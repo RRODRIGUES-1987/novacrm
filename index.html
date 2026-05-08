@@ -643,19 +643,37 @@ document.addEventListener('keydown',e=>{
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 
 (async()=>{
-  if(!isConfigured()){
+  function showAuth(){
     hideLoading();
     document.getElementById('auth-screen').style.display='flex';
     showView('login');
-    showErr('login-err','⚙️ Configure o Supabase: abra o index.html e substitua COLE_SUA_URL_AQUI e COLE_SUA_ANON_KEY_AQUI pelos valores do seu projeto.');
+  }
+
+  if(!isConfigured()){
+    showAuth();
+    showErr('login-err','⚙️ Configure o Supabase antes de continuar.');
     return;
   }
-  const{data:{session}}=await sb.auth.getSession();
-  if(session){await enterApp(session.user);}
-  else{hideLoading();document.getElementById('auth-screen').style.display='flex';showView('login');}
-  sb.auth.onAuthStateChange((event,session)=>{
-    if(event==='SIGNED_OUT'&&cu){cu=null;document.getElementById('app').classList.remove('visible');document.getElementById('auth-screen').style.display='flex';showView('login');}
-  });
+
+  // Timeout de segurança: se demorar mais de 5s, mostra login
+  const timeout = setTimeout(()=>{ if(!cu) showAuth(); }, 5000);
+
+  try {
+    const token = sessionStorage.getItem('novacrm-token');
+    const userStr = sessionStorage.getItem('novacrm-user');
+    if(token && userStr){
+      sb._token = token;
+      const user = JSON.parse(userStr);
+      clearTimeout(timeout);
+      await enterApp(user);
+    } else {
+      clearTimeout(timeout);
+      showAuth();
+    }
+  } catch(e) {
+    clearTimeout(timeout);
+    showAuth();
+  }
 })();
 <\/script>
 </body>
