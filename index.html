@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>
+
 <title>NovaCRM</title>
 <style>
 :root{--bg:#fff;--bg2:#f7f7f5;--bg3:#f0f0ec;--text:#1a1a1a;--text2:#666;--text3:#999;--border:#e5e5e0;--border2:#d0d0ca;--accent:#1a1a1a;--accent-text:#fff;--green:#1D9E75;--green-bg:#e8f7f2;--green-text:#0a5c43;--blue-bg:#e8f1fb;--blue-text:#1a4a8a;--amber-bg:#fdf3e3;--amber-text:#7a4a0a;--red-bg:#fdeaea;--red-text:#8a1a1a;--gray-bg:#f0f0ec;--gray-text:#555;--radius:10px;--radius-lg:14px;--radius-xl:20px;--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--font:'DM Sans',sans-serif;}
@@ -277,8 +277,115 @@ const SUPABASE_URL = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 // ═══════════════════════════════════════════════════
 
-const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Cliente REST direto — sem biblioteca externa
+const sb = {
+  _url: SUPABASE_URL,
+  _key: SUPABASE_KEY,
+  _token: null,
+
+  _headers(extra={}) {
+    const h = {'Content-Type':'application/json','apikey':this._key,'Prefer':'return=representation',...extra};
+    if(this._token) h['Authorization'] = 'Bearer '+this._token;
+    return h;
+  },
+
+  async _req(method, path, body) {
+    const r = await fetch(this._url+path, {method, headers:this._headers(), body: body ? JSON.stringify(body) : undefined});
+    const text = await r.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch(e) { data = text; }
+    if(!r.ok) return { data: Array.isArray(data)?data:[data], error: data };
+    return { data, error: null };
+  },
+
+  from(table) {
+    const self = this;
+    let _filters = [], _order = null, _single = false;
+    const q = {
+      select(cols='*') { q._sel=cols; return q; },
+      eq(col,val) { _filters.push(`${col}=eq.${val}`); return q; },
+      order(col,opts={}) { _order=`${col}.${opts.ascending===false?'desc':'asc'}`; return q; },
+      single() { _single=true; return q; },
+      async _build(method='GET', body) {
+        let path = `/rest/v1/${table}`;
+        const params = [..._filters];
+        if(q._sel) params.push(`select=${q._sel}`);
+        if(_order) params.push(`order=${_order}`);
+        if(params.length) path += '?'+params.join('&');
+        const headers = {'Content-Type':'application/json','apikey':self._key,'Prefer':'return=representation'};
+        if(self._token) headers['Authorization']='Bearer '+self._token;
+        if(_single) headers['Accept']='application/vnd.pgrst.object+json';
+        const r = await fetch(self._url+path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+        const text = await r.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch(e) {}
+        if(!r.ok) return {data:null, error:data};
+        return {data, error:null};
+      },
+      async then(resolve) { resolve(await q._build()); },
+      insert(body) { return { select(){ return {single(){ return q._build('POST', Array.isArray(body)?body:[body]); }}; }, then(resolve){ resolve(q._build('POST', Array.isArray(body)?body:[body])); } }; },
+      async update(body) { return q._build('PATCH', body); },
+      async delete() { return q._build('DELETE'); },
+    };
+    return q;
+  },
+
+  auth: {
+    _self: null,
+    async signInWithPassword({email,password}) {
+      const r = await fetch(sb._url+'/auth/v1/token?grant_type=password', {
+        method:'POST', headers:{'Content-Type':'application/json','apikey':sb._key},
+        body: JSON.stringify({email,password})
+      });
+      const data = await r.json();
+      if(!r.ok) return {data:null, error:data};
+      sb._token = data.access_token;
+      sessionStorage.setItem('novacrm-token', data.access_token);
+      sessionStorage.setItem('novacrm-user', JSON.stringify(data.user));
+      return {data:{user:data.user, session:data}, error:null};
+    },
+    async signUp({email,password,options={}}) {
+      const r = await fetch(sb._url+'/auth/v1/signup', {
+        method:'POST', headers:{'Content-Type':'application/json','apikey':sb._key},
+        body: JSON.stringify({email,password,data:options.data||{}})
+      });
+      const data = await r.json();
+      if(!r.ok) return {data:null, error:data};
+      if(data.access_token) {
+        sb._token = data.access_token;
+        sessionStorage.setItem('novacrm-token', data.access_token);
+        sessionStorage.setItem('novacrm-user', JSON.stringify(data.user));
+      }
+      return {data:{user:data.user, session:data.access_token?data:null}, error:null};
+    },
+    async signOut() {
+      await fetch(sb._url+'/auth/v1/logout', {
+        method:'POST', headers:{'Content-Type':'application/json','apikey':sb._key,'Authorization':'Bearer '+(sb._token||'')}
+      });
+      sb._token = null;
+      sessionStorage.removeItem('novacrm-token');
+      sessionStorage.removeItem('novacrm-user');
+    },
+    async resetPasswordForEmail(email, opts={}) {
+      const r = await fetch(sb._url+'/auth/v1/recover', {
+        method:'POST', headers:{'Content-Type':'application/json','apikey':sb._key},
+        body: JSON.stringify({email, ...( opts.redirectTo ? {redirect_to: opts.redirectTo} : {})})
+      });
+      const data = await r.json();
+      return r.ok ? {error:null} : {error:data};
+    },
+    async getSession() {
+      const token = sessionStorage.getItem('novacrm-token');
+      const user = sessionStorage.getItem('novacrm-user');
+      if(token && user) {
+        sb._token = token;
+        return {data:{session:{user:JSON.parse(user), access_token:token}}, error:null};
+      }
+      return {data:{session:null}, error:null};
+    },
+    onAuthStateChange(cb) { /* handled via sessionStorage */ }
+  }
+};
 
 const STAGES=['Prospecção','Qualificação','Proposta','Negociação','Fechado'];
 const SB_MAP={Cliente:'bdg bg',Lead:'bdg bb',Prospecto:'bdg ba',Inativo:'bdg bgr'};
