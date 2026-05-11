@@ -604,23 +604,26 @@ function filterC(q){
     </div></div></div>`).join('')||'<div class="empty"><p>Nenhum resultado</p></div>';
 }
 
-function rPipeline(){
+let pipelineFilter='todos';
+
+function filterPipeline(val){
+  pipelineFilter=val;
+  const el=ge('pipeline-board');
+  if(el) el.innerHTML=renderPipelineBoard();
+}
+
+function renderPipelineBoard(){
   const role=profile?.role||'vendedor';
-  const stageStyle={
-    'Fechado':'background:#e8f7f2;',
-    'Perdido':'background:#fdeaea;',
-  };
-  const hdrStyle={
-    'Fechado':'color:#0a5c43;',
-    'Perdido':'color:#8a1a1a;',
-  };
-  return`<div class="pscroll"><div class="pipeline">${STAGES.map(s=>{
-    const cards=deals.filter(d=>d.stage===s);
+  const stageStyle={'Fechado':'background:#e8f7f2;','Perdido':'background:#fdeaea;'};
+  const hdrStyle={'Fechado':'color:#0a5c43;','Perdido':'color:#8a1a1a;'};
+  const filtered=pipelineFilter==='todos'?deals:deals.filter(d=>d.owner_id===pipelineFilter);
+  return STAGES.map(s=>{
+    const cards=filtered.filter(d=>d.stage===s);
     const stStyle=stageStyle[s]||'';
     const hStyle=hdrStyle[s]||'';
     return`<div class="stage" style="${stStyle}">
       <div class="shdr" style="${hStyle}"><span>${s}</span><span>${cards.length}</span></div>
-      ${cards.map(d=>`<div class="dcard" onclick="${(role==='admin'||d.owner_id===cu.id)?`openModal('deal','${d.id}')`:''}">
+      ${cards.map(d=>`<div class="dcard" onclick="${(role==='admin'||role==='gestor'||d.owner_id===cu.id)?`openModal('deal','${d.id}')`:''}">
         <div class="dname">${d.name}</div>
         <div class="dcontact">${d.contact_name||''}</div>
         <div class="dval">${fmtV(d.value||0)}</div>
@@ -628,7 +631,31 @@ function rPipeline(){
       </div>`).join('')}
       ${!cards.length?`<div style="font-size:11px;color:var(--text3);text-align:center;padding:8px 0">Vazio</div>`:''}
     </div>`;
-  }).join('')}</div></div>`;
+  }).join('');
+}
+
+function rPipeline(){
+  const role=profile?.role||'vendedor';
+  pipelineFilter='todos';
+
+  // Monta opções do filtro — só para admin e gestor
+  let filterBar='';
+  if(role!=='vendedor' && profiles.length>0){
+    const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
+    const opts=vendedores.map(p=>`<option value="${p.id}">${p.full_name||p.email}</option>`).join('');
+    filterBar=`<div class="sechdr" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="sectitle">Filtrar por responsável:</span>
+        <select class="fi" style="width:auto;padding:5px 10px;font-size:12px" onchange="filterPipeline(this.value)">
+          <option value="todos">Todos os vendedores</option>
+          ${opts}
+        </select>
+      </div>
+      <div style="font-size:12px;color:var(--text2)">${fmtV(deals.reduce((s,d)=>s+Number(d.value||0),0))} total</div>
+    </div>`;
+  }
+
+  return`${filterBar}<div class="pscroll"><div class="pipeline" id="pipeline-board">${renderPipelineBoard()}</div></div>`;
 }
 
 function rTarefas(){
