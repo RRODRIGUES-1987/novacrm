@@ -533,15 +533,24 @@ function openModal(mode,id=null){
 
   if(mode==='contact'){
     const c=id?contacts.find(x=>x.id===id):null;
+    const role=profile?.role||'vendedor';
     title.textContent=c?'Editar contato':'Novo contato';
-    body.innerHTML=`<div class="fg"><label class="fl">Nome</label><input class="fi" id="fn" value="${c?c.name:''}" placeholder="Nome completo"></div><div class="fg"><label class="fl">Empresa</label><input class="fi" id="fco" value="${c?c.company||'':''}" placeholder="Empresa"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fem" type="email" value="${c?c.email||'':''}" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="fph" value="${c?c.phone||'':''}" placeholder="(11) 99999-0000"></div><div class="fg"><label class="fl">Status</label><select class="fi" id="fst">${['Lead','Prospecto','Cliente','Inativo'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>`;
+    // Campo de vendedor responsável — visível para admin e gestor
+    const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
+    const vendedorOpts=vendedores.map(p=>`<option value="${p.id}" ${(c&&c.owner_id===p.id)||((!c||!c.owner_id)&&p.id===cu.id)?'selected':''}>${p.full_name||p.email}</option>`).join('');
+    const vendedorField=(role==='admin'||role==='gestor')&&vendedores.length>0?`<div class="fg"><label class="fl">Vendedor responsável</label><select class="fi" id="fowner"><option value="${cu.id}" ${(!c||c.owner_id===cu.id)?'selected':''}>Eu mesmo (${profile?.full_name||''})</option>${vendedorOpts}</select></div>`:'';
+    body.innerHTML=`<div class="fg"><label class="fl">Nome</label><input class="fi" id="fn" value="${c?c.name:''}" placeholder="Nome completo"></div><div class="fg"><label class="fl">Empresa cliente</label><input class="fi" id="fco" value="${c?c.company||'':''}" placeholder="Empresa do contato"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fem" type="email" value="${c?c.email||'':''}" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="fph" value="${c?c.phone||'':''}" placeholder="(11) 99999-0000"></div><div class="fg"><label class="fl">Status</label><select class="fi" id="fst">${['Lead','Prospecto','Cliente','Inativo'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>${vendedorField}`;
     setTimeout(()=>{const e=ge('fn');if(e)e.focus();},100);
 
   }else if(mode==='deal'){
     const d=id?deals.find(x=>x.id===id):null;
+    const role=profile?.role||'vendedor';
     title.textContent=d?'Editar negócio':'Novo negócio';
     const co=contacts.map(c=>`<option ${d&&d.contact_name===c.name?'selected':''}>${c.name}</option>`).join('');
-    body.innerHTML=`<div class="fg"><label class="fl">Nome do negócio</label><input class="fi" id="fdn" value="${d?d.name:''}" placeholder="Ex: Empresa X - Plano Pro"></div><div class="fg"><label class="fl">Contato</label><select class="fi" id="fdc">${co||'<option>Adicione contatos primeiro</option>'}</select></div><div class="fg"><label class="fl">Valor (R$)</label><input class="fi" id="fdv" type="number" value="${d?d.value:''}" placeholder="0"></div><div class="fg"><label class="fl">Estágio</label><select class="fi" id="fds">${STAGES.map(s=>`<option ${d&&d.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>`;
+    const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
+    const vOpts=vendedores.map(p=>`<option value="${p.id}" ${(d&&d.owner_id===p.id)||((!d||!d.owner_id)&&p.id===cu.id)?'selected':''}>${p.full_name||p.email}</option>`).join('');
+    const ownerField=(role==='admin'||role==='gestor')&&vendedores.length>0?`<div class="fg"><label class="fl">Vendedor responsável</label><select class="fi" id="fdowner"><option value="${cu.id}" ${(!d||d.owner_id===cu.id)?'selected':''}>Eu mesmo (${profile?.full_name||''})</option>${vOpts}</select></div>`:'';
+    body.innerHTML=`<div class="fg"><label class="fl">Nome do negócio</label><input class="fi" id="fdn" value="${d?d.name:''}" placeholder="Ex: Empresa X - Plano Pro"></div><div class="fg"><label class="fl">Contato</label><select class="fi" id="fdc">${co||'<option>Adicione contatos primeiro</option>'}</select></div><div class="fg"><label class="fl">Valor (R$)</label><input class="fi" id="fdv" type="number" value="${d?d.value:''}" placeholder="0"></div><div class="fg"><label class="fl">Estágio</label><select class="fi" id="fds">${STAGES.map(s=>`<option ${d&&d.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>${ownerField}`;
 
   }else if(mode==='task'){
     title.textContent='Nova tarefa';
@@ -575,13 +584,17 @@ async function saveModal(){
 
     if(mmode==='contact'){
       const name=ge('fn').value.trim();if(!name)return;
-      const obj={owner_id:cu.id,company_id:cid,name,company:ge('fco').value||null,email:ge('fem').value||null,phone:ge('fph').value||null,status:ge('fst').value};
+      const ownerEl=ge('fowner');
+      const ownerId=ownerEl?ownerEl.value:cu.id;
+      const obj={owner_id:ownerId,company_id:cid,name,company:ge('fco').value||null,email:ge('fem').value||null,phone:ge('fph').value||null,status:ge('fst').value};
       if(mid){await dbUpdate('contacts',mid,obj);contacts=contacts.map(c=>c.id===mid?{...c,...obj}:c);}
       else{const d=await dbInsert('contacts',obj);if(d)contacts.unshift(d);}
 
     }else if(mmode==='deal'){
       const name=ge('fdn').value.trim();if(!name)return;
-      const obj={owner_id:cu.id,company_id:cid,name,contact_name:ge('fdc').value,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
+      const dOwnerEl=ge('fdowner');
+      const dOwnerId=dOwnerEl?dOwnerEl.value:cu.id;
+      const obj={owner_id:dOwnerId,company_id:cid,name,contact_name:ge('fdc').value,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
       if(mid){await dbUpdate('deals',mid,obj);deals=deals.map(d=>d.id===mid?{...d,...obj}:d);}
       else{const d=await dbInsert('deals',obj);if(d)deals.unshift(d);}
 
