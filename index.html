@@ -135,8 +135,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @media(min-width:768px){.idlewarn{bottom:20px;left:calc(105px + 50%)}}
 .idleinner{display:flex;align-items:center;gap:10px}.idletxt{flex:1;font-size:12px;color:var(--amber-text);display:flex;flex-direction:column;gap:2px}.idletxt strong{font-size:13px}
 .idlebtn{padding:5px 12px;border-radius:var(--radius);font-size:12px;font-weight:600;cursor:pointer;border:none;background:#c07000;color:#fff;font-family:var(--font);white-space:nowrap;flex-shrink:0}
-/* FAB */
-.fab{position:fixed;right:16px;bottom:calc(68px + var(--safe-bottom));width:52px;height:52px;border-radius:50%;background:var(--accent);color:var(--accent-text);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:50}
+/* COMPANY SELECTION */
+.company-select-screen{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px;z-index:150}
+.company-select-screen.show{display:flex;animation:fi .2s}
+.company-select-card{width:100%;max-width:400px}
+.company-select-title{font-size:20px;font-weight:600;margin-bottom:6px;letter-spacing:-0.3px}
+.company-select-sub{font-size:13px;color:var(--text2);margin-bottom:24px;line-height:1.5}
+.company-option{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius);margin-bottom:8px;cursor:pointer;transition:all .15s}
+.company-option:hover{border-color:var(--accent);background:var(--bg2)}
+.company-option.selected{border-color:var(--accent);background:var(--bg2)}
+.co-icon{width:42px;height:42px;border-radius:var(--radius);background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;font-weight:700;color:var(--text2)}
+.co-info{flex:1;min-width:0}.co-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.co-cnpj{font-size:11px;color:var(--text2);margin-top:2px}
+.co-check{width:20px;height:20px;border-radius:50%;border:2px solid var(--border2);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.company-option.selected .co-check{background:var(--accent);border-color:var(--accent)}
+.co-all{background:var(--bg3);border-style:dashed}
+.co-all .co-icon{background:var(--accent);color:var(--accent-text)}
 @media(min-width:768px){.fab{display:none}}
 #nav-admin{display:none}#nav-admin.visible{display:flex}.empty{text-align:center;padding:32px 16px;color:var(--text2)}.empty svg{width:48px!important;height:48px!important;max-width:48px;max-height:48px;stroke:var(--border2);margin:0 auto 10px;display:block}.empty p{font-size:13px}
 .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:rotate .7s linear infinite;display:inline-block;vertical-align:middle}
@@ -174,6 +187,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       <button class="btn-full" onclick="doRecover()">Enviar link</button>
       <div class="auth-switch" style="margin-top:14px"><a onclick="sv('vlogin')">Voltar ao login</a></div>
     </div>
+  </div>
+</div>
+
+<!-- COMPANY SELECTION -->
+<div class="company-select-screen" id="company-select-screen">
+  <div class="company-select-card">
+    <div class="auth-logo"><div class="auth-logo-icon">N</div><div class="auth-logo-name">Nova<span>CRM</span></div></div>
+    <div class="company-select-title">Selecione a empresa</div>
+    <div class="company-select-sub" id="cs-sub">Escolha em qual empresa deseja trabalhar nesta sessão.</div>
+    <div id="company-options"></div>
+    <button class="btn-full" style="margin-top:16px" onclick="confirmCompany()">Entrar</button>
   </div>
 </div>
 
@@ -225,6 +249,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       <div class="umem" id="umem">—</div>
       <div class="umrole"><span class="role-badge" id="umrolebdg">—</span></div>
     </div>
+    <div class="umitem" onclick="trocarEmpresa()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Trocar empresa</div>
     <div class="umitem danger" onclick="doLogout()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sair</div>
   </div>
 </div>
@@ -259,6 +284,7 @@ const ROLES={admin:'Admin',gestor:'Gestor',vendedor:'Vendedor'};
 const ROLE_CLASS={admin:'role-admin',gestor:'role-gestor',vendedor:'role-vendedor'};
 
 let cu=null,tok=null,profile=null,company=null;
+let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
 let curPage='dashboard',mmode='',mid=null,adminTab='empresas';
 
@@ -340,20 +366,96 @@ async function doLogout(){
 async function enterApp(user){
   cu=user;
   // Carrega perfil
-  const ps=await dbSelect('profiles',`id=eq.${user.id}&select=*,companies(*)`);
+  const ps=await dbSelect('profiles',`id=eq.${user.id}`);
   profile=ps[0]||null;
 
   if(!profile){
-    // Cria perfil básico se não existe
     const meta=user.user_metadata||{};
     profile=await dbInsert('profiles',{id:user.id,full_name:meta.full_name||meta.name||user.email.split('@')[0],email:user.email,role:'vendedor'});
   }
 
-  company=profile?.companies||null;
+  const role=profile?.role||'vendedor';
 
+  // Carrega empresas disponíveis
+  if(role==='admin'){
+    allCompanies=await dbSelect('companies','select=*');
+  } else if(profile?.company_id){
+    allCompanies=await dbSelect('companies',`id=eq.${profile.company_id}`);
+  } else {
+    allCompanies=[];
+  }
+
+  // Mostra tela de seleção se admin ou multi-empresa
+  ge('auth-wrap').style.display='none';
+  await showCompanySelect(user, allCompanies);
+}
+
+async function showCompanySelect(user, companies){
+  pendingUser=user;
+  const role=profile?.role||'vendedor';
+
+  // Se vendedor com 1 empresa ou sem empresa — entra direto
+  if(role==='vendedor'||(role==='gestor'&&companies.length<=1)){
+    selectedCompanyId=companies.length>0?companies[0].id:null;
+    company=companies.length>0?companies[0]:null;
+    await finishEnterApp(user);
+    return;
+  }
+
+  // Admin ou gestor multi-empresa — mostra seleção
+  selectedCompanyId=null; // admin começa com "todas"
+
+  const sub=ge('cs-sub');
+  if(sub) sub.textContent=role==='admin'
+    ?'Como administrador, escolha uma empresa ou acesse todas.'
+    :'Escolha em qual empresa deseja trabalhar nesta sessão.';
+
+  const el=ge('company-options');
+  if(!el) return;
+
+  let opts='';
+  if(role==='admin'){
+    opts+=`<div class="company-option co-all selected" onclick="selectCompany(null,this)">
+      <div class="co-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+      <div class="co-info"><div class="co-name">Todas as empresas</div><div class="co-cnpj">Visão global de administrador</div></div>
+      <div class="co-check"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+    </div>`;
+  }
+
+  opts+=companies.map((c,i)=>`
+    <div class="company-option ${i===0&&role!=='admin'?'selected':''}" id="co-${c.id}" onclick="selectCompany('${c.id}',this)">
+      <div class="co-icon" style="background:var(--bg3);color:var(--text2);font-size:13px;font-weight:700">${c.name.slice(0,2).toUpperCase()}</div>
+      <div class="co-info"><div class="co-name">${c.name}</div><div class="co-cnpj">${fmtCNPJ(c.cnpj)}</div></div>
+      <div class="co-check">${i===0&&role!=='admin'?'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>':''}</div>
+    </div>`).join('');
+
+  el.innerHTML=opts;
+  if(role!=='admin'&&companies.length>0) selectedCompanyId=companies[0].id;
+  ge('company-select-screen').classList.add('show');
+}
+
+function selectCompany(id, el){
+  selectedCompanyId=id;
+  document.querySelectorAll('.company-option').forEach(e=>{
+    e.classList.remove('selected');
+    const chk=e.querySelector('.co-check');
+    if(chk) chk.innerHTML='';
+  });
+  el.classList.add('selected');
+  const chk=el.querySelector('.co-check');
+  if(chk) chk.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+}
+
+async function confirmCompany(){
+  company=selectedCompanyId?allCompanies.find(c=>c.id===selectedCompanyId):null;
+  ge('company-select-screen').classList.remove('show');
+  await finishEnterApp(pendingUser);
+}
+
+async function finishEnterApp(user){
   const name=profile?.full_name||user.email.split('@')[0];
   const role=profile?.role||'vendedor';
-  const companyName=company?.name||'Sem empresa';
+  const companyName=company?.name||(role==='admin'?'Todas as empresas':'Sem empresa');
   const cnpj=company?.cnpj||'';
   const av=name.split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2);
 
@@ -366,14 +468,12 @@ async function enterApp(user){
   const sc=ge('sidebar-company-name');if(sc)sc.textContent=cnpj?`${companyName} · ${fmtCNPJ(cnpj)}`:companyName;
   const tc=ge('topbar-company');if(tc)tc.textContent=companyName;
 
-  // Mostra aba admin se for admin
   const navAdmin=ge('nav-admin');
   if(navAdmin){
     if(role==='admin') navAdmin.classList.add('visible');
     else navAdmin.classList.remove('visible');
   }
 
-  ge('auth-wrap').style.display='none';
   ge('app').classList.add('on');
   await loadData();
   pg('dashboard');
@@ -384,16 +484,28 @@ async function enterApp(user){
 async function loadData(){
   const uid=cu.id;
   const role=profile?.role||'vendedor';
-  const cid=profile?.company_id;
+  const cid=company?.id||null; // empresa selecionada na tela de seleção
 
   if(role==='admin'){
-    [contacts,deals,tasks,companies,profiles]=await Promise.all([
-      dbSelect('contacts','select=*'),
-      dbSelect('deals','select=*'),
-      dbSelect('tasks','select=*'),
-      dbSelect('companies','select=*'),
-      dbSelect('profiles','select=*'),
-    ]);
+    if(cid){
+      // Admin filtrado por empresa selecionada
+      [contacts,deals,tasks,companies,profiles]=await Promise.all([
+        dbSelect('contacts',`company_id=eq.${cid}`),
+        dbSelect('deals',`company_id=eq.${cid}`),
+        dbSelect('tasks',`company_id=eq.${cid}`),
+        dbSelect('companies','select=*'),
+        dbSelect('profiles',`company_id=eq.${cid}`),
+      ]);
+    } else {
+      // Admin vê tudo
+      [contacts,deals,tasks,companies,profiles]=await Promise.all([
+        dbSelect('contacts','select=*'),
+        dbSelect('deals','select=*'),
+        dbSelect('tasks','select=*'),
+        dbSelect('companies','select=*'),
+        dbSelect('profiles','select=*'),
+      ]);
+    }
   } else if(role==='gestor'&&cid){
     [contacts,deals,tasks,profiles]=await Promise.all([
       dbSelect('contacts',`company_id=eq.${cid}`),
@@ -580,7 +692,8 @@ function closeModal(){ge('mbg').classList.remove('open');mmode='';mid=null;}
 async function saveModal(){
   const btn=ge('msave');btn.disabled=true;btn.innerHTML='<span class="spin"></span>';
   try{
-    const cid=profile?.company_id;
+    const role=profile?.role||'vendedor';
+    const cid=role==='admin'?(profile?.company_id||null):profile?.company_id;
 
     if(mmode==='contact'){
       const name=ge('fn').value.trim();if(!name)return;
@@ -640,6 +753,12 @@ async function delContact(id){if(!confirm('Remover contato?'))return;await dbDel
 async function delCompany(id){if(!confirm('Remover empresa? Usuários associados perderão o vínculo.'))return;await dbDelete('companies',id);companies=companies.filter(c=>c.id!==id);render();}
 async function toggleTask(id){const t=tasks.find(x=>x.id===id);if(!t)return;t.done=!t.done;await dbUpdate('tasks',id,{done:t.done});render();}
 async function delTask(id){await dbDelete('tasks',id);tasks=tasks.filter(t=>t.id!==id);render();}
+
+function trocarEmpresa(){
+  closeMenu();
+  ge('app').classList.remove('on');
+  showCompanySelect(cu, allCompanies);
+}
 
 function toggleMenu(e){if(e)e.stopPropagation();const w=ge('umwrap'),o=ge('umo'),open=!w.classList.contains('open');w.classList.toggle('open',open);o.style.display=open?'block':'none';}
 function closeMenu(){ge('umwrap').classList.remove('open');ge('umo').style.display='none';}
