@@ -1419,10 +1419,78 @@ async function saveModal(){
     }else if(mmode==='deal'){
       const name=ge('fdn').value.trim();if(!name)return;
       const dOwnerEl=ge('fdowner');
-      const dOwnerId=dOwnerEl?dOwnerEl.value:cu.id;
-      const obj={owner_id:dOwnerId,company_id:cid,name,contact_name:ge('fdc').value,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
-      if(mid){await dbUpdate('deals',mid,obj);deals=deals.map(d=>d.id===mid?{...d,...obj}:d);}
-      else{const d=await dbInsert('deals',obj);if(d)deals.unshift(d);}
+      const newOwnerId=dOwnerEl?dOwnerEl.value:cu.id;
+      const obj={owner_id:newOwnerId,company_id:cid,name,contact_name:ge('fdc').value,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
+
+      if(mid){
+        // Verifica se houve mudança de responsável
+        const dealAtual=deals.find(d=>d.id===mid);
+        const oldOwnerId=dealAtual?.owner_id;
+
+        if(oldOwnerId && newOwnerId && oldOwnerId!==newOwnerId){
+          // Pergunta se quer transferir TODOS os negócios
+          const transferirTodos=confirm(
+            'Responsável alterado! Deseja transferir TODOS os negócios deste vendedor para o novo responsável?\n\nClique OK para transferir todos ou Cancelar para alterar apenas este negócio.'
+          );
+
+          if(transferirTodos){
+            // Busca todos os negócios do vendedor antigo na mesma empresa
+            const dealsDoVendedor=deals.filter(d=>d.owner_id===oldOwnerId);
+
+            // Atualiza todos no banco
+            await Promise.all(dealsDoVendedor.map(d=>
+              dbUpdate('deals',d.id,{owner_id:newOwnerId})
+            ));
+
+            // Atualiza localmente
+            deals=deals.map(d=>d.owner_id===oldOwnerId?{...d,owner_id:newOwnerId}:d);
+
+            // Grava log de cada transferência
+            const oldProfile=profiles.find(p=>p.id===oldOwnerId);
+            const newProfile=profiles.find(p=>p.id===newOwnerId);
+            const alteradoPorProfile=profiles.find(p=>p.id===cu.id)||profile;
+
+            await Promise.all(dealsDoVendedor.map(d=>
+              dbInsert('transferencias_responsavel',{
+                company_id:cid,
+                deal_id:d.id,
+                de_user_id:oldOwnerId,
+                para_user_id:newOwnerId,
+                de_nome:oldProfile?.full_name||oldProfile?.email||oldOwnerId,
+                para_nome:newProfile?.full_name||newProfile?.email||newOwnerId,
+                alterado_por:cu.id,
+                alterado_por_nome:alteradoPorProfile?.full_name||cu.email,
+                motivo:'Transferência em massa via edição de negócio'
+              })
+            ));
+
+          } else {
+            // Só este negócio — grava log individual
+            const oldProfile=profiles.find(p=>p.id===oldOwnerId);
+            const newProfile=profiles.find(p=>p.id===newOwnerId);
+            const alteradoPorProfile=profiles.find(p=>p.id===cu.id)||profile;
+
+            await dbInsert('transferencias_responsavel',{
+              company_id:cid,
+              deal_id:mid,
+              de_user_id:oldOwnerId,
+              para_user_id:newOwnerId,
+              de_nome:oldProfile?.full_name||oldProfile?.email||oldOwnerId,
+              para_nome:newProfile?.full_name||newProfile?.email||newOwnerId,
+              alterado_por:cu.id,
+              alterado_por_nome:alteradoPorProfile?.full_name||cu.email,
+              motivo:'Alteração individual de responsável'
+            });
+          }
+        }
+
+        // Salva o negócio atual
+        await dbUpdate('deals',mid,obj);
+        deals=deals.map(d=>d.id===mid?{...d,...obj}:d);
+
+      } else {
+        const d=await dbInsert('deals',obj);if(d)deals.unshift(d);
+      }
 
     }else if(mmode==='task'){
       const title=ge('ftt').value.trim();if(!title)return;
