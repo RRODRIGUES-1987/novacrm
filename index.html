@@ -266,6 +266,31 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       </div>
     </div>
 
+    <!-- Módulo Gestão -->
+    <div class="nav-module">
+      <button class="nav-module-header" id="mod-gestao" onclick="toggleModule('gestao')">
+        <div style="display:flex;align-items:center;gap:9px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 11l3 3L22 4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          <span>Gestão</span>
+        </div>
+        <svg class="mod-arrow" id="arrow-gestao" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="nav-submenu" id="sub-gestao">
+        <button class="navitem sub" id="nav-tarefas-gestao" onclick="pg('tarefas-gestao')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Tarefas</span>
+        </button>
+        <button class="navitem sub" id="nav-atas" onclick="pg('atas')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <span>Ata de Reunião</span>
+        </button>
+        <button class="navitem sub" id="nav-plano-acao" onclick="pg('plano-acao')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span>Plano de Ação</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Módulo CRM -->
     <div class="nav-module">
       <button class="nav-module-header" id="mod-crm" onclick="toggleModule('crm')">
@@ -375,6 +400,7 @@ let cu=null,tok=null,profile=null,company=null;
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
 let clientes=[],fornecedores=[],pessoas=[];
+let tarefasGestao=[],atas=[],planoAcao=[];
 let cadastrosTab='clientes',cadastroForm=null;
 let curPage='dashboard',mmode='',mid=null,adminTab='empresas';
 
@@ -619,6 +645,13 @@ async function loadData(){
       dbSelect('fornecedores',`owner_id=eq.${uid}`),
       dbSelect('pessoas',`owner_id=eq.${uid}`),
     ]);
+    // Gestão - todos veem os da empresa ou os próprios
+    const gFilter=cid?`company_id=eq.${cid}`:`owner_id=eq.${uid}`;
+    [tarefasGestao,atas,planoAcao]=await Promise.all([
+      dbSelect('tarefas_gestao',gFilter),
+      dbSelect('atas',gFilter),
+      dbSelect('plano_acao',gFilter),
+    ]);
   }
 }
 
@@ -652,6 +685,7 @@ async function doIdleLogout(){
 const MODULE_MAP={
   clientes:'cadastros', fornecedores:'cadastros', pessoas:'cadastros',
   'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm',
+  'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
 };
 
 function toggleModule(mod){
@@ -683,6 +717,7 @@ function pg(p){
   const titles={
     dashboard:'Dashboard',
     clientes:'Cadastros · Clientes', fornecedores:'Cadastros · Fornecedores', pessoas:'Cadastros · Pessoas',
+    'tarefas-gestao':'Gestão · Tarefas', atas:'Gestão · Ata de Reunião', 'plano-acao':'Gestão · Plano de Ação',
     'crm-dashboard':'CRM · Visão Geral',
     contatos:'CRM · Contatos', pipeline:'CRM · Pipeline', tarefas:'CRM · Tarefas',
     admin:'Administração'
@@ -693,7 +728,11 @@ function pg(p){
   if(noAdd.includes(p)){if(da)da.style.display='none';if(fab)fab.style.display='none';}
   else{
     if(da){da.style.display='';
-      const lb={clientes:'+ Novo cliente',fornecedores:'+ Novo fornecedor',pessoas:'+ Nova pessoa',contatos:'+ Novo contato',pipeline:'+ Novo negócio',tarefas:'+ Nova tarefa'};
+      const lb={
+        clientes:'+ Novo cliente',fornecedores:'+ Novo fornecedor',pessoas:'+ Nova pessoa',
+        'tarefas-gestao':'+ Nova tarefa',atas:'+ Nova ata','plano-acao':'+ Nova ação',
+        contatos:'+ Novo contato',pipeline:'+ Novo negócio',tarefas:'+ Nova tarefa'
+      };
       da.textContent=lb[p]||'+ Novo';
       da.onclick=()=>openFor();
     }
@@ -709,6 +748,9 @@ function render(){
   else if(curPage==='clientes'){cadastrosTab='clientes';c.innerHTML=rCadastros();}
   else if(curPage==='fornecedores'){cadastrosTab='fornecedores';c.innerHTML=rCadastros();}
   else if(curPage==='pessoas'){cadastrosTab='pessoas';c.innerHTML=rCadastros();}
+  else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
+  else if(curPage==='atas')c.innerHTML=rAtas();
+  else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
   else if(curPage==='contatos')c.innerHTML=rContatos();
   else if(curPage==='pipeline')c.innerHTML=rPipeline();
   else if(curPage==='tarefas')c.innerHTML=rTarefas();
@@ -716,9 +758,14 @@ function render(){
 }
 
 function openFor(){
-  const map={clientes:'clientes',fornecedores:'fornecedores',pessoas:'pessoas',contatos:'contact',pipeline:'deal',tarefas:'task'};
+  const map={
+    clientes:'clientes',fornecedores:'fornecedores',pessoas:'pessoas',
+    'tarefas-gestao':'tarefas-gestao',atas:'atas','plano-acao':'plano-acao',
+    contatos:'contact',pipeline:'deal',tarefas:'task'
+  };
   const m=map[curPage];
   if(m==='clientes'||m==='fornecedores'||m==='pessoas') openCadastro(m);
+  else if(m==='tarefas-gestao'||m==='atas'||m==='plano-acao') openGestao(m);
   else openModal(m||'contact');
 }
 
@@ -994,6 +1041,228 @@ async function delCadastro(tipo, id){
   if(tipo==='clientes') clientes=clientes.filter(r=>r.id!==id);
   else if(tipo==='fornecedores') fornecedores=fornecedores.filter(r=>r.id!==id);
   else pessoas=pessoas.filter(r=>r.id!==id);
+  render();
+}
+
+// ── MÓDULO GESTÃO ──
+const TG_STATUS={aberta:'bdg bb',em_andamento:'bdg ba',concluida:'bdg bg',cancelada:'bdg bgr'};
+const TG_STATUS_LBL={aberta:'Aberta',em_andamento:'Em andamento',concluida:'Concluída',cancelada:'Cancelada'};
+const PA_STATUS={pendente:'bdg bb',em_andamento:'bdg ba',concluido:'bdg bg',cancelado:'bdg bgr'};
+const PA_STATUS_LBL={pendente:'Pendente',em_andamento:'Em andamento',concluido:'Concluído',cancelado:'Cancelado'};
+const PRIO_G={baixa:'bdg bgr',normal:'bdg bb',alta:'bdg ba',urgente:'bdg br'};
+const PRIO_G_LBL={baixa:'Baixa',normal:'Normal',alta:'Alta',urgente:'Urgente'};
+
+function rTarefasGestao(){
+  const sorted=[...tarefasGestao].sort((a,b)=>{
+    const ord={aberta:0,em_andamento:1,concluida:2,cancelada:3};
+    return(ord[a.status]||0)-(ord[b.status]||0);
+  });
+  const today=new Date();today.setHours(0,0,0,0);
+  const rows=sorted.map((t,i)=>{
+    const resp=profiles.find(p=>p.id===t.responsavel_id);
+    const respNome=resp?.full_name||t.responsavel_nome||'—';
+    const atrasada=t.prazo&&new Date(t.prazo+'T00:00:00')<today&&t.status!=='concluida'&&t.status!=='cancelada';
+    return`<div class="li" style="${atrasada?'border-color:#f5c5c5;':''}">
+      <div class="av ${AVC[i%5]}" style="font-size:10px">${ini(t.titulo)}</div>
+      <div class="linfo">
+        <div class="lname">${t.titulo}</div>
+        <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">
+          <span>${respNome}</span>
+          ${t.prazo?`<span>${atrasada?'⚠ ':''}<span style="${atrasada?'color:var(--red-text);font-weight:600':''}">
+            ${new Date(t.prazo+'T00:00:00').toLocaleDateString('pt-BR')}</span></span>`:''}
+        </div>
+      </div>
+      <div class="lright">
+        <span class="${TG_STATUS[t.status]||'bdg bgr'}">${TG_STATUS_LBL[t.status]||t.status}</span>
+        <span class="${PRIO_G[t.prioridade]||'bdg bgr'}" style="font-size:9px">${PRIO_G_LBL[t.prioridade]||t.prioridade}</span>
+        <div style="display:flex;gap:4px;margin-top:2px">
+          <button class="bicon btn-sm" onclick="openGestao('tarefas-gestao','${t.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="bicon btn-sm" onclick="delGestao('tarefas_gestao','${t.id}','tarefasGestao')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  return`<div class="sechdr"><span class="sectitle">Tarefas de Gestão (${tarefasGestao.length})</span><button class="btn btn-p btn-sm" onclick="openGestao('tarefas-gestao')">+ Nova tarefa</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><p>Nenhuma tarefa</p></div>'}`;
+}
+
+function rAtas(){
+  const rows=atas.map((a,i)=>`
+    <div class="li">
+      <div class="av ${AVC[i%5]}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <div class="linfo">
+        <div class="lname">${a.titulo}</div>
+        <div class="lsub">${new Date(a.data_reuniao+'T00:00:00').toLocaleDateString('pt-BR')} ${a.local?'· '+a.local:''}</div>
+      </div>
+      <div class="lright">
+        <span class="${a.status==='finalizada'?'bdg bg':'bdg ba'}">${a.status==='finalizada'?'Finalizada':'Rascunho'}</span>
+        <div style="display:flex;gap:4px;margin-top:4px">
+          <button class="bicon btn-sm" onclick="openGestao('atas','${a.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="bicon btn-sm" onclick="delGestao('atas','${a.id}','atas')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </div>
+      </div>
+    </div>`).join('');
+  return`<div class="sechdr"><span class="sectitle">Atas de Reunião (${atas.length})</span><button class="btn btn-p btn-sm" onclick="openGestao('atas')">+ Nova ata</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma ata registrada</p></div>'}`;
+}
+
+function rPlanoAcao(){
+  const rows=planoAcao.map((p,i)=>{
+    const ata=atas.find(a=>a.id===p.ata_id);
+    const resp=profiles.find(pr=>pr.id===p.responsavel_id);
+    return`<div class="li">
+      <div class="av ${AVC[i%5]}" style="font-size:10px">${ini(p.titulo)}</div>
+      <div class="linfo">
+        <div class="lname">${p.titulo}</div>
+        <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">${p.acao}</span>
+          ${resp?`<span>· ${resp.full_name||resp.email}</span>`:''}
+          ${ata?`<span style="color:var(--blue-text)">· ${ata.titulo}</span>`:''}
+        </div>
+      </div>
+      <div class="lright">
+        <span class="${PA_STATUS[p.status]||'bdg bgr'}">${PA_STATUS_LBL[p.status]||p.status}</span>
+        ${p.data_prevista?`<span style="font-size:10px;color:var(--text3)">${new Date(p.data_prevista+'T00:00:00').toLocaleDateString('pt-BR')}</span>`:''}
+        <div style="display:flex;gap:4px;margin-top:2px">
+          <button class="bicon btn-sm" onclick="openGestao('plano-acao','${p.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="bicon btn-sm" onclick="delGestao('plano_acao','${p.id}','planoAcao')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  return`<div class="sechdr"><span class="sectitle">Plano de Ação (${planoAcao.length})</span><button class="btn btn-p btn-sm" onclick="openGestao('plano-acao')">+ Nova ação</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><p>Nenhum plano de ação</p></div>'}`;
+}
+
+function openGestao(tipo, id=null){
+  mmode='gestao';mid=id;cadastroForm=tipo;
+  ge('mbg').classList.add('open');
+  const title=ge('mtitle'),body=ge('mbody');
+  const saveBtn=ge('msave');if(saveBtn)saveBtn.style.display='';
+
+  if(tipo==='tarefas-gestao'){
+    const t=id?tarefasGestao.find(x=>x.id===id):null;
+    title.textContent=t?'Editar tarefa':'Nova tarefa de gestão';
+    const respOpts=profiles.map(p=>`<option value="${p.id}" ${t&&t.responsavel_id===p.id?'selected':''}>${p.full_name||p.email}</option>`).join('');
+    const today=new Date().toISOString().split('T')[0];
+    body.innerHTML=`
+      <div class="fg"><label class="fl">Título</label><input class="fi" id="gtg-titulo" value="${t?t.titulo:''}" placeholder="Título da tarefa"></div>
+      <div class="fg"><label class="fl">Descrição</label><textarea class="fi" id="gtg-desc" style="resize:vertical;min-height:72px" placeholder="Detalhes...">${t?t.descricao||'':''}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Responsável</label><select class="fi" id="gtg-resp"><option value="">Selecione</option>${respOpts}</select></div>
+        <div class="fg"><label class="fl">Prazo</label><input class="fi" id="gtg-prazo" type="date" value="${t?t.prazo||today:today}"></div>
+        <div class="fg"><label class="fl">Prioridade</label><select class="fi" id="gtg-prio">
+          ${['baixa','normal','alta','urgente'].map(p=>`<option value="${p}" ${t&&t.prioridade===p?'selected':p==='normal'&&!t?'selected':''}>${PRIO_G_LBL[p]}</option>`).join('')}
+        </select></div>
+        <div class="fg"><label class="fl">Status</label><select class="fi" id="gtg-status">
+          ${['aberta','em_andamento','concluida','cancelada'].map(s=>`<option value="${s}" ${t&&t.status===s?'selected':s==='aberta'&&!t?'selected':''}>${TG_STATUS_LBL[s]}</option>`).join('')}
+        </select></div>
+      </div>`;
+    setTimeout(()=>{const e=ge('gtg-titulo');if(e)e.focus();},100);
+
+  }else if(tipo==='atas'){
+    const a=id?atas.find(x=>x.id===id):null;
+    title.textContent=a?'Editar ata':'Nova ata de reunião';
+    const today=new Date().toISOString().split('T')[0];
+    body.innerHTML=`
+      <div class="fg"><label class="fl">Título</label><input class="fi" id="gata-titulo" value="${a?a.titulo:''}" placeholder="Ex: Reunião de planejamento Q1"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Data da reunião</label><input class="fi" id="gata-data" type="date" value="${a?a.data_reuniao||today:today}"></div>
+        <div class="fg"><label class="fl">Local</label><input class="fi" id="gata-local" value="${a?a.local||'':''}" placeholder="Sala, Online, etc."></div>
+      </div>
+      <div class="fg"><label class="fl">Participantes</label><input class="fi" id="gata-part" value="${a?a.participantes||'':''}" placeholder="Nome1, Nome2, Nome3..."></div>
+      <div class="fg"><label class="fl">Pauta</label><textarea class="fi" id="gata-pauta" style="resize:vertical;min-height:80px" placeholder="Tópicos discutidos...">${a?a.pauta||'':''}</textarea></div>
+      <div class="fg"><label class="fl">Deliberações</label><textarea class="fi" id="gata-delib" style="resize:vertical;min-height:80px" placeholder="Decisões tomadas...">${a?a.deliberacoes||'':''}</textarea></div>
+      <div class="fg"><label class="fl">Próximos passos</label><textarea class="fi" id="gata-prox" style="resize:vertical;min-height:60px" placeholder="O que será feito a seguir...">${a?a.proximos_passos||'':''}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Status</label><select class="fi" id="gata-status">
+          <option value="rascunho" ${!a||a.status==='rascunho'?'selected':''}>Rascunho</option>
+          <option value="finalizada" ${a&&a.status==='finalizada'?'selected':''}>Finalizada</option>
+        </select></div>
+        <div class="fg"><label class="fl">Anexo PDF <span style="color:var(--text3);text-transform:none;font-weight:400">(opcional)</span></label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="file" id="gata-pdf" accept=".pdf" class="fi" style="font-size:11px;padding:6px">
+          </div>
+          ${a&&a.arquivo_nome?`<div style="font-size:11px;color:var(--text2);margin-top:4px">📎 ${a.arquivo_nome}</div>`:''}
+        </div>
+      </div>`;
+    setTimeout(()=>{const e=ge('gata-titulo');if(e)e.focus();},100);
+
+  }else if(tipo==='plano-acao'){
+    const p=id?planoAcao.find(x=>x.id===id):null;
+    title.textContent=p?'Editar ação':'Nova ação';
+    const today=new Date().toISOString().split('T')[0];
+    const respOpts=profiles.map(pr=>`<option value="${pr.id}" ${p&&p.responsavel_id===pr.id?'selected':''}>${pr.full_name||pr.email}</option>`).join('');
+    const ataOpts=atas.map(a=>`<option value="${a.id}" ${p&&p.ata_id===a.id?'selected':''}>${a.titulo} · ${new Date(a.data_reuniao+'T00:00:00').toLocaleDateString('pt-BR')}</option>`).join('');
+    body.innerHTML=`
+      <div class="fg"><label class="fl">Título</label><input class="fi" id="gpa-titulo" value="${p?p.titulo:''}" placeholder="Ex: Revisão do processo de vendas"></div>
+      <div class="fg"><label class="fl">Ação / O que fazer</label><textarea class="fi" id="gpa-acao" style="resize:vertical;min-height:72px" placeholder="Descreva a ação detalhadamente...">${p?p.acao||'':''}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Responsável</label><select class="fi" id="gpa-resp"><option value="">Selecione</option>${respOpts}</select></div>
+        <div class="fg"><label class="fl">Data prevista</label><input class="fi" id="gpa-data" type="date" value="${p?p.data_prevista||today:today}"></div>
+        <div class="fg"><label class="fl">Status</label><select class="fi" id="gpa-status">
+          ${['pendente','em_andamento','concluido','cancelado'].map(s=>`<option value="${s}" ${p&&p.status===s?'selected':s==='pendente'&&!p?'selected':''}>${PA_STATUS_LBL[s]}</option>`).join('')}
+        </select></div>
+        <div class="fg"><label class="fl">Ata vinculada <span style="color:var(--text3);text-transform:none;font-weight:400">(opcional)</span></label>
+          <select class="fi" id="gpa-ata"><option value="">Nenhuma</option>${ataOpts}</select>
+        </div>
+      </div>`;
+    setTimeout(()=>{const e=ge('gpa-titulo');if(e)e.focus();},100);
+  }
+}
+
+async function saveGestao(){
+  const tipo=cadastroForm;
+  const role=profile?.role||'vendedor';
+  const cid=role==='admin'?(company?.id||null):profile?.company_id;
+  const getV=id=>{const e=ge(id);return e?e.value||null:null;};
+
+  if(tipo==='tarefas-gestao'){
+    const titulo=ge('gtg-titulo')?.value.trim();if(!titulo)return;
+    const respId=getV('gtg-resp');
+    const resp=profiles.find(p=>p.id===respId);
+    const obj={owner_id:cu.id,company_id:cid,titulo,descricao:getV('gtg-desc'),responsavel_id:respId||null,responsavel_nome:resp?.full_name||null,prazo:getV('gtg-prazo'),prioridade:getV('gtg-prio')||'normal',status:getV('gtg-status')||'aberta'};
+    if(mid){await dbUpdate('tarefas_gestao',mid,obj);tarefasGestao=tarefasGestao.map(t=>t.id===mid?{...t,...obj}:t);}
+    else{const d=await dbInsert('tarefas_gestao',obj);if(d)tarefasGestao.unshift(d);}
+
+  }else if(tipo==='atas'){
+    const titulo=ge('gata-titulo')?.value.trim();if(!titulo)return;
+    const obj={owner_id:cu.id,company_id:cid,titulo,data_reuniao:getV('gata-data'),local:getV('gata-local'),participantes:getV('gata-part'),pauta:getV('gata-pauta'),deliberacoes:getV('gata-delib'),proximos_passos:getV('gata-prox'),status:getV('gata-status')||'rascunho'};
+
+    // Upload PDF se selecionado
+    const pdfInput=ge('gata-pdf');
+    if(pdfInput?.files?.length>0){
+      const file=pdfInput.files[0];
+      if(file.type==='application/pdf'){
+        const path=`atas/${cu.id}/${Date.now()}_${file.name}`;
+        const formData=new FormData();formData.append('',file);
+        const upRes=await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`,{
+          method:'POST',headers:{'Authorization':'Bearer '+tok,'x-upsert':'true'},body:formData
+        });
+        if(upRes.ok){obj.arquivo=path;obj.arquivo_nome=file.name;}
+      }
+    }
+
+    if(mid){await dbUpdate('atas',mid,obj);atas=atas.map(a=>a.id===mid?{...a,...obj}:a);}
+    else{const d=await dbInsert('atas',obj);if(d)atas.unshift(d);}
+
+  }else if(tipo==='plano-acao'){
+    const titulo=ge('gpa-titulo')?.value.trim();if(!titulo)return;
+    const acao=ge('gpa-acao')?.value.trim();if(!acao)return;
+    const respId=getV('gpa-resp');
+    const resp=profiles.find(p=>p.id===respId);
+    const obj={owner_id:cu.id,company_id:cid,titulo,acao,responsavel_id:respId||null,responsavel_nome:resp?.full_name||null,data_prevista:getV('gpa-data'),status:getV('gpa-status')||'pendente',ata_id:getV('gpa-ata')||null};
+    if(mid){await dbUpdate('plano_acao',mid,obj);planoAcao=planoAcao.map(p=>p.id===mid?{...p,...obj}:p);}
+    else{const d=await dbInsert('plano_acao',obj);if(d)planoAcao.unshift(d);}
+  }
+}
+
+async function delGestao(table, id, varName){
+  if(!confirm('Remover este item?'))return;
+  await dbDelete(table,id);
+  if(varName==='tarefasGestao')tarefasGestao=tarefasGestao.filter(x=>x.id!==id);
+  else if(varName==='atas')atas=atas.filter(x=>x.id!==id);
+  else if(varName==='planoAcao')planoAcao=planoAcao.filter(x=>x.id!==id);
   render();
 }
 
@@ -1407,9 +1676,11 @@ async function saveModal(){
   try{
     if(mmode==='cadastro'){
       await saveCadastro();
-      closeModal();
-      render();
-      return;
+      closeModal();render();return;
+    }
+    if(mmode==='gestao'){
+      await saveGestao();
+      closeModal();render();return;
     }
     const role=profile?.role||'vendedor';
     const cid=role==='admin'?(profile?.company_id||null):profile?.company_id;
