@@ -209,7 +209,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       <div class="sidebar-logo-company" id="sidebar-company-name">—</div>
     </div>
     <button class="navitem active" id="nav-dashboard" onclick="pg('dashboard')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Dashboard</span></button>
-    <button class="navitem" id="nav-contatos" onclick="pg('contatos')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Contatos</span></button>
+    <button class="navitem" id="nav-cadastros" onclick="pg('cadastros')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Cadastros</span></button>
+    <button class="navitem" id="nav-contatos" onclick="pg('contatos')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>CRM</span></button>
     <button class="navitem" id="nav-pipeline" onclick="pg('pipeline')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg><span>Pipeline</span></button>
     <button class="navitem" id="nav-tarefas" onclick="pg('tarefas')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Tarefas</span></button>
     <button class="navitem" id="nav-admin" onclick="pg('admin')"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7"/><path d="M18 21v-6m-3 3l3-3 3 3"/></svg><span>Admin</span></button>
@@ -286,6 +287,8 @@ const ROLE_CLASS={admin:'role-admin',gestor:'role-gestor',vendedor:'role-vendedo
 let cu=null,tok=null,profile=null,company=null;
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
+let clientes=[],fornecedores=[],pessoas=[];
+let cadastrosTab='clientes',cadastroForm=null;
 let curPage='dashboard',mmode='',mid=null,adminTab='empresas';
 
 const ini=n=>{const p=n.trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();};
@@ -498,26 +501,35 @@ async function loadData(){
       ]);
     } else {
       // Admin vê tudo
-      [contacts,deals,tasks,companies,profiles]=await Promise.all([
+      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas]=await Promise.all([
         dbSelect('contacts','select=*'),
         dbSelect('deals','select=*'),
         dbSelect('tasks','select=*'),
         dbSelect('companies','select=*'),
         dbSelect('profiles','select=*'),
+        dbSelect('clientes','select=*'),
+        dbSelect('fornecedores','select=*'),
+        dbSelect('pessoas','select=*'),
       ]);
     }
   } else if(role==='gestor'&&cid){
-    [contacts,deals,tasks,profiles]=await Promise.all([
+    [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas]=await Promise.all([
       dbSelect('contacts',`company_id=eq.${cid}`),
       dbSelect('deals',`company_id=eq.${cid}`),
       dbSelect('tasks',`company_id=eq.${cid}`),
       dbSelect('profiles',`company_id=eq.${cid}`),
+      dbSelect('clientes',`company_id=eq.${cid}`),
+      dbSelect('fornecedores',`company_id=eq.${cid}`),
+      dbSelect('pessoas',`company_id=eq.${cid}`),
     ]);
   } else {
-    [contacts,deals,tasks]=await Promise.all([
+    [contacts,deals,tasks,clientes,fornecedores,pessoas]=await Promise.all([
       dbSelect('contacts',`owner_id=eq.${uid}`),
       dbSelect('deals',`owner_id=eq.${uid}`),
       dbSelect('tasks',`owner_id=eq.${uid}`),
+      dbSelect('clientes',`owner_id=eq.${uid}`),
+      dbSelect('fornecedores',`owner_id=eq.${uid}`),
+      dbSelect('pessoas',`owner_id=eq.${uid}`),
     ]);
   }
 }
@@ -550,14 +562,16 @@ async function doIdleLogout(){
 // ── PAGES ──
 function pg(p){
   curPage=p;
-  const pages=['dashboard','contatos','pipeline','tarefas','admin'];
+  const pages=['dashboard','cadastros','contatos','pipeline','tarefas','admin'];
   pages.forEach(x=>{const e=ge('nav-'+x);if(e)e.classList.toggle('active',x===p);});
-  const titles={dashboard:'Dashboard',contatos:'Contatos',pipeline:'Pipeline',tarefas:'Tarefas',admin:'Administração'};
-  const dt=ge('dtitle');if(dt)dt.textContent=titles[p];
+  const titles={dashboard:'Dashboard',cadastros:'Cadastros',contatos:'CRM · Contatos',pipeline:'CRM · Pipeline',tarefas:'CRM · Tarefas',admin:'Administração'};
+  const dt=ge('dtitle');if(dt)dt.textContent=titles[p]||p;
   const da=ge('dadd');const fab=ge('fab');
-  if(p==='admin'){if(da){da.style.display='none';}if(fab)fab.style.display='none';}
-  else{
-    if(da){da.style.display='';const lb={dashboard:'+ Novo contato',contatos:'+ Novo contato',pipeline:'+ Novo negócio',tarefas:'+ Nova tarefa'};da.textContent=lb[p];}
+  if(p==='admin'||p==='cadastros'){
+    if(da)da.style.display='none';
+    if(fab)fab.style.display='none';
+  } else {
+    if(da){da.style.display='';const lb={dashboard:'+ Novo contato',contatos:'+ Novo contato',pipeline:'+ Novo negócio',tarefas:'+ Nova tarefa'};da.textContent=lb[p]||'+ Novo';}
     if(fab)fab.style.display='';
   }
   render();
@@ -566,10 +580,298 @@ function pg(p){
 function render(){
   const c=ge('content');if(!c)return;
   if(curPage==='dashboard')c.innerHTML=rDash();
+  else if(curPage==='cadastros')c.innerHTML=rCadastros();
   else if(curPage==='contatos')c.innerHTML=rContatos();
   else if(curPage==='pipeline')c.innerHTML=rPipeline();
   else if(curPage==='tarefas')c.innerHTML=rTarefas();
   else if(curPage==='admin')c.innerHTML=rAdmin();
+}
+
+// ── CADASTROS ──
+function setCadastrosTab(t){
+  cadastrosTab=t;
+  const el=ge('cad-content');
+  if(el)el.innerHTML=rCadastrosList();
+}
+
+function rCadastros(){
+  return`
+  <div class="tabs" style="margin-bottom:0">
+    <button class="tab ${cadastrosTab==='clientes'?'active':''}" onclick="setCadastrosTab('clientes')">
+      Clientes (${clientes.length})
+    </button>
+    <button class="tab ${cadastrosTab==='fornecedores'?'active':''}" onclick="setCadastrosTab('fornecedores')">
+      Fornecedores (${fornecedores.length})
+    </button>
+    <button class="tab ${cadastrosTab==='pessoas'?'active':''}" onclick="setCadastrosTab('pessoas')">
+      Pessoas (${pessoas.length})
+    </button>
+  </div>
+  <div id="cad-content" style="margin-top:12px">${rCadastrosList()}</div>`;
+}
+
+function rCadastrosList(){
+  const list = cadastrosTab==='clientes'?clientes : cadastrosTab==='fornecedores'?fornecedores : pessoas;
+  const label = cadastrosTab==='clientes'?'cliente' : cadastrosTab==='fornecedores'?'fornecedor' : 'pessoa';
+
+  const rows = list.map((r,i)=>{
+    const tipo = r.tipo==='fisica'?'F':'J';
+    const tipoColor = r.tipo==='fisica'?'background:var(--amber-bg);color:var(--amber-text)':'background:var(--blue-bg);color:var(--blue-text)';
+    const tipoPessoa = r.tipo_pessoa==='funcionario'?'Funcionário':'Contato';
+    const subInfo = [r.cpf_cnpj,r.email,r.cidade&&r.estado?`${r.cidade}/${r.estado}`:''].filter(Boolean).join(' · ');
+    const statusColor = r.ativo!==false?'var(--green)':'var(--text3)';
+    return`<div class="li">
+      <div class="av ${AVC[i%5]}" style="font-size:11px;font-weight:700">${ini(r.nome)}</div>
+      <div class="linfo">
+        <div class="lname" style="display:flex;align-items:center;gap:6px">
+          ${r.nome}
+          ${cadastrosTab!=='pessoas'?`<span class="bdg" style="${tipoColor};padding:1px 5px;font-size:9px">${tipo}</span>`:`<span class="bdg bgr" style="font-size:9px">${tipoPessoa}</span>`}
+          ${r.cargo?`<span style="font-size:11px;color:var(--text3)">${r.cargo}</span>`:''}
+        </div>
+        <div class="lsub">${subInfo||'Sem informações'}</div>
+      </div>
+      <div class="lright">
+        <div style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
+        <div style="display:flex;gap:4px;margin-top:4px">
+          <button class="bicon btn-sm" onclick="openCadastro('${cadastrosTab}','${r.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="bicon btn-sm" onclick="delCadastro('${cadastrosTab}','${r.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const emptyIcon = cadastrosTab==='clientes'
+    ?'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
+    :cadastrosTab==='fornecedores'
+    ?'<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'
+    :'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>';
+
+  return`<div class="sechdr">
+    <div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Buscar ${label}..." oninput="filterCad(this.value)">
+    </div>
+    <button class="btn btn-p btn-sm" onclick="openCadastro('${cadastrosTab}')">+ Novo ${label}</button>
+  </div>
+  <div id="cad-list">
+    ${rows||`<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor">${emptyIcon}</svg><p>Nenhum ${label} cadastrado</p></div>`}
+  </div>`;
+}
+
+function filterCad(q){
+  const list = cadastrosTab==='clientes'?clientes : cadastrosTab==='fornecedores'?fornecedores : pessoas;
+  const f = list.filter(r=>r.nome.toLowerCase().includes(q.toLowerCase())||(r.cpf_cnpj||'').includes(q)||(r.email||'').toLowerCase().includes(q.toLowerCase()));
+  const el=ge('cad-list');if(!el)return;
+  if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
+  // Re-render filtered
+  const tmp = cadastrosTab==='clientes'?clientes:cadastrosTab==='fornecedores'?fornecedores:pessoas;
+  const saved = [...tmp];
+  if(cadastrosTab==='clientes')clientes=f;
+  else if(cadastrosTab==='fornecedores')fornecedores=f;
+  else pessoas=f;
+  el.innerHTML = rCadastrosList().split('<div id="cad-list">')[1]?.split('</div>')[0]||'';
+  if(cadastrosTab==='clientes')clientes=saved;
+  else if(cadastrosTab==='fornecedores')fornecedores=saved;
+  else pessoas=saved;
+}
+
+function buildCadastroForm(tipo, record){
+  const r = record||{};
+  const isPessoa = tipo==='pessoas';
+  const isFornecedor = tipo==='fornecedores';
+
+  return`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    ${isPessoa?`
+    <div class="fg" style="grid-column:1/-1"><label class="fl">Tipo</label>
+      <select class="fi" id="cad-tipo_pessoa">
+        <option value="funcionario" ${r.tipo_pessoa==='funcionario'?'selected':''}>Funcionário</option>
+        <option value="contato" ${r.tipo_pessoa==='contato'||!r.tipo_pessoa?'selected':''}>Contato geral</option>
+      </select>
+    </div>`:`
+    <div class="fg" style="grid-column:1/-1"><label class="fl">Tipo de pessoa</label>
+      <select class="fi" id="cad-tipo" onchange="toggleCadTipo(this.value)">
+        <option value="juridica" ${r.tipo==='juridica'||!r.tipo?'selected':''}>Pessoa Jurídica</option>
+        <option value="fisica" ${r.tipo==='fisica'?'selected':''}>Pessoa Física</option>
+      </select>
+    </div>`}
+    <div class="fg" style="grid-column:1/-1"><label class="fl">Nome ${isPessoa?'completo':'/ Razão social'}</label>
+      <input class="fi" id="cad-nome" value="${r.nome||''}" placeholder="${isPessoa?'Nome completo':'Razão social ou nome fantasia'}">
+    </div>
+    <div class="fg"><label class="fl" id="lbl-doc">${isPessoa?'CPF':'CPF / CNPJ'}</label>
+      <input class="fi" id="cad-cpf_cnpj" value="${r.cpf_cnpj||''}" placeholder="${isPessoa?'000.000.000-00':'00.000.000/0000-00 ou CPF'}">
+    </div>
+    <div class="fg"><label class="fl">Email</label>
+      <input class="fi" id="cad-email" type="email" value="${r.email||''}" placeholder="email@exemplo.com">
+    </div>
+    <div class="fg"><label class="fl">Telefone</label>
+      <input class="fi" id="cad-telefone" value="${r.telefone||''}" placeholder="(11) 3333-3333">
+    </div>
+    <div class="fg"><label class="fl">Celular</label>
+      <input class="fi" id="cad-celular" value="${r.celular||''}" placeholder="(11) 99999-9999">
+    </div>
+    ${isPessoa?`
+    <div class="fg"><label class="fl">Cargo</label>
+      <input class="fi" id="cad-cargo" value="${r.cargo||''}" placeholder="Ex: Analista, Gerente...">
+    </div>
+    <div class="fg"><label class="fl">Departamento</label>
+      <input class="fi" id="cad-departamento" value="${r.departamento||''}" placeholder="Ex: Financeiro, TI...">
+    </div>`:''}
+    ${isFornecedor?`
+    <div class="fg" style="grid-column:1/-1"><label class="fl">Categoria</label>
+      <input class="fi" id="cad-categoria" value="${r.categoria||''}" placeholder="Ex: Transporte, TI, Serviços...">
+    </div>`:''}
+  </div>
+
+  <div style="margin:8px 0 10px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:8px">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    Endereço
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="fg"><label class="fl">CEP</label>
+      <input class="fi" id="cad-cep" value="${r.cep||''}" placeholder="00000-000" oninput="buscaCEP(this.value)" maxlength="9">
+    </div>
+    <div class="fg"><label class="fl">Logradouro</label>
+      <input class="fi" id="cad-logradouro" value="${r.logradouro||''}" placeholder="Rua, Av...">
+    </div>
+    <div class="fg"><label class="fl">Número</label>
+      <input class="fi" id="cad-numero" value="${r.numero||''}" placeholder="123">
+    </div>
+    <div class="fg"><label class="fl">Complemento</label>
+      <input class="fi" id="cad-complemento" value="${r.complemento||''}" placeholder="Apto, Sala...">
+    </div>
+    <div class="fg"><label class="fl">Bairro</label>
+      <input class="fi" id="cad-bairro" value="${r.bairro||''}" placeholder="Bairro">
+    </div>
+    <div class="fg"><label class="fl">Cidade</label>
+      <input class="fi" id="cad-cidade" value="${r.cidade||''}" placeholder="Cidade">
+    </div>
+    <div class="fg"><label class="fl">Estado</label>
+      <select class="fi" id="cad-estado">
+        <option value="">UF</option>
+        ${['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf=>`<option value="${uf}" ${r.estado===uf?'selected':''}>${uf}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  <div style="margin:8px 0 10px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:8px">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+    Dados Bancários
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="fg"><label class="fl">Banco</label>
+      <input class="fi" id="cad-banco" value="${r.banco||''}" placeholder="Ex: Itaú, Bradesco...">
+    </div>
+    <div class="fg"><label class="fl">Tipo de conta</label>
+      <select class="fi" id="cad-tipo_conta">
+        <option value="">Selecione</option>
+        <option value="corrente" ${r.tipo_conta==='corrente'?'selected':''}>Conta Corrente</option>
+        <option value="poupanca" ${r.tipo_conta==='poupanca'?'selected':''}>Conta Poupança</option>
+        <option value="pagamento" ${r.tipo_conta==='pagamento'?'selected':''}>Conta Pagamento</option>
+      </select>
+    </div>
+    <div class="fg"><label class="fl">Agência</label>
+      <input class="fi" id="cad-agencia" value="${r.agencia||''}" placeholder="0000">
+    </div>
+    <div class="fg"><label class="fl">Conta</label>
+      <input class="fi" id="cad-conta" value="${r.conta||''}" placeholder="00000-0">
+    </div>
+    <div class="fg"><label class="fl">PIX</label>
+      <input class="fi" id="cad-pix" value="${r.pix||''}" placeholder="CPF, CNPJ, email ou chave">
+    </div>
+    <div class="fg"><label class="fl">Titular</label>
+      <input class="fi" id="cad-titular_banco" value="${r.titular_banco||''}" placeholder="Nome do titular">
+    </div>
+  </div>
+
+  <div style="margin:8px 0 10px;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Observações</div>
+  <div class="fg">
+    <textarea class="fi" id="cad-observacoes" placeholder="Observações gerais..." style="resize:vertical;min-height:72px">${r.observacoes||''}</textarea>
+  </div>
+  <div class="fg" style="display:flex;align-items:center;gap:8px;margin-bottom:0">
+    <input type="checkbox" id="cad-ativo" ${r.ativo!==false?'checked':''} style="width:16px;height:16px;cursor:pointer">
+    <label for="cad-ativo" style="font-size:13px;cursor:pointer">Ativo</label>
+  </div>`;
+}
+
+async function buscaCEP(v){
+  const cep=v.replace(/\D/g,'');
+  if(cep.length!==8)return;
+  try{
+    const r=await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    const d=await r.json();
+    if(d.erro)return;
+    const set=(id,val)=>{const e=ge(id);if(e&&!e.value)e.value=val;else if(e)e.value=val;};
+    set('cad-logradouro',d.logradouro);
+    set('cad-bairro',d.bairro);
+    set('cad-cidade',d.localidade);
+    const est=ge('cad-estado');if(est)est.value=d.uf;
+    setTimeout(()=>{const n=ge('cad-numero');if(n)n.focus();},100);
+  }catch(e){}
+}
+
+function openCadastro(tipo, id=null){
+  const map={clientes:'cliente',fornecedores:'fornecedor',pessoas:'pessoa'};
+  const list=tipo==='clientes'?clientes:tipo==='fornecedores'?fornecedores:pessoas;
+  const record=id?list.find(x=>x.id===id):null;
+  mmode='cadastro';mid=id;cadastroForm=tipo;
+  ge('mbg').classList.add('open');
+  const action=record?'Editar':'Novo';
+  ge('mtitle').textContent=`${action} ${map[tipo]}`;
+  ge('mbody').innerHTML=buildCadastroForm(tipo,record);
+}
+
+async function saveCadastro(){
+  const tipo=cadastroForm;
+  const nome=ge('cad-nome')?.value.trim();
+  if(!nome)return alert('Nome é obrigatório.');
+  const role=profile?.role||'vendedor';
+  const cid=role==='admin'?(company?.id||null):profile?.company_id;
+  const getV=id=>ge(id)?.value||null;
+  const getChk=id=>ge(id)?.checked!==false;
+
+  const obj={
+    owner_id:cu.id, company_id:cid, nome,
+    cpf_cnpj:getV('cad-cpf_cnpj'), email:getV('cad-email'),
+    telefone:getV('cad-telefone'), celular:getV('cad-celular'),
+    cep:getV('cad-cep'), logradouro:getV('cad-logradouro'),
+    numero:getV('cad-numero'), complemento:getV('cad-complemento'),
+    bairro:getV('cad-bairro'), cidade:getV('cad-cidade'), estado:getV('cad-estado'),
+    banco:getV('cad-banco'), agencia:getV('cad-agencia'),
+    conta:getV('cad-conta'), tipo_conta:getV('cad-tipo_conta'),
+    pix:getV('cad-pix'), titular_banco:getV('cad-titular_banco'),
+    observacoes:getV('cad-observacoes'), ativo:getChk('cad-ativo'),
+  };
+
+  if(tipo==='clientes'||tipo==='fornecedores') obj.tipo=getV('cad-tipo')||'juridica';
+  if(tipo==='fornecedores') obj.categoria=getV('cad-categoria');
+  if(tipo==='pessoas'){
+    obj.tipo_pessoa=getV('cad-tipo_pessoa')||'contato';
+    obj.cargo=getV('cad-cargo');
+    obj.departamento=getV('cad-departamento');
+  }
+
+  if(mid){
+    await dbUpdate(tipo,mid,obj);
+    if(tipo==='clientes') clientes=clientes.map(r=>r.id===mid?{...r,...obj}:r);
+    else if(tipo==='fornecedores') fornecedores=fornecedores.map(r=>r.id===mid?{...r,...obj}:r);
+    else pessoas=pessoas.map(r=>r.id===mid?{...r,...obj}:r);
+  } else {
+    const d=await dbInsert(tipo,obj);
+    if(d){
+      if(tipo==='clientes') clientes.unshift(d);
+      else if(tipo==='fornecedores') fornecedores.unshift(d);
+      else pessoas.unshift(d);
+    }
+  }
+}
+
+async function delCadastro(tipo, id){
+  if(!confirm('Remover este cadastro?'))return;
+  await dbDelete(tipo,id);
+  if(tipo==='clientes') clientes=clientes.filter(r=>r.id!==id);
+  else if(tipo==='fornecedores') fornecedores=fornecedores.filter(r=>r.id!==id);
+  else pessoas=pessoas.filter(r=>r.id!==id);
+  render();
 }
 
 // ── RENDER DASHBOARD ──
@@ -846,6 +1148,12 @@ function closeModal(){ge('mbg').classList.remove('open');mmode='';mid=null;}
 async function saveModal(){
   const btn=ge('msave');btn.disabled=true;btn.innerHTML='<span class="spin"></span>';
   try{
+    if(mmode==='cadastro'){
+      await saveCadastro();
+      closeModal();
+      render();
+      return;
+    }
     const role=profile?.role||'vendedor';
     const cid=role==='admin'?(profile?.company_id||null):profile?.company_id;
 
