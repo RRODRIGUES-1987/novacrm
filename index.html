@@ -436,7 +436,23 @@ let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
 let clientes=[],fornecedores=[],pessoas=[];
 let tarefasGestao=[],atas=[],planoAcao=[];
+let permissoes={}; // { userId: { tela: {pode_ver, pode_criar, ...} } }
+let minhasPermissoes={}; // permissões do usuário logado
 let cadastrosTab='clientes',cadastroForm=null;
+
+const TELAS=[
+  {id:'clientes',      label:'Cadastros · Clientes',      modulo:'Cadastros'},
+  {id:'fornecedores',  label:'Cadastros · Fornecedores',  modulo:'Cadastros'},
+  {id:'pessoas',       label:'Cadastros · Pessoas',       modulo:'Cadastros'},
+  {id:'contatos',      label:'CRM · Contatos',            modulo:'CRM'},
+  {id:'pipeline',      label:'CRM · Pipeline',            modulo:'CRM'},
+  {id:'tarefas',       label:'CRM · Tarefas',             modulo:'CRM'},
+  {id:'tarefas-gestao',label:'Gestão · Tarefas',          modulo:'Gestão'},
+  {id:'atas',          label:'Gestão · Ata de Reunião',   modulo:'Gestão'},
+  {id:'plano-acao',    label:'Gestão · Plano de Ação',    modulo:'Gestão'},
+];
+const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
+const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
 let curPage='dashboard',mmode='',mid=null,adminTab='empresas';
 
 const ini=n=>{const p=n.trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();};
@@ -445,8 +461,8 @@ const fmtCNPJ=c=>c.replace(/\D/g,'').replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2}
 const ge=id=>document.getElementById(id);
 
 // ── REST ──
-async function sbFetch(method,path,body,tk){
-  const h={'Content-Type':'application/json','apikey':SB_KEY,'Prefer':'return=representation'};
+async function sbFetch(method,path,body,tk,extra_headers={}){
+  const h={'Content-Type':'application/json','apikey':SB_KEY,'Prefer':'return=representation',...extra_headers};
   if(tk||tok)h['Authorization']='Bearer '+(tk||tok);
   const r=await fetch(SB_URL+path,{method,headers:h,body:body?JSON.stringify(body):undefined});
   const txt=await r.text();let data=null;try{data=txt?JSON.parse(txt):null;}catch(e){}
@@ -639,9 +655,44 @@ async function finishEnterApp(user){
 
   ge('app').classList.add('on');
   await loadData();
+  await loadPermissoes();
   pg('crm-dashboard');
   openModule('crm');
   resetIdle();
+}
+
+// ── PERMISSÕES ──
+async function loadPermissoes(){
+  const role=profile?.role||'vendedor';
+  if(role==='admin'){minhasPermissoes={};return;} // admin tem tudo
+
+  const perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
+  minhasPermissoes={};
+  perms.forEach(p=>{minhasPermissoes[p.tela]=p;});
+
+  // Atualiza menu lateral baseado nas permissões
+  TELAS.forEach(t=>{
+    const el=ge('nav-'+t.id);
+    if(!el)return;
+    const perm=minhasPermissoes[t.id];
+    if(perm&&perm.pode_ver){el.style.display='';}
+    else{el.style.display='none';}
+  });
+}
+
+function canDo(tela, acao){
+  const role=profile?.role||'vendedor';
+  if(role==='admin'||role==='gestor')return true;
+  const perm=minhasPermissoes[tela];
+  if(!perm)return false;
+  return perm[acao]===true;
+}
+
+async function loadUserPermissoes(userId){
+  const perms=await dbSelect('permissoes',`user_id=eq.${userId}`);
+  const map={};
+  perms.forEach(p=>{map[p.tela]=p;});
+  return map;
 }
 
 // ── DATA ──
@@ -1682,9 +1733,30 @@ function rEmpresas(){
 function rUsuarios(){
   const rows=profiles.map((p,i)=>{
     const comp=companies.find(c=>c.id===p.company_id);
-    return`<div class="li"><div class="av ${AVC[i%5]}">${ini(p.full_name||p.email||'?')}</div><div class="linfo"><div class="lname">${p.full_name||'—'}</div><div class="lsub">${p.email||''} ${comp?'· '+comp.name:''}</div></div><div class="lright"><span class="role-badge ${ROLE_CLASS[p.role]||''}">${ROLES[p.role]||p.role}</span><div style="display:flex;gap:4px;margin-top:3px"><button class="bicon btn-sm" onclick="openModal('user','${p.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button></div></div></div>`;
+    return`<div class="li">
+      <div class="av ${AVC[i%5]}">${ini(p.full_name||p.email||'?')}</div>
+      <div class="linfo">
+        <div class="lname">${p.full_name||'—'}</div>
+        <div class="lsub">${p.email||''} ${comp?'· '+comp.name:''}</div>
+      </div>
+      <div class="lright">
+        <span class="role-badge ${ROLE_CLASS[p.role]||''}">${ROLES[p.role]||p.role}</span>
+        <div style="display:flex;gap:4px;margin-top:3px">
+          <button class="bicon btn-sm" title="Editar" onclick="openModal('user','${p.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="bicon btn-sm" title="Permissões" onclick="openModal('permissoes','${p.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
+          <button class="bicon btn-sm" title="Copiar permissões de outro usuário" onclick="copiarPermissoes('${p.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>`;
   }).join('');
-  return`<div class="sechdr"><span class="sectitle">Usuários (${profiles.length})</span><button class="btn btn-p btn-sm" onclick="openModal('new_user')">+ Novo usuário</button></div>${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>Nenhum usuário</p></div>'}`;
+  return`<div class="sechdr"><span class="sectitle">Usuários (${profiles.length})</span><button class="btn btn-p btn-sm" onclick="openModal('new_user')">+ Novo usuário</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>Nenhum usuário</p></div>'}`;
 }
 
 // ── MODALS ──
@@ -1779,7 +1851,36 @@ function openModal(mode,id=null){
     const compOpts=companies.map(c=>`<option value="${c.id}">${c.name} · ${fmtCNPJ(c.cnpj)}</option>`).join('');
     body.innerHTML=`<div class="fg"><label class="fl">Nome completo</label><input class="fi" id="funame" placeholder="Nome do usuário"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fuemail" type="email" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Senha temporária</label><input class="fi" id="fupw" type="password" placeholder="mínimo 6 caracteres"></div><div class="fg"><label class="fl">Perfil</label><select class="fi" id="furole"><option value="vendedor">Vendedor</option><option value="gestor">Gestor</option><option value="admin">Admin</option></select></div><div class="fg"><label class="fl">Empresa</label><select class="fi" id="fucomp">${compOpts||'<option>Cadastre uma empresa primeiro</option>'}</select></div>`;
 
-  }else if(mode==='user'){
+  }else if(mode==='permissoes'){
+    const prof=id?profiles.find(x=>x.id===id):null;
+    if(!prof)return;
+    title.textContent=`Permissões — ${prof.full_name||prof.email}`;
+    body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin spinner-dark"></span> Carregando...</div>';
+    ge('msave').onclick=()=>savePermissoes(id);
+    // Carrega permissões de forma assíncrona
+    loadUserPermissoes(id).then(userPerms=>{
+      const modulos=[...new Set(TELAS.map(t=>t.modulo))];
+      body.innerHTML=`
+        <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">Configure o que este usuário pode fazer em cada tela.</div>
+        ${modulos.map(mod=>`
+          <div style="margin-bottom:16px">
+            <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">${mod}</div>
+            ${TELAS.filter(t=>t.modulo===mod).map(t=>{
+              const perm=userPerms[t.id]||{};
+              return`<div style="margin-bottom:10px">
+                <div style="font-size:13px;font-weight:500;margin-bottom:5px">${t.label.split(' · ')[1]||t.label}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">
+                  ${PERMS.map(pn=>`
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:${perm[pn]?'var(--accent)':'var(--bg2)'};color:${perm[pn]?'var(--accent-text)':'var(--text2)'}">
+                      <input type="checkbox" id="perm-${t.id}-${pn}" ${perm[pn]?'checked':''} style="display:none" onchange="togglePermBadge(this)">
+                      ${PERMS_LBL[pn]}
+                    </label>`).join('')}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>`).join('')}`;
+    });
+    return;
     const p=id?profiles.find(x=>x.id===id):null;
     title.textContent='Editar usuário';
     const compOpts=companies.map(c=>`<option value="${c.id}" ${p&&p.company_id===c.id?'selected':''}>${c.name} · ${fmtCNPJ(c.cnpj)}</option>`).join('');
@@ -1936,6 +2037,96 @@ async function deleteDoc(docId, path, dealId){
     await dbDelete('documentos',docId);
     await loadDocsList(dealId);
   }catch(e){alert('Erro ao excluir: '+e.message);}
+}
+
+function togglePermBadge(input, tela, perm){
+  const label=input.closest('label');
+  if(input.checked){
+    label.style.background='var(--accent)';
+    label.style.color='var(--accent-text)';
+  } else {
+    label.style.background='var(--bg2)';
+    label.style.color='var(--text2)';
+  }
+}
+
+async function savePermissoes(userId){
+  const btn=ge('msave');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>';}
+  try{
+    const cid=company?.id||null;
+    // Para cada tela, monta o objeto de permissão
+    const ops=TELAS.map(async t=>{
+      const obj={user_id:userId,company_id:cid,tela:t.id};
+      PERMS.forEach(pn=>{
+        const el=ge(`perm-${t.id}-${pn}`);
+        obj[pn]=el?el.checked:false;
+      });
+      // Upsert — insere ou atualiza
+      const r=await sbFetch('POST',`/rest/v1/permissoes`,obj,tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+      return r;
+    });
+    await Promise.all(ops);
+    closeModal();
+    render();
+  }catch(e){
+    showModalErr(e.message||'Erro ao salvar permissões.');
+  }finally{
+    if(btn){btn.disabled=false;btn.innerHTML='Salvar';}
+  }
+}
+
+async function copiarPermissoes(paraUserId){
+  // Escolhe de quem copiar
+  const outros=profiles.filter(p=>p.id!==paraUserId&&p.role!=='admin');
+  if(!outros.length){alert('Nenhum outro usuário disponível para copiar.');return;}
+
+  const opts=outros.map(p=>`<option value="${p.id}">${p.full_name||p.email} (${ROLES[p.role]||p.role})</option>`).join('');
+  const paraUser=profiles.find(p=>p.id===paraUserId);
+
+  mmode='copiar-perm';mid=paraUserId;
+  ge('mbg').classList.add('open');
+  ge('mtitle').textContent=`Copiar permissões para ${paraUser?.full_name||'usuário'}`;
+  ge('mbody').innerHTML=`
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px">
+      Selecione o usuário cujas permissões serão copiadas. As permissões atuais serão substituídas.
+    </div>
+    <div class="fg"><label class="fl">Copiar permissões de</label>
+      <select class="fi" id="copy-from-user">${opts}</select>
+    </div>
+    <div style="background:var(--amber-bg);border:1px solid #f0c070;border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--amber-text)">
+      ⚠ Isso substituirá todas as permissões atuais do usuário.
+    </div>`;
+  ge('msave').onclick=()=>executarCopiaPermissoes(paraUserId);
+}
+
+async function executarCopiaPermissoes(paraUserId){
+  const btn=ge('msave');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>';}
+  try{
+    const deUserId=ge('copy-from-user')?.value;
+    if(!deUserId)throw new Error('Selecione um usuário.');
+    const cid=company?.id||null;
+
+    // Carrega permissões do usuário de origem
+    const permsOrigem=await loadUserPermissoes(deUserId);
+
+    // Aplica para o usuário destino
+    const ops=TELAS.map(async t=>{
+      const permOrig=permsOrigem[t.id]||{};
+      const obj={user_id:paraUserId,company_id:cid,tela:t.id};
+      PERMS.forEach(pn=>{obj[pn]=permOrig[pn]||false;});
+      return sbFetch('POST',`/rest/v1/permissoes`,obj,tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+    });
+    await Promise.all(ops);
+
+    const deUser=profiles.find(p=>p.id===deUserId);
+    closeModal();
+    render();
+    alert(`Permissões copiadas de ${deUser?.full_name||deUser?.email} com sucesso!`);
+  }catch(e){
+    showModalErr(e.message||'Erro ao copiar permissões.');
+  }finally{
+    if(btn){btn.disabled=false;btn.innerHTML='Salvar';}
+  }
 }
 
 function closeModal(){ge('mbg').classList.remove('open');mmode='';mid=null;}
