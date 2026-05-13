@@ -403,7 +403,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     <div class="mhandle"></div>
     <div class="mtitle" id="mtitle"></div>
     <div id="mbody"></div>
-    <div class="mfoot"><button class="btn" onclick="closeModal()">Cancelar</button><button class="btn btn-p" id="msave" onclick="saveModal()">Salvar</button></div>
+    <div class="mfoot">
+      <div id="modal-err" style="flex:1;font-size:12px;color:var(--red-text);background:var(--red-bg);border:1px solid #f5c5c5;border-radius:var(--radius);padding:7px 10px;display:none;text-align:left"></div>
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" id="msave" onclick="saveModal()">Salvar</button>
+    </div>
   </div>
 </div>
 
@@ -456,9 +460,20 @@ async function dbSelect(table,filter=''){
 }
 async function dbInsert(table,body){
   const r=await sbFetch('POST',`/rest/v1/${table}`,body,tok);
-  if(r.ok&&r.data)return Array.isArray(r.data)?r.data[0]:r.data;return null;
+  if(r.ok&&r.data)return Array.isArray(r.data)?r.data[0]:r.data;
+  if(!r.ok){
+    const msg=r.data?.message||r.data?.msg||r.data?.hint||JSON.stringify(r.data)||'Erro ao salvar';
+    throw new Error(`[${table}] ${msg}`);
+  }
+  return null;
 }
-async function dbUpdate(table,id,body){await sbFetch('PATCH',`/rest/v1/${table}?id=eq.${id}`,body,tok);}
+async function dbUpdate(table,id,body){
+  const r=await sbFetch('PATCH',`/rest/v1/${table}?id=eq.${id}`,body,tok);
+  if(!r.ok){
+    const msg=r.data?.message||r.data?.msg||JSON.stringify(r.data)||'Erro ao atualizar';
+    throw new Error(`[${table}] ${msg}`);
+  }
+}
 async function dbDelete(table,id){await sbFetch('DELETE',`/rest/v1/${table}?id=eq.${id}`,null,tok);}
 
 // ── AUTH UI ──
@@ -1169,7 +1184,7 @@ function openCadastro(tipo, id=null){
 async function saveCadastro(){
   const tipo=cadastroForm;
   const nome=ge('cad-nome')?.value.trim();
-  if(!nome)return alert('Nome é obrigatório.');
+  if(!nome) throw new Error('Nome é obrigatório.');
   const role=profile?.role||'vendedor';
   const cid=role==='admin'?(company?.id||null):profile?.company_id;
   const getV=id=>ge(id)?.value||null;
@@ -1924,11 +1939,23 @@ async function deleteDoc(docId, path, dealId){
 
 function closeModal(){ge('mbg').classList.remove('open');mmode='';mid=null;}
 
+function showModalErr(msg){
+  const el=ge('modal-err');
+  if(el){el.textContent='⚠ '+msg;el.style.display='block';}
+}
+function hideModalErr(){
+  const el=ge('modal-err');
+  if(el){el.textContent='';el.style.display='none';}
+}
+
 async function saveModal(){
-  const btn=ge('msave');btn.disabled=true;btn.innerHTML='<span class="spin"></span>';
+  const btn=ge('msave');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>';}
+  hideModalErr();
   try{
     if(mmode==='cadastro'){
-      await saveCadastro();
+      const ok=await saveCadastro();
+      if(ok===false) return; // erro já exibido
       closeModal();render();return;
     }
     if(mmode==='gestao'){
@@ -2061,7 +2088,11 @@ async function saveModal(){
     }
 
     closeModal();render();
-  }finally{btn.disabled=false;btn.innerHTML='Salvar';}
+  }catch(err){
+    showModalErr(err.message||'Erro ao salvar. Tente novamente.');
+  }finally{
+    if(btn){btn.disabled=false;btn.innerHTML='Salvar';}
+  }
 }
 
 async function delContact(id){if(!confirm('Remover contato?'))return;await dbDelete('contacts',id);contacts=contacts.filter(c=>c.id!==id);render();}
