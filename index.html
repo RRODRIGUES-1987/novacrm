@@ -173,10 +173,19 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @media(min-width:768px){.fab{display:none}}
 #nav-admin{display:none}#nav-admin.visible{display:flex}.doc-upload-area{border:2px dashed var(--border2);border-radius:var(--radius);padding:24px;text-align:center;cursor:pointer;transition:all .2s;color:var(--text2)}
 .doc-upload-area:hover{border-color:var(--accent);background:var(--bg2);color:var(--text)}
-.doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border-radius:var(--radius);margin-bottom:6px}
+.doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border-radius:var(--radius);margin-bottom:6px;cursor:pointer;transition:background .15s}
+.doc-item:hover{background:var(--bg3)}
 .doc-item-info{flex:1;min-width:0}
 .doc-item-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .doc-item-meta{font-size:11px;color:var(--text3);margin-top:2px}
+.pdf-viewer-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;flex-direction:column}
+.pdf-viewer-bg.open{display:flex;animation:fi .2s}
+.pdf-viewer-header{background:var(--bg);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;border-bottom:1px solid var(--border)}
+.pdf-viewer-title{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pdf-viewer-actions{display:flex;gap:8px;flex-shrink:0}
+.pdf-viewer-body{flex:1;overflow:hidden;background:#525659}
+.pdf-viewer-body iframe{width:100%;height:100%;border:none}
+.pdf-viewer-loading{display:flex;align-items:center;justify-content:center;height:100%;color:#fff;font-size:13px;gap:10px}
 .empty{text-align:center;padding:32px 16px;color:var(--text2)}.empty svg{width:48px!important;height:48px!important;max-width:48px;max-height:48px;stroke:var(--border2);margin:0 auto 10px;display:block}.empty p{font-size:13px}
 .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:rotate .7s linear infinite;display:inline-block;vertical-align:middle}
 .divider{height:1px;background:var(--border);margin:12px 0}
@@ -368,6 +377,26 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 </div>
 
 <button class="fab" id="fab" onclick="openFor()"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+
+<!-- PDF VIEWER -->
+<div class="pdf-viewer-bg" id="pdf-viewer-bg">
+  <div class="pdf-viewer-header">
+    <div class="pdf-viewer-title" id="pdf-viewer-title">Documento</div>
+    <div class="pdf-viewer-actions">
+      <button class="btn btn-sm" onclick="downloadCurrentPdf()" title="Baixar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Baixar
+      </button>
+      <button class="btn btn-sm" onclick="closePdfViewer()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Fechar
+      </button>
+    </div>
+  </div>
+  <div class="pdf-viewer-body" id="pdf-viewer-body">
+    <div class="pdf-viewer-loading"><span class="spin" style="border-top-color:#fff"></span> Carregando...</div>
+  </div>
+</div>
 
 <div class="mbg" id="mbg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -1580,18 +1609,20 @@ async function loadDocsList(dealId){
   const el=ge('doc-list');if(!el)return;
   if(!docs.length){el.innerHTML='<div style="text-align:center;padding:16px;font-size:13px;color:var(--text2)">Nenhum documento anexado</div>';return;}
   el.innerHTML=docs.map(d=>`
-    <div class="doc-item">
+    <div class="doc-item" onclick="viewPdf('${d.arquivo}','${d.nome}')" title="Clique para visualizar">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--red-text)" stroke-width="1.5" style="flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       <div class="doc-item-info">
         <div class="doc-item-name">${d.nome}</div>
-        <div class="doc-item-meta">${d.tamanho?fmtSize(d.tamanho):''} · ${new Date(d.created_at).toLocaleDateString('pt-BR')}</div>
+        <div class="doc-item-meta">${d.tamanho?fmtSize(d.tamanho):''} · ${new Date(d.created_at).toLocaleDateString('pt-BR')} · <span style="color:var(--blue-text)">clique para visualizar</span></div>
       </div>
-      <button class="bicon btn-sm" title="Baixar" onclick="downloadDoc('${d.arquivo}','${d.nome}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      </button>
-      <button class="bicon btn-sm" title="Excluir" onclick="deleteDoc('${d.id}','${d.arquivo}','${dealId}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-      </button>
+      <div style="display:flex;gap:4px" onclick="event.stopPropagation()">
+        <button class="bicon btn-sm" title="Baixar" onclick="downloadDoc('${d.arquivo}','${d.nome}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="bicon btn-sm" title="Excluir" onclick="deleteDoc('${d.id}','${d.arquivo}','${dealId}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>
     </div>`).join('');
 }
 
@@ -1642,7 +1673,54 @@ async function uploadDoc(dealId, input){
   }
 }
 
-async function downloadDoc(path, nome){
+let currentPdfPath=null, currentPdfNome=null;
+
+async function viewPdf(path, nome){
+  currentPdfPath=path;currentPdfNome=nome;
+  const bg=ge('pdf-viewer-bg');
+  const title=ge('pdf-viewer-title');
+  const body=ge('pdf-viewer-body');
+  if(!bg||!title||!body)return;
+  title.textContent=nome;
+  body.innerHTML='<div class="pdf-viewer-loading"><span class="spin" style="border-top-color:#fff"></span> Carregando...</div>';
+  bg.classList.add('open');
+  try{
+    const r=await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`,{
+      headers:{'Authorization':'Bearer '+tok}
+    });
+    if(!r.ok)throw new Error('Erro ao carregar');
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    body.innerHTML=`<iframe src="${url}" style="width:100%;height:100%;border:none"></iframe>`;
+    // Revoga após 5 min
+    setTimeout(()=>URL.revokeObjectURL(url),5*60*1000);
+  }catch(e){
+    body.innerHTML=`<div class="pdf-viewer-loading" style="flex-direction:column;gap:12px">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f07070" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <span style="color:#f07070">Erro ao carregar o PDF</span>
+      <button class="btn" style="color:#fff;border-color:#fff" onclick="downloadDoc('${path}','${nome}')">Baixar arquivo</button>
+    </div>`;
+  }
+}
+
+function closePdfViewer(){
+  const bg=ge('pdf-viewer-bg');
+  if(bg)bg.classList.remove('open');
+  const body=ge('pdf-viewer-body');
+  if(body)body.innerHTML='';
+  currentPdfPath=null;currentPdfNome=null;
+}
+
+function downloadCurrentPdf(){
+  if(currentPdfPath&&currentPdfNome)downloadDoc(currentPdfPath,currentPdfNome);
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(ge('pdf-viewer-bg')?.classList.contains('open'))closePdfViewer();
+    else closeModal();
+  }
+});
   try{
     const r=await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`,{
       headers:{'Authorization':'Bearer '+tok}
@@ -1826,7 +1904,6 @@ function toggleMenu(e){if(e)e.stopPropagation();const w=ge('umwrap'),o=ge('umo')
 function closeMenu(){ge('umwrap').classList.remove('open');ge('umo').style.display='none';}
 
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape')closeModal();
   if(e.key==='Enter'&&ge('vlogin')&&ge('vlogin').style.display!=='none')doLogin();
 });
 
