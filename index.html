@@ -1099,6 +1099,18 @@ function buildCadastroForm(tipo, record){
             <input class="fi" id="cad-horario" value="${r.horario||''}" placeholder="Ex: 08:00 às 17:00, Seg a Sex">
           </div>
         </div>
+        ${id?`
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Registro de alteração</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fg" style="grid-column:1/-1"><label class="fl">Motivo da alteração</label>
+              <input class="fi" id="cad-motivo" placeholder="Ex: Promoção, Transferência, Reajuste salarial...">
+            </div>
+            <div class="fg"><label class="fl">Data de vigência</label>
+              <input class="fi" id="cad-vigencia" type="date" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+          </div>
+        </div>`:''}
       </div>
     </div>`;
   }
@@ -1237,7 +1249,60 @@ function openCadastro(tipo, id=null){
   ge('mbg').classList.add('open');
   const action=record?'Editar':'Novo';
   ge('mtitle').textContent=`${action} ${map[tipo]}`;
-  ge('mbody').innerHTML=buildCadastroForm(tipo,record);
+
+  if(tipo==='pessoas'&&id){
+    // Modo edição de pessoa — mostra abas Dados e Histórico
+    ge('mbody').innerHTML=`
+      <div class="tabs" style="margin-bottom:14px">
+        <button class="tab active" id="pes-tab-dados" onclick="switchPessoaTab('dados')">Dados</button>
+        <button class="tab" id="pes-tab-hist" onclick="switchPessoaTab('hist')">Histórico profissional</button>
+      </div>
+      <div id="pes-tab-dados-content">${buildCadastroForm(tipo,record)}</div>
+      <div id="pes-tab-hist-content" style="display:none">
+        <div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin spinner-dark"></span> Carregando...</div>
+      </div>`;
+    loadHistoricoProfissional(id);
+  } else {
+    ge('mbody').innerHTML=buildCadastroForm(tipo,record);
+  }
+}
+
+function switchPessoaTab(tab){
+  ['dados','hist'].forEach(t=>{
+    const btn=ge('pes-tab-'+t);
+    const content=ge('pes-tab-'+t+'-content');
+    if(btn)btn.classList.toggle('active',t===tab);
+    if(content)content.style.display=t===tab?'':'none';
+  });
+  const saveBtn=ge('msave');
+  if(saveBtn)saveBtn.style.display=tab==='hist'?'none':'';
+}
+
+async function loadHistoricoProfissional(pessoaId){
+  const hist=await dbSelect('historico_profissional',`pessoa_id=eq.${pessoaId}&order=created_at.desc`);
+  const el=ge('pes-tab-hist-content');if(!el)return;
+  if(!hist.length){
+    el.innerHTML='<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg><p>Nenhuma alteração registrada</p></div>';
+    return;
+  }
+  const CAMPOS={cargo:'Função',departamento:'Departamento',lider:'Líder/Gestor',unidade:'Unidade',cbo:'CBO',salario:'Salário',turno:'Turno',horario:'Horário'};
+  el.innerHTML=hist.map(h=>{
+    const alteracoes=Object.keys(CAMPOS).filter(k=>h[k+'_anterior']!==h[k+'_novo']&&(h[k+'_anterior']||h[k+'_novo']));
+    return`<div style="background:var(--bg2);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600">${new Date(h.created_at).toLocaleDateString('pt-BR')} · ${h.alterado_por_nome||'—'}</div>
+        ${h.data_vigencia?`<div style="font-size:11px;color:var(--text2)">Vigência: ${new Date(h.data_vigencia+'T00:00:00').toLocaleDateString('pt-BR')}</div>`:''}
+      </div>
+      ${h.motivo?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px;font-style:italic">"${h.motivo}"</div>`:''}
+      ${alteracoes.map(k=>`
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px">
+          <span style="font-weight:500;min-width:80px">${CAMPOS[k]}:</span>
+          <span style="color:var(--red-text);text-decoration:line-through">${k==='salario'?'R$'+(h[k+'_anterior']||0).toLocaleString('pt-BR'):h[k+'_anterior']||'—'}</span>
+          <span style="color:var(--text3)">→</span>
+          <span style="color:var(--green)">${k==='salario'?'R$'+(h[k+'_novo']||0).toLocaleString('pt-BR'):h[k+'_novo']||'—'}</span>
+        </div>`).join('')}
+    </div>`;
+  }).join('');
 }
 
 async function saveCadastro(){
@@ -1305,6 +1370,24 @@ async function saveCadastro(){
     delete obj.tipo_contrato;
     delete obj.horario_entrada;delete obj.horario_saida;
     delete obj.horario_intervalo;delete obj.carga_horaria;
+
+    // Grava histórico se edição e houve mudança em campos profissionais
+    if(mid){
+      const anterior=pessoas.find(p=>p.id===mid)||{};
+      const camposProf=['cargo','departamento','lider','unidade','cbo','salario','turno','horario'];
+      const mudou=camposProf.some(k=>String(anterior[k]||'')!==String(obj[k]||''));
+      if(mudou){
+        const hist={
+          pessoa_id:mid,company_id:cid,
+          alterado_por:cu.id,
+          alterado_por_nome:profile?.full_name||cu.email,
+          motivo:getV('cad-motivo')||null,
+          data_vigencia:getV('cad-vigencia')||null,
+        };
+        camposProf.forEach(k=>{hist[k+'_anterior']=anterior[k]||null;hist[k+'_novo']=obj[k]||null;});
+        await dbInsert('historico_profissional',hist);
+      }
+    }
   }
 
   if(mid){
