@@ -270,10 +270,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           <span>Fornecedores</span>
         </button>
-        <button class="navitem sub" id="nav-pessoas" onclick="pg('pessoas')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          <span>Pessoas</span>
-        </button>
       </div>
     </div>
 
@@ -824,7 +820,7 @@ async function doIdleLogout(){
 // ── PAGES ──
 // ── MODULE MENU ──
 const MODULE_MAP={
-  clientes:'cadastros', fornecedores:'cadastros', pessoas:'cadastros',
+  clientes:'cadastros', fornecedores:'cadastros',
   'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm',
   'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
   'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh',
@@ -1291,31 +1287,119 @@ function openCadastro(tipo, id=null){
   ge('mtitle').textContent=`${action} ${map[tipo]}`;
 
   if(tipo==='pessoas'&&id){
-    // Modo edição de pessoa — mostra abas Dados e Histórico
+    // Modo edição de pessoa — mostra abas Dados, Histórico e Dependentes
     ge('mbody').innerHTML=`
       <div class="tabs" style="margin-bottom:14px">
         <button class="tab active" id="pes-tab-dados" onclick="switchPessoaTab('dados')">Dados</button>
-        <button class="tab" id="pes-tab-hist" onclick="switchPessoaTab('hist')">Histórico profissional</button>
+        <button class="tab" id="pes-tab-dep" onclick="switchPessoaTab('dep')">Dependentes</button>
+        <button class="tab" id="pes-tab-hist" onclick="switchPessoaTab('hist')">Histórico</button>
       </div>
       <div id="pes-tab-dados-content">${buildCadastroForm(tipo,record)}</div>
+      <div id="pes-tab-dep-content" style="display:none">
+        <div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div>
+      </div>
       <div id="pes-tab-hist-content" style="display:none">
-        <div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin spinner-dark"></span> Carregando...</div>
+        <div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div>
       </div>`;
     loadHistoricoProfissional(id);
+    loadDependentes(id);
   } else {
     ge('mbody').innerHTML=buildCadastroForm(tipo,record);
   }
 }
 
 function switchPessoaTab(tab){
-  ['dados','hist'].forEach(t=>{
+  ['dados','dep','hist'].forEach(t=>{
     const btn=ge('pes-tab-'+t);
     const content=ge('pes-tab-'+t+'-content');
     if(btn)btn.classList.toggle('active',t===tab);
     if(content)content.style.display=t===tab?'':'none';
   });
   const saveBtn=ge('msave');
-  if(saveBtn)saveBtn.style.display=tab==='hist'?'none':'';
+  if(saveBtn)saveBtn.style.display=(tab==='hist'||tab==='dep')?'none':'';
+}
+
+async function loadDependentes(pessoaId){
+  const deps=await dbSelect('rh_dependentes',`pessoa_id=eq.${pessoaId}&order=created_at.asc`);
+  const el=ge('pes-tab-dep-content');if(!el)return;
+  const PARENTESCO=['Cônjuge','Filho(a)','Pai','Mãe','Irmão/Irmã','Sogro(a)','Neto(a)','Avô/Avó','Outro'];
+  el.innerHTML=`
+    <div class="sechdr" style="margin-bottom:10px">
+      <span class="sectitle">Dependentes (${deps.length})</span>
+      <button class="btn btn-p btn-sm" onclick="abrirFormDependente('${pessoaId}')">+ Adicionar</button>
+    </div>
+    <div id="dep-list">
+      ${deps.length?deps.map(d=>`
+        <div class="li">
+          <div class="av av1" style="font-size:11px">${ini(d.nome)}</div>
+          <div class="linfo">
+            <div class="lname">${d.nome}</div>
+            <div class="lsub" style="display:flex;gap:6px">
+              ${d.grau_parentesco?`<span>${d.grau_parentesco}</span>`:''}
+              ${d.cpf?`<span>· CPF: ${d.cpf}</span>`:''}
+              ${d.data_nascimento?`<span>· ${new Date(d.data_nascimento+'T00:00:00').toLocaleDateString('pt-BR')}</span>`:''}
+            </div>
+          </div>
+          <button class="bicon btn-sm" onclick="delDependente('${d.id}','${pessoaId}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>`).join(''):'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum dependente</p></div>'}
+    </div>
+    <div id="dep-form" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Novo dependente</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Nome completo</label>
+          <input class="fi" id="dep-nome" placeholder="Nome do dependente">
+        </div>
+        <div class="fg"><label class="fl">CPF</label>
+          <input class="fi" id="dep-cpf" placeholder="000.000.000-00">
+        </div>
+        <div class="fg"><label class="fl">Data de nascimento</label>
+          <input class="fi" id="dep-nasc" type="date">
+        </div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Grau de parentesco</label>
+          <select class="fi" id="dep-parent">
+            <option value="">Selecione</option>
+            ${PARENTESCO.map(p=>`<option value="${p}">${p}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+        <button class="btn" onclick="ge('dep-form').style.display='none'">Cancelar</button>
+        <button class="btn btn-p" onclick="salvarDependente('${pessoaId}')">Salvar dependente</button>
+      </div>
+    </div>`;
+}
+
+function abrirFormDependente(pessoaId){
+  const f=ge('dep-form');
+  if(f){
+    f.style.display='';
+    const n=ge('dep-nome');if(n){n.value='';n.focus();}
+    const c=ge('dep-cpf');if(c)c.value='';
+    const d=ge('dep-nasc');if(d)d.value='';
+    const p=ge('dep-parent');if(p)p.value='';
+  }
+}
+
+async function salvarDependente(pessoaId){
+  const nome=ge('dep-nome')?.value.trim();
+  if(!nome){alert('Nome é obrigatório.');return;}
+  const cid=profile?.role==='admin'?(company?.id||null):profile?.company_id;
+  const obj={
+    pessoa_id:pessoaId,company_id:cid,nome,
+    cpf:ge('dep-cpf')?.value||null,
+    data_nascimento:ge('dep-nasc')?.value||null,
+    grau_parentesco:ge('dep-parent')?.value||null,
+  };
+  await dbInsert('rh_dependentes',obj);
+  await loadDependentes(pessoaId);
+}
+
+async function delDependente(depId, pessoaId){
+  if(!confirm('Remover dependente?'))return;
+  await dbDelete('rh_dependentes',depId);
+  await loadDependentes(pessoaId);
 }
 
 async function loadHistoricoProfissional(pessoaId){
@@ -1737,7 +1821,10 @@ function rRHFuncoes(){
   const rows=rhFuncoes.map((f,i)=>`<div class="li">
     <div class="av ${AVC[i%5]}" style="font-size:10px">${f.funcao.slice(0,2).toUpperCase()}</div>
     <div class="linfo">
-      <div class="lname">${f.funcao}</div>
+      <div class="lname" style="display:flex;align-items:center;gap:6px">
+        ${f.funcao}
+        ${f.e_gestor?'<span class="bdg" style="background:var(--purple-bg);color:var(--purple-text);font-size:9px">Gestor</span>':''}
+      </div>
       <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
         ${f.departamento?`<span>${f.departamento}</span>`:''}
         ${f.cbo?`<span>· CBO: ${f.cbo}</span>`:''}
@@ -1809,6 +1896,10 @@ function openRH(tipo, id=null){
             <option value="false" ${f&&f.ativo===false?'selected':''}>Inativo</option>
           </select>
         </div>
+        <div class="fg" style="grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg2);border-radius:var(--radius)">
+          <input type="checkbox" id="rf-gestor" ${f&&f.e_gestor?'checked':''} style="width:16px;height:16px;cursor:pointer">
+          <label for="rf-gestor" style="font-size:13px;font-weight:500;cursor:pointer">Esta função tem responsabilidade de gestão sobre outros funcionários</label>
+        </div>
         <div class="fg" style="grid-column:1/-1"><label class="fl">Descrição</label>
           <textarea class="fi" id="rf-descricao" style="resize:vertical;min-height:72px" placeholder="Descrição das atividades...">${f?f.descricao||'':''}</textarea>
         </div>
@@ -1863,7 +1954,7 @@ async function saveRH(){
 
   if(tipo==='rh-funcoes'){
     const funcao=ge('rf-funcao')?.value.trim();if(!funcao)throw new Error('Função é obrigatória.');
-    const obj={owner_id:cu.id,company_id:cid,funcao,departamento:getV('rf-departamento'),cbo:getV('rf-cbo'),salario_base:getV('rf-salario')?Number(getV('rf-salario')):null,descricao:getV('rf-descricao'),ativo:getV('rf-ativo')!=='false'};
+    const obj={owner_id:cu.id,company_id:cid,funcao,departamento:getV('rf-departamento'),cbo:getV('rf-cbo'),salario_base:getV('rf-salario')?Number(getV('rf-salario')):null,descricao:getV('rf-descricao'),ativo:getV('rf-ativo')!=='false',e_gestor:ge('rf-gestor')?.checked||false};
     if(mid){await dbUpdate('rh_funcoes',mid,obj);rhFuncoes=rhFuncoes.map(f=>f.id===mid?{...f,...obj}:f);}
     else{const d=await dbInsert('rh_funcoes',obj);if(d)rhFuncoes.unshift(d);}
 
