@@ -302,6 +302,31 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       </div>
     </div>
 
+    <!-- Módulo RH -->
+    <div class="nav-module">
+      <button class="nav-module-header" id="mod-rh" onclick="toggleModule('rh')">
+        <div style="display:flex;align-items:center;gap:9px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>RH</span>
+        </div>
+        <svg class="mod-arrow" id="arrow-rh" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="nav-submenu" id="sub-rh">
+        <button class="navitem sub" id="nav-rh-pessoas" onclick="pg('rh-pessoas')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>Colaboradores</span>
+        </button>
+        <button class="navitem sub" id="nav-rh-funcoes" onclick="pg('rh-funcoes')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+          <span>Funções</span>
+        </button>
+        <button class="navitem sub" id="nav-rh-horarios" onclick="pg('rh-horarios')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Horários</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Módulo CRM -->
     <div class="nav-module">
       <button class="nav-module-header" id="mod-crm" onclick="toggleModule('crm')">
@@ -436,8 +461,8 @@ let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
 let clientes=[],fornecedores=[],pessoas=[];
 let tarefasGestao=[],atas=[],planoAcao=[];
-let permissoes={}; // { userId: { tela: {pode_ver, pode_criar, ...} } }
-let minhasPermissoes={}; // permissões do usuário logado
+let rhFuncoes=[],rhHorarios=[];
+let permissoes={},minhasPermissoes={};
 let cadastrosTab='clientes',cadastroForm=null;
 
 const TELAS=[
@@ -450,6 +475,9 @@ const TELAS=[
   {id:'tarefas-gestao',label:'Gestão · Tarefas',          modulo:'Gestão'},
   {id:'atas',          label:'Gestão · Ata de Reunião',   modulo:'Gestão'},
   {id:'plano-acao',    label:'Gestão · Plano de Ação',    modulo:'Gestão'},
+  {id:'rh-pessoas',    label:'RH · Colaboradores',        modulo:'RH'},
+  {id:'rh-funcoes',    label:'RH · Funções',              modulo:'RH'},
+  {id:'rh-horarios',   label:'RH · Horários',             modulo:'RH'},
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
@@ -707,8 +735,7 @@ async function loadData(){
 
   if(role==='admin'){
     if(cid){
-      // Admin filtrado por empresa selecionada
-      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,tarefasGestao,atas,planoAcao]=await Promise.all([
+      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,tarefasGestao,atas,planoAcao,rhFuncoes,rhHorarios]=await Promise.all([
         dbSelect('contacts',`company_id=eq.${cid}`),
         dbSelect('deals',`company_id=eq.${cid}`),
         dbSelect('tasks',`company_id=eq.${cid}`),
@@ -720,10 +747,11 @@ async function loadData(){
         dbSelect('tarefas_gestao',`company_id=eq.${cid}`),
         dbSelect('atas',`company_id=eq.${cid}`),
         dbSelect('plano_acao',`company_id=eq.${cid}`),
+        dbSelect('rh_funcoes',`company_id=eq.${cid}`),
+        dbSelect('rh_horarios',`company_id=eq.${cid}`),
       ]);
     } else {
-      // Admin vê tudo
-      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas]=await Promise.all([
+      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios]=await Promise.all([
         dbSelect('contacts','select=*'),
         dbSelect('deals','select=*'),
         dbSelect('tasks','select=*'),
@@ -732,10 +760,12 @@ async function loadData(){
         dbSelect('clientes','select=*'),
         dbSelect('fornecedores','select=*'),
         dbSelect('pessoas','select=*'),
+        dbSelect('rh_funcoes','select=*'),
+        dbSelect('rh_horarios','select=*'),
       ]);
     }
   } else if(role==='gestor'&&cid){
-    [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas]=await Promise.all([
+    [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios]=await Promise.all([
       dbSelect('contacts',`company_id=eq.${cid}`),
       dbSelect('deals',`company_id=eq.${cid}`),
       dbSelect('tasks',`company_id=eq.${cid}`),
@@ -743,17 +773,20 @@ async function loadData(){
       dbSelect('clientes',`company_id=eq.${cid}`),
       dbSelect('fornecedores',`company_id=eq.${cid}`),
       dbSelect('pessoas',`company_id=eq.${cid}`),
+      dbSelect('rh_funcoes',`company_id=eq.${cid}`),
+      dbSelect('rh_horarios',`company_id=eq.${cid}`),
     ]);
   } else {
-    [contacts,deals,tasks,clientes,fornecedores,pessoas]=await Promise.all([
+    [contacts,deals,tasks,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios]=await Promise.all([
       dbSelect('contacts',`owner_id=eq.${uid}`),
       dbSelect('deals',`owner_id=eq.${uid}`),
       dbSelect('tasks',`owner_id=eq.${uid}`),
       dbSelect('clientes',`owner_id=eq.${uid}`),
       dbSelect('fornecedores',`owner_id=eq.${uid}`),
       dbSelect('pessoas',`owner_id=eq.${uid}`),
+      dbSelect('rh_funcoes',`company_id=eq.${cid||'00000000-0000-0000-0000-000000000000'}`),
+      dbSelect('rh_horarios',`company_id=eq.${cid||'00000000-0000-0000-0000-000000000000'}`),
     ]);
-    // Gestão - todos veem os da empresa ou os próprios
     const gFilter=cid?`company_id=eq.${cid}`:`owner_id=eq.${uid}`;
     [tarefasGestao,atas,planoAcao]=await Promise.all([
       dbSelect('tarefas_gestao',gFilter),
@@ -794,6 +827,7 @@ const MODULE_MAP={
   clientes:'cadastros', fornecedores:'cadastros', pessoas:'cadastros',
   'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm',
   'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
+  'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh',
 };
 
 function toggleModule(mod){
@@ -826,6 +860,7 @@ function pg(p){
     dashboard:'Dashboard',
     clientes:'Cadastros · Clientes', fornecedores:'Cadastros · Fornecedores', pessoas:'Cadastros · Pessoas',
     'tarefas-gestao':'Gestão · Tarefas', atas:'Gestão · Ata de Reunião', 'plano-acao':'Gestão · Plano de Ação',
+    'rh-pessoas':'RH · Colaboradores', 'rh-funcoes':'RH · Funções', 'rh-horarios':'RH · Horários',
     'crm-dashboard':'CRM · Visão Geral',
     contatos:'CRM · Contatos', pipeline:'CRM · Pipeline', tarefas:'CRM · Tarefas',
     admin:'Administração'
@@ -848,6 +883,9 @@ function render(){
   else if(curPage==='clientes'){cadastrosTab='clientes';c.innerHTML=rCadastros();}
   else if(curPage==='fornecedores'){cadastrosTab='fornecedores';c.innerHTML=rCadastros();}
   else if(curPage==='pessoas'){cadastrosTab='pessoas';c.innerHTML=rCadastros();}
+  else if(curPage==='rh-pessoas')c.innerHTML=rRHPessoas();
+  else if(curPage==='rh-funcoes')c.innerHTML=rRHFuncoes();
+  else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
   else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
   else if(curPage==='atas')c.innerHTML=rAtas();
   else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
@@ -860,11 +898,13 @@ function render(){
 function openFor(){
   const map={
     clientes:'clientes',fornecedores:'fornecedores',pessoas:'pessoas',
+    'rh-pessoas':'rh-pessoas','rh-funcoes':'rh-funcoes','rh-horarios':'rh-horarios',
     'tarefas-gestao':'tarefas-gestao',atas:'atas','plano-acao':'plano-acao',
     contatos:'contact',pipeline:'deal',tarefas:'task'
   };
   const m=map[curPage];
   if(m==='clientes'||m==='fornecedores'||m==='pessoas') openCadastro(m);
+  else if(m==='rh-pessoas'||m==='rh-funcoes'||m==='rh-horarios') openRH(m);
   else if(m==='tarefas-gestao'||m==='atas'||m==='plano-acao') openGestao(m);
   else openModal(m||'contact');
 }
@@ -1636,6 +1676,213 @@ async function delGestao(table, id, varName){
   render();
 }
 
+// ── MÓDULO RH ──
+function rRHPessoas(){
+  const sorted=[...pessoas].sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  const ativos=sorted.filter(p=>p.ativo!==false);
+  const inativos=sorted.filter(p=>p.ativo===false);
+
+  const renderRow=(p,i)=>`<div class="li">
+    <div class="av ${AVC[i%5]}" style="font-size:11px">${ini(p.nome)}</div>
+    <div class="linfo">
+      <div class="lname">${p.nome}</div>
+      <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${p.cargo?`<span>${p.cargo}</span>`:''}
+        ${p.departamento?`<span>· ${p.departamento}</span>`:''}
+        ${p.telefone?`<span>· ${p.telefone}</span>`:''}
+      </div>
+    </div>
+    <div class="lright">
+      <div style="width:8px;height:8px;border-radius:50%;background:${p.ativo!==false?'var(--green)':'var(--text3)'}"></div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="bicon btn-sm" onclick="openCadastro('pessoas','${p.id}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="bicon btn-sm" onclick="delCadastro('pessoas','${p.id}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  return`<div class="sechdr">
+    <div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Buscar colaborador..." oninput="filterRHPessoas(this.value)">
+    </div>
+    <button class="btn btn-p btn-sm" onclick="openCadastro('pessoas')">+ Novo</button>
+  </div>
+  <div id="rh-pessoas-list">
+    ${ativos.length?ativos.map((p,i)=>renderRow(p,i)).join(''):''}
+    ${inativos.length?`<div style="margin-top:14px;margin-bottom:8px;font-size:12px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:.5px">Inativos (${inativos.length})</div>${inativos.map((p,i)=>renderRow(p,i)).join('')}`:''}
+    ${!ativos.length&&!inativos.length?'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>Nenhum colaborador</p></div>':''}
+  </div>`;
+}
+
+function filterRHPessoas(q){
+  const f=pessoas.filter(p=>p.nome.toLowerCase().includes(q.toLowerCase())||(p.cargo||'').toLowerCase().includes(q.toLowerCase())||(p.departamento||'').toLowerCase().includes(q.toLowerCase()));
+  const el=ge('rh-pessoas-list');if(!el)return;
+  if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
+  el.innerHTML=f.map((p,i)=>`<div class="li">
+    <div class="av ${AVC[i%5]}" style="font-size:11px">${ini(p.nome)}</div>
+    <div class="linfo"><div class="lname">${p.nome}</div>
+    <div class="lsub">${p.cargo||''} ${p.departamento?'· '+p.departamento:''}</div></div>
+    <div class="lright">
+      <div style="width:8px;height:8px;border-radius:50%;background:${p.ativo!==false?'var(--green)':'var(--text3)'}"></div>
+      <button class="bicon btn-sm" onclick="openCadastro('pessoas','${p.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+    </div>
+  </div>`).join('');
+}
+
+function rRHFuncoes(){
+  const rows=rhFuncoes.map((f,i)=>`<div class="li">
+    <div class="av ${AVC[i%5]}" style="font-size:10px">${f.funcao.slice(0,2).toUpperCase()}</div>
+    <div class="linfo">
+      <div class="lname">${f.funcao}</div>
+      <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${f.departamento?`<span>${f.departamento}</span>`:''}
+        ${f.cbo?`<span>· CBO: ${f.cbo}</span>`:''}
+        ${f.salario_base?`<span>· ${fmtV(f.salario_base)}</span>`:''}
+      </div>
+    </div>
+    <div class="lright">
+      <div style="width:8px;height:8px;border-radius:50%;background:${f.ativo!==false?'var(--green)':'var(--text3)'}"></div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="bicon btn-sm" onclick="openRH('rh-funcoes','${f.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        <button class="bicon btn-sm" onclick="delRH('rh_funcoes','${f.id}','rhFuncoes')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+      </div>
+    </div>
+  </div>`).join('');
+  return`<div class="sechdr"><span class="sectitle">Funções (${rhFuncoes.length})</span><button class="btn btn-p btn-sm" onclick="openRH('rh-funcoes')">+ Nova função</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg><p>Nenhuma função cadastrada</p></div>'}`;
+}
+
+function rRHHorarios(){
+  const rows=rhHorarios.map((h,i)=>`<div class="li">
+    <div class="av ${AVC[i%5]}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+    <div class="linfo">
+      <div class="lname">${h.nome}</div>
+      <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${h.turno?`<span>${h.turno}</span>`:''}
+        ${h.entrada&&h.saida?`<span>· ${h.entrada} às ${h.saida}</span>`:''}
+        ${h.carga_semanal?`<span>· ${h.carga_semanal}</span>`:''}
+        ${h.dias_semana?`<span>· ${h.dias_semana}</span>`:''}
+      </div>
+    </div>
+    <div class="lright">
+      <div style="width:8px;height:8px;border-radius:50%;background:${h.ativo!==false?'var(--green)':'var(--text3)'}"></div>
+      <div style="display:flex;gap:4px;margin-top:4px">
+        <button class="bicon btn-sm" onclick="openRH('rh-horarios','${h.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        <button class="bicon btn-sm" onclick="delRH('rh_horarios','${h.id}','rhHorarios')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+      </div>
+    </div>
+  </div>`).join('');
+  return`<div class="sechdr"><span class="sectitle">Horários (${rhHorarios.length})</span><button class="btn btn-p btn-sm" onclick="openRH('rh-horarios')">+ Novo horário</button></div>
+  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><p>Nenhum horário cadastrado</p></div>'}`;
+}
+
+function openRH(tipo, id=null){
+  mmode='rh';mid=id;cadastroForm=tipo;
+  ge('mbg').classList.add('open');
+  const title=ge('mtitle'),body=ge('mbody');
+  const saveBtn=ge('msave');if(saveBtn)saveBtn.style.display='';
+
+  if(tipo==='rh-funcoes'){
+    const f=id?rhFuncoes.find(x=>x.id===id):null;
+    title.textContent=f?'Editar função':'Nova função';
+    body.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Função</label>
+          <input class="fi" id="rf-funcao" value="${f?f.funcao||'':''}" placeholder="Ex: Analista de Logística">
+        </div>
+        <div class="fg"><label class="fl">Departamento</label>
+          <input class="fi" id="rf-departamento" value="${f?f.departamento||'':''}" placeholder="Ex: Operações">
+        </div>
+        <div class="fg"><label class="fl">CBO</label>
+          <input class="fi" id="rf-cbo" value="${f?f.cbo||'':''}" placeholder="Ex: 2124-05">
+        </div>
+        <div class="fg"><label class="fl">Salário base (R$)</label>
+          <input class="fi" id="rf-salario" type="number" step="0.01" value="${f?f.salario_base||'':''}" placeholder="0,00">
+        </div>
+        <div class="fg"><label class="fl">Status</label>
+          <select class="fi" id="rf-ativo">
+            <option value="true" ${!f||f.ativo!==false?'selected':''}>Ativo</option>
+            <option value="false" ${f&&f.ativo===false?'selected':''}>Inativo</option>
+          </select>
+        </div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Descrição</label>
+          <textarea class="fi" id="rf-descricao" style="resize:vertical;min-height:72px" placeholder="Descrição das atividades...">${f?f.descricao||'':''}</textarea>
+        </div>
+      </div>`;
+    setTimeout(()=>{const e=ge('rf-funcao');if(e)e.focus();},100);
+
+  }else if(tipo==='rh-horarios'){
+    const h=id?rhHorarios.find(x=>x.id===id):null;
+    title.textContent=h?'Editar horário':'Novo horário';
+    body.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Nome do horário</label>
+          <input class="fi" id="rh-nome" value="${h?h.nome||'':''}" placeholder="Ex: Comercial, Turno A, Noturno...">
+        </div>
+        <div class="fg"><label class="fl">Turno</label>
+          <select class="fi" id="rh-turno">
+            <option value="">Selecione</option>
+            ${['Matutino','Vespertino','Noturno','Integral','Flexível'].map(s=>`<option value="${s}" ${h&&h.turno===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Dias da semana</label>
+          <input class="fi" id="rh-dias" value="${h?h.dias_semana||'':''}" placeholder="Ex: Seg a Sex, Seg a Sáb">
+        </div>
+        <div class="fg"><label class="fl">Entrada</label>
+          <input class="fi" id="rh-entrada" type="time" value="${h?h.entrada||'':''}">
+        </div>
+        <div class="fg"><label class="fl">Saída</label>
+          <input class="fi" id="rh-saida" type="time" value="${h?h.saida||'':''}">
+        </div>
+        <div class="fg"><label class="fl">Intervalo</label>
+          <input class="fi" id="rh-intervalo" value="${h?h.intervalo||'':''}" placeholder="Ex: 12h às 13h">
+        </div>
+        <div class="fg"><label class="fl">Carga semanal</label>
+          <input class="fi" id="rh-carga" value="${h?h.carga_semanal||'':''}" placeholder="Ex: 44h">
+        </div>
+        <div class="fg"><label class="fl">Status</label>
+          <select class="fi" id="rh-ativo">
+            <option value="true" ${!h||h.ativo!==false?'selected':''}>Ativo</option>
+            <option value="false" ${h&&h.ativo===false?'selected':''}>Inativo</option>
+          </select>
+        </div>
+      </div>`;
+    setTimeout(()=>{const e=ge('rh-nome');if(e)e.focus();},100);
+  }
+}
+
+async function saveRH(){
+  const tipo=cadastroForm;
+  const role=profile?.role||'vendedor';
+  const cid=role==='admin'?(company?.id||null):profile?.company_id;
+  const getV=id=>{const e=ge(id);return e?e.value||null:null;};
+
+  if(tipo==='rh-funcoes'){
+    const funcao=ge('rf-funcao')?.value.trim();if(!funcao)throw new Error('Função é obrigatória.');
+    const obj={owner_id:cu.id,company_id:cid,funcao,departamento:getV('rf-departamento'),cbo:getV('rf-cbo'),salario_base:getV('rf-salario')?Number(getV('rf-salario')):null,descricao:getV('rf-descricao'),ativo:getV('rf-ativo')!=='false'};
+    if(mid){await dbUpdate('rh_funcoes',mid,obj);rhFuncoes=rhFuncoes.map(f=>f.id===mid?{...f,...obj}:f);}
+    else{const d=await dbInsert('rh_funcoes',obj);if(d)rhFuncoes.unshift(d);}
+
+  }else if(tipo==='rh-horarios'){
+    const nome=ge('rh-nome')?.value.trim();if(!nome)throw new Error('Nome é obrigatório.');
+    const obj={owner_id:cu.id,company_id:cid,nome,turno:getV('rh-turno'),dias_semana:getV('rh-dias'),entrada:getV('rh-entrada'),saida:getV('rh-saida'),intervalo:getV('rh-intervalo'),carga_semanal:getV('rh-carga'),ativo:getV('rh-ativo')!=='false'};
+    if(mid){await dbUpdate('rh_horarios',mid,obj);rhHorarios=rhHorarios.map(h=>h.id===mid?{...h,...obj}:h);}
+    else{const d=await dbInsert('rh_horarios',obj);if(d)rhHorarios.unshift(d);}
+  }
+}
+
+async function delRH(table, id, varName){
+  if(!confirm('Remover este item?'))return;
+  await dbDelete(table,id);
+  if(varName==='rhFuncoes')rhFuncoes=rhFuncoes.filter(x=>x.id!==id);
+  else if(varName==='rhHorarios')rhHorarios=rhHorarios.filter(x=>x.id!==id);
+  render();
+}
+
 // ── RENDER DASHBOARD ──
 function ownerName(owner_id){
   if(!owner_id)return'—';
@@ -2251,6 +2498,10 @@ async function saveModal(){
     }
     if(mmode==='gestao'){
       await saveGestao();
+      closeModal();render();return;
+    }
+    if(mmode==='rh'){
+      await saveRH();
       closeModal();render();return;
     }
     const role=profile?.role||'vendedor';
