@@ -2034,18 +2034,23 @@ function openFaturamento(id=null){
   ge('msave').onclick=()=>saveModal();
 
   const cliOpts=clientes.map(c=>`<option value="${c.id}" ${f&&f.cliente_id===c.id?'selected':''}>${c.nome}</option>`).join('');
-  const respOpts=profiles.map(p=>`<option value="${p.full_name||p.email}" ${f&&f.responsavel_aprovacao===(p.full_name||p.email)?'selected':''}>${p.full_name||p.email}</option>`).join('');
 
   ge('mbody').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="fg" style="grid-column:1/-1"><label class="fl">Cliente</label>
-        <select class="fi" id="fat-cliente"><option value="">Selecione</option>${cliOpts}</select>
+        <select class="fi" id="fat-cliente" onchange="onFatClienteChange(this.value)">
+          <option value="">Selecione</option>${cliOpts}
+        </select>
       </div>
       <div class="fg"><label class="fl">Tipo de operação</label>
-        <input class="fi" id="fat-tipo" value="${f?f.tipo_operacao||'':''}" placeholder="Ex: Armazenagem, Transporte...">
+        <select class="fi" id="fat-tipo" onchange="onFatTipoChange(this.value)">
+          <option value="">Selecione o cliente primeiro</option>
+        </select>
       </div>
       <div class="fg"><label class="fl">Responsável pela aprovação</label>
-        <select class="fi" id="fat-resp"><option value="">Selecione</option>${respOpts}</select>
+        <select class="fi" id="fat-resp">
+          <option value="">—</option>
+        </select>
       </div>
       <div class="fg"><label class="fl">Período de apuração</label>
         <input class="fi" id="fat-periodo" value="${f?f.periodo_apuracao||'':''}" placeholder="Ex: 01/05 a 31/05/2026">
@@ -2083,6 +2088,61 @@ function openFaturamento(id=null){
         <textarea class="fi" id="fat-obs" style="resize:vertical;min-height:60px" placeholder="Observações...">${f?f.observacoes||'':''}</textarea>
       </div>
     </div>`;
+
+  // Se editando, carrega os contatos do cliente já selecionado
+  if(f&&f.cliente_id){
+    onFatClienteChange(f.cliente_id, f.tipo_operacao, f.responsavel_aprovacao);
+  }
+}
+
+// Cache de contatos do cliente selecionado
+let fatClienteContatos=[];
+
+async function onFatClienteChange(clienteId, tipoAtual=null, respAtual=null){
+  const tipoSel=ge('fat-tipo');
+  const respSel=ge('fat-resp');
+  if(!tipoSel||!respSel)return;
+
+  if(!clienteId){
+    tipoSel.innerHTML='<option value="">Selecione o cliente primeiro</option>';
+    respSel.innerHTML='<option value="">—</option>';
+    fatClienteContatos=[];
+    return;
+  }
+
+  // Busca contatos do cliente
+  tipoSel.innerHTML='<option value="">Carregando...</option>';
+  fatClienteContatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=tipo_operacao.asc`);
+
+  // Tipos de operação únicos
+  const tipos=[...new Set(fatClienteContatos.map(c=>c.tipo_operacao).filter(Boolean))];
+
+  if(tipos.length){
+    tipoSel.innerHTML=`<option value="">Selecione</option>${tipos.map(t=>`<option value="${t}" ${tipoAtual===t?'selected':''}>${t}</option>`).join('')}`;
+  } else {
+    tipoSel.innerHTML='<option value="">Nenhum tipo cadastrado</option>';
+  }
+
+  // Se tem tipo atual, carrega responsáveis
+  if(tipoAtual){
+    onFatTipoChange(tipoAtual, respAtual);
+  } else {
+    respSel.innerHTML='<option value="">Selecione o tipo primeiro</option>';
+  }
+}
+
+function onFatTipoChange(tipo, respAtual=null){
+  const respSel=ge('fat-resp');
+  if(!respSel)return;
+
+  // Filtra contatos do tipo selecionado
+  const contatos=fatClienteContatos.filter(c=>c.tipo_operacao===tipo);
+
+  if(contatos.length){
+    respSel.innerHTML=`<option value="">Selecione</option>${contatos.map(c=>`<option value="${c.nome}" ${respAtual===c.nome?'selected':''}>${c.nome}${c.cargo?' · '+c.cargo:''}</option>`).join('')}`;
+  } else {
+    respSel.innerHTML='<option value="">Nenhum contato para este tipo</option>';
+  }
 }
 
 async function saveFaturamento(){
@@ -2093,8 +2153,7 @@ async function saveFaturamento(){
   const obj={
     owner_id:cu.id, company_id:cid,
     cliente_id:clienteId,
-    tipo_operacao:getV('fat-tipo'),
-    responsavel_aprovacao:getV('fat-resp'),
+    tipo_operacao:getV('fat-tipo'),    responsavel_aprovacao:getV('fat-resp'),
     periodo_apuracao:getV('fat-periodo'),
     mes_referencia:getV('fat-mes'),
     data_envio_aprovacao:getV('fat-data-envio'),
