@@ -52,7 +52,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .navitem.active{color:var(--text)}.navitem svg{width:22px;height:22px;stroke-width:1.6}.navitem span{font-size:10px;font-weight:500}
 @media(min-width:768px){
   .app{flex-direction:row}.topbar{display:none}
-  .bottomnav{flex-direction:column;width:210px;border-top:none;border-right:1px solid var(--border);padding-bottom:0}
+  .bottomnav{flex-direction:column;width:210px;border-top:none;border-right:1px solid var(--border);padding-bottom:0;overflow-y:auto;overflow-x:hidden}
   .sidebar-logo{display:flex;flex-direction:column;gap:2px;padding:16px}
   .sidebar-logo-top{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
   .sidebar-logo-icon{width:28px;height:28px;border-radius:7px;background:var(--accent);color:var(--accent-text);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
@@ -1165,6 +1165,20 @@ function buildCadastroForm(tipo, record, id=null){
       </div>
     </div>
 
+    <!-- SEÇÃO DEPENDENTES -->
+    ${id?`<div style="margin-top:8px">
+      <button type="button" class="btn" style="width:100%;justify-content:space-between" onclick="togglePessoaSection('sec-dependentes')">
+        <div style="display:flex;align-items:center;gap:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Dependentes
+        </div>
+        <svg id="arr-sec-dependentes" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform .2s"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="sec-dependentes" style="display:none;margin-top:10px">
+        <div id="dep-inline-list"><div style="text-align:center;padding:12px;color:var(--text2);font-size:13px"><span class="spin"></span> Carregando...</div></div>
+      </div>
+    </div>`:''}
+
     <!-- SEÇÃO DADOS PROFISSIONAIS -->
     <div style="margin-top:8px">
       <button type="button" class="btn" style="width:100%;justify-content:space-between" onclick="togglePessoaSection('sec-profissional')">
@@ -1436,6 +1450,10 @@ function togglePessoaSection(id){
   const open=sec.style.display==='none';
   sec.style.display=open?'':'none';
   if(arr)arr.style.transform=open?'rotate(180deg)':'rotate(0deg)';
+  // Carrega dependentes ao abrir a seção
+  if(open&&id==='sec-dependentes'&&mid){
+    loadDependentesInline(mid);
+  }
 }
 
 async function buscaCEP(v){
@@ -1474,16 +1492,13 @@ function openCadastro(tipo, id=null){
     ge('mbody').innerHTML=`
       <div class="tabs" style="margin-bottom:14px">
         <button class="tab active" id="pes-tab-dados" onclick="switchPessoaTab('dados')">Dados</button>
-        <button class="tab" id="pes-tab-dep" onclick="switchPessoaTab('dep')">Dependentes</button>
         <button class="tab" id="pes-tab-hist" onclick="switchPessoaTab('hist')">Histórico</button>
       </div>
       <div id="pes-tab-dados-content"></div>
-      <div id="pes-tab-dep-content" style="display:none"><div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div></div>
       <div id="pes-tab-hist-content" style="display:none"><div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div></div>`;
     const dadosEl=ge('pes-tab-dados-content');
     if(dadosEl)dadosEl.innerHTML=formHtml;
     loadHistoricoProfissional(id);
-    loadDependentes(id);
   } else if(tipo==='clientes'&&id){
     const formHtml=buildCadastroForm(tipo,record,id);
     ge('mbody').innerHTML=formHtml;
@@ -1494,14 +1509,75 @@ function openCadastro(tipo, id=null){
 }
 
 function switchPessoaTab(tab){
-  ['dados','dep','hist'].forEach(t=>{
+  ['dados','hist'].forEach(t=>{
     const btn=ge('pes-tab-'+t);
     const content=ge('pes-tab-'+t+'-content');
     if(btn)btn.classList.toggle('active',t===tab);
     if(content)content.style.display=t===tab?'':'none';
   });
   const saveBtn=ge('msave');
-  if(saveBtn)saveBtn.style.display=(tab==='hist'||tab==='dep')?'none':'';
+  if(saveBtn)saveBtn.style.display=tab==='hist'?'none':'';
+}
+
+async function loadDependentesInline(pessoaId){
+  const el=ge('dep-inline-list');if(!el)return;
+  const deps=await dbSelect('rh_dependentes',`pessoa_id=eq.${pessoaId}&order=created_at.asc`);
+  const PARENTESCO=['Cônjuge','Filho(a)','Pai','Mãe','Irmão/Irmã','Sogro(a)','Neto(a)','Avô/Avó','Outro'];
+  el.innerHTML=`
+    <div style="margin-bottom:8px">
+      ${deps.map(d=>`
+        <div class="li" style="margin-bottom:4px">
+          <div class="av av1" style="font-size:11px">${ini(d.nome)}</div>
+          <div class="linfo">
+            <div class="lname">${d.nome}</div>
+            <div class="lsub">${d.grau_parentesco||''} ${d.cpf?'· CPF: '+d.cpf:''} ${d.data_nascimento?'· '+new Date(d.data_nascimento+'T00:00:00').toLocaleDateString('pt-BR'):''}</div>
+          </div>
+          <button class="bicon btn-sm" onclick="delDependenteInline('${d.id}','${pessoaId}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>`).join('')}
+    </div>
+    <div id="dep-inline-form" style="background:var(--bg2);border-radius:var(--radius);padding:10px;display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="fg" style="grid-column:1/-1;margin-bottom:4px"><label class="fl">Nome</label>
+          <input class="fi" id="dep-i-nome" placeholder="Nome completo">
+        </div>
+        <div class="fg" style="margin-bottom:4px"><label class="fl">CPF</label>
+          <input class="fi" id="dep-i-cpf" placeholder="000.000.000-00">
+        </div>
+        <div class="fg" style="margin-bottom:4px"><label class="fl">Nascimento</label>
+          <input class="fi" id="dep-i-nasc" type="date">
+        </div>
+        <div class="fg" style="grid-column:1/-1;margin-bottom:4px"><label class="fl">Grau de parentesco</label>
+          <select class="fi" id="dep-i-parent">
+            <option value="">Selecione</option>
+            ${PARENTESCO.map(p=>`<option value="${p}">${p}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:4px">
+        <button class="btn btn-sm" onclick="ge('dep-inline-form').style.display='none'">Cancelar</button>
+        <button class="btn btn-p btn-sm" onclick="salvarDependenteInline('${pessoaId}')">Salvar</button>
+      </div>
+    </div>
+    <button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:4px" onclick="ge('dep-inline-form').style.display='';ge('dep-i-nome').focus()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Adicionar dependente
+    </button>`;
+}
+
+async function salvarDependenteInline(pessoaId){
+  const nome=ge('dep-i-nome')?.value.trim();
+  if(!nome){alert('Nome é obrigatório.');return;}
+  const cid=company?.id||profile?.company_id||null;
+  await dbInsert('rh_dependentes',{pessoa_id:pessoaId,company_id:cid,nome,cpf:ge('dep-i-cpf')?.value||null,data_nascimento:ge('dep-i-nasc')?.value||null,grau_parentesco:ge('dep-i-parent')?.value||null});
+  await loadDependentesInline(pessoaId);
+}
+
+async function delDependenteInline(depId, pessoaId){
+  if(!confirm('Remover dependente?'))return;
+  await dbDelete('rh_dependentes',depId);
+  await loadDependentesInline(pessoaId);
 }
 
 async function loadDependentes(pessoaId){
