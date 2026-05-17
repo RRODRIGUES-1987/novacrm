@@ -726,14 +726,12 @@ async function finishEnterApp(user){
   const isReload=!!savedPage; // se tem página salva é F5
 
   if(isReload&&savedPage){
-    // F5 — restaura página anterior
     const mod=MODULE_MAP[savedPage];
     pg(savedPage);
     if(mod)openModule(mod);
   } else {
-    // Login novo — sempre vai para dashboard
-    pg('crm-dashboard');
-    openModule('crm');
+    // Login novo — sempre abre Visão Geral (dashboard)
+    pg('dashboard');
   }
   resetIdle();
   // Garante que o usuário logado sempre esteja no array de profiles
@@ -996,7 +994,7 @@ function rCadastrosList(){
     const tipoPessoa = r.tipo_pessoa==='funcionario'?'Funcionário':'Contato';
     const subInfo = [r.cpf_cnpj,r.email,r.cidade&&r.estado?`${r.cidade}/${r.estado}`:''].filter(Boolean).join(' · ');
     const statusColor = r.ativo!==false?'var(--green)':'var(--text3)';
-    return`<div class="li">
+    return`<div class="li" style="cursor:pointer" onclick="openCadastro('${cadastrosTab}','${r.id}')">
       <div class="av ${AVC[i%5]}" style="font-size:11px;font-weight:700">${ini(r.nome)}</div>
       <div class="linfo">
         <div class="lname" style="display:flex;align-items:center;gap:6px">
@@ -1008,7 +1006,7 @@ function rCadastrosList(){
       </div>
       <div class="lright">
         <div style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
-        <div style="display:flex;gap:4px;margin-top:4px">
+        <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
           <button class="bicon btn-sm" onclick="openCadastro('${cadastrosTab}','${r.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
           <button class="bicon btn-sm" onclick="delCadastro('${cadastrosTab}','${r.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
         </div>
@@ -1961,7 +1959,7 @@ async function delGestao(table, id, varName){
 function rTabelasTarifarias(){
   const rows=tabelasTarifarias.map((t,i)=>{
     const cli=clientes.find(c=>c.id===t.cliente_id);
-    return`<div class="li">
+    return`<div class="li" style="cursor:pointer" onclick="openTabelaTarifaria('${t.id}')">
       <div class="av ${AVC[i%5]}" style="font-size:10px">${cli?ini(cli.nome):'?'}</div>
       <div class="linfo">
         <div class="lname">${t.nome}</div>
@@ -2045,11 +2043,26 @@ async function openTabelaTarifaria(id=null){
     <button class="btn btn-sm" onclick="addQuadro()" style="width:100%;justify-content:center">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Adicionar quadro
-    </button>`;
+    </button>
+
+    ${id?`
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Documento PDF</div>
+      <div class="doc-upload-area" onclick="ge('tt-pdf-input').click()" id="tt-upload-area">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+        <div style="font-size:13px;font-weight:500;margin-top:6px">Clique para anexar PDF da proposta</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">Apenas arquivos .pdf · Máx. 10MB</div>
+        <input type="file" id="tt-pdf-input" accept=".pdf" style="display:none" onchange="uploadTTPdf('${id}',this)">
+      </div>
+      <div id="tt-uploading" style="display:none;text-align:center;padding:12px;font-size:13px;color:var(--text2)"><span class="spin"></span> Enviando...</div>
+      <div id="tt-doc-list" style="margin-top:10px"></div>
+    </div>`:''}`;
 
   // Carrega quadros se editando
-  if(id) await loadTTQuadros(id);
-  else addQuadro(); // começa com 1 quadro vazio
+  if(id){
+    await loadTTQuadros(id);
+    loadTTDocs(id);
+  } else addQuadro();
 
   // Carrega tipos do cliente
   if(t&&t.cliente_id) onTTClienteChange(t.cliente_id, t.tipo_operacao);
@@ -2057,6 +2070,54 @@ async function openTabelaTarifaria(id=null){
 
 // Cache de quadros em edição
 let ttQuadros=[];
+
+async function loadTTDocs(tabelaId){
+  const docs=await dbSelect('documentos',`deal_id=eq.${tabelaId}`).catch(()=>[]);
+  // Busca docs usando campo genérico — reutiliza tabela documentos com deal_id como tabela_id
+  const r=await sbFetch('GET',`/rest/v1/documentos?deal_id=eq.${tabelaId}&order=created_at.desc`,null,tok);
+  const list=r.ok&&Array.isArray(r.data)?r.data:[];
+  const el=ge('tt-doc-list');if(!el)return;
+  if(!list.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);text-align:center;padding:8px">Nenhum documento anexado</div>';return;}
+  el.innerHTML=list.map(d=>`
+    <div class="doc-item" onclick="viewPdf('${d.arquivo}','${d.nome}')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red-text)" stroke-width="1.5" style="flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <div class="doc-item-info">
+        <div class="doc-item-name">${d.nome}</div>
+        <div class="doc-item-meta">${d.tamanho?fmtSize(d.tamanho):''} · ${new Date(d.created_at).toLocaleDateString('pt-BR')} · <span style="color:var(--blue-text)">clique para visualizar</span></div>
+      </div>
+      <div style="display:flex;gap:4px" onclick="event.stopPropagation()">
+        <button class="bicon btn-sm" onclick="downloadDoc('${d.arquivo}','${d.nome}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="bicon btn-sm" onclick="deleteTTDoc('${d.id}','${d.arquivo}','${tabelaId}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+      </div>
+    </div>`).join('');
+}
+
+async function uploadTTPdf(tabelaId, input){
+  const file=input.files[0];if(!file)return;
+  if(file.type!=='application/pdf'){alert('Apenas arquivos PDF.');input.value='';return;}
+  if(file.size>10*1024*1024){alert('Arquivo muito grande. Máximo 10MB.');input.value='';return;}
+  const area=ge('tt-upload-area');const uploading=ge('tt-uploading');
+  if(area)area.style.display='none';if(uploading)uploading.style.display='block';
+  try{
+    const path=`tabelas/${cu.id}/${tabelaId}/${Date.now()}_${file.name}`;
+    const formData=new FormData();formData.append('',file);
+    const upRes=await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`,{
+      method:'POST',headers:{'Authorization':'Bearer '+tok,'x-upsert':'true'},body:formData
+    });
+    if(!upRes.ok)throw new Error('Erro no upload');
+    const cid=company?.id||profile?.company_id||null;
+    await dbInsert('documentos',{deal_id:tabelaId,company_id:cid,owner_id:cu.id,nome:file.name,arquivo:path,tamanho:file.size});
+    await loadTTDocs(tabelaId);
+  }catch(e){alert('Erro: '+e.message);}
+  finally{if(area)area.style.display='';if(uploading)uploading.style.display='none';input.value='';}
+}
+
+async function deleteTTDoc(docId, path, tabelaId){
+  if(!confirm('Excluir documento?'))return;
+  await fetch(`${SB_URL}/storage/v1/object/documentos/${path}`,{method:'DELETE',headers:{'Authorization':'Bearer '+tok}});
+  await dbDelete('documentos',docId);
+  await loadTTDocs(tabelaId);
+}
 
 async function loadTTQuadros(tabelaId){
   const quadros=await dbSelect('tabelas_quadros',`tabela_id=eq.${tabelaId}&order=ordem.asc`);
@@ -2250,7 +2311,7 @@ function rFaturamento(){
     const st=FAT_STATUS[f.status]||{label:f.status,cls:'bdg bgr'};
     const venc=f.vencimento?new Date(f.vencimento+'T00:00:00'):null;
     const atrasada=venc&&venc<today&&f.status!=='pago_prazo'&&f.status!=='pago_atraso';
-    return`<div class="li" style="${atrasada?'border-color:#f5c5c5;':''}">
+    return`<div class="li" style="${atrasada?'border-color:#f5c5c5;':''};cursor:pointer" onclick="openFaturamento('${f.id}')">
       <div class="av ${AVC[i%5]}" style="font-size:10px">${cli?ini(cli.nome):'?'}</div>
       <div class="linfo">
         <div class="lname">${cli?cli.nome:'—'} ${f.tipo_operacao?`<span style="font-size:11px;color:var(--text2);font-weight:400">· ${f.tipo_operacao}</span>`:''}</div>
@@ -2475,7 +2536,7 @@ function rRHPessoas(){
   const ativos=sorted.filter(p=>p.ativo!==false);
   const inativos=sorted.filter(p=>p.ativo===false);
 
-  const renderRow=(p,i)=>`<div class="li">
+  const renderRow=(p,i)=>`<div class="li" style="cursor:pointer" onclick="openCadastro('pessoas','${p.id}')">
     <div class="av ${AVC[i%5]}" style="font-size:11px">${ini(p.nome)}</div>
     <div class="linfo">
       <div class="lname">${p.nome}</div>
@@ -2735,7 +2796,7 @@ function rDash(){
 
 function rContatos(){
   const role=profile?.role||'vendedor';
-  const rows=contacts.map((c,i)=>`<div class="li"><div class="av ${AVC[i%5]}">${ini(c.name)}</div><div class="linfo"><div class="lname">${c.name}</div><div class="lsub">${c.company||''} ${c.email?'· '+c.email:''}</div></div><div class="lright"><span class="${SBM[c.status]||'bdg bgr'}">${c.status}</span>${role!=='vendedor'?`<span style="font-size:10px;color:var(--text3)">${ownerName(c.owner_id)}</span>`:''}
+  const rows=contacts.map((c,i)=>`<div class="li" style="cursor:pointer" onclick="openModal('contact','${c.id}')"><div class="av ${AVC[i%5]}">${ini(c.name)}</div><div class="linfo"><div class="lname">${c.name}</div><div class="lsub">${c.company||''} ${c.email?'· '+c.email:''}</div></div><div class="lright"><span class="${SBM[c.status]||'bdg bgr'}">${c.status}</span>${role!=='vendedor'?`<span style="font-size:10px;color:var(--text3)">${ownerName(c.owner_id)}</span>`:''}
     <div style="display:flex;gap:4px;margin-top:2px">${(role==='admin'||c.owner_id===cu.id)?`<button class="bicon btn-sm" onclick="event.stopPropagation();openModal('contact','${c.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="bicon btn-sm" onclick="event.stopPropagation();delContact('${c.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`:''}
     </div></div></div>`).join('');
   return`<div class="sechdr"><div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input placeholder="Buscar..." oninput="filterC(this.value)"></div><button class="btn btn-p btn-sm" onclick="openModal('contact')">+ Novo</button></div><div id="clist">${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum contato</p></div>'}</div>`;
@@ -3462,7 +3523,7 @@ function closeMenu(){ge('umwrap').classList.remove('open');ge('umo').style.displ
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
     if(ge('pdf-viewer-bg')?.classList.contains('open'))closePdfViewer();
-    // ESC não fecha o modal para evitar perda de dados
+    else if(ge('mbg')?.classList.contains('open'))closeModal();
   }
   if(e.key==='Enter'&&ge('vlogin')&&ge('vlogin').style.display!=='none')doLogin();
 });
