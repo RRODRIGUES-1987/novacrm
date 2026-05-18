@@ -739,6 +739,7 @@ async function finishEnterApp(user){
     pg('dashboard');
   }
   resetIdle();
+  checkFechamentoSemanal();
   // Garante que o usuário logado sempre esteja no array de profiles
   if(cu&&profile&&!profiles.find(p=>p.id===cu.id)){
     profiles=[profile,...profiles];
@@ -2889,44 +2890,46 @@ function rDash(){
 
 // ── PERFORMANCE ──
 let perfPeriodo='mes';
+let perfVendedorId=null;
 
 function getDateRange(periodo){
   const now=new Date();
-  let ini,fim=new Date(now);fim.setHours(23,59,59,999);
+  let iniDate,fim=new Date(now);fim.setHours(23,59,59,999);
   if(periodo==='semana'){
-    ini=new Date(now);
-    ini.setDate(now.getDate()-now.getDay());
-    ini.setHours(0,0,0,0);
+    iniDate=new Date(now);
+    iniDate.setDate(now.getDate()-now.getDay());
+    iniDate.setHours(0,0,0,0);
   } else if(periodo==='mes'){
-    ini=new Date(now.getFullYear(),now.getMonth(),1);
+    iniDate=new Date(now.getFullYear(),now.getMonth(),1);
   } else {
-    ini=new Date(now.getFullYear(),0,1);
+    iniDate=new Date(now.getFullYear(),0,1);
   }
-  return{ini,fim};
+  return{iniDate,fim};
+}
+
+function calcMetricas(vendedorId, iniDate, fim){
+  const contatos_criados=contacts.filter(c=>c.owner_id===vendedorId&&new Date(c.created_at)>=iniDate&&new Date(c.created_at)<=fim).length;
+  const negocios_abertos=deals.filter(d=>d.owner_id===vendedorId&&!['Fechado','Perdido'].includes(d.stage)).length;
+  const propostas=deals.filter(d=>d.owner_id===vendedorId&&new Date(d.created_at)>=iniDate&&new Date(d.created_at)<=fim).length;
+  const tarefas_feitas=tasks.filter(t=>t.owner_id===vendedorId&&t.done&&new Date(t.created_at)>=iniDate&&new Date(t.created_at)<=fim).length;
+  const reunioes=tasks.filter(t=>t.owner_id===vendedorId&&t.done&&(t.title||'').toLowerCase().includes('reuni')&&new Date(t.created_at)>=iniDate&&new Date(t.created_at)<=fim).length;
+  const pipeline_total=deals.filter(d=>d.owner_id===vendedorId&&!['Fechado','Perdido'].includes(d.stage)).reduce((s,d)=>s+Number(d.value||0),0);
+  return{contatos_criados,negocios_abertos,propostas,reunioes,tarefas_feitas,pipeline_total};
 }
 
 function rPerformance(){
+  // Inclui vendedores e gestores
   const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
-  const {ini:iniDate,fim}=getDateRange(perfPeriodo);
+  if(!vendedores.length) return'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum vendedor cadastrado</p></div>';
 
-  // Calcula métricas por vendedor
-  const metricas=vendedores.map(v=>{
-    const contatos_criados=contacts.filter(c=>c.owner_id===v.id&&new Date(c.created_at)>=iniDate&&new Date(c.created_at)<=fim).length;
-    const negocios_abertos=deals.filter(d=>d.owner_id===v.id&&!['Fechado','Perdido'].includes(d.stage)).length;
-    const propostas=deals.filter(d=>d.owner_id===v.id&&new Date(d.created_at)>=iniDate&&new Date(d.created_at)<=fim).length;
-    const tarefas_feitas=tasks.filter(t=>t.owner_id===v.id&&t.done&&new Date(t.created_at)>=iniDate&&new Date(t.created_at)<=fim).length;
-    // Reuniões = tarefas com "reunião" no título
-    const reunioes=tasks.filter(t=>t.owner_id===v.id&&t.done&&(t.title||'').toLowerCase().includes('reuni')&&new Date(t.created_at)>=iniDate&&new Date(t.created_at)<=fim).length;
-    const pipeline_total=deals.filter(d=>d.owner_id===v.id&&!['Fechado','Perdido'].includes(d.stage)).reduce((s,d)=>s+Number(d.value||0),0);
-    return{...v,contatos_criados,negocios_abertos,propostas,tarefas_feitas,reunioes,pipeline_total};
-  });
+  // Seleciona o primeiro por padrão
+  if(!perfVendedorId||!vendedores.find(v=>v.id===perfVendedorId)){
+    perfVendedorId=vendedores[0].id;
+  }
 
-  // Ranking por pipeline
-  const ranked=[...metricas].sort((a,b)=>b.pipeline_total-a.pipeline_total);
-
-  // Max values para barras
-  const maxPipeline=Math.max(...metricas.map(m=>m.pipeline_total),1);
-  const maxNegocios=Math.max(...metricas.map(m=>m.negocios_abertos),1);
+  const v=vendedores.find(x=>x.id===perfVendedorId)||vendedores[0];
+  const {iniDate,fim}=getDateRange(perfPeriodo);
+  const m=calcMetricas(v.id,iniDate,fim);
 
   const periodos=[
     {id:'semana',label:'Esta semana'},
@@ -2934,94 +2937,132 @@ function rPerformance(){
     {id:'ano',label:'Este ano'},
   ];
 
-  const cards=ranked.map((v,i)=>{
-    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
-    const pipelineBar=maxPipeline>0?Math.round((v.pipeline_total/maxPipeline)*100):0;
-    const negociosBar=maxNegocios>0?Math.round((v.negocios_abertos/maxNegocios)*100):0;
-    return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="av ${AVC[i%5]}" style="width:36px;height:36px;font-size:12px">${ini(v.full_name||v.email||'?')}</div>
-          <div>
-            <div style="font-size:14px;font-weight:600">${medal} ${v.full_name||v.email}</div>
-            <div style="font-size:11px;color:var(--text2)">${ROLES[v.role]||v.role}</div>
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:18px;font-weight:700;color:var(--green)">${fmtV(v.pipeline_total)}</div>
-          <div style="font-size:11px;color:var(--text2)">Pipeline total</div>
-        </div>
-      </div>
+  const vendOpts=vendedores.map(vd=>`<option value="${vd.id}" ${vd.id===perfVendedorId?'selected':''}>${vd.full_name||vd.email} (${ROLES[vd.role]||vd.role})</option>`).join('');
 
-      <!-- Métricas -->
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px">
-        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
-          <div style="font-size:20px;font-weight:700">${v.contatos_criados}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">Contatos</div>
-        </div>
-        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
-          <div style="font-size:20px;font-weight:700">${v.negocios_abertos}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">Negócios</div>
-        </div>
-        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
-          <div style="font-size:20px;font-weight:700">${v.propostas}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">Propostas</div>
-        </div>
-        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
-          <div style="font-size:20px;font-weight:700">${v.reunioes}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">Reuniões</div>
-        </div>
-        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
-          <div style="font-size:20px;font-weight:700">${v.tarefas_feitas}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">Tarefas</div>
-        </div>
-      </div>
-
-      <!-- Barras -->
-      <div style="margin-bottom:6px">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px">
-          <span>Pipeline</span><span>${pipelineBar}%</span>
-        </div>
-        <div style="height:6px;background:var(--bg3);border-radius:3px">
-          <div style="height:100%;width:${pipelineBar}%;background:var(--green);border-radius:3px;transition:width .5s"></div>
-        </div>
-      </div>
-      <div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px">
-          <span>Negócios abertos</span><span>${negociosBar}%</span>
-        </div>
-        <div style="height:6px;background:var(--bg3);border-radius:3px">
-          <div style="height:100%;width:${negociosBar}%;background:var(--blue-text);border-radius:3px;transition:width .5s"></div>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-
-  // Totais gerais
-  const totPipeline=metricas.reduce((s,v)=>s+v.pipeline_total,0);
-  const totContatos=metricas.reduce((s,v)=>s+v.contatos_criados,0);
-  const totNegocios=metricas.reduce((s,v)=>s+v.negocios_abertos,0);
-  const totTarefas=metricas.reduce((s,v)=>s+v.tarefas_feitas,0);
+  // Barras relativas ao pipeline máximo de todos
+  const maxPipeline=Math.max(...vendedores.map(vd=>calcMetricas(vd.id,iniDate,fim).pipeline_total),1);
+  const pipelineBar=Math.round((m.pipeline_total/maxPipeline)*100);
 
   return`
-  <!-- Filtro período -->
-  <div style="display:flex;gap:6px;margin-bottom:16px">
-    ${periodos.map(p=>`<button class="btn ${perfPeriodo===p.id?'btn-p':''}" onclick="perfPeriodo='${p.id}';render()" style="flex:1;justify-content:center">${p.label}</button>`).join('')}
+  <!-- Controles -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <select class="fi" style="flex:1;min-width:180px" onchange="perfVendedorId=this.value;render()">
+      ${vendOpts}
+    </select>
+    <div style="display:flex;gap:4px">
+      ${periodos.map(p=>`<button class="btn ${perfPeriodo===p.id?'btn-p':''}" onclick="perfPeriodo='${p.id}';render()" style="white-space:nowrap">${p.label}</button>`).join('')}
+    </div>
   </div>
 
-  <!-- Totais -->
-  <div class="metrics" style="margin-bottom:16px">
-    <div class="metric"><div class="mlabel">Pipeline total</div><div class="mval" style="font-size:15px">${fmtV(totPipeline)}</div></div>
-    <div class="metric"><div class="mlabel">Contatos criados</div><div class="mval">${totContatos}</div></div>
-    <div class="metric"><div class="mlabel">Negócios abertos</div><div class="mval">${totNegocios}</div></div>
-    <div class="metric"><div class="mlabel">Tarefas feitas</div><div class="mval">${totTarefas}</div></div>
+  <!-- Header do vendedor -->
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px">
+    <div class="av av0" style="width:52px;height:52px;font-size:16px;flex-shrink:0">${ini(v.full_name||v.email||'?')}</div>
+    <div style="flex:1">
+      <div style="font-size:17px;font-weight:600">${v.full_name||v.email}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:2px">${ROLES[v.role]||v.role} · ${periodos.find(p=>p.id===perfPeriodo)?.label}</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:22px;font-weight:700;color:var(--green)">${fmtV(m.pipeline_total)}</div>
+      <div style="font-size:11px;color:var(--text2)">Pipeline total</div>
+    </div>
   </div>
 
-  <!-- Cards por vendedor -->
-  <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
-    Ranking — ${periodos.find(p=>p.id===perfPeriodo)?.label}
+  <!-- Métricas -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+    <div class="metric" style="text-align:center">
+      <div class="mlabel">Contatos criados</div>
+      <div class="mval">${m.contatos_criados}</div>
+    </div>
+    <div class="metric" style="text-align:center">
+      <div class="mlabel">Negócios abertos</div>
+      <div class="mval">${m.negocios_abertos}</div>
+    </div>
+    <div class="metric" style="text-align:center">
+      <div class="mlabel">Propostas enviadas</div>
+      <div class="mval">${m.propostas}</div>
+    </div>
+    <div class="metric" style="text-align:center">
+      <div class="mlabel">Reuniões executadas</div>
+      <div class="mval">${m.reunioes}</div>
+    </div>
+    <div class="metric" style="text-align:center">
+      <div class="mlabel">Tarefas realizadas</div>
+      <div class="mval">${m.tarefas_feitas}</div>
+    </div>
+    <div class="metric" style="text-align:center;background:var(--green-bg)">
+      <div class="mlabel" style="color:var(--green-text)">Pipeline</div>
+      <div class="mval" style="font-size:15px;color:var(--green-text)">${fmtV(m.pipeline_total)}</div>
+    </div>
   </div>
-  ${vendedores.length?cards:'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum vendedor cadastrado</p></div>'}`;
+
+  <!-- Barra de pipeline vs equipe -->
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:14px">
+    <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Pipeline vs equipe</div>
+    ${vendedores.map(vd=>{
+      const vm=calcMetricas(vd.id,iniDate,fim);
+      const bar=Math.round((vm.pipeline_total/maxPipeline)*100);
+      return`<div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span style="font-weight:${vd.id===v.id?'600':'400'};color:${vd.id===v.id?'var(--text)':'var(--text2)'}">${vd.full_name||vd.email}</span>
+          <span style="color:var(--text2)">${fmtV(vm.pipeline_total)}</span>
+        </div>
+        <div style="height:8px;background:var(--bg3);border-radius:4px">
+          <div style="height:100%;width:${bar}%;background:${vd.id===v.id?'var(--green)':'var(--border2)'};border-radius:4px;transition:width .5s"></div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <!-- Negócios por estágio -->
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+    <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Negócios por estágio</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+      ${STAGES.map(s=>{
+        const cnt=deals.filter(d=>d.owner_id===v.id&&d.stage===s).length;
+        const val=deals.filter(d=>d.owner_id===v.id&&d.stage===s).reduce((sum,d)=>sum+Number(d.value||0),0);
+        const color=s==='Fechado'?'var(--green)':s==='Perdido'?'var(--red-text)':'var(--blue-text)';
+        return`<div style="background:var(--bg2);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">${s}</div>
+          <div style="font-size:20px;font-weight:700;color:${color}">${cnt}</div>
+          <div style="font-size:11px;color:var(--text3)">${fmtV(val)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+// Auto-save semanal todo domingo à meia-noite
+async function gravarFechamentoSemanal(){
+  const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
+  const now=new Date();
+  const semFim=new Date(now);semFim.setHours(23,59,59,999);
+  const semIni=new Date(now);semIni.setDate(now.getDate()-6);semIni.setHours(0,0,0,0);
+
+  const cid=company?.id||profile?.company_id||null;
+  for(const v of vendedores){
+    const m=calcMetricas(v.id,semIni,semFim);
+    await dbInsert('performance_fechamentos',{
+      company_id:cid,
+      vendedor_id:v.id,
+      vendedor_nome:v.full_name||v.email,
+      semana_inicio:semIni.toISOString().split('T')[0],
+      semana_fim:semFim.toISOString().split('T')[0],
+      ...m
+    }).catch(()=>{});
+  }
+}
+
+// Verifica se deve salvar fechamento (todo domingo)
+function checkFechamentoSemanal(){
+  if(!cu||!profile)return;
+  const role=profile?.role||'vendedor';
+  if(role!=='admin'&&role!=='gestor')return;
+  const now=new Date();
+  if(now.getDay()!==0)return; // só domingo
+  const key=`fechamento_${now.toISOString().split('T')[0]}`;
+  if(sessionStorage.getItem(key))return; // já fez hoje
+  sessionStorage.setItem(key,'1');
+  gravarFechamentoSemanal();
 }
 
 function rContatos(){
@@ -3029,7 +3070,7 @@ function rContatos(){
   const rows=contacts.map((c,i)=>`<div class="li" style="cursor:pointer" onclick="openModal('contact','${c.id}')"><div class="av ${AVC[i%5]}">${ini(c.name)}</div><div class="linfo"><div class="lname">${c.name}</div><div class="lsub">${c.company||''} ${c.email?'· '+c.email:''}</div></div><div class="lright"><span class="${SBM[c.status]||'bdg bgr'}">${c.status}</span>${role!=='vendedor'?`<span style="font-size:10px;color:var(--text3)">${ownerName(c.owner_id)}</span>`:''}
     <div style="display:flex;gap:4px;margin-top:2px">${(role==='admin'||c.owner_id===cu.id)?`<button class="bicon btn-sm" onclick="event.stopPropagation();openModal('contact','${c.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="bicon btn-sm" onclick="event.stopPropagation();delContact('${c.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`:''}
     </div></div></div>`).join('');
-  return`<div class="sechdr"><div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input placeholder="Buscar..." oninput="filterC(this.value)"></div><button class="btn btn-p btn-sm" onclick="openModal('contact')">+ Novo</button></div><div id="clist">${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum contato</p></div>'}</div>`;
+  return`<div class="sechdr"><div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input placeholder="Buscar..." oninput="filterC(this.value)"></div><button class="btn btn-p btn-sm" onclick="openModal('contact')">+ Novo contato</button></div><div id="clist">${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum contato</p></div>'}</div>`;
 }
 
 function filterC(q){
