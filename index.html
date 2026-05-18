@@ -86,7 +86,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .mlabel{font-size:11px;color:var(--text2);margin-bottom:3px}.mval{font-size:22px;font-weight:600;line-height:1}.msub{font-size:11px;color:var(--green);margin-top:3px}
 /* ROLE BADGES */
 .role-badge{padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;white-space:nowrap}
-.role-admin{background:#1a1a1a;color:#fff}.role-gestor{background:var(--purple-bg);color:var(--purple-text)}.role-vendedor{background:var(--blue-bg);color:var(--blue-text)}
+.role-admin{background:#1a1a1a;color:#fff}.role-adm{background:var(--amber-bg);color:var(--amber-text)}.role-gestor{background:var(--purple-bg);color:var(--purple-text)}.role-vendedor{background:var(--blue-bg);color:var(--blue-text)}
 /* LIST */
 .li{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;cursor:pointer}.li:hover{background:var(--bg2)}
 .av{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
@@ -474,8 +474,8 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const STAGES=['Prospecção','Negociação','Fechado','Perdido'];
 const SBM={Cliente:'bdg bg',Lead:'bdg bb',Prospecto:'bdg ba',Inativo:'bdg bgr'};
 const AVC=['av0','av1','av2','av3','av4'];
-const ROLES={admin:'Admin',gestor:'Gestor',vendedor:'Vendedor'};
-const ROLE_CLASS={admin:'role-admin',gestor:'role-gestor',vendedor:'role-vendedor'};
+const ROLES={admin:'Admin',adm:'ADM',gestor:'Gestor',vendedor:'Vendedor'};
+const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-gestor',vendedor:'role-vendedor'};
 
 let cu=null,tok=null,profile=null,company=null;
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
@@ -718,7 +718,7 @@ async function finishEnterApp(user){
 
   const navAdmin=ge('nav-admin');
   if(navAdmin){
-    if(role==='admin') navAdmin.classList.add('visible');
+    if(role==='admin'||role==='adm') navAdmin.classList.add('visible');
     else navAdmin.classList.remove('visible');
   }
 
@@ -749,7 +749,7 @@ async function finishEnterApp(user){
 // ── PERMISSÕES ──
 async function loadPermissoes(){
   const role=profile?.role||'vendedor';
-  if(role==='admin'){minhasPermissoes={};return;} // admin tem tudo
+  if(role==='admin'||role==='adm'){minhasPermissoes={};return;} // admin e adm têm tudo
 
   const perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
   minhasPermissoes={};
@@ -767,7 +767,7 @@ async function loadPermissoes(){
 
 function canDo(tela, acao){
   const role=profile?.role||'vendedor';
-  if(role==='admin'||role==='gestor')return true;
+  if(role==='admin'||role==='adm'||role==='gestor')return true;
   const perm=minhasPermissoes[tela];
   if(!perm)return false;
   return perm[acao]===true;
@@ -819,7 +819,7 @@ async function loadData(){
         dbSelect('rh_horarios','select=*'),
       ]);
     }
-  } else if(role==='gestor'&&cid){
+  } else if((role==='gestor'||role==='adm')&&cid){
     [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias]=await Promise.all([
       dbSelect('contacts',`company_id=eq.${cid}`),
       dbSelect('deals',`company_id=eq.${cid}`),
@@ -3328,7 +3328,7 @@ function openModal(mode,id=null){
   }else if(mode==='new_user'){
     title.textContent='Novo usuário';
     const compOpts=companies.map(c=>`<option value="${c.id}">${c.name} · ${fmtCNPJ(c.cnpj)}</option>`).join('');
-    body.innerHTML=`<div class="fg"><label class="fl">Nome completo</label><input class="fi" id="funame" placeholder="Nome do usuário"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fuemail" type="email" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Senha temporária</label><input class="fi" id="fupw" type="password" placeholder="mínimo 6 caracteres"></div><div class="fg"><label class="fl">Perfil</label><select class="fi" id="furole"><option value="vendedor">Vendedor</option><option value="gestor">Gestor</option><option value="admin">Admin</option></select></div><div class="fg"><label class="fl">Empresa</label><select class="fi" id="fucomp">${compOpts||'<option>Cadastre uma empresa primeiro</option>'}</select></div>`;
+    body.innerHTML=`<div class="fg"><label class="fl">Nome completo</label><input class="fi" id="funame" placeholder="Nome do usuário"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fuemail" type="email" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Senha temporária</label><input class="fi" id="fupw" type="password" placeholder="mínimo 6 caracteres"></div><div class="fg"><label class="fl">Perfil</label><select class="fi" id="furole"><option value="vendedor">Vendedor</option><option value="gestor">Gestor</option><option value="adm">ADM</option><option value="admin">Admin</option></select></div><div class="fg"><label class="fl">Empresa</label><select class="fi" id="fucomp">${compOpts||'<option>Cadastre uma empresa primeiro</option>'}</select></div>`;
 
   }else if(mode==='permissoes'){
     const prof=id?profiles.find(x=>x.id===id):null;
@@ -3360,10 +3360,31 @@ function openModal(mode,id=null){
           </div>`).join('')}`;
     });
     return;
+
+  }else if(mode==='user'){
     const p=id?profiles.find(x=>x.id===id):null;
     title.textContent='Editar usuário';
     const compOpts=companies.map(c=>`<option value="${c.id}" ${p&&p.company_id===c.id?'selected':''}>${c.name} · ${fmtCNPJ(c.cnpj)}</option>`).join('');
-    body.innerHTML=`<div class="fg"><label class="fl">Nome completo</label><input class="fi" id="funame" value="${p?p.full_name||'':''}" placeholder="Nome"></div><div class="fg"><label class="fl">Perfil</label><select class="fi" id="furole"><option value="vendedor" ${p&&p.role==='vendedor'?'selected':''}>Vendedor</option><option value="gestor" ${p&&p.role==='gestor'?'selected':''}>Gestor</option><option value="admin" ${p&&p.role==='admin'?'selected':''}>Admin</option></select></div><div class="fg"><label class="fl">Empresa</label><select class="fi" id="fucomp"><option value="">Sem empresa</option>${compOpts}</select></div>`;
+    body.innerHTML=`
+      <div class="fg"><label class="fl">Nome completo</label>
+        <input class="fi" id="funame" value="${p?p.full_name||'':''}" placeholder="Nome">
+      </div>
+      <div class="fg"><label class="fl">Email</label>
+        <input class="fi" id="fuemail" type="email" value="${p?p.email||'':''}" placeholder="email@empresa.com">
+      </div>
+      <div class="fg"><label class="fl">Perfil</label>
+        <select class="fi" id="furole">
+          <option value="vendedor" ${p&&p.role==='vendedor'?'selected':''}>Vendedor</option>
+          <option value="gestor" ${p&&p.role==='gestor'?'selected':''}>Gestor</option>
+          <option value="adm" ${p&&p.role==='adm'?'selected':''}>ADM</option>
+          <option value="admin" ${p&&p.role==='admin'?'selected':''}>Admin</option>
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Empresa</label>
+        <select class="fi" id="fucomp">
+          <option value="">Sem empresa</option>${compOpts}
+        </select>
+      </div>`;
   }
 }
 
@@ -3764,8 +3785,12 @@ async function saveModal(){
       }
 
     }else if(mmode==='user'){
-      const name=ge('funame').value.trim();const role=ge('furole').value;const comp=ge('fucomp').value;
+      const name=ge('funame').value.trim();
+      const email=ge('fuemail')?.value.trim();
+      const role=ge('furole').value;
+      const comp=ge('fucomp').value;
       const obj={full_name:name,role,company_id:comp||null};
+      if(email) obj.email=email;
       await dbUpdate('profiles',mid,obj);
       profiles=profiles.map(p=>p.id===mid?{...p,...obj}:p);
     }
