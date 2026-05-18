@@ -370,6 +370,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span>Tarefas</span>
         </button>
+        <button class="navitem sub" id="nav-performance" onclick="pg('performance')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span>Performance</span>
+        </button>
       </div>
     </div>
 
@@ -878,7 +882,7 @@ async function doIdleLogout(){
 // ── MODULE MENU ──
 const MODULE_MAP={
   clientes:'cadastros', fornecedores:'cadastros',
-  'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm',
+  'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm', performance:'crm',
   'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
   'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh',
   faturamento:'financeiro',
@@ -921,7 +925,7 @@ function pg(p){
     faturamento:'Financeiro · Faturamento',
     'tabelas-tarifarias':'Financeiro · Tabelas Tarifárias',
     'crm-dashboard':'CRM · Visão Geral',
-    contatos:'CRM · Contatos', pipeline:'CRM · Pipeline', tarefas:'CRM · Tarefas',
+    contatos:'CRM · Contatos', pipeline:'CRM · Pipeline', tarefas:'CRM · Tarefas', performance:'CRM · Performance',
     admin:'Administração'
   };
   const dt=ge('dtitle');if(dt)dt.textContent=titles[p]||p;
@@ -950,7 +954,7 @@ function render(){
   else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
   else if(curPage==='atas')c.innerHTML=rAtas();
   else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
-  else if(curPage==='contatos')c.innerHTML=rContatos();
+  else if(curPage==='performance')c.innerHTML=rPerformance();
   else if(curPage==='pipeline')c.innerHTML=rPipeline();
   else if(curPage==='tarefas')c.innerHTML=rTarefas();
   else if(curPage==='admin')c.innerHTML=rAdmin();
@@ -2881,6 +2885,143 @@ function rDash(){
   </div>`:''}
   <div class="sechdr"><span class="sectitle">Contatos recentes</span><button class="btn btn-sm" onclick="pg('contatos')">Ver todos</button></div>
   ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum contato</p></div>'}`;
+}
+
+// ── PERFORMANCE ──
+let perfPeriodo='mes';
+
+function getDateRange(periodo){
+  const now=new Date();
+  let ini,fim=new Date(now);fim.setHours(23,59,59,999);
+  if(periodo==='semana'){
+    ini=new Date(now);
+    ini.setDate(now.getDate()-now.getDay());
+    ini.setHours(0,0,0,0);
+  } else if(periodo==='mes'){
+    ini=new Date(now.getFullYear(),now.getMonth(),1);
+  } else {
+    ini=new Date(now.getFullYear(),0,1);
+  }
+  return{ini,fim};
+}
+
+function rPerformance(){
+  const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
+  const {ini,fim}=getDateRange(perfPeriodo);
+
+  // Calcula métricas por vendedor
+  const metricas=vendedores.map(v=>{
+    const contatos_criados=contacts.filter(c=>c.owner_id===v.id&&new Date(c.created_at)>=ini&&new Date(c.created_at)<=fim).length;
+    const negocios_abertos=deals.filter(d=>d.owner_id===v.id&&!['Fechado','Perdido'].includes(d.stage)).length;
+    const propostas=deals.filter(d=>d.owner_id===v.id&&new Date(d.created_at)>=ini&&new Date(d.created_at)<=fim).length;
+    const tarefas_feitas=tasks.filter(t=>t.owner_id===v.id&&t.done&&new Date(t.created_at)>=ini&&new Date(t.created_at)<=fim).length;
+    // Reuniões = tarefas com "reunião" no título
+    const reunioes=tasks.filter(t=>t.owner_id===v.id&&t.done&&(t.title||'').toLowerCase().includes('reuni')&&new Date(t.created_at)>=ini&&new Date(t.created_at)<=fim).length;
+    const pipeline_total=deals.filter(d=>d.owner_id===v.id&&!['Fechado','Perdido'].includes(d.stage)).reduce((s,d)=>s+Number(d.value||0),0);
+    return{...v,contatos_criados,negocios_abertos,propostas,tarefas_feitas,reunioes,pipeline_total};
+  });
+
+  // Ranking por pipeline
+  const ranked=[...metricas].sort((a,b)=>b.pipeline_total-a.pipeline_total);
+
+  // Max values para barras
+  const maxPipeline=Math.max(...metricas.map(m=>m.pipeline_total),1);
+  const maxNegocios=Math.max(...metricas.map(m=>m.negocios_abertos),1);
+
+  const periodos=[
+    {id:'semana',label:'Esta semana'},
+    {id:'mes',label:'Este mês'},
+    {id:'ano',label:'Este ano'},
+  ];
+
+  const cards=ranked.map((v,i)=>{
+    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+    const pipelineBar=maxPipeline>0?Math.round((v.pipeline_total/maxPipeline)*100):0;
+    const negociosBar=maxNegocios>0?Math.round((v.negocios_abertos/maxNegocios)*100):0;
+    return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="av ${AVC[i%5]}" style="width:36px;height:36px;font-size:12px">${ini(v.full_name||v.email||'?')}</div>
+          <div>
+            <div style="font-size:14px;font-weight:600">${medal} ${v.full_name||v.email}</div>
+            <div style="font-size:11px;color:var(--text2)">${ROLES[v.role]||v.role}</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:18px;font-weight:700;color:var(--green)">${fmtV(v.pipeline_total)}</div>
+          <div style="font-size:11px;color:var(--text2)">Pipeline total</div>
+        </div>
+      </div>
+
+      <!-- Métricas -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px">
+        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
+          <div style="font-size:20px;font-weight:700">${v.contatos_criados}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">Contatos</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
+          <div style="font-size:20px;font-weight:700">${v.negocios_abertos}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">Negócios</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
+          <div style="font-size:20px;font-weight:700">${v.propostas}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">Propostas</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
+          <div style="font-size:20px;font-weight:700">${v.reunioes}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">Reuniões</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px">
+          <div style="font-size:20px;font-weight:700">${v.tarefas_feitas}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">Tarefas</div>
+        </div>
+      </div>
+
+      <!-- Barras -->
+      <div style="margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px">
+          <span>Pipeline</span><span>${pipelineBar}%</span>
+        </div>
+        <div style="height:6px;background:var(--bg3);border-radius:3px">
+          <div style="height:100%;width:${pipelineBar}%;background:var(--green);border-radius:3px;transition:width .5s"></div>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px">
+          <span>Negócios abertos</span><span>${negociosBar}%</span>
+        </div>
+        <div style="height:6px;background:var(--bg3);border-radius:3px">
+          <div style="height:100%;width:${negociosBar}%;background:var(--blue-text);border-radius:3px;transition:width .5s"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Totais gerais
+  const totPipeline=metricas.reduce((s,v)=>s+v.pipeline_total,0);
+  const totContatos=metricas.reduce((s,v)=>s+v.contatos_criados,0);
+  const totNegocios=metricas.reduce((s,v)=>s+v.negocios_abertos,0);
+  const totTarefas=metricas.reduce((s,v)=>s+v.tarefas_feitas,0);
+
+  return`
+  <!-- Filtro período -->
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    ${periodos.map(p=>`<button class="btn ${perfPeriodo===p.id?'btn-p':''}" onclick="perfPeriodo='${p.id}';render()" style="flex:1;justify-content:center">${p.label}</button>`).join('')}
+  </div>
+
+  <!-- Totais -->
+  <div class="metrics" style="margin-bottom:16px">
+    <div class="metric"><div class="mlabel">Pipeline total</div><div class="mval" style="font-size:15px">${fmtV(totPipeline)}</div></div>
+    <div class="metric"><div class="mlabel">Contatos criados</div><div class="mval">${totContatos}</div></div>
+    <div class="metric"><div class="mlabel">Negócios abertos</div><div class="mval">${totNegocios}</div></div>
+    <div class="metric"><div class="mlabel">Tarefas feitas</div><div class="mval">${totTarefas}</div></div>
+  </div>
+
+  <!-- Cards por vendedor -->
+  <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
+    Ranking — ${periodos.find(p=>p.id===perfPeriodo)?.label}
+  </div>
+  ${vendedores.length?cards:'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><p>Nenhum vendedor cadastrado</p></div>'}`;
 }
 
 function rContatos(){
