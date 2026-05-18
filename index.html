@@ -402,6 +402,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span>Usuários</span>
         </button>
+        <button class="navitem sub" id="nav-admin-importacao" onclick="pg('admin');setTimeout(()=>setAdminTab('importacao'),50)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>Importação</span>
+        </button>
       </div>
     </div>
 
@@ -3424,9 +3428,221 @@ function rAdmin(){
     <div class="tabs">
       <button class="tab admin-tab-btn active" data-tab="empresas" onclick="setAdminTab('empresas')">Empresas</button>
       <button class="tab admin-tab-btn" data-tab="usuarios" onclick="setAdminTab('usuarios')">Usuários</button>
+      <button class="tab admin-tab-btn" data-tab="importacao" onclick="setAdminTab('importacao')">Importação</button>
     </div>
     <div class="admin-tab-panel" data-tab="empresas">${rEmpresas()}</div>
-    <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>`;
+    <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
+    <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
+}
+
+// ── IMPORTAÇÃO ──
+const IMPORT_CONFIGS={
+  rh_funcoes:{
+    label:'Funções (RH)',
+    icon:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>',
+    colunas:['funcao','departamento','salario_base','cbo','descricao'],
+    labels:['Função*','Departamento','Salário base','CBO','Descrição'],
+    obrigatorio:['funcao'],
+    exemplo:[['Analista de Logística','Operações','3500','2124-05','Análise de operações logísticas'],['Auxiliar Administrativo','Administrativo','2000','4110-10','Suporte administrativo geral']],
+  },
+  rh_horarios:{
+    label:'Horários (RH)',
+    icon:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    colunas:['nome','turno','dias_semana','entrada','saida','intervalo','carga_semanal'],
+    labels:['Nome*','Turno','Dias da semana','Entrada','Saída','Intervalo','Carga semanal'],
+    obrigatorio:['nome'],
+    exemplo:[['Comercial','Matutino','Seg a Sex','08:00','17:00','12:00-13:00','44h'],['Turno A','Noturno','Seg a Sáb','22:00','06:00','02:00-02:30','44h']],
+  },
+  clientes:{
+    label:'Clientes',
+    icon:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    colunas:['nome','cpf_cnpj','telefone','inscricao_municipal','cep','logradouro','numero','bairro','cidade','estado'],
+    labels:['Nome/Razão Social*','CPF/CNPJ','Telefone','Inscrição Municipal','CEP','Logradouro','Número','Bairro','Cidade','Estado'],
+    obrigatorio:['nome'],
+    exemplo:[['MK Logística Ltda','12.345.678/0001-99','(11) 3333-4444','123456','01310-100','Av. Paulista','1000','Bela Vista','São Paulo','SP']],
+  },
+  fornecedores:{
+    label:'Fornecedores',
+    icon:'<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    colunas:['nome','cpf_cnpj','email','telefone','celular','categoria'],
+    labels:['Nome/Razão Social*','CPF/CNPJ','Email','Telefone','Celular','Categoria'],
+    obrigatorio:['nome'],
+    exemplo:[['Fornecedor Exemplo','98.765.432/0001-10','contato@fornecedor.com','(11) 3333-5555','(11) 99999-6666','Transporte']],
+  },
+  pessoas:{
+    label:'Colaboradores (RH)',
+    icon:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+    colunas:['nome','cpf','rg','data_nascimento','data_admissao','telefone','cargo','departamento','turno'],
+    labels:['Nome*','CPF','RG','Data Nasc. (DD/MM/AAAA)','Data Admissão (DD/MM/AAAA)','Telefone','Função/Cargo','Departamento','Turno'],
+    obrigatorio:['nome'],
+    exemplo:[['João Silva','123.456.789-00','12.345.678-9','15/03/1990','01/01/2024','(11) 99999-0000','Analista','Operações','Matutino']],
+  },
+};
+
+let importTela=null,importDados=[],importErros=[];
+
+function rImportacao(){
+  return`
+  <div style="margin-bottom:16px">
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Selecione a tabela que deseja importar, baixe o template, preencha e faça o upload.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">
+      ${Object.entries(IMPORT_CONFIGS).map(([key,cfg])=>`
+        <button onclick="selecionarImport('${key}')" style="text-align:left;background:var(--bg2);border:2px solid ${importTela===key?'var(--accent)':'var(--border)'};border-radius:var(--radius);padding:12px;cursor:pointer;transition:all .15s">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${importTela===key?'var(--accent)':'var(--text2)'}" stroke-width="1.5" style="display:block;margin-bottom:6px">${cfg.icon}</svg>
+          <div style="font-size:12px;font-weight:600;color:${importTela===key?'var(--accent)':'var(--text)'}">${cfg.label}</div>
+        </button>`).join('')}
+    </div>
+  </div>
+  <div id="import-area">${importTela?buildImportArea():''}</div>`;
+}
+
+function buildImportArea(){
+  const cfg=IMPORT_CONFIGS[importTela];if(!cfg)return'';
+  return`
+  <div style="border-top:1px solid var(--border);padding-top:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600">${cfg.label}</div>
+      <button class="btn btn-sm" onclick="downloadTemplate()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Baixar template Excel
+      </button>
+    </div>
+
+    <!-- Upload area -->
+    <div id="import-upload-area" style="border:2px dashed var(--border2);border-radius:var(--radius);padding:24px;text-align:center;cursor:pointer;color:var(--text2);margin-bottom:12px" onclick="ge('import-file-input').click()">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div style="font-size:13px;font-weight:500">Clique para selecionar o arquivo Excel</div>
+      <div style="font-size:11px;margin-top:4px;color:var(--text3)">Apenas .xlsx ou .xls</div>
+      <input type="file" id="import-file-input" accept=".xlsx,.xls" style="display:none" onchange="processarExcel(this)">
+    </div>
+
+    <!-- Preview -->
+    <div id="import-preview"></div>
+  </div>`;
+}
+
+function selecionarImport(tela){
+  importTela=tela;importDados=[];importErros=[];
+  const el=ge('admin-content')||ge('content');
+  render();
+  setTimeout(()=>setAdminTab('importacao'),50);
+}
+
+function downloadTemplate(){
+  const cfg=IMPORT_CONFIGS[importTela];if(!cfg)return;
+  // Cria CSV com header e exemplos
+  const linhas=[cfg.labels.join(','),...cfg.exemplo.map(row=>row.map(v=>`"${v}"`).join(','))];
+  const csv='\uFEFF'+linhas.join('\n'); // BOM para Excel reconhecer UTF-8
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`template_${importTela}.csv`;
+  a.click();URL.revokeObjectURL(a.href);
+}
+
+async function processarExcel(input){
+  const file=input.files[0];if(!file)return;
+  const preview=ge('import-preview');
+  if(preview)preview.innerHTML='<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spin"></span> Processando...</div>';
+
+  try{
+    const XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+
+    if(!raw.length){throw new Error('Arquivo vazio.');}
+
+    const cfg=IMPORT_CONFIGS[importTela];
+    const header=raw[0].map(h=>String(h).trim().toLowerCase());
+    const linhas=raw.slice(1).filter(r=>r.some(v=>v!==''));
+
+    // Mapeia colunas pelo índice (usa posição, não nome)
+    importDados=linhas.map((row,ri)=>{
+      const obj={};
+      cfg.colunas.forEach((col,ci)=>{obj[col]=String(row[ci]||'').trim();});
+      return obj;
+    });
+
+    // Valida obrigatórios
+    importErros=[];
+    importDados.forEach((obj,i)=>{
+      cfg.obrigatorio.forEach(campo=>{
+        if(!obj[campo])importErros.push(`Linha ${i+2}: campo "${campo}" é obrigatório.`);
+      });
+    });
+
+    renderImportPreview(cfg);
+  }catch(e){
+    if(preview)preview.innerHTML=`<div style="background:var(--red-bg);color:var(--red-text);border-radius:var(--radius);padding:10px 12px;font-size:13px">⚠ ${e.message}</div>`;
+  }
+  input.value='';
+}
+
+function renderImportPreview(cfg){
+  const preview=ge('import-preview');if(!preview)return;
+  const temErros=importErros.length>0;
+  preview.innerHTML=`
+    <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:13px;font-weight:600">${importDados.length} linhas encontradas ${temErros?`<span style="color:var(--red-text)">· ${importErros.length} erro(s)</span>`:''}</div>
+      ${!temErros?`<button class="btn btn-p btn-sm" onclick="confirmarImport()">Importar ${importDados.length} registros</button>`:''}
+    </div>
+    ${temErros?`<div style="background:var(--red-bg);color:var(--red-text);border-radius:var(--radius);padding:10px 12px;font-size:12px;margin-bottom:10px">${importErros.map(e=>`<div>⚠ ${e}</div>`).join('')}</div>`:''}
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:var(--bg3)">
+            <th style="padding:7px 10px;text-align:left;font-weight:600;color:var(--text2)">#</th>
+            ${cfg.labels.map(l=>`<th style="padding:7px 10px;text-align:left;font-weight:600;color:var(--text2)">${l}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${importDados.slice(0,10).map((row,i)=>`<tr style="border-top:1px solid var(--border)">
+            <td style="padding:6px 10px;color:var(--text3)">${i+1}</td>
+            ${cfg.colunas.map(col=>`<td style="padding:6px 10px">${row[col]||'—'}</td>`).join('')}
+          </tr>`).join('')}
+          ${importDados.length>10?`<tr><td colspan="${cfg.colunas.length+1}" style="padding:8px 10px;text-align:center;color:var(--text3);font-size:11px">... e mais ${importDados.length-10} linhas</td></tr>`:''}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function confirmarImport(){
+  const cfg=IMPORT_CONFIGS[importTela];if(!cfg||!importDados.length)return;
+  const btn=document.querySelector('#import-preview .btn-p');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Importando...';}
+
+  const cid=company?.id||profile?.company_id||null;
+  let ok=0,erros=0;
+
+  for(const row of importDados){
+    try{
+      const obj={owner_id:cu.id,company_id:cid,ativo:true};
+      cfg.colunas.forEach(col=>{
+        let v=row[col]||null;
+        // Converte salário para número
+        if(col==='salario_base'&&v) v=Number(v.replace(/[^0-9.,]/g,'').replace(',','.'));
+        // Converte datas DD/MM/AAAA para ISO
+        if((col==='data_nascimento'||col==='data_admissao')&&v&&v.includes('/')){
+          const [d,m,a]=v.split('/');v=`${a}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
+        obj[col]=v;
+      });
+      await dbInsert(importTela,obj);
+      ok++;
+    }catch(e){erros++;}
+  }
+
+  // Recarrega dados
+  await loadData();
+  importDados=[];importErros=[];
+
+  const preview=ge('import-preview');
+  if(preview)preview.innerHTML=`
+    <div style="background:var(--green-bg);color:var(--green-text);border-radius:var(--radius);padding:12px 14px;font-size:13px">
+      ✓ Importação concluída — ${ok} registro(s) inserido(s)${erros>0?` · ${erros} com erro`:''}
+    </div>`;
 }
 
 function rEmpresas(){
