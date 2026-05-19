@@ -2986,6 +2986,7 @@ const PROP_STATUS={rascunho:{label:'Rascunho',color:'var(--text2)',bg:'var(--bg3
 const ESCOPO_DEFAULTS={local_operacao:'MKLOG ITU',volume:'650 pallets',dimensao_peso:'1,10 x 1,00 x 1,30 max. 400 kg',tipo_produto:'Produto acabado',total_codigos:'466 SKUs',recebimento:'Paletizado',expedicao:'Paletizado',valor_estoque:'R$12.350.000,00',sla:'D + 1 com corte as 17:00 do dia anterior',fat_coletas:'Por conta do cliente',carregamento:'Por conta da MKLOG',docas:'Compartilhadas',operacao_dedicada:'Não',estrutura_armazenagem:'Porta-Pallets',horario_operacional:'Seg 06:00 - Sex 22:00'};
 
 let propEditando=null;
+let propTarifas=[];
 
 function rPropostas(){
   const role=profile?.role||'vendedor';
@@ -3068,275 +3069,283 @@ async function openPropostaEditor(id=null){
   }
 
   const mes_ano=p?.mes_ano||new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-
-  // Busca negócios para vincular
   const dealOpts=deals.filter(d=>!['Fechado','Perdido'].includes(d.stage)).map(d=>`<option value="${d.id}" ${p&&p.deal_id===d.id?'selected':''}>${d.name} · ${d.contact_name||''}</option>`).join('');
 
-  // Monta tarifas existentes ou padrão
   let tarifas=[];
   try{tarifas=JSON.parse(p?.tarifas||'[]');}catch(e){}
   if(!tarifas.length) tarifas=[
     {quadro:'Tarifas Básicas',itens:[{servico:'',unidade:'',valor:''}]},
     {quadro:'Extraordinários',itens:[{servico:'',unidade:'',valor:''}]},
   ];
+  propTarifas=tarifas;
 
-  // Abre janela de edição grande
-  const win=window.open('','_blank','width=900,height=800,scrollbars=yes');
-  win.document.write(buildPropostaEditorHTML(p,nextPO,mes_ano,dealOpts,tarifas,role,cid));
-  win.document.close();
-}
+  // Cria overlay fullscreen
+  let overlay=ge('prop-editor-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='prop-editor-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:#f7f7f5;z-index:300;overflow-y:auto;display:none';
+    document.body.appendChild(overlay);
+  }
 
-function buildPropostaEditorHTML(p,nextPO,mes_ano,dealOpts,tarifas,role,cid){
   const sc=p||{};
   const d=ESCOPO_DEFAULTS;
-  const tarifasJS=JSON.stringify(tarifas).replace(/'/g,"\'");
-  return`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Editor de Proposta</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;font-size:14px;background:#f7f7f5;color:#1a1a1a;padding:20px}
-.card{background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #e5e5e0}
-h2{font-size:16px;font-weight:600;margin-bottom:14px;color:#1a1a1a}
-h3{font-size:13px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
-label{display:block;font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
-input,select,textarea{width:100%;padding:8px 10px;border:1px solid #e5e5e0;border-radius:8px;font-size:13px;font-family:inherit;background:#fff;color:#1a1a1a;outline:none}
-input:focus,select:focus,textarea:focus{border-color:#1a1a1a}
-textarea{resize:vertical;min-height:60px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.fg{margin-bottom:10px}
-.full{grid-column:1/-1}
-table{width:100%;border-collapse:collapse}
-th{background:#1a1a1a;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:600}
-td{padding:5px 6px;border-bottom:1px solid #e5e5e0}
-td input{border:none;padding:4px 6px;background:transparent;font-size:12px}
-td input:focus{background:#f7f7f5;border-radius:4px}
-.btn{padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
-.btn-p{background:#1a1a1a;color:#fff}
-.btn-s{background:#f0f0ec;color:#1a1a1a}
-.btn-sm{padding:4px 8px;font-size:12px}
-.actions{display:flex;gap:8px;justify-content:flex-end;padding-top:16px;border-top:1px solid #e5e5e0;margin-top:8px}
-.tab-row{display:flex;gap:4px;margin-bottom:14px}
-.tab{padding:6px 14px;border:1px solid #e5e5e0;border-radius:8px;font-size:13px;cursor:pointer;background:#f7f7f5;font-family:inherit}
-.tab.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
-</style></head><body>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-  <div><div style="font-size:20px;font-weight:700">${p?'Editar proposta':'Nova proposta'}</div>
-  <div style="font-size:12px;color:#666;margin-top:2px">${nextPO}</div></div>
-  <div style="display:flex;gap:8px">
-    <button class="btn btn-s" onclick="salvarRascunho()">Salvar rascunho</button>
-    ${role==='admin'||role==='adm'?`<button class="btn btn-p" onclick="salvarEAprovar()">Salvar e aprovar</button>`:`<button class="btn btn-p" onclick="enviarParaAprovacao()">Enviar para aprovação</button>`}
-  </div>
-</div>
+  overlay.innerHTML=buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,id);
+  overlay.style.display='block';
+  renderPropTarifas();
 
-<!-- IDENTIFICAÇÃO -->
-<div class="card">
-  <h2>Identificação</h2>
-  <div class="grid2">
-    <div class="fg"><label>Número PO</label><input id="e-numero_po" value="${sc.numero_po||nextPO}"></div>
-    <div class="fg"><label>Mês/Ano</label><input id="e-mes_ano" value="${sc.mes_ano||mes_ano}"></div>
-    <div class="fg full"><label>Negócio vinculado (Pipeline)</label>
-      <select id="e-deal_id" onchange="preencherDadosDeal(this.value)"><option value="">Selecione</option>${dealOpts}</select>
-    </div>
-    <div id="autofill-msg" style="font-size:11px;color:#1a4a8a;display:none;margin-top:-6px;margin-bottom:6px">✓ Dados preenchidos automaticamente do negócio</div>
-    <div class="fg"><label>Cliente / Empresa</label><input id="e-cliente_nome" value="${sc.cliente_nome||''}"></div>
-    <div class="fg"><label>Contato (aos cuidados de)</label><input id="e-cliente_contato" value="${sc.cliente_contato||''}"></div>
-  </div>
-</div>
-
-<!-- ESCOPO TÉCNICO -->
-<div class="card">
-  <h2>Escopo Técnico</h2>
-  <div class="grid2">
-    <div class="fg"><label>Local da operação</label>
-      <select id="e-local_operacao">
-        <option value="MKLOG ITU" ${(sc.local_operacao||d.local_operacao)==='MKLOG ITU'?'selected':''}>MKLOG ITU</option>
-        <option value="MKLOG Salto" ${sc.local_operacao==='MKLOG Salto'?'selected':''}>MKLOG Salto</option>
-      </select></div>
-    <div class="fg"><label>Volume</label><input id="e-volume" value="${sc.volume||d.volume}"></div>
-    <div class="fg"><label>Dimensão e peso do maior pallet</label><input id="e-dimensao_peso" value="${sc.dimensao_peso||d.dimensao_peso}"></div>
-    <div class="fg"><label>Tipo de produto</label><input id="e-tipo_produto" value="${sc.tipo_produto||d.tipo_produto}"></div>
-    <div class="fg"><label>Total de códigos (SKUs)</label><input id="e-total_codigos" value="${sc.total_codigos||d.total_codigos}"></div>
-    <div class="fg"><label>Recebimento</label>
-      <select id="e-recebimento">
-        <option value="Paletizado" ${(sc.recebimento||d.recebimento)==='Paletizado'?'selected':''}>Paletizado</option>
-        <option value="Batido" ${sc.recebimento==='Batido'?'selected':''}>Batido</option>
-      </select></div>
-    <div class="fg"><label>Expedição</label>
-      <select id="e-expedicao">
-        <option value="Paletizado" ${(sc.expedicao||d.expedicao)==='Paletizado'?'selected':''}>Paletizado</option>
-        <option value="Batido" ${sc.expedicao==='Batido'?'selected':''}>Batido</option>
-      </select></div>
-    <div class="fg"><label>Valor em estoque</label><input id="e-valor_estoque" value="${sc.valor_estoque||d.valor_estoque}"></div>
-    <div class="fg full"><label>SLA</label><input id="e-sla" value="${sc.sla||d.sla}"></div>
-    <div class="fg"><label>Faturamento e coletas</label><input id="e-fat_coletas" value="${sc.fat_coletas||d.fat_coletas}"></div>
-    <div class="fg"><label>Carregamento</label><input id="e-carregamento" value="${sc.carregamento||d.carregamento}"></div>
-    <div class="fg"><label>Docas</label><input id="e-docas" value="${sc.docas||d.docas}"></div>
-    <div class="fg"><label>Operação dedicada</label><input id="e-operacao_dedicada" value="${sc.operacao_dedicada||d.operacao_dedicada}"></div>
-    <div class="fg"><label>Estrutura de armazenagem</label><input id="e-estrutura_armazenagem" value="${sc.estrutura_armazenagem||d.estrutura_armazenagem}"></div>
-    <div class="fg full"><label>Horário operacional</label><input id="e-horario_operacional" value="${sc.horario_operacional||d.horario_operacional}"></div>
-  </div>
-</div>
-
-<!-- TARIFAS -->
-<div class="card">
-  <h2>Proposta Comercial</h2>
-  <div id="tarifas-editor"></div>
-  <button class="btn btn-s btn-sm" onclick="addQuadroTarifa()" style="margin-top:10px">+ Adicionar quadro</button>
-</div>
-
-<!-- CONDIÇÕES GERAIS -->
-<div class="card">
-  <h2>Condições Gerais</h2>
-  <div class="grid2">
-    <div class="fg"><label>Faturamento</label>
-      <select id="e-cond_faturamento">
-        <option value="Quinzenal" ${(sc.cond_faturamento||'Quinzenal')==='Quinzenal'?'selected':''}>Quinzenal</option>
-        <option value="Mensal" ${sc.cond_faturamento==='Mensal'?'selected':''}>Mensal</option>
-      </select>
-    </div>
-    <div class="fg"><label>Reajustes</label><input id="e-cond_reajustes" value="${sc.cond_reajustes||'IPCA a cada 12 meses'}"></div>
-    <div class="fg"><label>Prazo de contrato</label><input id="e-cond_prazo_contrato" value="${sc.cond_prazo_contrato||''}" placeholder="Ex: 12 meses ou SPOT até nov/26"></div>
-    <div class="fg"><label>Faturamento mínimo</label><input id="e-cond_fat_minimo" value="${sc.cond_fat_minimo||'R$60.000,00'}"></div>
-    <div class="fg"><label>Multa</label><input id="e-cond_multa" value="${sc.cond_multa||'Não aplicado'}"></div>
-    <div class="fg"><label>Notice (dias)</label><input id="e-cond_notice" value="${sc.cond_notice||'30 dias'}"></div>
-    <div class="fg"><label>Prazo de aprovação da fatura</label><input id="e-cond_prazo_aprovacao" value="${sc.cond_prazo_aprovacao||'2 dias úteis após apresentação'}" readonly style="background:#f7f7f5"></div>
-    <div class="fg"><label>Prazo de pagamento (dias)</label>
-      <div style="display:flex;align-items:center;gap:6px">
-        <input id="e-cond_prazo_pagamento_dias" value="${sc.cond_prazo_pagamento_dias||'60'}" style="width:80px">
-        <span style="font-size:12px;color:#666">dias corridos após apresentação da fatura</span>
-      </div>
-    </div>
-    <div class="fg"><label>PIS/COFINS</label><input value="Inclusos nos valores acima" readonly style="background:#f7f7f5"></div>
-    <div class="fg"><label>ISS – 2%</label><input value="Não inclusos nos valores acima" readonly style="background:#f7f7f5"></div>
-  </div>
-</div>
-
-<script>
-let tarifasData=${tarifasJS};
-const propId='${p?.id||''}';
-const propVersao=${p?.versao||1};
-const compId='${cid||''}';
-const ownerId='${cu?.id||''}';
-const propStatus='${p?.status||'rascunho'}';
-
-function renderTarifas(){
-  const el=document.getElementById('tarifas-editor');if(!el)return;
-  el.innerHTML=tarifasData.map((q,qi)=>\`
-    <div style="margin-bottom:16px;border:1px solid #e5e5e0;border-radius:8px;overflow:hidden">
-      <div style="background:#f0f0ec;padding:8px 12px;display:flex;align-items:center;gap:8px">
-        <input value="\${q.quadro}" onchange="tarifasData[\${qi}].quadro=this.value"
-          style="flex:1;border:none;background:transparent;font-size:13px;font-weight:600;outline:none">
-        <button onclick="addItemTarifa(\${qi})" class="btn btn-s btn-sm">+ Linha</button>
-        <button onclick="tarifasData.splice(\${qi},1);renderTarifas()" class="btn btn-sm" style="background:#fee;color:#a00">×</button>
-      </div>
-      <table>
-        <thead><tr><th style="width:50%">Serviço</th><th style="width:30%">Un. Cobrança</th><th style="width:15%;text-align:right">Valor</th><th style="width:5%"></th></tr></thead>
-        <tbody id="tbody-\${qi}">
-          \${q.itens.map((it,ii)=>\`<tr>
-            <td><input value="\${it.servico||''}" onchange="tarifasData[\${qi}].itens[\${ii}].servico=this.value" placeholder="Serviço"></td>
-            <td><input value="\${it.unidade||''}" onchange="tarifasData[\${qi}].itens[\${ii}].unidade=this.value" placeholder="Pallet, m²..."></td>
-            <td><input value="\${it.valor||''}" onchange="tarifasData[\${qi}].itens[\${ii}].valor=this.value" placeholder="0,00" style="text-align:right"></td>
-            <td style="text-align:center"><button onclick="tarifasData[\${qi}].itens.splice(\${ii},1);renderTarifas()" style="border:none;background:none;cursor:pointer;color:#999">×</button></td>
-          </tr>\`).join('')}
-        </tbody>
-      </table>
-    </div>\`).join('');
+  // Se editando, preenche negócio
+  if(p?.deal_id) preencherDadosDeal(p.deal_id,true);
 }
 
-function addQuadroTarifa(){tarifasData.push({quadro:'Novo quadro',itens:[{servico:'',unidade:'',valor:''}]});renderTarifas();}
-function addItemTarifa(qi){tarifasData[qi].itens.push({servico:'',unidade:'',valor:''});renderTarifas();}
+function closePropEditor(){
+  const el=ge('prop-editor-overlay');
+  if(el)el.style.display='none';
+}
 
-function getV(id){const e=document.getElementById(id);return e?e.value||null:null;}
+function getPropV(id){const e=ge(id);return e?e.value||null:null;}
 
-function getDados(){
+function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
+  const d=ESCOPO_DEFAULTS;
+  return`<div style="max-width:860px;margin:0 auto;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;position:sticky;top:0;background:#f7f7f5;padding:12px 0;z-index:10;border-bottom:1px solid #e5e5e0">
+      <div>
+        <div style="font-size:18px;font-weight:700">${editId?'Editar proposta':'Nova proposta'}</div>
+        <div style="font-size:12px;color:#666;margin-top:2px">${nextPO}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="closePropEditor()" style="padding:8px 14px;border:1px solid #e5e5e0;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">✕ Fechar</button>
+        <button onclick="salvarRascunho()" style="padding:8px 14px;border:1px solid #e5e5e0;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>
+        ${role==='admin'||role==='adm'
+          ?`<button onclick="salvarEAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar e aprovar</button>`
+          :`<button onclick="enviarParaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`
+        }
+      </div>
+    </div>
+
+    <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #e5e5e0">
+      <div style="font-size:15px;font-weight:600;margin-bottom:14px">Identificação</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Número PO</label><input class="fi" id="e-numero_po" value="${sc.numero_po||nextPO}"></div>
+        <div class="fg"><label class="fl">Mês/Ano</label><input class="fi" id="e-mes_ano" value="${sc.mes_ano||mes_ano}"></div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Negócio vinculado (Pipeline)</label>
+          <select class="fi" id="e-deal_id" onchange="preencherDadosDeal(this.value,false)">
+            <option value="">Selecione</option>${dealOpts}
+          </select>
+          <div id="autofill-msg" style="font-size:11px;color:var(--blue-text);display:none;margin-top:4px">✓ Dados preenchidos do negócio</div>
+        </div>
+        <div class="fg"><label class="fl">Cliente / Empresa</label><input class="fi" id="e-cliente_nome" value="${sc.cliente_nome||''}"></div>
+        <div class="fg"><label class="fl">Contato (aos cuidados de)</label><input class="fi" id="e-cliente_contato" value="${sc.cliente_contato||''}"></div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #e5e5e0">
+      <div style="font-size:15px;font-weight:600;margin-bottom:14px">Escopo Técnico</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Local da operação</label>
+          <select class="fi" id="e-local_operacao">
+            <option value="MKLOG ITU" ${(sc.local_operacao||'MKLOG ITU')==='MKLOG ITU'?'selected':''}>MKLOG ITU</option>
+            <option value="MKLOG Salto" ${sc.local_operacao==='MKLOG Salto'?'selected':''}>MKLOG Salto</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Volume</label><input class="fi" id="e-volume" value="${sc.volume||d.volume}"></div>
+        <div class="fg"><label class="fl">Dimensão e peso do maior pallet</label><input class="fi" id="e-dimensao_peso" value="${sc.dimensao_peso||d.dimensao_peso}"></div>
+        <div class="fg"><label class="fl">Tipo de produto</label><input class="fi" id="e-tipo_produto" value="${sc.tipo_produto||d.tipo_produto}"></div>
+        <div class="fg"><label class="fl">Total de códigos (SKUs)</label><input class="fi" id="e-total_codigos" value="${sc.total_codigos||d.total_codigos}"></div>
+        <div class="fg"><label class="fl">Recebimento</label>
+          <select class="fi" id="e-recebimento">
+            <option value="Paletizado" ${(sc.recebimento||'Paletizado')==='Paletizado'?'selected':''}>Paletizado</option>
+            <option value="Batido" ${sc.recebimento==='Batido'?'selected':''}>Batido</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Expedição</label>
+          <select class="fi" id="e-expedicao">
+            <option value="Paletizado" ${(sc.expedicao||'Paletizado')==='Paletizado'?'selected':''}>Paletizado</option>
+            <option value="Batido" ${sc.expedicao==='Batido'?'selected':''}>Batido</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Valor em estoque</label><input class="fi" id="e-valor_estoque" value="${sc.valor_estoque||d.valor_estoque}"></div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">SLA</label><input class="fi" id="e-sla" value="${sc.sla||d.sla}"></div>
+        <div class="fg"><label class="fl">Faturamento e coletas</label><input class="fi" id="e-fat_coletas" value="${sc.fat_coletas||d.fat_coletas}"></div>
+        <div class="fg"><label class="fl">Carregamento</label><input class="fi" id="e-carregamento" value="${sc.carregamento||d.carregamento}"></div>
+        <div class="fg"><label class="fl">Docas</label><input class="fi" id="e-docas" value="${sc.docas||d.docas}"></div>
+        <div class="fg"><label class="fl">Operação dedicada</label><input class="fi" id="e-operacao_dedicada" value="${sc.operacao_dedicada||d.operacao_dedicada}"></div>
+        <div class="fg"><label class="fl">Estrutura de armazenagem</label><input class="fi" id="e-estrutura_armazenagem" value="${sc.estrutura_armazenagem||d.estrutura_armazenagem}"></div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">Horário operacional</label><input class="fi" id="e-horario_operacional" value="${sc.horario_operacional||d.horario_operacional}"></div>
+      </div>
+    </div>
+
+    <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #e5e5e0">
+      <div style="font-size:15px;font-weight:600;margin-bottom:14px">Proposta Comercial</div>
+      <div id="prop-tarifas-editor"></div>
+      <button onclick="addQuadroTarifa()" style="width:100%;padding:8px;border:1px dashed #ccc;border-radius:8px;background:transparent;cursor:pointer;font-size:13px;margin-top:8px">+ Adicionar quadro</button>
+    </div>
+
+    <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;border:1px solid #e5e5e0">
+      <div style="font-size:15px;font-weight:600;margin-bottom:14px">Condições Gerais</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Faturamento</label>
+          <select class="fi" id="e-cond_faturamento">
+            <option value="Quinzenal" ${(sc.cond_faturamento||'Quinzenal')==='Quinzenal'?'selected':''}>Quinzenal</option>
+            <option value="Mensal" ${sc.cond_faturamento==='Mensal'?'selected':''}>Mensal</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Reajustes</label><input class="fi" id="e-cond_reajustes" value="${sc.cond_reajustes||'IPCA a cada 12 meses'}"></div>
+        <div class="fg"><label class="fl">Prazo de contrato</label><input class="fi" id="e-cond_prazo_contrato" value="${sc.cond_prazo_contrato||''}" placeholder="Ex: 12 meses ou SPOT até nov/26"></div>
+        <div class="fg"><label class="fl">Faturamento mínimo</label><input class="fi" id="e-cond_fat_minimo" value="${sc.cond_fat_minimo||'R$60.000,00'}"></div>
+        <div class="fg"><label class="fl">Multa</label><input class="fi" id="e-cond_multa" value="${sc.cond_multa||'Não aplicado'}"></div>
+        <div class="fg"><label class="fl">Notice (saída/prorrogação)</label><input class="fi" id="e-cond_notice" value="${sc.cond_notice||'30 dias'}"></div>
+        <div class="fg"><label class="fl">Prazo de aprovação da fatura</label>
+          <input class="fi" id="e-cond_prazo_aprovacao" value="${sc.cond_prazo_aprovacao||'2 dias úteis após apresentação'}" style="background:var(--bg2)" readonly>
+        </div>
+        <div class="fg"><label class="fl">Prazo de pagamento (dias corridos)</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="fi" id="e-cond_prazo_pagamento_dias" value="${sc.cond_prazo_pagamento_dias||'7'}" style="max-width:80px">
+            <span style="font-size:12px;color:var(--text2)">dias corridos após fatura</span>
+          </div>
+        </div>
+        <div class="fg"><label class="fl">PIS/COFINS</label><input class="fi" value="Inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
+        <div class="fg"><label class="fl">ISS – 2%</label><input class="fi" value="Não inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function preencherDadosDeal(dealId, silencioso=false){
+  if(!dealId)return;
+  const deal=deals.find(d=>d.id===dealId);
+  if(!deal)return;
+  const ni=ge('e-cliente_nome');
+  const ci=ge('e-cliente_contato');
+  const msg=ge('autofill-msg');
+  const cli=clientes.find(c=>c.nome&&deal.contact_name&&c.nome.toLowerCase().includes(deal.contact_name.toLowerCase()));
+  if(ni&&!ni.value) ni.value=cli?.nome||deal.contact_name||deal.name||'';
+  if(ci&&!ci.value) ci.value=deal.contact_name||'';
+  if(msg&&!silencioso) msg.style.display='block';
+}
+
+function renderPropTarifas(){
+  const el=ge('prop-tarifas-editor');if(!el)return;
+  el.innerHTML=propTarifas.map((q,qi)=>`
+    <div style="margin-bottom:12px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <div style="background:var(--bg3);padding:8px 12px;display:flex;align-items:center;gap:8px">
+        <input value="${q.nome||q.quadro||''}" onchange="propTarifas[${qi}].nome=this.value;propTarifas[${qi}].quadro=this.value"
+          style="flex:1;border:none;background:transparent;font-size:13px;font-weight:600;outline:none;color:var(--text)" placeholder="Nome do quadro">
+        <button onclick="addItemPropTarifa(${qi})" class="bicon btn-sm" title="+ Linha">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button onclick="propTarifas.splice(${qi},1);renderPropTarifas()" class="bicon btn-sm" title="Remover quadro">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--accent);color:var(--accent-text)">
+          <th style="padding:6px 10px;text-align:left;font-size:11px;width:50%">Serviço</th>
+          <th style="padding:6px 10px;text-align:left;font-size:11px;width:30%">Un. Cobrança</th>
+          <th style="padding:6px 10px;text-align:right;font-size:11px;width:15%">Valor</th>
+          <th style="width:5%"></th>
+        </tr></thead>
+        <tbody>
+          ${q.itens.map((it,ii)=>`<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:4px 6px"><input value="${it.servico||''}" onchange="propTarifas[${qi}].itens[${ii}].servico=this.value"
+              style="width:100%;border:none;background:transparent;font-size:12px;outline:none" placeholder="Serviço"></td>
+            <td style="padding:4px 6px"><input value="${it.unidade||''}" onchange="propTarifas[${qi}].itens[${ii}].unidade=this.value"
+              style="width:100%;border:none;background:transparent;font-size:12px;outline:none" placeholder="Pallet, m²..."></td>
+            <td style="padding:4px 6px"><input value="${it.valor||''}" onchange="propTarifas[${qi}].itens[${ii}].valor=this.value"
+              style="width:100%;border:none;background:transparent;font-size:12px;outline:none;text-align:right" placeholder="0,00"></td>
+            <td style="text-align:center;padding:4px">
+              <button onclick="propTarifas[${qi}].itens.splice(${ii},1);renderPropTarifas()"
+                style="border:none;background:none;cursor:pointer;color:var(--text3)">×</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('');
+}
+
+function addItemPropTarifa(qi){
+  propTarifas[qi].itens.push({servico:'',unidade:'',valor:''});
+  renderPropTarifas();
+}
+
+function addQuadroTarifa(){
+  propTarifas.push({quadro:'Novo quadro',nome:'Novo quadro',itens:[{servico:'',unidade:'',valor:''}]});
+  renderPropTarifas();
+}
+
+function getPropDados(status){
+  const cid=company?.id||profile?.company_id||null;
   return{
-    numero_po:getV('e-numero_po'),
-    mes_ano:getV('e-mes_ano'),
-    deal_id:getV('e-deal_id')||null,
-    cliente_nome:getV('e-cliente_nome'),
-    cliente_contato:getV('e-cliente_contato'),
-    local_operacao:getV('e-local_operacao'),
-    volume:getV('e-volume'),
-    dimensao_peso:getV('e-dimensao_peso'),
-    tipo_produto:getV('e-tipo_produto'),
-    total_codigos:getV('e-total_codigos'),
-    recebimento:getV('e-recebimento'),
-    expedicao:getV('e-expedicao'),
-    valor_estoque:getV('e-valor_estoque'),
-    sla:getV('e-sla'),
-    fat_coletas:getV('e-fat_coletas'),
-    carregamento:getV('e-carregamento'),
-    docas:getV('e-docas'),
-    operacao_dedicada:getV('e-operacao_dedicada'),
-    estrutura_armazenagem:getV('e-estrutura_armazenagem'),
-    horario_operacional:getV('e-horario_operacional'),
-    cond_faturamento:getV('e-cond_faturamento'),
-    cond_reajustes:getV('e-cond_reajustes'),
-    cond_prazo_contrato:getV('e-cond_prazo_contrato'),
-    cond_fat_minimo:getV('e-cond_fat_minimo'),
-    cond_multa:getV('e-cond_multa'),
-    cond_notice:getV('e-cond_notice'),
-    cond_prazo_aprovacao:getV('e-cond_prazo_aprovacao')||'2 dias úteis após apresentação',
-    cond_prazo_pagamento_dias:getV('e-cond_prazo_pagamento_dias'),
-    tarifas:JSON.stringify(tarifasData),
-    company_id:compId||null,
-    owner_id:ownerId,
+    numero_po:getPropV('e-numero_po'), mes_ano:getPropV('e-mes_ano'),
+    deal_id:getPropV('e-deal_id')||null,
+    cliente_nome:getPropV('e-cliente_nome'), cliente_contato:getPropV('e-cliente_contato'),
+    local_operacao:getPropV('e-local_operacao'), volume:getPropV('e-volume'),
+    dimensao_peso:getPropV('e-dimensao_peso'), tipo_produto:getPropV('e-tipo_produto'),
+    total_codigos:getPropV('e-total_codigos'), recebimento:getPropV('e-recebimento'),
+    expedicao:getPropV('e-expedicao'), valor_estoque:getPropV('e-valor_estoque'),
+    sla:getPropV('e-sla'), fat_coletas:getPropV('e-fat_coletas'),
+    carregamento:getPropV('e-carregamento'), docas:getPropV('e-docas'),
+    operacao_dedicada:getPropV('e-operacao_dedicada'),
+    estrutura_armazenagem:getPropV('e-estrutura_armazenagem'),
+    horario_operacional:getPropV('e-horario_operacional'),
+    cond_faturamento:getPropV('e-cond_faturamento'),
+    cond_reajustes:getPropV('e-cond_reajustes'),
+    cond_prazo_contrato:getPropV('e-cond_prazo_contrato'),
+    cond_fat_minimo:getPropV('e-cond_fat_minimo'),
+    cond_multa:getPropV('e-cond_multa'),
+    cond_notice:getPropV('e-cond_notice'),
+    cond_prazo_aprovacao:getPropV('e-cond_prazo_aprovacao'),
+    cond_prazo_pagamento_dias:getPropV('e-cond_prazo_pagamento_dias'),
+    tarifas:JSON.stringify(propTarifas),
+    company_id:cid, owner_id:cu.id, status,
   };
 }
 
-function preencherDadosDeal(dealId){
-  if(!window.opener||!dealId)return;
-  const deal=window.opener.deals?.find(d=>d.id===dealId);
-  if(!deal)return;
-  const ni=document.getElementById('e-cliente_nome');
-  const ci=document.getElementById('e-cliente_contato');
-  const msg=document.getElementById('autofill-msg');
-  // Busca cliente pelo nome do contato do negócio
-  const clientes=window.opener.clientes||[];
-  const cliente=clientes.find(c=>
-    (c.nome&&deal.contact_name&&c.nome.toLowerCase().includes(deal.contact_name.toLowerCase()))||
-    (c.nome&&deal.name&&c.nome.toLowerCase().includes(deal.name.toLowerCase()))
-  );
-  if(ni) ni.value=cliente?.nome||deal.contact_name||deal.name||'';
-  if(ci) ci.value=deal.contact_name||'';
-  if(msg&&(ni?.value||ci?.value)) msg.style.display='block';
-}
-
-async function salvar(status){
-  const dados={...getDados(),status};
-  const SB_URL=window.opener?.SB_URL||'';
-  const tok=window.opener?.tok||'';
-  if(!SB_URL||!tok){alert('Sessão expirada. Feche e tente novamente.');return;}
-
-  let res;
-  if(propId){
-    // Atualiza
-    const r=await fetch(SB_URL+'/rest/v1/propostas?id=eq.'+propId,{method:'PATCH',headers:{'Content-Type':'application/json','apikey':window.opener.SB_KEY,'Authorization':'Bearer '+tok,'Prefer':'return=representation'},body:JSON.stringify(dados)});
-    res=await r.json();
+async function salvarProposta(status){
+  const dados=getPropDados(status);
+  const p=propEditando;
+  if(p){
+    await dbUpdate('propostas',p.id,dados);
+    propostas=propostas.map(x=>x.id===p.id?{...x,...dados}:x);
   } else {
-    // Insere e atualiza número PO
-    const r=await fetch(SB_URL+'/rest/v1/propostas',{method:'POST',headers:{'Content-Type':'application/json','apikey':window.opener.SB_KEY,'Authorization':'Bearer '+tok,'Prefer':'return=representation'},body:JSON.stringify(dados)});
-    res=await r.json();
-    // Incrementa número PO no system_config
-    const numAtual=parseInt(dados.numero_po?.replace(/\D/g,'')||'14444');
-    await fetch(SB_URL+'/rest/v1/system_config?chave=eq.po_numero_atual',{method:'PATCH',headers:{'Content-Type':'application/json','apikey':window.opener.SB_KEY,'Authorization':'Bearer '+tok},body:JSON.stringify({valor:String(numAtual+1)})});
+    const res=await dbInsert('propostas',dados);
+    if(res){
+      propostas.unshift(res);
+      propEditando=res;
+      // Incrementa PO
+      const numAtual=parseInt(dados.numero_po?.replace(/\D/g,'')||'14444');
+      await dbUpdate('system_config',null,{valor:String(numAtual+1)});
+      // Usa filter pois system_config não tem update por id simples
+      await sbFetch('PATCH','/rest/v1/system_config?chave=eq.po_numero_atual',{valor:String(numAtual+1)},tok);
+    }
   }
-  await window.opener.loadData();
-  window.opener.render();
-  return res;
 }
 
-async function salvarRascunho(){await salvar('rascunho');alert('Rascunho salvo!');}
-async function enviarParaAprovacao(){await salvar('aguardando_aprovacao');alert('Enviado para aprovação!');window.close();}
+async function salvarRascunho(){
+  try{
+    await salvarProposta('rascunho');
+    alert('Rascunho salvo!');
+    closePropEditor();render();
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+async function enviarParaAprovacao(){
+  try{
+    await salvarProposta('aguardando_aprovacao');
+    alert('Enviado para aprovação!');
+    closePropEditor();render();
+  }catch(e){alert('Erro: '+e.message);}
+}
+
 async function salvarEAprovar(){
-  const res=await salvar('aprovada');
-  alert('Proposta salva e aprovada!');
-  window.close();
+  try{
+    await salvarProposta('aprovada');
+    await dbUpdate('propostas',propEditando?.id||'',{aprovado_por:cu.id,aprovado_em:new Date().toISOString()});
+    alert('Proposta salva e aprovada!');
+    closePropEditor();render();
+  }catch(e){alert('Erro: '+e.message);}
 }
 
-renderTarifas();
-'+'<'+'/'+'script></body></html>`;
-}
 
 async function aprovarProposta(id){
   if(!confirm('Aprovar esta proposta?'))return;
