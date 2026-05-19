@@ -3137,6 +3137,7 @@ td input:focus{background:#f7f7f5;border-radius:4px}
     <div class="fg full"><label>Negócio vinculado (Pipeline)</label>
       <select id="e-deal_id" onchange="preencherDadosDeal(this.value)"><option value="">Selecione</option>${dealOpts}</select>
     </div>
+    <div id="autofill-msg" style="font-size:11px;color:#1a4a8a;display:none;margin-top:-6px;margin-bottom:6px">✓ Dados preenchidos automaticamente do negócio</div>
     <div class="fg"><label>Cliente / Empresa</label><input id="e-cliente_nome" value="${sc.cliente_nome||''}"></div>
     <div class="fg"><label>Contato (aos cuidados de)</label><input id="e-cliente_contato" value="${sc.cliente_contato||''}"></div>
   </div>
@@ -3146,13 +3147,25 @@ td input:focus{background:#f7f7f5;border-radius:4px}
 <div class="card">
   <h2>Escopo Técnico</h2>
   <div class="grid2">
-    <div class="fg"><label>Local da operação</label><input id="e-local_operacao" value="${sc.local_operacao||d.local_operacao}"></div>
+    <div class="fg"><label>Local da operação</label>
+      <select id="e-local_operacao">
+        <option value="MKLOG ITU" ${(sc.local_operacao||d.local_operacao)==='MKLOG ITU'?'selected':''}>MKLOG ITU</option>
+        <option value="MKLOG Salto" ${sc.local_operacao==='MKLOG Salto'?'selected':''}>MKLOG Salto</option>
+      </select></div>
     <div class="fg"><label>Volume</label><input id="e-volume" value="${sc.volume||d.volume}"></div>
     <div class="fg"><label>Dimensão e peso do maior pallet</label><input id="e-dimensao_peso" value="${sc.dimensao_peso||d.dimensao_peso}"></div>
     <div class="fg"><label>Tipo de produto</label><input id="e-tipo_produto" value="${sc.tipo_produto||d.tipo_produto}"></div>
     <div class="fg"><label>Total de códigos (SKUs)</label><input id="e-total_codigos" value="${sc.total_codigos||d.total_codigos}"></div>
-    <div class="fg"><label>Recebimento</label><input id="e-recebimento" value="${sc.recebimento||d.recebimento}"></div>
-    <div class="fg"><label>Expedição</label><input id="e-expedicao" value="${sc.expedicao||d.expedicao}"></div>
+    <div class="fg"><label>Recebimento</label>
+      <select id="e-recebimento">
+        <option value="Paletizado" ${(sc.recebimento||d.recebimento)==='Paletizado'?'selected':''}>Paletizado</option>
+        <option value="Batido" ${sc.recebimento==='Batido'?'selected':''}>Batido</option>
+      </select></div>
+    <div class="fg"><label>Expedição</label>
+      <select id="e-expedicao">
+        <option value="Paletizado" ${(sc.expedicao||d.expedicao)==='Paletizado'?'selected':''}>Paletizado</option>
+        <option value="Batido" ${sc.expedicao==='Batido'?'selected':''}>Batido</option>
+      </select></div>
     <div class="fg"><label>Valor em estoque</label><input id="e-valor_estoque" value="${sc.valor_estoque||d.valor_estoque}"></div>
     <div class="fg full"><label>SLA</label><input id="e-sla" value="${sc.sla||d.sla}"></div>
     <div class="fg"><label>Faturamento e coletas</label><input id="e-fat_coletas" value="${sc.fat_coletas||d.fat_coletas}"></div>
@@ -3186,7 +3199,7 @@ td input:focus{background:#f7f7f5;border-radius:4px}
     <div class="fg"><label>Faturamento mínimo</label><input id="e-cond_fat_minimo" value="${sc.cond_fat_minimo||'R$60.000,00'}"></div>
     <div class="fg"><label>Multa</label><input id="e-cond_multa" value="${sc.cond_multa||'Não aplicado'}"></div>
     <div class="fg"><label>Notice (dias)</label><input id="e-cond_notice" value="${sc.cond_notice||'30 dias'}"></div>
-    <div class="fg"><label>Prazo de aprovação</label><input id="e-cond_prazo_aprovacao" value="${sc.cond_prazo_aprovacao||'5 dias úteis após apresentação'}" readonly style="background:#f7f7f5"></div>
+    <div class="fg"><label>Prazo de aprovação da fatura</label><input id="e-cond_prazo_aprovacao" value="${sc.cond_prazo_aprovacao||'2 dias úteis após apresentação'}" readonly style="background:#f7f7f5"></div>
     <div class="fg"><label>Prazo de pagamento (dias)</label>
       <div style="display:flex;align-items:center;gap:6px">
         <input id="e-cond_prazo_pagamento_dias" value="${sc.cond_prazo_pagamento_dias||'60'}" style="width:80px">
@@ -3263,7 +3276,7 @@ function getDados(){
     cond_fat_minimo:getV('e-cond_fat_minimo'),
     cond_multa:getV('e-cond_multa'),
     cond_notice:getV('e-cond_notice'),
-    cond_prazo_aprovacao:getV('e-cond_prazo_aprovacao'),
+    cond_prazo_aprovacao:getV('e-cond_prazo_aprovacao')||'2 dias úteis após apresentação',
     cond_prazo_pagamento_dias:getV('e-cond_prazo_pagamento_dias'),
     tarifas:JSON.stringify(tarifasData),
     company_id:compId||null,
@@ -3277,8 +3290,16 @@ function preencherDadosDeal(dealId){
   if(!deal)return;
   const ni=document.getElementById('e-cliente_nome');
   const ci=document.getElementById('e-cliente_contato');
-  if(ni&&!ni.value&&deal.contact_name)ni.value=deal.contact_name;
-  if(ci&&!ci.value&&deal.name)ci.value=deal.name;
+  const msg=document.getElementById('autofill-msg');
+  // Busca cliente pelo nome do contato do negócio
+  const clientes=window.opener.clientes||[];
+  const cliente=clientes.find(c=>
+    (c.nome&&deal.contact_name&&c.nome.toLowerCase().includes(deal.contact_name.toLowerCase()))||
+    (c.nome&&deal.name&&c.nome.toLowerCase().includes(deal.name.toLowerCase()))
+  );
+  if(ni) ni.value=cliente?.nome||deal.contact_name||deal.name||'';
+  if(ci) ci.value=deal.contact_name||'';
+  if(msg&&(ni?.value||ci?.value)) msg.style.display='block';
 }
 
 async function salvar(status){
