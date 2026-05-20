@@ -3053,7 +3053,8 @@ function rAprovarPropostas(){
 
 function openPropostaDetalhe(id){openPropostaEditor(id);}
 
-async function openPropostaEditor(id=null){
+async function openPropostaEditor(id=null, preDealId=null){
+  const dealPreFill=preDealId?deals.find(d=>d.id===preDealId):null;
   const p=id?propostas.find(x=>x.id===id):null;
   propEditando=p||null;
   const role=profile?.role||'vendedor';
@@ -3069,7 +3070,7 @@ async function openPropostaEditor(id=null){
   }
 
   const mes_ano=p?.mes_ano||new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-  const dealOpts=deals.filter(d=>!['Fechado','Perdido'].includes(d.stage)).map(d=>`<option value="${d.id}" ${p&&p.deal_id===d.id?'selected':''}>${d.name} · ${d.contact_name||''}</option>`).join('');
+  const dealOpts=deals.filter(d=>!['Fechado','Perdido'].includes(d.stage)).map(d=>`<option value="${d.id}" ${(p&&p.deal_id===d.id)||(preDealId&&d.id===preDealId)?'selected':''}>${d.name} · ${d.contact_name||''}</option>`).join('');
 
   let tarifas=[];
   try{
@@ -3106,8 +3107,8 @@ async function openPropostaEditor(id=null){
     document.body.appendChild(overlay);
   }
 
-  const sc=p||{};
-  const d=ESCOPO_DEFAULTS;
+  const sc={...(p||{})};
+  if(dealPreFill){if(!sc.cliente_nome)sc.cliente_nome=dealPreFill.empresa||dealPreFill.contact_name||'';if(!sc.cliente_contato)sc.cliente_contato=dealPreFill.contact_name||'';if(!sc.deal_id)sc.deal_id=preDealId;}
   overlay.innerHTML=buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,id);
   overlay.style.display='block';
   renderPropTarifas();
@@ -3229,6 +3230,24 @@ function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
   </div>`;
 }
 
+function autoFillEmpresaDeal(contactName){
+  const contato=contacts.find(c=>c.name===contactName);
+  const empEl=ge('fdemp');
+  if(empEl&&contato?.company&&!empEl.value) empEl.value=contato.company;
+}
+
+async function gerarPropostaDoDeal(dealId){
+  const d=deals.find(x=>x.id===dealId);
+  if(!d)return;
+  // Verifica se já tem proposta rascunho/negociação
+  const jatem=propostas.find(p=>p.deal_id===dealId&&['rascunho','aguardando_aprovacao'].includes(p.status));
+  if(jatem){
+    if(!confirm('Este negócio já tem uma proposta em andamento. Deseja criar uma nova versão?'))return;
+  }
+  // Abre editor com dados pré-preenchidos
+  await openPropostaEditor(null, dealId);
+}
+
 function preencherDadosDeal(dealId, silencioso=false){
   if(!dealId)return;
   const deal=deals.find(d=>d.id===dealId);
@@ -3236,8 +3255,9 @@ function preencherDadosDeal(dealId, silencioso=false){
   const ni=ge('e-cliente_nome');
   const ci=ge('e-cliente_contato');
   const msg=ge('autofill-msg');
-  const cli=clientes.find(c=>c.nome&&deal.contact_name&&c.nome.toLowerCase().includes(deal.contact_name.toLowerCase()));
-  if(ni&&!ni.value) ni.value=cli?.nome||deal.contact_name||deal.name||'';
+  // Busca empresa via contacts
+  const contato=contacts.find(c=>c.name===deal.contact_name);
+  if(ni&&!ni.value) ni.value=deal.empresa||contato?.company||deal.contact_name||'';
   if(ci&&!ci.value) ci.value=deal.contact_name||'';
   if(msg&&!silencioso) msg.style.display='block';
 }
@@ -3333,6 +3353,14 @@ async function salvarProposta(status){
       // Incrementa número PO via REST direto (system_config não tem id numérico)
       const numAtual=parseInt(dados.numero_po?.replace(/\D/g,'')||'14444');
       await sbFetch('PATCH','/rest/v1/system_config?chave=eq.po_numero_atual',{valor:String(numAtual+1)},tok);
+    }
+  }
+  // Automação: move negócio de Prospecção para Negociação ao criar proposta (regra a partir de 2026-05-20)
+  if(dados.deal_id&&['rascunho','aguardando_aprovacao','aprovada'].includes(status)){
+    const dealAut=deals.find(d=>d.id===dados.deal_id);
+    if(dealAut&&dealAut.stage==='Prospecção'&&(dealAut.created_at||'')>='2026-05-20'){
+      await dbUpdate('deals',dados.deal_id,{stage:'Negociação'});
+      deals=deals.map(d=>d.id===dados.deal_id?{...d,stage:'Negociação'}:d);
     }
   }
 }
@@ -3970,12 +3998,25 @@ function renderPipelineBoard(){
     const hStyle=hdrStyle[s]||'';
     return`<div class="stage" style="${stStyle}">
       <div class="shdr" style="${hStyle}"><span>${s}</span><span>${cards.length}</span></div>
-      ${cards.map(d=>`<div class="dcard" onclick="${(role==='admin'||role==='gestor'||d.owner_id===cu.id)?`openModal('deal','${d.id}')`:''}">
-        <div class="dname">${d.name}</div>
-        <div class="dcontact">${d.contact_name||''}</div>
-        <div class="dval">${fmtV(d.value||0)}</div>
-        ${role!=='vendedor'?`<div class="downer">${ownerName(d.owner_id)}</div>`:''}
-      </div>`).join('')}
+      ${cards.map(d=>{
+        const temProposta=propostas.some(p=>p.deal_id===d.id);
+        const podeGerar=(role==='admin'||role==='gestor'||d.owner_id===cu.id);
+        const criado=d.created_at||'';
+        const novaRegra=criado>='2026-05-20';
+        const alertaProposta=novaRegra&&d.stage==='Negociação'&&!temProposta;
+        return`<div class="dcard" onclick="${podeGerar?`openModal('deal','${d.id}')`:''}" style="${alertaProposta?'border-left:3px solid var(--amber-text)':''}">
+          <div class="dname">${d.name}</div>
+          <div class="dcontact" style="color:var(--text2)">${d.empresa?`<strong>${d.empresa}</strong> · `:''}${d.contact_name||''}</div>
+          <div class="dval">${fmtV(d.value||0)}</div>
+          ${role!=='vendedor'?`<div class="downer">${ownerName(d.owner_id)}</div>`:''}
+          ${podeGerar?`<div style="display:flex;gap:4px;margin-top:6px" onclick="event.stopPropagation()">
+            <button class="btn btn-sm" style="font-size:10px;padding:3px 8px;background:var(--accent);color:var(--accent-text);border:none;border-radius:6px;cursor:pointer" onclick="gerarPropostaDoDeal('${d.id}')">
+              📄 Gerar proposta
+            </button>
+            ${alertaProposta?`<span style="font-size:10px;color:var(--amber-text);align-self:center">⚠ Sem proposta</span>`:''}
+          </div>`:''}
+        </div>`;
+      }).join('')}
       ${!cards.length?`<div style="font-size:11px;color:var(--text3);text-align:center;padding:8px 0">Vazio</div>`:''}
     </div>`;
   }).join('');
@@ -4352,7 +4393,7 @@ function openModal(mode,id=null){
     const vendedores=profiles.filter(p=>p.role==='vendedor'||p.role==='gestor');
     const vendedorOpts=vendedores.map(p=>`<option value="${p.id}" ${(c&&c.owner_id===p.id)||((!c||!c.owner_id)&&p.id===cu.id)?'selected':''}>${p.full_name||p.email}</option>`).join('');
     const vendedorField=(role==='admin'||role==='gestor')&&vendedores.length>0?`<div class="fg"><label class="fl">Vendedor responsável</label><select class="fi" id="fowner"><option value="${cu.id}" ${(!c||c.owner_id===cu.id)?'selected':''}>Eu mesmo (${profile?.full_name||''})</option>${vendedorOpts}</select></div>`:'';
-    body.innerHTML=`<div class="fg"><label class="fl">Nome</label><input class="fi" id="fn" value="${c?c.name:''}" placeholder="Nome completo"></div><div class="fg"><label class="fl">Empresa cliente</label><input class="fi" id="fco" value="${c?c.company||'':''}" placeholder="Empresa do contato"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fem" type="email" value="${c?c.email||'':''}" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="fph" value="${c?c.phone||'':''}" placeholder="(11) 99999-0000"></div><div class="fg"><label class="fl">Status</label><select class="fi" id="fst">${['Lead','Prospecto','Cliente','Inativo'].map(s=>`<option ${c&&c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>${vendedorField}`;
+    body.innerHTML=`<div class="fg"><label class="fl">Nome</label><input class="fi" id="fn" value="${c?c.name:''}" placeholder="Nome completo"></div><div class="fg"><label class="fl">Empresa cliente</label><input class="fi" id="fco" value="${c?c.company||'':''}" placeholder="Empresa do contato"></div><div class="fg"><label class="fl">Email</label><input class="fi" id="fem" type="email" value="${c?c.email||'':''}" placeholder="email@empresa.com"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="fph" value="${c?c.phone||'':''}" placeholder="(11) 99999-0000"></div>${vendedorField}`;
     setTimeout(()=>{const e=ge('fn');if(e)e.focus();},100);
 
   }else if(mode==='deal'){
@@ -4371,8 +4412,11 @@ function openModal(mode,id=null){
         </button>
       </div>
       <div id="deal-tab-dados-content">
-        <div class="fg"><label class="fl">Nome do negócio</label><input class="fi" id="fdn" value="${d?d.name:''}" placeholder="Ex: Empresa X - Plano Pro"></div>
-        <div class="fg"><label class="fl">Contato</label><select class="fi" id="fdc">${co||'<option>Adicione contatos primeiro</option>'}</select></div>
+        <div class="fg"><label class="fl">Nome do negócio</label><input class="fi" id="fdn" value="${d?d.name:''}" placeholder="Ex: Empresa X - Armazenagem"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label class="fl">Contato</label><select class="fi" id="fdc" onchange="autoFillEmpresaDeal(this.value)">${co||'<option>Adicione contatos primeiro</option>'}</select></div>
+          <div class="fg"><label class="fl">Empresa</label><input class="fi" id="fdemp" value="${d?d.empresa||'':''}" placeholder="Nome da empresa"></div>
+        </div>
         <div class="fg"><label class="fl">Valor (R$)</label><input class="fi" id="fdv" type="number" value="${d?d.value:''}" placeholder="0"></div>
         <div class="fg"><label class="fl">Estágio</label><select class="fi" id="fds">${STAGES.map(s=>`<option ${d&&d.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>
         ${ownerField}
@@ -4785,7 +4829,7 @@ async function saveModal(){
       const name=ge('fn').value.trim();if(!name)return;
       const ownerEl=ge('fowner');
       const ownerId=ownerEl?ownerEl.value:cu.id;
-      const obj={owner_id:ownerId,company_id:cid,name,company:ge('fco').value||null,email:ge('fem').value||null,phone:ge('fph').value||null,status:ge('fst').value};
+      const obj={owner_id:ownerId,company_id:cid,name,company:ge('fco').value||null,email:ge('fem').value||null,phone:ge('fph').value||null};
       if(mid){await dbUpdate('contacts',mid,obj);contacts=contacts.map(c=>c.id===mid?{...c,...obj}:c);}
       else{const d=await dbInsert('contacts',obj);if(d)contacts.unshift(d);}
 
@@ -4793,7 +4837,8 @@ async function saveModal(){
       const name=ge('fdn').value.trim();if(!name)return;
       const dOwnerEl=ge('fdowner');
       const newOwnerId=dOwnerEl?dOwnerEl.value:cu.id;
-      const obj={owner_id:newOwnerId,company_id:cid,name,contact_name:ge('fdc').value,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
+      const novaEmpresa=ge('fdemp')?.value||null;
+      const obj={owner_id:newOwnerId,company_id:cid,name,contact_name:ge('fdc').value,empresa:novaEmpresa,value:Number(ge('fdv').value)||0,stage:ge('fds').value};
 
       if(mid){
         // Verifica se houve mudança de responsável
