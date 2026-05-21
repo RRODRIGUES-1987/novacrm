@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.22 | Gerado: 2026-05-21 22:42 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.23 | Gerado: 2026-05-21 22:55 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.22';
+const APP_VERSION='v1.0.23';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2599,6 +2599,9 @@ function rFaturamento(){
           ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Registrar NFS-e" onclick="registrarNFSe('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           </button>`:''}
+          ${f.status==='rascunho'?`<button class="bicon btn-sm" title="Excluir" style="color:var(--red-text)" onclick="event.stopPropagation();delFaturamento('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>`:''}
         </div>
       </div>
     </div>`;
@@ -2718,33 +2721,64 @@ async function openFaturaEditor(id=null){
       </div>
     </div>
 
-    <!-- Cliente e Tabela -->
+    <!-- 1. Cliente (primeiro campo) -->
     <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Cliente</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">1. Cliente</div>
+      <div class="fg"><label class="fl">Selecione o cliente *</label>
+        <select class="fi" id="fat-cliente" onchange="onFatClienteChange(this.value)">
+          <option value="">— selecione —</option>${cliOpts}
+        </select>
+      </div>
+      <div id="fat-cliente-info" style="display:none;margin-top:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label class="fl">Tipo de operação</label>
+            <select class="fi" id="fat-tipo-op" onchange="onFatTipoChange(this.value)">
+              <option value="">Selecione</option>
+            </select>
+          </div>
+          <div class="fg"><label class="fl">Responsável pela aprovação</label>
+            <select class="fi" id="fat-responsavel">
+              <option value="">— automático ao selecionar tipo —</option>
+            </select>
+          </div>
+        </div>
+        <div id="fat-tabela-erro" style="display:none;background:var(--red-bg);color:var(--red-text);padding:10px 14px;border-radius:8px;margin-top:10px;font-size:13px">
+          ⚠ Este cliente não possui tabela tarifária ativa. Cadastre uma tabela antes de criar a fatura.
+        </div>
+        <input type="hidden" id="fat-tabela">
+      </div>
+    </div>
+
+    <!-- 2. Período -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">2. Período</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Periodicidade</label>
+          <select class="fi" id="fat-period" onchange="updatePeriodo(this.value)">
+            <option value="quinzenal" ${(f?.periodicidade||'quinzenal')==='quinzenal'?'selected':''}>Quinzenal</option>
+            <option value="mensal" ${f?.periodicidade==='mensal'?'selected':''}>Mensal</option>
+            <option value="avulso" ${f?.periodicidade==='avulso'?'selected':''}>Avulso</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Período início</label><input class="fi" id="fat-ini" type="date" value="${periodoIni}"></div>
+        <div class="fg"><label class="fl">Período fim</label><input class="fi" id="fat-fim" type="date" value="${periodoFim}"></div>
+      </div>
+    </div>
+
+    <!-- 3. Linhas de cobrança -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">3. Linhas de cobrança</div>
+      <div id="fat-linhas-grid"><div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">Selecione o cliente para carregar as linhas</div></div>
+      <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha manual</button>
+    </div>
+
+    <!-- 4. ISS e Observações -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">4. Impostos e observações</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fg"><label class="fl">Cliente *</label>
-          <select class="fi" id="fat-cliente" onchange="carregarTabelaCliente(this.value)">
-            <option value="">Selecione o cliente</option>${cliOpts}
-          </select>
-        </div>
-        <div class="fg"><label class="fl">Tabela tarifária</label>
-          <select class="fi" id="fat-tabela" onchange="carregarLinhasFatura(this.value)">
-            <option value="">— será preenchido automaticamente —</option>${tabOpts}
-          </select>
-        </div>
-        <div class="fg"><label class="fl">Tipo de operação</label>
-          <select class="fi" id="fat-tipo-op" onchange="carregarResponsavelFatura(this.value)">
-            <option value="">Selecione o cliente primeiro</option>
-          </select>
-        </div>
-        <div class="fg"><label class="fl">Responsável pela aprovação</label>
-          <select class="fi" id="fat-responsavel">
-            <option value="">— será preenchido automaticamente —</option>
-          </select>
-        </div>
         <div class="fg"><label class="fl">ISS</label>
           <select class="fi" id="fat-iss-incluso" onchange="recalcFatura()">
-            <option value="nao" ${!f?.iss_incluso||f?.iss_incluso===false?'selected':''}>Não incluso (2%)</option>
+            <option value="nao" ${!f?.iss_incluso?'selected':''}>Não incluso (2%)</option>
             <option value="sim" ${f?.iss_incluso?'selected':''}>Incluso nos valores</option>
           </select>
         </div>
@@ -2754,85 +2788,114 @@ async function openFaturaEditor(id=null){
       </div>
     </div>
 
-    <!-- Linhas de cobrança -->
-    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Linhas de cobrança</div>
-      <div id="fat-linhas-grid"></div>
-      <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha manual</button>
-    </div>
-
-    <!-- Totais -->
+    <!-- 5. Totais -->
     <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
       <div id="fat-totais"></div>
     </div>
   </div>`;
 
   overlay.style.display='block';
-  // Se editando, carrega dados do cliente/tabela
+  // Se editando, carrega dados
   if(f?.cliente_id){
-    await carregarTabelaCliente(f.cliente_id);
-    if(f.tabela_id){const st=ge('fat-tabela');if(st)st.value=f.tabela_id;}
-    if(f.tipo_operacao){const to=ge('fat-tipo-op');if(to){to.value=f.tipo_operacao;carregarResponsavelFatura(f.tipo_operacao);}}
+    await onFatClienteChange(f.cliente_id);
+    if(f.tipo_operacao){
+      const to=ge('fat-tipo-op');
+      if(to){to.value=f.tipo_operacao;onFatTipoChange(f.tipo_operacao);}
+    }
     if(f.responsavel_id){const rs=ge('fat-responsavel');if(rs)rs.value=f.responsavel_id;}
-    if(f.tabela_id) carregarLinhasFatura(f.tabela_id);
   } else {
-    renderLinhasFatura();
+    recalcFatura();
   }
-  recalcFatura();
 }
 
 function closeFaturaEditor(){
   const el=ge('fatura-editor-overlay');if(el)el.style.display='none';
 }
 
-async function carregarTabelaCliente(clienteId){
-  const sel=ge('fat-tabela');
+async function onFatClienteChange(clienteId){
+  const info=ge('fat-cliente-info');
+  const erroEl=ge('fat-tabela-erro');
   const tipoSel=ge('fat-tipo-op');
-  if(!clienteId){
-    if(sel)sel.innerHTML='<option value="">— será preenchido automaticamente —</option>';
-    if(tipoSel)tipoSel.innerHTML='<option value="">Selecione o cliente primeiro</option>';
-    return;
-  }
+  const respSel=ge('fat-responsavel');
+  window._fatContatos=[];
+
+  if(!clienteId){if(info)info.style.display='none';return;}
+
+  if(info)info.style.display='block';
+
   const cli=clientes.find(c=>c.id===clienteId);
 
-  // Filtra tabelas do cliente
-  const tabDoCliente=tabelasTarifarias.filter(t=>t.status!=='pendente'&&
+  // Busca tabela do cliente
+  const tabela=tabelasTarifarias.find(t=>t.status!=='pendente'&&
     (t.cliente_id===clienteId||(cli&&t.cliente_nome&&t.cliente_nome.toLowerCase()===cli.nome.toLowerCase()))
   );
 
-  if(sel){
-    sel.innerHTML=`<option value="">Selecione</option>`+tabDoCliente.map(t=>`<option value="${t.id}">${t.nome||t.cliente_nome}</option>`).join('');
-    // Auto-seleciona se só tem uma
-    if(tabDoCliente.length===1){
-      sel.value=tabDoCliente[0].id;
-      carregarLinhasFatura(tabDoCliente[0].id);
+  const tabelaInput=ge('fat-tabela');
+
+  if(tabela){
+    if(tabelaInput)tabelaInput.value=tabela.id;
+    if(erroEl)erroEl.style.display='none';
+    // Carrega linhas automaticamente
+    carregarLinhasFatura(tabela.id);
+    // Aplica periodicidade da tabela
+    if(tabela.cond_faturamento){
+      const period=ge('fat-period');
+      if(period){
+        if(tabela.cond_faturamento.toLowerCase().includes('quinzenal'))period.value='quinzenal';
+        else if(tabela.cond_faturamento.toLowerCase().includes('mensal'))period.value='mensal';
+        updatePeriodo(period.value);
+      }
     }
+    // Aplica ISS da tabela (se disponível)
+    const issEl=ge('fat-iss-incluso');
+    if(issEl&&tabela.cond_iss!==undefined){
+      issEl.value=tabela.cond_iss?'sim':'nao';
+    }
+  } else {
+    if(tabelaInput)tabelaInput.value='';
+    if(erroEl)erroEl.style.display='block';
+    fatLinhas=[];
+    renderLinhasFatura();
   }
 
-  // Busca tipos de operação do cliente (via clientes_contatos)
+  // Busca tipos de operação
   if(tipoSel){
     tipoSel.innerHTML='<option value="">Carregando...</option>';
     try{
       const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}`);
-      const tipos=[...new Set(contatos.map(c=>c.tipo_operacao).filter(Boolean))];
-      tipoSel.innerHTML=`<option value="">Selecione o tipo</option>`+tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
-      // Guarda contatos para uso no responsável
       window._fatContatos=contatos;
+      const tipos=[...new Set(contatos.map(c=>c.tipo_operacao).filter(Boolean))];
+      if(tipos.length){
+        tipoSel.innerHTML=`<option value="">Selecione</option>`+tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
+        // Auto-seleciona se só tem um tipo
+        if(tipos.length===1){
+          tipoSel.value=tipos[0];
+          onFatTipoChange(tipos[0]);
+        }
+      } else {
+        tipoSel.innerHTML='<option value="">Nenhum tipo de operação cadastrado</option>';
+      }
     }catch(e){
-      tipoSel.innerHTML='<option value="">Nenhum tipo cadastrado</option>';
+      tipoSel.innerHTML='<option value="">Erro ao carregar tipos</option>';
     }
   }
+  recalcFatura();
 }
 
-function carregarResponsavelFatura(tipo){
+function onFatTipoChange(tipo){
   const sel=ge('fat-responsavel');if(!sel)return;
   const contatos=(window._fatContatos||[]).filter(c=>c.tipo_operacao===tipo);
   if(contatos.length){
     sel.innerHTML=`<option value="">Selecione</option>`+contatos.map(c=>`<option value="${c.id}">${c.nome}${c.cargo?' · '+c.cargo:''}</option>`).join('');
+    // Auto-seleciona se só tem um
+    if(contatos.length===1)sel.value=contatos[0].id;
   } else {
     sel.innerHTML='<option value="">Nenhum responsável para este tipo</option>';
   }
 }
+
+async function carregarTabelaCliente(clienteId){onFatClienteChange(clienteId);}
+function carregarResponsavelFatura(tipo){onFatTipoChange(tipo);}
 
 function carregarLinhasFatura(tabelaId){
   const tabela=tabelasTarifarias.find(t=>t.id===tabelaId);
