@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.18 | Gerado: 2026-05-21 13:17 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.19 | Gerado: 2026-05-21 15:59 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.18';
+const APP_VERSION='v1.0.19';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2548,13 +2548,486 @@ async function delTabelaTarifaria(id){
 
 // ── MÓDULO FINANCEIRO ──
 const FAT_STATUS={
-  a_faturar:{label:'A faturar',cls:'bdg bb'},
-  a_faturar_atraso:{label:'A faturar em atraso',cls:'bdg ba'},
-  a_vencer:{label:'A vencer',cls:'bdg ba'},
-  vencida:{label:'Vencida',cls:'',style:'background:var(--red-bg);color:var(--red-text)'},
-  pago_prazo:{label:'Pago no prazo',cls:'bdg bg'},
-  pago_atraso:{label:'Pago em atraso',cls:'',style:'background:var(--amber-bg);color:var(--amber-text)'},
+  rascunho:      {label:'Rascunho',         color:'var(--text2)',       bg:'var(--bg3)'},
+  aguardando:    {label:'Aguard. aprovação', color:'var(--amber-text)',  bg:'var(--amber-bg)'},
+  aprovado:      {label:'Aprovado',          color:'var(--blue-text)',   bg:'var(--blue-bg)'},
+  enviado:       {label:'Enviado ao cliente',color:'var(--purple-text)', bg:'var(--purple-bg)'},
+  autorizado:    {label:'Autorizado',        color:'var(--green-text)',  bg:'var(--green-bg)'},
+  nfse_emitida:  {label:'NFS-e emitida',     color:'var(--green-text)',  bg:'var(--green-bg)'},
+  cancelado:     {label:'Cancelado',         color:'var(--red-text)',    bg:'var(--red-bg)'},
 };
+
+// Número sequencial de fatura
+let fatNumeroAtual=1000;
+
+function getFatNumero(){
+  const max=faturamento.reduce((m,f)=>{
+    const n=parseInt((f.numero_fatura||'').replace(/\D/g,''));
+    return n>m?n:m;
+  },fatNumeroAtual);
+  return String(max+1).padStart(4,'0');
+}
+
+function rFaturamento(){
+  const role=profile?.role||'vendedor';
+  const isGestor=['gestor','admin','adm'].includes(role);
+  const pendAprov=faturamento.filter(f=>f.status==='aguardando').length;
+  const totalAutorizado=faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
+
+  const rows=faturamento.map((f,i)=>{
+    const cli=clientes.find(c=>c.id===f.cliente_id);
+    const st=FAT_STATUS[f.status]||FAT_STATUS.rascunho;
+    return`<div class="li" style="cursor:pointer" onclick="openFaturaEditor('${f.id}')">
+      <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">${f.numero_fatura||'—'}</div>
+      <div class="linfo">
+        <div class="lname">${cli?.nome||f.cliente_nome||'—'}</div>
+        <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
+          ${f.periodo_inicio?`<span>${fmtDate(f.periodo_inicio)} → ${fmtDate(f.periodo_fim)}</span>`:''}
+          ${f.total?`<span>· ${fmtV(f.total)}</span>`:''}
+          ${f.nfse_numero?`<span>· NFS-e: ${f.nfse_numero}</span>`:''}
+        </div>
+      </div>
+      <div class="lright">
+        <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:${st.bg};color:${st.color};white-space:nowrap">${st.label}</span>
+        <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
+          ${isGestor&&f.status==='aguardando'?`<button class="bicon btn-sm" title="Aprovar" style="color:var(--green)" onclick="aprovarFatura('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>`:''}
+          ${f.status==='aprovado'?`<button class="bicon btn-sm" title="Registrar autorização cliente" onclick="registrarAutorizacao('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg>
+          </button>`:''}
+          ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Registrar NFS-e" onclick="registrarNFSe('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </button>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return`
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Total faturas</div>
+      <div style="font-size:24px;font-weight:700">${faturamento.length}</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Aguard. aprovação</div>
+      <div style="font-size:24px;font-weight:700;color:${pendAprov>0?'var(--amber-text)':'var(--text)'}">${pendAprov}</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Total autorizado</div>
+      <div style="font-size:20px;font-weight:700;color:var(--green-text)">${fmtV(totalAutorizado)}</div>
+    </div>
+  </div>
+  <div class="sechdr">
+    <div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Buscar cliente, fatura..." oninput="filterFaturamento(this.value)">
+    </div>
+    <button class="btn btn-p btn-sm" onclick="openFaturaEditor()">+ Nova fatura</button>
+  </div>
+  <div id="fat-list">
+    ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma fatura cadastrada</p></div>'}
+  </div>`;
+}
+
+function filterFaturamento(q){
+  const f=faturamento.filter(f=>{
+    const cli=clientes.find(c=>c.id===f.cliente_id);
+    return(cli?.nome||f.cliente_nome||'').toLowerCase().includes(q.toLowerCase())||
+      (f.numero_fatura||'').toLowerCase().includes(q.toLowerCase());
+  });
+  const el=ge('fat-list');if(!el)return;
+  if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
+  el.innerHTML=f.map((f,i)=>{
+    const cli=clientes.find(c=>c.id===f.cliente_id);
+    const st=FAT_STATUS[f.status]||FAT_STATUS.rascunho;
+    return`<div class="li" style="cursor:pointer" onclick="openFaturaEditor('${f.id}')">
+      <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">${f.numero_fatura||'—'}</div>
+      <div class="linfo"><div class="lname">${cli?.nome||'—'}</div>
+      <div class="lsub">${f.periodo_inicio?fmtDate(f.periodo_inicio)+' → '+fmtDate(f.periodo_fim):''} ${f.total?'· '+fmtV(f.total):''}</div></div>
+      <div class="lright"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:${st.bg};color:${st.color}">${st.label}</span></div>
+    </div>`;
+  }).join('');
+}
+
+// Editor de fatura em overlay
+let faturaEditando=null;
+let fatLinhas=[];
+
+async function openFaturaEditor(id=null){
+  const f=id?faturamento.find(x=>x.id===id):null;
+  faturaEditando=f||null;
+  try{fatLinhas=JSON.parse(f?.linhas||'[]');}catch(e){fatLinhas=[];}
+
+  const cid=company?.id||profile?.company_id||null;
+  const role=profile?.role||'vendedor';
+  const num=f?.numero_fatura||getFatNumero();
+  const hoje=new Date().toISOString().slice(0,10);
+
+  // Calcula período padrão (quinzenal atual)
+  const d=new Date();
+  const dia=d.getDate();
+  let pIni,pFim;
+  if(dia<=15){pIni=new Date(d.getFullYear(),d.getMonth(),1);pFim=new Date(d.getFullYear(),d.getMonth(),15);}
+  else{pIni=new Date(d.getFullYear(),d.getMonth(),16);pFim=new Date(d.getFullYear(),d.getMonth()+1,0);}
+  const periodoIni=f?.periodo_inicio||pIni.toISOString().slice(0,10);
+  const periodoFim=f?.periodo_fim||pFim.toISOString().slice(0,10);
+
+  const cliOpts=clientes.filter(c=>c.status!=='pendente').map(c=>`<option value="${c.id}" ${f?.cliente_id===c.id?'selected':''}>${c.nome}</option>`).join('');
+  const tabOpts=tabelasTarifarias.filter(t=>t.status!=='pendente').map(t=>`<option value="${t.id}" ${f?.tabela_id===t.id?'selected':''}>${t.nome||t.cliente_nome}</option>`).join('');
+
+  let overlay=ge('fatura-editor-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='fatura-editor-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:#f7f7f5;z-index:300;overflow-y:auto;display:none';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML=`<div style="max-width:900px;margin:0 auto;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;position:sticky;top:0;background:#f7f7f5;padding:12px 0;z-index:10;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:18px;font-weight:700">${f?'Editar fatura':'Nova fatura'}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">Nº ${num}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="closeFaturaEditor()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">✕ Fechar</button>
+        <button onclick="salvarFaturaRascunho()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>
+        ${role==='admin'||role==='adm'||role==='gestor'?`<button onclick="salvarFaturaAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Aprovar</button>`:`<button onclick="enviarFaturaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`}
+      </div>
+    </div>
+
+    <!-- Identificação -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Identificação</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Nº Fatura</label><input class="fi" id="fat-num" value="${num}" readonly style="background:var(--bg2)"></div>
+        <div class="fg"><label class="fl">Periodicidade</label>
+          <select class="fi" id="fat-period" onchange="updatePeriodo(this.value)">
+            <option value="quinzenal" ${(f?.periodicidade||'quinzenal')==='quinzenal'?'selected':''}>Quinzenal</option>
+            <option value="mensal" ${f?.periodicidade==='mensal'?'selected':''}>Mensal</option>
+            <option value="avulso" ${f?.periodicidade==='avulso'?'selected':''}>Avulso</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Status</label>
+          <input class="fi" value="${FAT_STATUS[f?.status||'rascunho']?.label||'Rascunho'}" readonly style="background:var(--bg2)">
+        </div>
+        <div class="fg"><label class="fl">Período início</label><input class="fi" id="fat-ini" type="date" value="${periodoIni}"></div>
+        <div class="fg"><label class="fl">Período fim</label><input class="fi" id="fat-fim" type="date" value="${periodoFim}"></div>
+        <div class="fg"><label class="fl">Data emissão</label><input class="fi" id="fat-emissao" type="date" value="${f?.data_emissao||hoje}"></div>
+      </div>
+    </div>
+
+    <!-- Cliente e Tabela -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Cliente</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Cliente</label>
+          <select class="fi" id="fat-cliente" onchange="carregarTabelaCliente(this.value)">
+            <option value="">Selecione</option>${cliOpts}
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Tabela tarifária</label>
+          <select class="fi" id="fat-tabela" onchange="carregarLinhasFatura(this.value)">
+            <option value="">Selecione</option>${tabOpts}
+          </select>
+        </div>
+        <div class="fg"><label class="fl">ISS</label>
+          <select class="fi" id="fat-iss-incluso" onchange="recalcFatura()">
+            <option value="nao" ${!f?.iss_incluso||f?.iss_incluso===false?'selected':''}>Não incluso (2%)</option>
+            <option value="sim" ${f?.iss_incluso?'selected':''}>Incluso nos valores</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Observações</label>
+          <input class="fi" id="fat-obs" value="${f?.observacoes||''}">
+        </div>
+      </div>
+    </div>
+
+    <!-- Linhas de cobrança -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">Linhas de cobrança</div>
+      <div id="fat-linhas-grid"></div>
+      <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha</button>
+    </div>
+
+    <!-- Totais -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+      <div id="fat-totais"></div>
+    </div>
+  </div>`;
+
+  overlay.style.display='block';
+  renderLinhasFatura();
+  recalcFatura();
+}
+
+function closeFaturaEditor(){
+  const el=ge('fatura-editor-overlay');if(el)el.style.display='none';
+}
+
+function carregarTabelaCliente(clienteId){
+  // Filtra tabelas do cliente selecionado
+  const tabOpts=tabelasTarifarias.filter(t=>t.status!=='pendente'&&
+    (t.cliente_id===clienteId||clientes.find(c=>c.id===clienteId&&t.cliente_nome===c.nome))
+  ).map(t=>`<option value="${t.id}">${t.nome||t.cliente_nome}</option>`).join('');
+  const sel=ge('fat-tabela');
+  if(sel) sel.innerHTML=`<option value="">Selecione</option>${tabOpts||tabelasTarifarias.filter(t=>t.status!=='pendente').map(t=>`<option value="${t.id}">${t.nome}</option>`).join('')}`;
+}
+
+function carregarLinhasFatura(tabelaId){
+  const tabela=tabelasTarifarias.find(t=>t.id===tabelaId);
+  if(!tabela)return;
+  let tarifas=[];
+  try{tarifas=JSON.parse(tabela.tarifas||'[]');}catch(e){}
+  // Monta linhas a partir das tarifas
+  fatLinhas=tarifas.flatMap(q=>q.itens.filter(i=>i.servico).map(it=>({
+    quadro:q.quadro||q.nome,
+    servico:it.servico,
+    unidade:it.unidade,
+    preco_unitario:it.valor,
+    quantidade:'',
+    subtotal:0,
+    tipo:it.valor?.includes('%')?'percentual':'unitario',
+  })));
+  renderLinhasFatura();
+  recalcFatura();
+}
+
+function renderLinhasFatura(){
+  const el=ge('fat-linhas-grid');if(!el)return;
+  if(!fatLinhas.length){el.innerHTML='<div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">Selecione uma tabela tarifária para carregar as linhas</div>';return;}
+
+  // Agrupa por quadro
+  const quadros=[...new Set(fatLinhas.map(l=>l.quadro))];
+  el.innerHTML=quadros.map(q=>{
+    const itens=fatLinhas.filter(l=>l.quadro===q);
+    const qIdx=fatLinhas.findIndex(l=>l.quadro===q);
+    return`<div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:5px 8px;background:var(--bg3);border-radius:6px">${q}</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--accent)">
+          <th style="padding:5px 8px;text-align:left;font-size:11px;color:var(--accent-text);width:40%">Serviço</th>
+          <th style="padding:5px 8px;text-align:center;font-size:11px;color:var(--accent-text);width:15%">Un.</th>
+          <th style="padding:5px 8px;text-align:right;font-size:11px;color:var(--accent-text);width:15%">Preço Unit.</th>
+          <th style="padding:5px 8px;text-align:center;font-size:11px;color:var(--accent-text);width:15%">Qtd/Base</th>
+          <th style="padding:5px 8px;text-align:right;font-size:11px;color:var(--accent-text);width:15%">Subtotal</th>
+        </tr></thead>
+        <tbody>
+          ${itens.map((l,ri)=>{
+            const gi=fatLinhas.indexOf(l);
+            const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
+            return`<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:4px 8px;font-size:12px">${l.servico}</td>
+              <td style="padding:4px 8px;font-size:12px;text-align:center">${l.unidade||''}</td>
+              <td style="padding:4px 8px;font-size:12px;text-align:right">${l.preco_unitario||''}</td>
+              <td style="padding:4px 6px">
+                <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;calcLinhaFatura(${gi});recalcFatura()"
+                  style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:center"
+                  placeholder="${isPerc?'Valor R$':'Qtd'}">
+              </td>
+              <td style="padding:4px 8px;font-size:12px;text-align:right;font-weight:600;color:var(--text)" id="sub-${gi}">
+                ${l.subtotal?fmtV(l.subtotal):'—'}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }).join('');
+}
+
+function calcLinhaFatura(idx){
+  const l=fatLinhas[idx];
+  if(!l)return;
+  const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
+  const preco=parseFloat(String(l.preco_unitario).replace('%','').replace(',','.').replace(/[^\d.]/g,''))||0;
+  const qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
+  if(isPerc){l.subtotal=(preco/100)*qtd;}
+  else{l.subtotal=preco*qtd;}
+  const el=ge(`sub-${idx}`);
+  if(el)el.textContent=l.subtotal?fmtV(l.subtotal):'—';
+}
+
+function addLinhaFatura(){
+  fatLinhas.push({quadro:'Extras',servico:'',unidade:'',preco_unitario:'',quantidade:'',subtotal:0,tipo:'unitario'});
+  renderLinhasFatura();
+}
+
+function recalcFatura(){
+  const subtotal=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const issIncluso=ge('fat-iss-incluso')?.value==='sim';
+  const issVal=issIncluso?0:subtotal*0.02;
+  const total=subtotal+issVal;
+
+  const el=ge('fat-totais');
+  if(!el)return;
+  el.innerHTML=`
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="display:flex;gap:40px;font-size:13px">
+        <span style="color:var(--text2)">Subtotal:</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
+      </div>
+      ${!issIncluso?`<div style="display:flex;gap:40px;font-size:13px">
+        <span style="color:var(--text2)">ISS (2%):</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(issVal)}</span>
+      </div>`:''}
+      <div style="display:flex;gap:40px;font-size:16px;border-top:2px solid var(--border);padding-top:8px;margin-top:4px">
+        <span style="font-weight:700">Total:</span>
+        <span style="font-weight:700;color:var(--accent);min-width:120px;text-align:right">${fmtV(total)}</span>
+      </div>
+    </div>`;
+}
+
+function getFatV(id){const e=ge(id);return e?e.value||null:null;}
+
+async function salvarFatura(status){
+  const cid=company?.id||profile?.company_id||null;
+  const clienteId=getFatV('fat-cliente');
+  const cli=clientes.find(c=>c.id===clienteId);
+  const subtotal=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const issIncluso=ge('fat-iss-incluso')?.value==='sim';
+  const issVal=issIncluso?0:subtotal*0.02;
+  const total=subtotal+issVal;
+  const num=getFatV('fat-num');
+
+  const obj={
+    owner_id:cu.id, company_id:cid,
+    numero_fatura:num,
+    cliente_id:clienteId||null,
+    cliente_nome:cli?.nome||'',
+    tabela_id:getFatV('fat-tabela')||null,
+    periodicidade:getFatV('fat-period')||'quinzenal',
+    periodo_inicio:getFatV('fat-ini'),
+    periodo_fim:getFatV('fat-fim'),
+    data_emissao:getFatV('fat-emissao'),
+    linhas:JSON.stringify(fatLinhas),
+    subtotal, iss_incluso:issIncluso, iss_valor:issVal, total,
+    observacoes:getFatV('fat-obs'),
+    status,
+  };
+
+  if(faturaEditando){
+    await dbUpdate('faturamento',faturaEditando.id,obj);
+    faturamento=faturamento.map(f=>f.id===faturaEditando.id?{...f,...obj}:f);
+  } else {
+    const res=await dbInsert('faturamento',obj);
+    if(res){faturamento.unshift(res);faturaEditando=res;}
+  }
+}
+
+async function salvarFaturaRascunho(){
+  try{await salvarFatura('rascunho');alert('Rascunho salvo!');closeFaturaEditor();render();}
+  catch(e){alert('Erro: '+e.message);}
+}
+async function enviarFaturaAprovacao(){
+  try{await salvarFatura('aguardando');alert('Enviado para aprovação!');closeFaturaEditor();render();}
+  catch(e){alert('Erro: '+e.message);}
+}
+async function salvarFaturaAprovar(){
+  try{
+    await salvarFatura('aprovado');
+    if(faturaEditando){await dbUpdate('faturamento',faturaEditando.id,{aprovado_por:cu.id,aprovado_em:new Date().toISOString()});}
+    alert('Fatura aprovada!');closeFaturaEditor();render();
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+async function aprovarFatura(id){
+  if(!confirm('Aprovar esta fatura?'))return;
+  await dbUpdate('faturamento',id,{status:'aprovado',aprovado_por:cu.id,aprovado_em:new Date().toISOString()});
+  faturamento=faturamento.map(f=>f.id===id?{...f,status:'aprovado',aprovado_por:cu.id}:f);
+  render();
+}
+
+function registrarAutorizacao(id){
+  const f=faturamento.find(x=>x.id===id);if(!f)return;
+  const old=ge('modal-autorizacao');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-autorizacao';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar autorização do cliente</div>
+    <div class="fg"><label class="fl">Nº Pedido do cliente (opcional)</label>
+      <input class="fi" id="auth-pedido" placeholder="Ex: PED-2026-001">
+    </div>
+    <div class="fg"><label class="fl">Data autorização</label>
+      <input class="fi" id="auth-data" type="date" value="${new Date().toISOString().slice(0,10)}">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="ge('modal-autorizacao').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="confirmarAutorizacao('${id}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-weight:600">Confirmar</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function confirmarAutorizacao(id){
+  const pedido=ge('auth-pedido')?.value||null;
+  const data=ge('auth-data')?.value||new Date().toISOString().slice(0,10);
+  await dbUpdate('faturamento',id,{status:'autorizado',numero_pedido_cliente:pedido,autorizado_em:data});
+  faturamento=faturamento.map(f=>f.id===id?{...f,status:'autorizado',numero_pedido_cliente:pedido}:f);
+  ge('modal-autorizacao')?.remove();
+  render();
+}
+
+function registrarNFSe(id){
+  const old=ge('modal-nfse');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-nfse';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar NFS-e</div>
+    <div class="fg"><label class="fl">Número da NFS-e</label>
+      <input class="fi" id="nfse-num" placeholder="Ex: 000123">
+    </div>
+    <div class="fg"><label class="fl">Data emissão</label>
+      <input class="fi" id="nfse-data" type="date" value="${new Date().toISOString().slice(0,10)}">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="ge('modal-nfse').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="confirmarNFSe('${id}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-weight:600">Registrar</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function confirmarNFSe(id){
+  const num=ge('nfse-num')?.value;
+  if(!num){alert('Informe o número da NFS-e.');return;}
+  const data=ge('nfse-data')?.value||new Date().toISOString().slice(0,10);
+  await dbUpdate('faturamento',id,{status:'nfse_emitida',nfse_numero:num,nfse_em:data});
+  faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num}:f);
+  ge('modal-nfse')?.remove();
+  render();
+}
+
+function updatePeriodo(tipo){
+  const d=new Date();
+  let ini,fim;
+  if(tipo==='quinzenal'){
+    if(d.getDate()<=15){ini=new Date(d.getFullYear(),d.getMonth(),1);fim=new Date(d.getFullYear(),d.getMonth(),15);}
+    else{ini=new Date(d.getFullYear(),d.getMonth(),16);fim=new Date(d.getFullYear(),d.getMonth()+1,0);}
+  }else if(tipo==='mensal'){
+    ini=new Date(d.getFullYear(),d.getMonth(),1);fim=new Date(d.getFullYear(),d.getMonth()+1,0);
+  }else return;
+  const fmtISO=dt=>dt.toISOString().slice(0,10);
+  const elI=ge('fat-ini');const elF=ge('fat-fim');
+  if(elI)elI.value=fmtISO(ini);if(elF)elF.value=fmtISO(fim);
+}
+
+async function delFaturamento(id){
+  if(!confirm('Remover esta fatura?'))return;
+  await dbDelete('faturamento',id);
+  faturamento=faturamento.filter(f=>f.id!==id);
+  render();
+}
+
+function openFaturamento(id=null){openFaturaEditor(id);}
+async function saveFaturamento(){await salvarFaturaRascunho();}
+
+
 
 function rFaturamento(){
   const today=new Date();today.setHours(0,0,0,0);
