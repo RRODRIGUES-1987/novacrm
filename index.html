@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.25 | Gerado: 2026-05-21 23:39 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.26 | Gerado: 2026-05-21 23:49 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.25';
+const APP_VERSION='v1.0.26';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -587,7 +587,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 let curPage='dashboard',mmode='',mid=null,adminTab='empresas';
 
 const ini=n=>{const p=n.trim().split(' ');return(p[0][0]+(p[1]?p[1][0]:'')).toUpperCase();};
-const fmtV=v=>'R$'+Number(v).toLocaleString('pt-BR');
+const fmtV=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtCNPJ=c=>c.replace(/\D/g,'').replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5');
 const ge=id=>document.getElementById(id);
 
@@ -2576,11 +2576,12 @@ const FAT_STATUS={
 let fatNumeroAtual=1000;
 
 function getFatNumero(){
+  const ano=String(new Date().getFullYear()).slice(-2);
   const max=faturamento.reduce((m,f)=>{
-    const n=parseInt((f.numero_fatura||'').replace(/\D/g,''));
+    const n=parseInt((f.numero_fatura||'').replace(/\D/g,'').slice(0,4));
     return n>m?n:m;
-  },fatNumeroAtual);
-  return String(max+1).padStart(4,'0');
+  },1000);
+  return 'FT'+String(max+1).padStart(4,'0')+'/'+ano;
 }
 
 function rFaturamento(){
@@ -2710,6 +2711,7 @@ async function openFaturaEditor(id=null){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="closeFaturaEditor()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">✕ Fechar</button>
+        <button onclick="gerarFaturaPDF(faturaEditando?.id)" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">🖨 Imprimir</button>
         <button onclick="salvarFaturaRascunho()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>
         ${role==='admin'||role==='adm'||role==='gestor'?`<button onclick="salvarFaturaAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Aprovar</button>`:`<button onclick="enviarFaturaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`}
       </div>
@@ -2760,7 +2762,7 @@ async function openFaturaEditor(id=null){
       <div style="font-size:14px;font-weight:600;margin-bottom:12px">2. Período</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="fg"><label class="fl">Periodicidade</label>
-          <select class="fi" id="fat-period" onchange="updatePeriodo(this.value)">
+          <select class="fi" id="fat-period" onchange="updatePeriodo(this.value)" disabled style="background:var(--bg2);cursor:not-allowed">
             <option value="quinzenal" ${(f?.periodicidade||'quinzenal')==='quinzenal'?'selected':''}>Quinzenal</option>
             <option value="mensal" ${f?.periodicidade==='mensal'?'selected':''}>Mensal</option>
             <option value="avulso" ${f?.periodicidade==='avulso'?'selected':''}>Avulso</option>
@@ -2783,7 +2785,7 @@ async function openFaturaEditor(id=null){
       <div style="font-size:14px;font-weight:600;margin-bottom:12px">4. Impostos e observações</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fg"><label class="fl">ISS</label>
-          <select class="fi" id="fat-iss-incluso" onchange="recalcFatura()">
+          <select class="fi" id="fat-iss-incluso" onchange="recalcFatura()" disabled style="background:var(--bg2);cursor:not-allowed">
             <option value="nao" ${!f?.iss_incluso?'selected':''}>Não incluso (2%)</option>
             <option value="sim" ${f?.iss_incluso?'selected':''}>Incluso nos valores</option>
           </select>
@@ -2814,7 +2816,114 @@ async function openFaturaEditor(id=null){
   }
 }
 
-function closeFaturaEditor(){
+function gerarFaturaPDF(id){
+  const f=id?faturamento.find(x=>x.id===id):faturaEditando;
+  if(!f&&!fatLinhas.length){alert('Salve a fatura antes de imprimir.');return;}
+
+  const cli=clientes.find(c=>c.id===(f?.cliente_id||ge('fat-cliente')?.value));
+  const num=f?.numero_fatura||ge('fat-num')?.value||'—';
+  const periodoIni=f?.periodo_inicio||ge('fat-ini')?.value||'';
+  const periodoFim=f?.periodo_fim||ge('fat-fim')?.value||'';
+  const period=f?.periodicidade||ge('fat-period')?.value||'';
+  const obs=f?.observacoes||ge('fat-obs')?.value||'';
+  const issIncluso=f?.iss_incluso||(ge('fat-iss-incluso')?.value==='sim');
+  const linhas=f?.linhas?(Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]')):fatLinhas;
+  const subtotal=linhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const issVal=issIncluso?0:subtotal*0.02;
+  const total=subtotal+issVal;
+  const hoje=new Date().toLocaleDateString('pt-BR');
+
+  const linhasHTML=linhas.filter(l=>l.servico).map(l=>`
+    <tr>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px">${l.servico}</td>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:center">${l.unidade||''}</td>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:right">${l.preco_unitario||''}</td>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:center">${l.quantidade||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:right;font-weight:600">${Number(l.subtotal||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`).join('');
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Fatura ${num}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Calibri,Arial,sans-serif;font-size:12px;color:#222;padding:20mm}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid #1e5f82}
+    .title{font-size:22px;font-weight:700;color:#1e5f82}
+    .num{font-size:16px;font-weight:700;color:#1e5f82}
+    .section{margin-bottom:14px}
+    .section-title{font-size:11px;font-weight:700;color:#2e4057;border-bottom:1.5px solid #2e4057;padding-bottom:3px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+    .info-item{font-size:11px;line-height:1.6}
+    .info-label{color:#666;font-weight:600}
+    table{width:100%;border-collapse:collapse;margin-bottom:10px}
+    th{background:#1e5f82;color:#fff;padding:5px 8px;font-size:11px;text-align:center}
+    th:first-child{text-align:left}
+    .totals{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-top:8px}
+    .total-row{display:flex;gap:40px;font-size:12px}
+    .total-final{font-size:16px;font-weight:700;color:#1e5f82;border-top:2px solid #1e5f82;padding-top:6px;margin-top:4px}
+    .footer{margin-top:30px;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px}
+    @media print{@page{size:A4;margin:15mm}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <div class="title">MK LOGÍSTICA LTDA.</div>
+      <div style="font-size:11px;color:#666;margin-top:4px">R. Nove de Julho, 2050 · Salto/SP · 55 11 4602 6363</div>
+    </div>
+    <div style="text-align:right">
+      <div class="num">${num}</div>
+      <div style="font-size:11px;color:#666">Emissão: ${hoje}</div>
+      <div style="font-size:11px;margin-top:4px;padding:3px 8px;background:#1e5f82;color:#fff;border-radius:4px;display:inline-block">${FAT_STATUS[f?.status||'rascunho']?.label||'Rascunho'}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Cliente</div>
+    <div class="info-grid">
+      <div class="info-item"><span class="info-label">Cliente: </span>${cli?.nome||'—'}</div>
+      <div class="info-item"><span class="info-label">Período: </span>${periodoIni?new Date(periodoIni+'T00:00').toLocaleDateString('pt-BR'):''} a ${periodoFim?new Date(periodoFim+'T00:00').toLocaleDateString('pt-BR'):''}</div>
+      <div class="info-item"><span class="info-label">Periodicidade: </span>${period}</div>
+      <div class="info-item"><span class="info-label">ISS: </span>${issIncluso?'Incluso':'Não incluso (2%)'}</div>
+      ${obs?`<div class="info-item" style="grid-column:1/-1"><span class="info-label">Obs: </span>${obs}</div>`:''}
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Serviços</div>
+    <table>
+      <thead><tr>
+        <th style="width:40%;text-align:left">Serviço</th>
+        <th style="width:15%">Un.</th>
+        <th style="width:15%">Preço Unit.</th>
+        <th style="width:15%">Qtd/Base</th>
+        <th style="width:15%">Subtotal</th>
+      </tr></thead>
+      <tbody>${linhasHTML}</tbody>
+    </table>
+    <div class="totals">
+      <div class="total-row"><span style="color:#666">Subtotal:</span><span style="font-weight:600;min-width:100px;text-align:right">R$ ${subtotal.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div>
+      ${!issIncluso?`<div class="total-row"><span style="color:#666">ISS (2%):</span><span style="font-weight:600;min-width:100px;text-align:right">R$ ${issVal.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div>`:''}
+      <div class="total-row total-final"><span>TOTAL:</span><span style="min-width:100px;text-align:right">R$ ${total.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div>
+    </div>
+  </div>
+
+  ${f?.numero_pedido_cliente?`<div class="section"><div class="info-item"><span class="info-label">Nº Pedido cliente: </span>${f.numero_pedido_cliente}</div></div>`:''}
+  ${f?.nfse_numero?`<div class="section"><div class="info-item"><span class="info-label">NFS-e: </span>${f.nfse_numero}</div></div>`:''}
+
+  <div class="footer">MK LOGÍSTICA LTDA · contato@mklogistica.com · www.mklogistica.com</div>
+  <script>window.onload=()=>{window.print();}</script>
+  </body></html>`;
+
+  const old=ge('fat-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='fat-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),2000);},600);
+}
+
+
   const el=ge('fatura-editor-overlay');if(el)el.style.display='none';
 }
 
@@ -2958,7 +3067,7 @@ function renderLinhasFatura(){
                   placeholder="${isPerc?'Valor R$':'Qtd'}">
               </td>
               <td style="padding:4px 8px;font-size:12px;text-align:right;font-weight:600;color:var(--text)" id="sub-${gi}">
-                ${l.subtotal?fmtV(l.subtotal):'—'}
+                ${fmtV(l.subtotal||0)}
               </td>
             </tr>`;
           }).join('')}
@@ -2972,7 +3081,8 @@ function calcLinhaFatura(idx){
   const l=fatLinhas[idx];
   if(!l)return;
   const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
-  const preco=parseFloat(String(l.preco_unitario).replace('%','').replace(',','.').replace(/[^\d.]/g,''))||0;
+  const precoStr=String(l.preco_unitario).replace('%','').trim();
+  const preco=parseFloat(precoStr.replace(/\./g,'').replace(',','.'))||0;
   const qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
   if(isPerc){l.subtotal=(preco/100)*qtd;}
   else{l.subtotal=preco*qtd;}
