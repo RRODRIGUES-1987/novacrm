@@ -3239,13 +3239,83 @@ function autoFillEmpresaDeal(contactName){
 async function gerarPropostaDoDeal(dealId){
   const d=deals.find(x=>x.id===dealId);
   if(!d)return;
-  // Verifica se já tem proposta rascunho/negociação
-  const jatem=propostas.find(p=>p.deal_id===dealId&&['rascunho','aguardando_aprovacao'].includes(p.status));
+
+  // Bloqueia para deals encerrados
+  if(['Fechado','Perdido'].includes(d.stage)){
+    alert('Não é possível gerar proposta para negócios encerrados.');return;
+  }
+
+  // Verifica se já tem proposta ativa
+  const jatem=propostas.find(p=>p.deal_id===dealId&&['rascunho','aguardando_aprovacao','aprovada'].includes(p.status));
   if(jatem){
     if(!confirm('Este negócio já tem uma proposta em andamento. Deseja criar uma nova versão?'))return;
   }
-  // Abre editor com dados pré-preenchidos
-  await openPropostaEditor(null, dealId);
+
+  // Busca empresa do contato
+  const contato=contacts.find(c=>c.name===d.contact_name);
+  const empresa=d.empresa||contato?.company||d.contact_name||'';
+
+  // Busca próximo número PO
+  const cfg=await dbSelect('system_config','chave=eq.po_numero_atual');
+  const prefix=(await dbSelect('system_config','chave=eq.po_prefixo'))[0]?.valor||'PO';
+  const num=cfg[0]?.valor||'14444';
+  const nextPO=prefix+num;
+  const mes_ano=new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const cid=company?.id||profile?.company_id||null;
+  const role=profile?.role||'vendedor';
+
+  // Tarifas padrão
+  const tarifasPadrao=[
+    {quadro:'Tarifas Básicas',itens:[
+      {servico:'Armazenagem Mensal*',unidade:'Pallet',valor:'50,55'},
+      {servico:'Movimentação Entrada',unidade:'Pallet',valor:'16,00'},
+      {servico:'Movimentação Saída',unidade:'Pallet',valor:'16,00'},
+      {servico:'Picking',unidade:'Volume separado',valor:'1,80'},
+      {servico:'Aplicação de etiquetas (sem abertura caixa)',unidade:'Por etiqueta',valor:'0,80'},
+      {servico:'Gris+Advalorem Mensal*',unidade:'Valor em estoque',valor:'0,20%'},
+    ]},
+    {quadro:'Extraordinários',itens:[
+      {servico:'Impressão de documentos do cliente (ex. NF venda/CTE)',unidade:'Folha',valor:'0,26'},
+      {servico:'Descarga/Carga Manual',unidade:'Carretas',valor:'1.000,00'},
+      {servico:'Fornecimento de pallet',unidade:'Pallet',valor:'60,64'},
+      {servico:'Fornecimento de filme stretch',unidade:'Pallet',valor:'17,47'},
+      {servico:'Movimentação interna',unidade:'Pallet',valor:'16,00'},
+    ]},
+  ];
+
+  // Salva rascunho automaticamente
+  const dados={
+    owner_id:cu.id, company_id:cid, status:'rascunho',
+    numero_po:nextPO, mes_ano, versao:1,
+    deal_id:dealId, cliente_nome:empresa, cliente_contato:d.contact_name||'',
+    local_operacao:'MKLOG ITU', volume:'650 pallets',
+    dimensao_peso:'1,10 x 1,00 x 1,30 máximo. Pesando 400 kg',
+    tipo_produto:'Produto acabado', total_codigos:'466 SKUs',
+    recebimento:'Paletizado', expedicao:'Paletizado',
+    valor_estoque:'R$12.350.000,00',
+    sla:'D + 1 com corte as 17:00 do dia anterior',
+    fat_coletas:'Por conta do cliente', carregamento:'Por conta da MKLOG',
+    docas:'Compartilhadas', operacao_dedicada:'Não',
+    estrutura_armazenagem:'Porta-Pallets',
+    horario_operacional:'Início: Segunda-feira 06:00 - Término: Sexta-feira as 22:00',
+    cond_faturamento:'Quinzenal', cond_reajustes:'IPCA a cada 12 meses',
+    cond_fat_minimo:'R$60.000,00', cond_multa:'Não aplicado',
+    cond_notice:'30 dias', cond_prazo_aprovacao:'2 dias úteis após apresentação',
+    cond_prazo_pagamento_dias:'7',
+    tarifas:JSON.stringify(tarifasPadrao),
+  };
+
+  const res=await dbInsert('propostas',dados);
+  if(res){
+    propostas.unshift(res);
+    // Incrementa PO
+    const numAtual=parseInt(nextPO.replace(/\D/g,'')||'14444');
+    await sbFetch('PATCH','/rest/v1/system_config?chave=eq.po_numero_atual',{valor:String(numAtual+1)},tok);
+    // Abre editor com a proposta criada
+    await openPropostaEditor(res.id);
+  } else {
+    alert('Erro ao criar proposta.');
+  }
 }
 
 function preencherDadosDeal(dealId, silencioso=false){
@@ -4004,20 +4074,22 @@ function renderPipelineBoard(){
       ${cards.map(d=>{
         const temProposta=propostas.some(p=>p.deal_id===d.id);
         const podeGerar=(role==='admin'||role==='gestor'||d.owner_id===cu.id);
+        const encerrado=['Fechado','Perdido'].includes(d.stage);
         const criado=d.created_at||'';
         const novaRegra=criado>='2026-05-20';
         const alertaProposta=novaRegra&&d.stage==='Negociação'&&!temProposta;
-        return`<div class="dcard" onclick="${podeGerar?`openModal('deal','${d.id}')`:''}" style="${alertaProposta?'border-left:3px solid var(--amber-text)':''}">
+        return`<div class="dcard" style="${alertaProposta?'border-left:3px solid var(--amber-text)':''};cursor:pointer" onclick="${podeGerar?`openModal('deal','${d.id}')`:''}"  >
           <div class="dname">${d.name}</div>
           <div class="dcontact" style="color:var(--text2)">${d.empresa?`<strong>${d.empresa}</strong> · `:''}${d.contact_name||''}</div>
           <div class="dval">${fmtV(d.value||0)}</div>
           ${role!=='vendedor'?`<div class="downer">${ownerName(d.owner_id)}</div>`:''}
-          ${podeGerar?`<div style="display:flex;gap:4px;margin-top:6px" onclick="event.stopPropagation()">
-            <button class="btn btn-sm" style="font-size:10px;padding:3px 8px;background:var(--accent);color:var(--accent-text);border:none;border-radius:6px;cursor:pointer" onclick="gerarPropostaDoDeal('${d.id}')">
-              📄 Gerar proposta
+          ${podeGerar&&!encerrado?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px" onclick="event.stopPropagation()">
+            <button onclick="gerarPropostaDoDeal('${d.id}')" style="width:100%;padding:5px 8px;background:var(--accent);color:var(--accent-text);border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:4px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Gerar proposta
             </button>
-            ${alertaProposta?`<span style="font-size:10px;color:var(--amber-text);align-self:center">⚠ Sem proposta</span>`:''}
-          </div>`:''}
+            ${alertaProposta?`<div style="font-size:10px;color:var(--amber-text);margin-top:4px;text-align:center">⚠ Negociação sem proposta</div>`:''}
+          </div>`:encerrado&&temProposta?`<div style="margin-top:6px;font-size:10px;color:var(--text3);text-align:center">${d.stage==='Fechado'?'✓ Proposta aceita':'✗ Negócio perdido'}</div>`:''}
         </div>`;
       }).join('')}
       ${!cards.length?`<div style="font-size:11px;color:var(--text3);text-align:center;padding:8px 0">Vazio</div>`:''}
