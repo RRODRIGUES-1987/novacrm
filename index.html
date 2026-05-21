@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.16 | Gerado: 2026-05-21 12:41 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.17 | Gerado: 2026-05-21 13:08 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -332,6 +332,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <svg class="mod-arrow" id="arrow-financeiro" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="nav-submenu" id="sub-financeiro">
+        <button class="navitem sub" id="nav-financeiro-dashboard" onclick="pg('financeiro-dashboard')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Dashboard</span>
+        </button>
         <button class="navitem sub" id="nav-faturamento" onclick="pg('faturamento')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span>Faturamento</span>
@@ -571,10 +575,11 @@ const TELAS=[
   {id:'rh-horarios',        label:'RH · Horários',                   modulo:'RH'},
   {id:'faturamento',        label:'Financeiro · Faturamento',        modulo:'Financeiro'},
   {id:'tabelas-tarifarias', label:'Financeiro · Tabelas Tarifárias', modulo:'Financeiro'},
+  {id:'financeiro-dashboard',  label:'Financeiro · Dashboard',          modulo:'Financeiro'},
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.16';
+const APP_VERSION='v1.0.17';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -860,7 +865,7 @@ async function loadPermissoes(){
   const modulos={
     cadastros:['clientes','fornecedores'],
     gestao:['tarefas-gestao','atas','plano-acao'],
-    financeiro:['faturamento','tabelas-tarifarias'],
+    financeiro:['financeiro-dashboard','faturamento','tabelas-tarifarias'],
     rh:['rh-pessoas','rh-funcoes','rh-horarios'],
     crm:['crm-dashboard','contatos','pipeline','tarefas','performance'],
   };
@@ -1029,6 +1034,7 @@ const MODULE_MAP={
   'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
   'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh',
   faturamento:'financeiro',
+    'financeiro-dashboard':'financeiro',
   admin:'admin-sub',
   'tabelas-tarifarias':'financeiro',
 };
@@ -1072,6 +1078,7 @@ function pg(p){
     'tarefas-gestao':'Gestão · Tarefas', atas:'Gestão · Ata de Reunião', 'plano-acao':'Gestão · Plano de Ação',
     'rh-pessoas':'RH · Colaboradores', 'rh-funcoes':'RH · Funções', 'rh-horarios':'RH · Horários',
     faturamento:'Financeiro · Faturamento',
+    'financeiro-dashboard':'Financeiro · Dashboard',
     'tabelas-tarifarias':'Financeiro · Tabelas Tarifárias',
     admin:'Administração',
     'crm-dashboard':'CRM · Visão Geral',
@@ -1099,6 +1106,7 @@ function render(){
   else if(curPage==='rh-pessoas')c.innerHTML=rRHPessoas();
   else if(curPage==='rh-funcoes')c.innerHTML=rRHFuncoes();
   else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
+  else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
@@ -3497,6 +3505,13 @@ async function salvarProposta(status){
   const dados=getPropDados(status);
   const p=propEditando;
   if(p){
+    // Se proposta aprovada/enviada for editada, volta para aguardando aprovação
+    const role=profile?.role||'vendedor';
+    if(['aprovada','enviada'].includes(p.status)&&(role!=='admin'&&role!=='adm')){
+      dados.status='aguardando_aprovacao';
+    } else if(['aprovada','enviada'].includes(p.status)&&(role==='admin'||role==='adm')&&status==='aprovada'){
+      dados.status='aprovada'; // admin pode salvar aprovada direto
+    }
     await dbUpdate('propostas',p.id,dados);
     propostas=propostas.map(x=>x.id===p.id?{...x,...dados}:x);
   } else {
@@ -3817,6 +3832,129 @@ ${marcaDagua}
 </div>
 
 </body></html>`;
+}
+
+// ── AUTOMAÇÃO FECHAR DEAL ──
+async function autoFecharDeal(dealId, dealObj, cid){
+  const deal={...dealObj, id:dealId};
+  const proposta=propostas.find(p=>p.deal_id===dealId&&['aprovada','enviada'].includes(p.status));
+
+  // 1. Pré-cadastra cliente pendente se não existir
+  const clienteExiste=clientes.find(c=>c.nome&&(deal.empresa||deal.contact_name)&&
+    c.nome.toLowerCase()===(deal.empresa||deal.contact_name||'').toLowerCase());
+  let clienteCriado=false;
+  if(!clienteExiste){
+    const novo=await dbInsert('clientes',{
+      owner_id:cu.id,company_id:cid,
+      nome:deal.empresa||deal.contact_name||deal.name,
+      status:'pendente',
+    });
+    if(novo){clientes.unshift(novo);clienteCriado=true;}
+  }
+
+  // 2. Cria tabela tarifária pendente baseada na proposta
+  let tabelaCriada=false;
+  if(proposta){
+    let tarifas=[];
+    try{tarifas=JSON.parse(proposta.tarifas||'[]');}catch(e){}
+    const nova=await dbInsert('tabelas_tarifarias',{
+      owner_id:cu.id,company_id:cid,
+      nome:`${deal.empresa||deal.contact_name||deal.name} — Tabela Comercial`,
+      cliente_nome:deal.empresa||deal.contact_name||'',
+      deal_id:dealId,proposta_id:proposta.id,
+      status:'pendente',
+      tarifas:JSON.stringify(tarifas),
+      vigencia_inicio:new Date().toISOString().slice(0,10),
+      cond_faturamento:proposta.cond_faturamento||'',
+      cond_reajustes:proposta.cond_reajustes||'',
+      cond_prazo_contrato:proposta.cond_prazo_contrato||'',
+      cond_fat_minimo:proposta.cond_fat_minimo||'',
+      cond_notice:proposta.cond_notice||'',
+      cond_prazo_pagamento_dias:proposta.cond_prazo_pagamento_dias||'',
+    });
+    if(nova){tabelasTarifarias.unshift(nova);tabelaCriada=true;}
+  }
+
+  if(clienteCriado||tabelaCriada){
+    alert(`✓ Negócio fechado!\n\n${clienteCriado?'• Cliente pré-cadastrado aguardando aprovação do Gestor\n':''}${tabelaCriada?'• Tabela tarifária criada aguardando aprovação do Gestor':''}`.trim());
+  }
+}
+
+// ── DASHBOARD FINANCEIRO ──
+function rFinanceiroDashboard(){
+  const role=profile?.role||'vendedor';
+  const isGestor=['gestor','admin','adm'].includes(role);
+  const pendClientes=clientes.filter(c=>c.status==='pendente');
+  const pendTabelas=tabelasTarifarias.filter(t=>t.status==='pendente');
+  const totalPend=pendClientes.length+pendTabelas.length;
+
+  return`
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Pendentes aprovação</div>
+      <div style="font-size:32px;font-weight:700;color:${totalPend>0?'var(--amber-text)':'var(--green-text)'}">${totalPend}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">${pendClientes.length} cliente(s) · ${pendTabelas.length} tabela(s)</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Clientes ativos</div>
+      <div style="font-size:32px;font-weight:700">${clientes.filter(c=>c.status!=='pendente').length}</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:var(--radius);padding:16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Tabelas ativas</div>
+      <div style="font-size:32px;font-weight:700">${tabelasTarifarias.filter(t=>t.status!=='pendente').length}</div>
+    </div>
+  </div>
+
+  ${isGestor&&totalPend>0?`
+  <div style="font-size:13px;font-weight:600;margin-bottom:10px">Pendentes de aprovação</div>
+  ${pendClientes.map(c=>`
+  <div class="li" style="border-left:3px solid var(--amber-text)">
+    <div class="av av2" style="font-size:10px">${ini(c.nome||'?')}</div>
+    <div class="linfo">
+      <div class="lname">${c.nome||'—'}</div>
+      <div class="lsub" style="color:var(--amber-text)">Pré-cadastro de cliente · Aguardando aprovação do Gestor</div>
+    </div>
+    <div class="lright" style="display:flex;gap:6px">
+      <button class="btn btn-p btn-sm" onclick="aprovarCliente('${c.id}')">Aprovar</button>
+      <button class="btn btn-sm" style="color:var(--red-text)" onclick="rejeitarCliente('${c.id}')">Rejeitar</button>
+    </div>
+  </div>`).join('')}
+  ${pendTabelas.map(t=>`
+  <div class="li" style="border-left:3px solid var(--amber-text)">
+    <div class="av av3" style="font-size:10px">${ini(t.cliente_nome||t.nome||'?')}</div>
+    <div class="linfo">
+      <div class="lname">${t.nome||'—'}</div>
+      <div class="lsub" style="color:var(--amber-text)">Tabela tarifária · ${t.cliente_nome||''} · Aguardando aprovação do Gestor</div>
+    </div>
+    <div class="lright" style="display:flex;gap:6px">
+      <button class="btn btn-p btn-sm" onclick="aprovarTabela('${t.id}')">Aprovar</button>
+      <button class="btn btn-sm" style="color:var(--red-text)" onclick="rejeitarTabela('${t.id}')">Rejeitar</button>
+    </div>
+  </div>`).join('')}
+  `:`${totalPend===0?'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg><p>Nenhuma aprovação pendente</p></div>':''}`}`;
+}
+
+async function aprovarCliente(id){
+  await dbUpdate('clientes',id,{status:'ativo'});
+  clientes=clientes.map(c=>c.id===id?{...c,status:'ativo'}:c);
+  render();
+}
+async function rejeitarCliente(id){
+  if(!confirm('Rejeitar e remover este pré-cadastro?'))return;
+  await dbDelete('clientes',id);
+  clientes=clientes.filter(c=>c.id!==id);
+  render();
+}
+async function aprovarTabela(id){
+  await dbUpdate('tabelas_tarifarias',id,{status:'ativo'});
+  tabelasTarifarias=tabelasTarifarias.map(t=>t.id===id?{...t,status:'ativo'}:t);
+  render();
+}
+async function rejeitarTabela(id){
+  if(!confirm('Rejeitar e remover esta tabela?'))return;
+  await dbDelete('tabelas_tarifarias',id);
+  tabelasTarifarias=tabelasTarifarias.filter(t=>t.id!==id);
+  render();
 }
 
 // ── TARIFÁRIO PADRÃO ──
@@ -5345,6 +5483,12 @@ async function saveModal(){
         // Salva o negócio atual
         await dbUpdate('deals',mid,obj);
         deals=deals.map(d=>d.id===mid?{...d,...obj}:d);
+
+        // Automação: deal fechado → pré-cadastra cliente e tabela tarifária
+        const dealAnterior=deals.find(d=>d.id===mid);
+        if(obj.stage==='Fechado'&&dealAnterior?.stage!=='Fechado'){
+          await autoFecharDeal(mid, obj, cid);
+        }
 
       } else {
         const d=await dbInsert('deals',obj);if(d)deals.unshift(d);
