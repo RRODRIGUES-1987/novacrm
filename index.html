@@ -736,10 +736,19 @@ async function confirmCompany(){
     return;
   }
   company=allCompanies.find(c=>c.id===selectedCompanyId)||null;
-  // Salva empresa selecionada na sessão
   if(company) sessionStorage.setItem('crm_company',JSON.stringify(company));
   ge('company-select-screen').classList.remove('show');
-  await finishEnterApp(pendingUser);
+  // Se já está no app, apenas recarrega os dados
+  if(ge('app').classList.contains('on')){
+    await loadData();
+    render();
+    // Atualiza nome na sidebar
+    const companyName=company?.name||'—';
+    const sc=ge('sidebar-company-name-txt');if(sc)sc.textContent=companyName;
+    const scParent=ge('sidebar-company-name');if(scParent)scParent.style.display=companyName&&companyName!=='—'?'flex':'none';
+  } else {
+    await finishEnterApp(pendingUser);
+  }
 }
 
 async function finishEnterApp(user){
@@ -5069,24 +5078,20 @@ async function delTask(id){await dbDelete('tasks',id);tasks=tasks.filter(t=>t.id
 
 function trocarEmpresa(){
   try{closeMenu();}catch(e){}
-  // Remove empresa da sessão para forçar tela de seleção
-  sessionStorage.removeItem('crm_company');
-  company=null;
-  selectedCompanyId=null;
-  // Mostra tela de seleção
-  const sub=ge('cs-sub');
-  if(sub) sub.textContent='Selecione a empresa para esta sessão.';
+  // Preenche as opções de empresa
   const el=ge('company-options');
   if(el){
-    const opts=allCompanies.map(c=>`
-      <div class="company-option" id="co-${c.id}" onclick="selectCompany('${c.id}',this)">
+    el.innerHTML=allCompanies.map(c=>`
+      <div class="company-option${company&&company.id===c.id?' selected':''}" id="co-${c.id}" onclick="selectCompany('${c.id}',this)">
         <div style="font-weight:600">${c.name}</div>
         <div style="font-size:11px;color:var(--text2)">${c.cnpj||''}</div>
       </div>`).join('');
-    el.innerHTML=opts;
   }
-  ge('vapp')&&(ge('vapp').style.display='none');
-  ge('vcs')&&(ge('vcs').style.display='');
+  const sub=ge('cs-sub');
+  if(sub) sub.textContent='Selecione a empresa para esta sessão.';
+  // Mostra tela de seleção sobre o app (sem esconder o app)
+  const screen=ge('company-select-screen');
+  if(screen) screen.classList.add('show');
 }
 
 function toggleMenu(e){if(e)e.stopPropagation();const w=ge('umwrap'),o=ge('umo'),open=!w.classList.contains('open');w.classList.toggle('open',open);o.style.display=open?'block':'none';}
