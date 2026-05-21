@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.21 | Gerado: 2026-05-21 20:52 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.22 | Gerado: 2026-05-21 22:42 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.21';
+const APP_VERSION='v1.0.22';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2722,14 +2722,24 @@ async function openFaturaEditor(id=null){
     <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600;margin-bottom:12px">Cliente</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fg"><label class="fl">Cliente</label>
+        <div class="fg"><label class="fl">Cliente *</label>
           <select class="fi" id="fat-cliente" onchange="carregarTabelaCliente(this.value)">
-            <option value="">Selecione</option>${cliOpts}
+            <option value="">Selecione o cliente</option>${cliOpts}
           </select>
         </div>
         <div class="fg"><label class="fl">Tabela tarifária</label>
           <select class="fi" id="fat-tabela" onchange="carregarLinhasFatura(this.value)">
-            <option value="">Selecione</option>${tabOpts}
+            <option value="">— será preenchido automaticamente —</option>${tabOpts}
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Tipo de operação</label>
+          <select class="fi" id="fat-tipo-op" onchange="carregarResponsavelFatura(this.value)">
+            <option value="">Selecione o cliente primeiro</option>
+          </select>
+        </div>
+        <div class="fg"><label class="fl">Responsável pela aprovação</label>
+          <select class="fi" id="fat-responsavel">
+            <option value="">— será preenchido automaticamente —</option>
           </select>
         </div>
         <div class="fg"><label class="fl">ISS</label>
@@ -2748,7 +2758,7 @@ async function openFaturaEditor(id=null){
     <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600;margin-bottom:12px">Linhas de cobrança</div>
       <div id="fat-linhas-grid"></div>
-      <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha</button>
+      <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha manual</button>
     </div>
 
     <!-- Totais -->
@@ -2758,7 +2768,16 @@ async function openFaturaEditor(id=null){
   </div>`;
 
   overlay.style.display='block';
-  renderLinhasFatura();
+  // Se editando, carrega dados do cliente/tabela
+  if(f?.cliente_id){
+    await carregarTabelaCliente(f.cliente_id);
+    if(f.tabela_id){const st=ge('fat-tabela');if(st)st.value=f.tabela_id;}
+    if(f.tipo_operacao){const to=ge('fat-tipo-op');if(to){to.value=f.tipo_operacao;carregarResponsavelFatura(f.tipo_operacao);}}
+    if(f.responsavel_id){const rs=ge('fat-responsavel');if(rs)rs.value=f.responsavel_id;}
+    if(f.tabela_id) carregarLinhasFatura(f.tabela_id);
+  } else {
+    renderLinhasFatura();
+  }
   recalcFatura();
 }
 
@@ -2766,13 +2785,53 @@ function closeFaturaEditor(){
   const el=ge('fatura-editor-overlay');if(el)el.style.display='none';
 }
 
-function carregarTabelaCliente(clienteId){
-  // Filtra tabelas do cliente selecionado
-  const tabOpts=tabelasTarifarias.filter(t=>t.status!=='pendente'&&
-    (t.cliente_id===clienteId||clientes.find(c=>c.id===clienteId&&t.cliente_nome===c.nome))
-  ).map(t=>`<option value="${t.id}">${t.nome||t.cliente_nome}</option>`).join('');
+async function carregarTabelaCliente(clienteId){
   const sel=ge('fat-tabela');
-  if(sel) sel.innerHTML=`<option value="">Selecione</option>${tabOpts||tabelasTarifarias.filter(t=>t.status!=='pendente').map(t=>`<option value="${t.id}">${t.nome}</option>`).join('')}`;
+  const tipoSel=ge('fat-tipo-op');
+  if(!clienteId){
+    if(sel)sel.innerHTML='<option value="">— será preenchido automaticamente —</option>';
+    if(tipoSel)tipoSel.innerHTML='<option value="">Selecione o cliente primeiro</option>';
+    return;
+  }
+  const cli=clientes.find(c=>c.id===clienteId);
+
+  // Filtra tabelas do cliente
+  const tabDoCliente=tabelasTarifarias.filter(t=>t.status!=='pendente'&&
+    (t.cliente_id===clienteId||(cli&&t.cliente_nome&&t.cliente_nome.toLowerCase()===cli.nome.toLowerCase()))
+  );
+
+  if(sel){
+    sel.innerHTML=`<option value="">Selecione</option>`+tabDoCliente.map(t=>`<option value="${t.id}">${t.nome||t.cliente_nome}</option>`).join('');
+    // Auto-seleciona se só tem uma
+    if(tabDoCliente.length===1){
+      sel.value=tabDoCliente[0].id;
+      carregarLinhasFatura(tabDoCliente[0].id);
+    }
+  }
+
+  // Busca tipos de operação do cliente (via clientes_contatos)
+  if(tipoSel){
+    tipoSel.innerHTML='<option value="">Carregando...</option>';
+    try{
+      const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}`);
+      const tipos=[...new Set(contatos.map(c=>c.tipo_operacao).filter(Boolean))];
+      tipoSel.innerHTML=`<option value="">Selecione o tipo</option>`+tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
+      // Guarda contatos para uso no responsável
+      window._fatContatos=contatos;
+    }catch(e){
+      tipoSel.innerHTML='<option value="">Nenhum tipo cadastrado</option>';
+    }
+  }
+}
+
+function carregarResponsavelFatura(tipo){
+  const sel=ge('fat-responsavel');if(!sel)return;
+  const contatos=(window._fatContatos||[]).filter(c=>c.tipo_operacao===tipo);
+  if(contatos.length){
+    sel.innerHTML=`<option value="">Selecione</option>`+contatos.map(c=>`<option value="${c.id}">${c.nome}${c.cargo?' · '+c.cargo:''}</option>`).join('');
+  } else {
+    sel.innerHTML='<option value="">Nenhum responsável para este tipo</option>';
+  }
 }
 
 function carregarLinhasFatura(tabelaId){
@@ -2885,6 +2944,8 @@ async function salvarFatura(status){
   const cid=company?.id||profile?.company_id||null;
   const clienteId=getFatV('fat-cliente');
   const cli=clientes.find(c=>c.id===clienteId);
+  const responsavelId=getFatV('fat-responsavel');
+  const tipoOp=getFatV('fat-tipo-op');
   const subtotal=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
   const issVal=issIncluso?0:subtotal*0.02;
@@ -2897,6 +2958,8 @@ async function salvarFatura(status){
     cliente_id:clienteId||null,
     cliente_nome:cli?.nome||'',
     tabela_id:getFatV('fat-tabela')||null,
+    tipo_operacao:tipoOp||null,
+    responsavel_id:responsavelId||null,
     periodicidade:getFatV('fat-period')||'quinzenal',
     periodo_inicio:getFatV('fat-ini'),
     periodo_fim:getFatV('fat-fim'),
