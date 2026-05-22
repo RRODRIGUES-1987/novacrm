@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.35 | Gerado: 2026-05-22 21:25 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.36 | Gerado: 2026-05-22 21:29 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.35';
+const APP_VERSION='v1.0.36';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2601,6 +2601,7 @@ function rFaturamento(){
         <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
           ${f.periodo_inicio?`<span>${fmtDateSimples(f.periodo_inicio)} → ${fmtDateSimples(f.periodo_fim)}</span>`:''}
           ${f.total?`<span>· ${fmtV(f.total)}</span>`:''}
+          ${f.vencimento?`<span>· Venc: ${fmtDateSimples(f.vencimento)}</span>`:''}
           ${f.nfse_numero?`<span>· NFS-e: ${f.nfse_numero}</span>`:''}
         </div>
       </div>
@@ -3357,9 +3358,23 @@ async function confirmarNFSe(id){
   const num=ge('nfse-num')?.value;
   if(!num){alert('Informe o número da NFS-e.');return;}
   const data=ge('nfse-data')?.value||new Date().toISOString().slice(0,10);
-  await dbUpdate('faturamento',id,{status:'nfse_emitida',nfse_numero:num,nfse_em:data});
-  faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num}:f);
+
+  // Calcula vencimento automaticamente: data NFS-e + dias de vencimento
+  const f=faturamento.find(x=>x.id===id);
+  const diasVenc=parseInt(f?.vencimento_dias||7);
+  const dtNfse=new Date(data+'T00:00');
+  dtNfse.setDate(dtNfse.getDate()+diasVenc);
+  const vencimento=dtNfse.toISOString().slice(0,10);
+
+  await dbUpdate('faturamento',id,{
+    status:'nfse_emitida',
+    nfse_numero:num,
+    nfse_em:data,
+    vencimento,
+  });
+  faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento}:f);
   ge('modal-nfse')?.remove();
+  alert(`NFS-e registrada! Vencimento calculado: ${dtNfse.toLocaleDateString('pt-BR')}`);
   render();
 }
 
