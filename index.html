@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.36 | Gerado: 2026-05-22 21:29 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.37 | Gerado: 2026-05-22 21:50 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -547,6 +547,7 @@ let clientes=[],fornecedores=[],pessoas=[];
 let tarefasGestao=[],atas=[],planoAcao=[];
 let rhFuncoes=[],rhHorarios=[];
 let faturamento=[];
+let workflowConfig=[];
 let tabelasTarifarias=[];
 let representantes=[];
 let propostas=[];
@@ -579,7 +580,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.36';
+const APP_VERSION='v1.0.37';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -940,6 +941,7 @@ async function loadData(){
         dbSelect('propostas',`company_id=eq.${cid}&order=created_at.desc`),
         dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`),
       ]);
+      workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
         dbSelect('contacts','select=*'),
@@ -3637,7 +3639,7 @@ function rDashboardGeral(){
     ${alerta.vencido?'Tarifário vencido! Clique para atualizar os valores.': `Tarifário vence em ${alerta.dias} dia(s). Clique para preparar o reajuste.`}
   </div>`:'';
 
-  return`${alertaHTML}<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;color:var(--text3);text-align:center;gap:16px">
+  return`${alertaHTML}${rWorkflowAlertas()}<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;color:var(--text3);text-align:center;gap:16px">
     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     <div>
       <div style="font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px">Visão Geral</div>
@@ -4510,6 +4512,7 @@ function rFinanceiroDashboard(){
   const totalPend=pendClientes.length+pendTabelas.length;
 
   return`
+  ${rWorkflowAlertas()}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
     <div style="background:var(--bg2);border-radius:var(--radius);padding:16px;border:1px solid var(--border)">
       <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Pendentes aprovação</div>
@@ -5220,11 +5223,246 @@ function rAdmin(){
     <div class="tabs">
       <button class="tab admin-tab-btn active" data-tab="empresas" onclick="setAdminTab('empresas')">Empresas</button>
       <button class="tab admin-tab-btn" data-tab="usuarios" onclick="setAdminTab('usuarios')">Usuários</button>
+      <button class="tab admin-tab-btn" data-tab="workflow" onclick="setAdminTab('workflow')">Workflow</button>
       <button class="tab admin-tab-btn" data-tab="importacao" onclick="setAdminTab('importacao')">Importação</button>
     </div>
     <div class="admin-tab-panel" data-tab="empresas">${rEmpresas()}</div>
     <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
+    <div class="admin-tab-panel" data-tab="workflow" style="display:none">${rWorkflow()}</div>
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
+}
+
+// ── WORKFLOW ──
+const WF_ROTINAS={
+  proposta:      {label:'Aprovação de proposta',      icon:'📋', modulo:'CRM → Propostas'},
+  fatura:        {label:'Aprovação de fatura',         icon:'💰', modulo:'Financeiro → Faturamento'},
+  cliente_pendente:{label:'Efetivação de cliente',    icon:'🏢', modulo:'Cadastros → Clientes'},
+  tabela_pendente: {label:'Efetivação de tabela tarifária', icon:'📊', modulo:'Financeiro → Tabelas'},
+};
+
+const WF_PERFIS=['admin','adm','gestor','vendedor','financeiro'];
+
+function rWorkflow(){
+  const rows=Object.entries(WF_ROTINAS).map(([key,def])=>{
+    const cfg=workflowConfig.find(w=>w.rotina===key)||{prazo_dias_uteis:1,perfis_aprovadores:[],perfis_lembrete:[],ativo:true};
+    return`<div style="background:var(--bg);border-radius:12px;padding:18px;border:1px solid var(--border);margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:22px">${def.icon}</span>
+          <div>
+            <div style="font-weight:600;font-size:14px">${def.label}</div>
+            <div style="font-size:11px;color:var(--text2)">${def.modulo}</div>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+          <input type="checkbox" id="wf-ativo-${key}" ${cfg.ativo?'checked':''} style="width:14px;height:14px">
+          Ativo
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Prazo (dias úteis)</div>
+          <input type="number" id="wf-prazo-${key}" value="${cfg.prazo_dias_uteis||1}" min="1" max="30"
+            style="width:80px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;background:var(--bg)">
+        </div>
+        <div></div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Perfis que aprovam</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${WF_PERFIS.map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:3px 8px;border:1px solid var(--border);border-radius:99px;background:${(cfg.perfis_aprovadores||[]).includes(p)?'var(--accent)':'var(--bg2)'};color:${(cfg.perfis_aprovadores||[]).includes(p)?'var(--accent-text)':'var(--text)'}">
+              <input type="checkbox" data-wf="${key}" data-tipo="aprov" data-perfil="${p}" ${(cfg.perfis_aprovadores||[]).includes(p)?'checked':''} style="display:none" onchange="wfTogglePerfil(this)">
+              ${p}
+            </label>`).join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Perfis que recebem lembrete</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${WF_PERFIS.map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:3px 8px;border:1px solid var(--border);border-radius:99px;background:${(cfg.perfis_lembrete||[]).includes(p)?'var(--blue-bg)':'var(--bg2)'};color:${(cfg.perfis_lembrete||[]).includes(p)?'var(--blue-text)':'var(--text)'}">
+              <input type="checkbox" data-wf="${key}" data-tipo="lemb" data-perfil="${p}" ${(cfg.perfis_lembrete||[]).includes(p)?'checked':''} style="display:none" onchange="wfTogglePerfil(this)">
+              ${p}
+            </label>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px">
+        <button onclick="saveWorkflow('${key}')" style="padding:7px 18px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Salvar</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return`
+  <div style="margin-bottom:16px">
+    <div style="font-size:13px;color:var(--text2)">Configure os prazos e perfis para cada rotina de aprovação. Os alertas aparecem no dashboard do módulo correspondente.</div>
+  </div>
+  ${rows}
+  <div style="background:var(--bg);border-radius:12px;padding:18px;border:1px solid var(--border);margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:22px">⏰</span>
+      <div>
+        <div style="font-weight:600;font-size:14px">Alertas automáticos</div>
+        <div style="font-size:11px;color:var(--text2)">Baseados nos campos da tabela tarifária de cada cliente</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:12px;padding:10px 14px;background:var(--amber-bg);color:var(--amber-text);border-radius:8px">
+        <strong>Prazo de autorização do cliente (faturamento)</strong> — Calculado a partir da data de aprovação interna da fatura, usando o campo "Prazo de aprovação da fatura" da tabela tarifária. Aparece no Financeiro.
+      </div>
+      <div style="font-size:12px;padding:10px 14px;background:var(--red-bg);color:var(--red-text);border-radius:8px">
+        <strong>Vencimento da fatura</strong> — Calculado a partir da data de upload da NFS-e, usando o campo "Prazo de pagamento" da tabela tarifária. Aparece no Financeiro.
+      </div>
+    </div>
+  </div>`;
+}
+
+function wfTogglePerfil(el){
+  // Atualiza visual do label
+  const label=el.closest('label');
+  const tipo=el.dataset.tipo;
+  if(tipo==='aprov'){
+    label.style.background=el.checked?'var(--accent)':'var(--bg2)';
+    label.style.color=el.checked?'var(--accent-text)':'var(--text)';
+  } else {
+    label.style.background=el.checked?'var(--blue-bg)':'var(--bg2)';
+    label.style.color=el.checked?'var(--blue-text)':'var(--text)';
+  }
+}
+
+async function saveWorkflow(rotina){
+  const cid=company?.id||profile?.company_id||null;
+  const prazo=parseInt(ge(`wf-prazo-${rotina}`)?.value||'1');
+  const ativo=ge(`wf-ativo-${rotina}`)?.checked!==false;
+
+  const aprovCbs=document.querySelectorAll(`input[data-wf="${rotina}"][data-tipo="aprov"]`);
+  const lembCbs=document.querySelectorAll(`input[data-wf="${rotina}"][data-tipo="lemb"]`);
+  const perfisAprov=[...aprovCbs].filter(c=>c.checked).map(c=>c.dataset.perfil);
+  const perfisLemb=[...lembCbs].filter(c=>c.checked).map(c=>c.dataset.perfil);
+
+  const existing=workflowConfig.find(w=>w.rotina===rotina);
+  const obj={
+    company_id:cid,
+    rotina,
+    label:WF_ROTINAS[rotina]?.label||rotina,
+    prazo_dias_uteis:prazo,
+    perfis_aprovadores:perfisAprov,
+    perfis_lembrete:perfisLemb,
+    ativo,
+  };
+
+  if(existing){
+    await dbUpdate('workflow_config',existing.id,obj);
+    workflowConfig=workflowConfig.map(w=>w.rotina===rotina?{...w,...obj}:w);
+  } else {
+    const res=await dbInsert('workflow_config',obj);
+    if(res)workflowConfig.push(res);
+  }
+  alert(`✓ Workflow "${WF_ROTINAS[rotina]?.label}" salvo!`);
+}
+
+// Calcula dias úteis decorridos desde uma data
+function diasUteisDecorridos(dataStr){
+  if(!dataStr)return 0;
+  const inicio=new Date(dataStr+'T00:00');
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  let dias=0,cur=new Date(inicio);
+  while(cur<hoje){
+    cur.setDate(cur.getDate()+1);
+    const dow=cur.getDay();
+    if(dow!==0&&dow!==6)dias++;
+  }
+  return dias;
+}
+
+// Verifica alertas de workflow para o perfil atual
+function getWorkflowAlertas(){
+  const role=profile?.role||'vendedor';
+  const alertas=[];
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+
+  workflowConfig.filter(w=>w.ativo&&(w.perfis_lembrete||[]).includes(role)).forEach(w=>{
+    const prazo=w.prazo_dias_uteis||1;
+    if(w.rotina==='proposta'){
+      propostas.filter(p=>p.status==='aguardando_aprovacao').forEach(p=>{
+        const dias=diasUteisDecorridos(p.created_at?.slice(0,10));
+        if(dias>=prazo)alertas.push({tipo:'proposta',label:`Proposta ${p.numero_proposta||''}`,cliente:p.cliente_nome||'',dias,prazo,id:p.id,status:p.status});
+      });
+    }
+    if(w.rotina==='fatura'){
+      faturamento.filter(f=>f.status==='aguardando').forEach(f=>{
+        const dias=diasUteisDecorridos(f.created_at?.slice(0,10));
+        if(dias>=prazo)alertas.push({tipo:'fatura',label:`Fatura ${f.numero_fatura||''}`,cliente:f.cliente_nome||'',dias,prazo,id:f.id,status:f.status});
+      });
+    }
+    if(w.rotina==='cliente_pendente'){
+      clientes.filter(c=>c.status==='pendente').forEach(c=>{
+        const dias=diasUteisDecorridos(c.created_at?.slice(0,10));
+        if(dias>=prazo)alertas.push({tipo:'cliente',label:`Cliente ${c.nome}`,cliente:c.nome,dias,prazo,id:c.id,status:'pendente'});
+      });
+    }
+    if(w.rotina==='tabela_pendente'){
+      tabelasTarifarias.filter(t=>t.status==='pendente').forEach(t=>{
+        const dias=diasUteisDecorridos(t.created_at?.slice(0,10));
+        if(dias>=prazo)alertas.push({tipo:'tabela',label:`Tabela ${t.nome||t.cliente_nome||''}`,cliente:t.cliente_nome||'',dias,prazo,id:t.id,status:'pendente'});
+      });
+    }
+  });
+
+  // Alertas automáticos — autorização do cliente (fatura aprovada)
+  if(['admin','adm','gestor','financeiro'].includes(role)){
+    faturamento.filter(f=>f.status==='aprovado'&&f.aprovado_em).forEach(f=>{
+      const tabela=tabelasTarifarias.find(t=>t.id===f.tabela_id);
+      const prazoAprov=tabela?.prazo_aprovacao||'';
+      const diasAprov=parseInt(prazoAprov)||5;
+      const dias=diasUteisDecorridos(f.aprovado_em?.slice(0,10));
+      if(dias>=diasAprov)alertas.push({tipo:'autorizacao',label:`Fatura ${f.numero_fatura||''} aguardando autorização do cliente`,cliente:f.cliente_nome||'',dias,prazo:diasAprov,id:f.id,status:'aprovado'});
+    });
+
+    // Alertas automáticos — vencimento
+    faturamento.filter(f=>f.vencimento&&f.status==='nfse_emitida').forEach(f=>{
+      const venc=new Date(f.vencimento+'T00:00');
+      const diff=Math.ceil((venc-hoje)/(1000*60*60*24));
+      if(diff<=3)alertas.push({tipo:'vencimento',label:`Fatura ${f.numero_fatura||''} vence em ${diff<=0?'VENCIDA':diff+' dias'}`,cliente:f.cliente_nome||'',dias:diff,prazo:0,id:f.id,status:'nfse_emitida',vencida:diff<=0});
+    });
+  }
+
+  return alertas;
+}
+
+// Renderiza painel de alertas de workflow
+function rWorkflowAlertas(){
+  const alertas=getWorkflowAlertas();
+  if(!alertas.length)return'';
+
+  const cores={
+    proposta:{bg:'var(--amber-bg)',color:'var(--amber-text)',icon:'📋'},
+    fatura:{bg:'var(--amber-bg)',color:'var(--amber-text)',icon:'💰'},
+    cliente:{bg:'var(--blue-bg)',color:'var(--blue-text)',icon:'🏢'},
+    tabela:{bg:'var(--blue-bg)',color:'var(--blue-text)',icon:'📊'},
+    autorizacao:{bg:'var(--purple-bg,#f3e8ff)',color:'var(--purple-text,#7e22ce)',icon:'📞'},
+    vencimento:{bg:'var(--red-bg)',color:'var(--red-text)',icon:'⚠'},
+  };
+
+  return`<div style="background:var(--bg);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:16px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+      <span>🔔</span> Pendências e alertas (${alertas.length})
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${alertas.map(a=>{
+        const c=cores[a.tipo]||{bg:'var(--bg2)',color:'var(--text)',icon:'•'};
+        const nav={proposta:()=>navigate('crm-propostas'),fatura:()=>navigate('faturamento'),cliente:()=>navigate('clientes'),tabela:()=>navigate('tabelas-tarifarias'),autorizacao:()=>navigate('faturamento'),vencimento:()=>navigate('faturamento')};
+        return`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:${c.bg};color:${c.color};border-radius:8px;font-size:12px;cursor:pointer" onclick="${a.tipo==='proposta'?`navigate('crm-propostas')`:a.tipo==='fatura'||a.tipo==='autorizacao'||a.tipo==='vencimento'?`navigate('faturamento')`:a.tipo==='cliente'?`navigate('clientes')`:`navigate('tabelas-tarifarias')`}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span>${c.icon}</span>
+            <div>
+              <div style="font-weight:600">${a.label}</div>
+              <div style="opacity:.8">${a.cliente}${a.tipo!=='vencimento'&&a.tipo!=='autorizacao'?` · ${a.dias} dia(s) útil(is) (prazo: ${a.prazo})`:''}</div>
+            </div>
+          </div>
+          <span style="font-size:10px;opacity:.7">Ver →</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 
 // ── IMPORTAÇÃO ──
