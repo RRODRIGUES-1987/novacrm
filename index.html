@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.34 | Gerado: 2026-05-22 21:17 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.35 | Gerado: 2026-05-22 21:25 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -579,7 +579,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.34';
+const APP_VERSION='v1.0.35';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2783,9 +2783,34 @@ async function openFaturaEditor(id=null){
       <button onclick="addLinhaFatura()" style="width:100%;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;margin-top:8px;color:var(--text2)">+ Adicionar linha manual</button>
     </div>
 
-    <!-- 4. ISS e Observações -->
+    <!-- 4. Faturamento e NF -->
     <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px">4. Impostos e observações</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">4. Faturamento e NF</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Nº Pedido de compra do cliente</label>
+          <input class="fi" id="fat-pedido" value="${f?.numero_pedido_cliente||''}" placeholder="Ex: PED-2026-001">
+        </div>
+        <div class="fg"><label class="fl">Vencimento (dias após autorização)</label>
+          <input class="fi" id="fat-venc-dias" type="number" value="${f?.vencimento_dias||7}" placeholder="7">
+        </div>
+        <div class="fg"><label class="fl">Nº NFS-e</label>
+          <input class="fi" id="fat-nfse-num" value="${f?.nfse_numero||''}" placeholder="Ex: 000123">
+        </div>
+        <div class="fg"><label class="fl">Data NFS-e</label>
+          <input class="fi" id="fat-nfse-data" type="date" value="${f?.nfse_em||''}">
+        </div>
+        <div class="fg" style="grid-column:1/-1"><label class="fl">PDF da NFS-e</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="fat-nfse-pdf" accept="application/pdf" style="flex:1;font-size:12px">
+            ${f?.nfse_pdf_url?`<a href="${f.nfse_pdf_url}" target="_blank" style="font-size:12px;color:var(--accent)">📄 Ver PDF</a>`:''}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. ISS e Observações -->
+    <div style="background:var(--bg);border-radius:10px;padding:18px;margin-bottom:14px;border:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">5. Impostos e observações</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fg"><label class="fl">ISS</label>
           <select class="fi" id="fat-iss-incluso" onchange="recalcFatura()" disabled style="background:var(--bg2);cursor:not-allowed">
@@ -2799,7 +2824,7 @@ async function openFaturaEditor(id=null){
       </div>
     </div>
 
-    <!-- 5. Totais -->
+    <!-- 6. Totais -->
     <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
       <div id="fat-totais"></div>
     </div>
@@ -2814,6 +2839,25 @@ async function openFaturaEditor(id=null){
       if(to){to.value=f.tipo_operacao;onFatTipoChange(f.tipo_operacao);}
     }
     if(f.responsavel_id){const rs=ge('fat-responsavel');if(rs)rs.value=f.responsavel_id;}
+    // Restaura quantidades salvas nas linhas
+    if(f.linhas){
+      let linhasSalvas=[];
+      try{linhasSalvas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
+      if(linhasSalvas.length&&fatLinhas.length){
+        fatLinhas=fatLinhas.map(l=>{
+          const salva=linhasSalvas.find(s=>s.servico===l.servico&&s.quadro===l.quadro);
+          return salva?{...l,quantidade:salva.quantidade,subtotal:salva.subtotal}:l;
+        });
+        // Se tem linhas salvas que não vieram da tabela, mantém
+        linhasSalvas.forEach(s=>{
+          if(!fatLinhas.find(l=>l.servico===s.servico&&l.quadro===s.quadro)){
+            fatLinhas.push(s);
+          }
+        });
+        renderLinhasFatura();
+        recalcFatura();
+      }
+    }
   } else {
     recalcFatura();
   }
@@ -2979,10 +3023,12 @@ function _imprimirFatura(f,contatoResp){
   const doc=iframe.contentDocument||iframe.contentWindow.document;
   doc.open();doc.write(html);doc.close();
   setTimeout(()=>{
+    const oldTitle=document.title;
+    document.title=nomeArq;
     try{iframe.contentWindow.document.title=nomeArq;}catch(e){}
     iframe.contentWindow.focus();
     iframe.contentWindow.print();
-    setTimeout(()=>iframe.remove(),3000);
+    setTimeout(()=>{document.title=oldTitle;iframe.remove();},3000);
   },800);
 }
 
@@ -3207,6 +3253,10 @@ async function salvarFatura(status){
     tabela_id:getFatV('fat-tabela')||null,
     tipo_operacao:tipoOp||null,
     responsavel_id:responsavelId||null,
+    numero_pedido_cliente:getFatV('fat-pedido')||null,
+    vencimento_dias:parseInt(getFatV('fat-venc-dias')||'7'),
+    nfse_numero:getFatV('fat-nfse-num')||null,
+    nfse_em:getFatV('fat-nfse-data')||null,
     periodicidade:getFatV('fat-period')||'quinzenal',
     periodo_inicio:getFatV('fat-ini'),
     periodo_fim:getFatV('fat-fim'),
