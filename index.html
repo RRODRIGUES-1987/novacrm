@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.48 | Gerado: 2026-05-23 20:46 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.49 | Gerado: 2026-05-23 21:50 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -352,6 +352,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           <span>Contas a Receber</span>
         </button>
+        <button class="navitem sub" id="nav-orcamento" onclick="pg('orcamento')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <span>Orçamento</span>
+        </button>
       </div>
     </div>
 
@@ -557,6 +561,7 @@ let rhFuncoes=[],rhHorarios=[];
 let faturamento=[];
 let workflowConfig=[];
 let contasReceber=[];
+let orcamentoReceitas=[];
 let tabelasTarifarias=[];
 let representantes=[];
 let propostas=[];
@@ -589,7 +594,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.48';
+const APP_VERSION='v1.0.49';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -952,6 +957,7 @@ async function loadData(){
       ]);
       workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
       contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}&order=vencimento.asc`);
+      orcamentoReceitas=await dbSelect('orcamento_receitas',`company_id=eq.${cid}&order=ano.asc,mes.asc`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
         dbSelect('contacts','select=*'),
@@ -1133,6 +1139,7 @@ function render(){
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
+  else if(curPage==='orcamento'){c.innerHTML=rOrcamento();initOrcamento();}
   else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
   else if(curPage==='atas')c.innerHTML=rAtas();
   else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
@@ -5409,6 +5416,421 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
     <div class="admin-tab-panel" data-tab="workflow" style="display:none">${rWorkflow()}</div>
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
+}
+
+// ── ORÇAMENTO ──
+let orcAno=new Date().getFullYear();
+const MESES_ABREV=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const MESES_FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function rOrcamento(){
+  const totalOrc=orcamentoReceitas.filter(o=>o.ano===orcAno).reduce((s,o)=>s+Number(o.valor_orcado||0),0);
+  const totalPrev=contasReceber.filter(cr=>{
+    const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+    return v&&v.getFullYear()===orcAno;
+  }).reduce((s,cr)=>s+Number(cr.valor||0),0);
+  const totalReal=contasReceber.filter(cr=>{
+    const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+    return v&&v.getFullYear()===orcAno&&['pago','pago_atraso'].includes(cr.status);
+  }).reduce((s,cr)=>s+Number(cr.valor||0),0);
+
+  return`
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Orçado ${orcAno}</div>
+      <div style="font-size:22px;font-weight:700;color:#0A2540">${fmtV(totalOrc)}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Previsto ${orcAno}</div>
+      <div style="font-size:22px;font-weight:700;color:#1e5f82">${fmtV(totalPrev)}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Realizado ${orcAno}</div>
+      <div style="font-size:22px;font-weight:700;color:#16a34a">${fmtV(totalReal)}</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="orcNavAno(-1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">‹</button>
+      <div style="font-size:15px;font-weight:600;min-width:60px;text-align:center">${orcAno}</div>
+      <button onclick="orcNavAno(1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">›</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="abrirOrcamentoEditor()" style="padding:7px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Lançar orçado</button>
+      <button onclick="imprimirOrcamento()" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">🖨 Imprimir</button>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
+    <div id="orc-matrix">Carregando...</div>
+  </div>
+
+  <div style="margin-top:16px;background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px">Orçado vs Previsto vs Realizado — ${orcAno}</div>
+    <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--text2)">
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#0A2540;border-radius:2px;display:inline-block"></span>Orçado</span>
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#1e5f82;border-radius:2px;display:inline-block"></span>Previsto</span>
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#16a34a;border-radius:2px;display:inline-block"></span>Realizado</span>
+    </div>
+    <div style="position:relative;width:100%;height:240px">
+      <canvas id="orc-chart" role="img" aria-label="Gráfico orçado vs previsto vs realizado por mês"></canvas>
+    </div>
+  </div>`;
+}
+
+function initOrcamento(){
+  renderOrcMatrix();
+  renderOrcChart();
+}
+
+function orcNavAno(d){
+  orcAno+=d;
+  if(curPage==='orcamento'){const c=ge('content');if(c){c.innerHTML=rOrcamento();initOrcamento();}}
+}
+
+function renderOrcMatrix(){
+  const el=ge('orc-matrix');if(!el)return;
+  const cliAtivos=clientes.filter(c=>c.status!=='pendente');
+  if(!cliAtivos.length){el.innerHTML='<div style="padding:30px;text-align:center;color:var(--text3)">Nenhum cliente ativo</div>';return;}
+
+  const fmtV2=v=>v?'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0}):'—';
+
+  // Cabeçalho
+  let html=`<table style="border-collapse:collapse;min-width:100%;font-size:11px">
+  <thead><tr>
+    <th style="position:sticky;left:0;background:#0A2540;color:#fff;padding:8px 14px;text-align:left;border-right:1px solid #1e5f82;border-bottom:1px solid #1e5f82;min-width:170px;z-index:2;font-size:12px">Cliente / Linha</th>
+    ${MESES_ABREV.map(m=>`<th style="padding:6px 8px;text-align:center;border-right:1px solid #1e5f82;border-bottom:1px solid #1e5f82;background:#0A2540;color:#fff;min-width:80px;font-size:11px">${m}</th>`).join('')}
+    <th style="padding:8px 10px;background:#0A2540;color:#fff;border-left:1px solid #1e5f82;border-bottom:1px solid #1e5f82;white-space:nowrap;font-size:11px">Total</th>
+  </tr></thead><tbody>`;
+
+  // Totais globais
+  const totOrc=Array(12).fill(0);
+  const totPrev=Array(12).fill(0);
+  const totReal=Array(12).fill(0);
+
+  cliAtivos.forEach((cli,ri)=>{
+    const bg=ri%2===0?'var(--bg)':'var(--bg2)';
+    const bgSticky=ri%2===0?'var(--bg)':'var(--bg2)';
+
+    // Linha Orçado
+    const orcMeses=MESES_ABREV.map((_,m)=>{
+      const o=orcamentoReceitas.find(x=>x.cliente_id===cli.id&&x.ano===orcAno&&x.mes===m+1);
+      return Number(o?.valor_orcado||0);
+    });
+    const totalOrcCli=orcMeses.reduce((a,b)=>a+b,0);
+    orcMeses.forEach((v,m)=>totOrc[m]+=v);
+
+    // Linha Previsto (CR)
+    const prevMeses=MESES_ABREV.map((_,m)=>
+      contasReceber.filter(cr=>{
+        const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+        return cr.cliente_id===cli.id&&v&&v.getFullYear()===orcAno&&v.getMonth()===m;
+      }).reduce((s,cr)=>s+Number(cr.valor||0),0)
+    );
+    const totalPrevCli=prevMeses.reduce((a,b)=>a+b,0);
+    prevMeses.forEach((v,m)=>totPrev[m]+=v);
+
+    // Linha Realizado
+    const realMeses=MESES_ABREV.map((_,m)=>
+      contasReceber.filter(cr=>{
+        const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+        return cr.cliente_id===cli.id&&v&&v.getFullYear()===orcAno&&v.getMonth()===m&&['pago','pago_atraso'].includes(cr.status);
+      }).reduce((s,cr)=>s+Number(cr.valor||0),0)
+    );
+    const totalRealCli=realMeses.reduce((a,b)=>a+b,0);
+    realMeses.forEach((v,m)=>totReal[m]+=v);
+
+    // Só mostra cliente se tem algum dado
+    if(!totalOrcCli&&!totalPrevCli&&!totalRealCli)return;
+
+    // Nome do cliente (span de 3 linhas)
+    html+=`<tr style="background:${bg}">
+      <td rowspan="3" style="position:sticky;left:0;padding:6px 14px;font-weight:600;border-right:1px solid var(--border);border-bottom:2px solid var(--border);background:${bgSticky};z-index:1;font-size:11px;vertical-align:middle">${cli.nome}</td>
+      <td style="padding:2px 0;font-size:10px;color:#0A2540;font-weight:600;border-right:0;background:${bg}" colspan="13"></td>
+    </tr>`;
+
+    // Linha Orçado
+    html+=`<tr style="background:${bg}">
+      <td style="position:sticky;left:0;display:none"></td>
+      ${orcMeses.map((v,m)=>`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);font-size:10px;cursor:pointer" onclick="editarOrcado('${cli.id}','${cli.nome}',${m+1})">
+        <div style="font-size:9px;color:#888;margin-bottom:1px">Orç</div>
+        <span style="color:#0A2540;font-weight:600">${v?fmtV2(v):'<span style="color:var(--border2)">+</span>'}</span>
+      </td>`).join('')}
+      <td style="padding:4px 8px;text-align:right;border-left:1px solid var(--border);font-size:10px;font-weight:700;color:#0A2540">${fmtV2(totalOrcCli)}</td>
+    </tr>`;
+
+    // Linha Previsto
+    html+=`<tr style="background:${bg}">
+      ${prevMeses.map((v,m)=>`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);font-size:10px">
+        <div style="font-size:9px;color:#888;margin-bottom:1px">Prev</div>
+        <span style="color:#1e5f82;font-weight:600">${fmtV2(v)}</span>
+      </td>`).join('')}
+      <td style="padding:4px 8px;text-align:right;border-left:1px solid var(--border);font-size:10px;font-weight:700;color:#1e5f82">${fmtV2(totalPrevCli)}</td>
+    </tr>`;
+
+    // Linha Realizado
+    html+=`<tr style="background:${bg};border-bottom:2px solid var(--border)">
+      <td style="position:sticky;left:0;padding:6px 14px;font-size:9px;color:#888;border-right:1px solid var(--border);background:${bgSticky};z-index:1">Real</td>
+      ${realMeses.map((v,m)=>{
+        const orc=orcMeses[m];
+        const varPct=orc>0?((v-orc)/orc*100):null;
+        return`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);font-size:10px">
+          <div style="font-size:9px;color:#888;margin-bottom:1px">Real</div>
+          <span style="color:#16a34a;font-weight:600">${fmtV2(v)}</span>
+          ${varPct!==null&&v>0?`<div style="font-size:8px;color:${varPct>=0?'#16a34a':'#991b1b'};font-weight:700">${varPct>=0?'+':''}${varPct.toFixed(0)}%</div>`:''}
+        </td>`;
+      }).join('')}
+      <td style="padding:4px 8px;text-align:right;border-left:1px solid var(--border);font-size:10px;font-weight:700;color:#16a34a">${fmtV2(totalRealCli)}</td>
+    </tr>`;
+  });
+
+  // Linha de totais
+  const totOrcGeral=totOrc.reduce((a,b)=>a+b,0);
+  const totPrevGeral=totPrev.reduce((a,b)=>a+b,0);
+  const totRealGeral=totReal.reduce((a,b)=>a+b,0);
+
+  html+=`<tr style="background:#e8eaed;border-top:2px solid #0A2540">
+    <td style="position:sticky;left:0;padding:8px 14px;font-weight:700;border-right:1px solid #0A2540;background:#e8eaed;z-index:1;font-size:12px;color:#000">TOTAL ORÇADO</td>
+    ${totOrc.map(v=>`<td style="padding:5px 6px;text-align:center;border-right:1px solid #c0c4cc;font-size:11px;font-weight:700;color:#0A2540">${fmtV2(v)}</td>`).join('')}
+    <td style="padding:5px 10px;text-align:right;border-left:1px solid #0A2540;font-size:12px;font-weight:700;color:#0A2540">${fmtV2(totOrcGeral)}</td>
+  </tr>
+  <tr style="background:#e8eaed">
+    <td style="position:sticky;left:0;padding:5px 14px;font-weight:700;border-right:1px solid #0A2540;background:#e8eaed;z-index:1;font-size:11px;color:#1e5f82">TOTAL PREVISTO</td>
+    ${totPrev.map(v=>`<td style="padding:4px 6px;text-align:center;border-right:1px solid #c0c4cc;font-size:11px;font-weight:700;color:#1e5f82">${fmtV2(v)}</td>`).join('')}
+    <td style="padding:4px 10px;text-align:right;border-left:1px solid #0A2540;font-size:11px;font-weight:700;color:#1e5f82">${fmtV2(totPrevGeral)}</td>
+  </tr>
+  <tr style="background:#e8eaed;border-bottom:2px solid #0A2540">
+    <td style="position:sticky;left:0;padding:5px 14px;font-weight:700;border-right:1px solid #0A2540;background:#e8eaed;z-index:1;font-size:11px;color:#16a34a">TOTAL REALIZADO</td>
+    ${totReal.map(v=>`<td style="padding:4px 6px;text-align:center;border-right:1px solid #c0c4cc;font-size:11px;font-weight:700;color:#16a34a">${fmtV2(v)}</td>`).join('')}
+    <td style="padding:4px 10px;text-align:right;border-left:1px solid #0A2540;font-size:11px;font-weight:700;color:#16a34a">${fmtV2(totRealGeral)}</td>
+  </tr>`;
+
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+}
+
+function renderOrcChart(){
+  const orcMeses=MESES_ABREV.map((_,m)=>
+    orcamentoReceitas.filter(o=>o.ano===orcAno&&o.mes===m+1).reduce((s,o)=>s+Number(o.valor_orcado||0),0)
+  );
+  const prevMeses=MESES_ABREV.map((_,m)=>
+    contasReceber.filter(cr=>{
+      const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+      return v&&v.getFullYear()===orcAno&&v.getMonth()===m;
+    }).reduce((s,cr)=>s+Number(cr.valor||0),0)
+  );
+  const realMeses=MESES_ABREV.map((_,m)=>
+    contasReceber.filter(cr=>{
+      const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+      return v&&v.getFullYear()===orcAno&&v.getMonth()===m&&['pago','pago_atraso'].includes(cr.status);
+    }).reduce((s,cr)=>s+Number(cr.valor||0),0)
+  );
+  const fmtBRL=v=>'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0});
+
+  const render=()=>{
+    const c=ge('orc-chart');if(!c)return;
+    if(c._chart)c._chart.destroy();
+    c._chart=new Chart(c,{
+      type:'bar',
+      data:{
+        labels:MESES_ABREV,
+        datasets:[
+          {label:'Orçado',data:orcMeses,backgroundColor:'rgba(10,37,64,0.75)',borderRadius:3},
+          {label:'Previsto',data:prevMeses,backgroundColor:'rgba(30,95,130,0.75)',borderRadius:3},
+          {label:'Realizado',data:realMeses,backgroundColor:'rgba(22,163,74,0.75)',borderRadius:3},
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: R$ ${Number(ctx.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}`}}},
+        scales:{
+          x:{grid:{display:false},ticks:{font:{size:10},autoSkip:false,maxRotation:0}},
+          y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},callback:v=>fmtBRL(v)}}
+        }
+      }
+    });
+  };
+  if(window.Chart)render();
+  else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=render;document.head.appendChild(s);}
+}
+
+// Editor de orçado por mês
+function editarOrcado(clienteId,clienteNome,mes){
+  const orc=orcamentoReceitas.find(o=>o.cliente_id===clienteId&&o.ano===orcAno&&o.mes===mes);
+  const old=ge('modal-orc-edit');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-orc-edit';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:360px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">${clienteNome}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${MESES_FULL[mes-1]} ${orcAno}</div>
+    <div class="fg"><label class="fl">Receita orçada (R$)</label>
+      <input class="fi" id="orc-valor" type="number" step="0.01" value="${orc?.valor_orcado||''}" placeholder="0,00" autofocus>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="ge('modal-orc-edit').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="salvarOrcado('${clienteId}','${clienteNome}',${mes})" style="flex:1;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+  setTimeout(()=>ge('orc-valor')?.focus(),100);
+}
+
+async function salvarOrcado(clienteId,clienteNome,mes){
+  const cid=company?.id||profile?.company_id||null;
+  const valor=parseFloat(ge('orc-valor')?.value||'0')||0;
+  const existing=orcamentoReceitas.find(o=>o.cliente_id===clienteId&&o.ano===orcAno&&o.mes===mes);
+  const obj={company_id:cid,owner_id:cu.id,cliente_id:clienteId,cliente_nome:clienteNome,ano:orcAno,mes,valor_orcado:valor};
+  if(existing){
+    await dbUpdate('orcamento_receitas',existing.id,{valor_orcado:valor});
+    orcamentoReceitas=orcamentoReceitas.map(o=>o.id===existing.id?{...o,valor_orcado:valor}:o);
+  } else {
+    const res=await dbInsert('orcamento_receitas',obj);
+    if(res)orcamentoReceitas.push(res);
+  }
+  ge('modal-orc-edit')?.remove();
+  renderOrcMatrix();
+  renderOrcChart();
+}
+
+// Editor em lote (lançar orçado para todos os clientes)
+function abrirOrcamentoEditor(){
+  const cliAtivos=clientes.filter(c=>c.status!=='pendente');
+  const old=ge('modal-orc-editor');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-orc-editor';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+
+  const rows=cliAtivos.map(cli=>{
+    const vals=Array.from({length:12},(_,m)=>{
+      const o=orcamentoReceitas.find(x=>x.cliente_id===cli.id&&x.ano===orcAno&&x.mes===m+1);
+      return o?.valor_orcado||'';
+    });
+    return`<tr style="border-bottom:1px solid var(--border2)">
+      <td style="padding:6px 10px;font-size:12px;font-weight:600;min-width:140px;white-space:nowrap">${cli.nome}</td>
+      ${vals.map((v,m)=>`<td style="padding:3px 4px"><input type="number" step="0.01" value="${v}" data-cli="${cli.id}" data-nome="${cli.nome}" data-mes="${m+1}"
+        style="width:75px;border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:11px;text-align:right"></td>`).join('')}
+    </tr>`;
+  }).join('');
+
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:95vw;max-width:1100px;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:85vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:600">Lançar orçado — ${orcAno}</div>
+      <button onclick="ge('modal-orc-editor').remove()" style="padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">✕</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%">
+        <thead><tr style="background:#0A2540;color:#fff">
+          <th style="padding:7px 10px;text-align:left;font-size:11px">Cliente</th>
+          ${MESES_ABREV.map(m=>`<th style="padding:7px 6px;text-align:center;font-size:11px">${m}</th>`).join('')}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button onclick="ge('modal-orc-editor').remove()" style="padding:9px 18px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="salvarOrcamentoLote()" style="padding:9px 18px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar tudo</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function salvarOrcamentoLote(){
+  const cid=company?.id||profile?.company_id||null;
+  const inputs=document.querySelectorAll('#modal-orc-editor input[data-cli]');
+  const saves=[];
+  inputs.forEach(inp=>{
+    const clienteId=inp.dataset.cli;
+    const clienteNome=inp.dataset.nome;
+    const mes=parseInt(inp.dataset.mes);
+    const valor=parseFloat(inp.value||'0')||0;
+    saves.push({clienteId,clienteNome,mes,valor});
+  });
+
+  for(const s of saves){
+    const existing=orcamentoReceitas.find(o=>o.cliente_id===s.clienteId&&o.ano===orcAno&&o.mes===s.mes);
+    const obj={company_id:cid,owner_id:cu.id,cliente_id:s.clienteId,cliente_nome:s.clienteNome,ano:orcAno,mes:s.mes,valor_orcado:s.valor};
+    if(existing){
+      if(s.valor!==existing.valor_orcado){
+        await dbUpdate('orcamento_receitas',existing.id,{valor_orcado:s.valor});
+        orcamentoReceitas=orcamentoReceitas.map(o=>o.id===existing.id?{...o,valor_orcado:s.valor}:o);
+      }
+    } else if(s.valor>0){
+      const res=await dbInsert('orcamento_receitas',obj);
+      if(res)orcamentoReceitas.push(res);
+    }
+  }
+  ge('modal-orc-editor')?.remove();
+  renderOrcMatrix();
+  renderOrcChart();
+  alert('✓ Orçamento salvo!');
+}
+
+function imprimirOrcamento(){
+  const fmtBRL=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtV2=v=>v?'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0}):'—';
+  const hojeStr=new Date().toLocaleDateString('pt-BR');
+  let LOGO='';
+  const logoMatch=document.documentElement.innerHTML.match(/data:image\/png;base64,[A-Za-z0-9+/=]{5000,}/);
+  if(logoMatch)LOGO=logoMatch[0];
+
+  const cliAtivos=clientes.filter(c=>c.status!=='pendente');
+  const rows=cliAtivos.map(cli=>{
+    const orcV=MESES_ABREV.map((_,m)=>orcamentoReceitas.find(o=>o.cliente_id===cli.id&&o.ano===orcAno&&o.mes===m+1)?.valor_orcado||0);
+    const prevV=MESES_ABREV.map((_,m)=>contasReceber.filter(cr=>{const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;return cr.cliente_id===cli.id&&v&&v.getFullYear()===orcAno&&v.getMonth()===m;}).reduce((s,cr)=>s+Number(cr.valor||0),0));
+    const realV=MESES_ABREV.map((_,m)=>contasReceber.filter(cr=>{const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;return cr.cliente_id===cli.id&&v&&v.getFullYear()===orcAno&&v.getMonth()===m&&['pago','pago_atraso'].includes(cr.status);}).reduce((s,cr)=>s+Number(cr.valor||0),0));
+    if(!orcV.some(v=>v>0)&&!prevV.some(v=>v>0)&&!realV.some(v=>v>0))return'';
+    const totOrc=orcV.reduce((a,b)=>a+b,0),totPrev=prevV.reduce((a,b)=>a+b,0),totReal=realV.reduce((a,b)=>a+b,0);
+    return`<tr><td rowspan="3" style="padding:4px 8px;font-size:10px;font-weight:700;border:1px solid #ddd;vertical-align:middle">${cli.nome}</td>
+      <td style="padding:3px 5px;font-size:9px;color:#0A2540;border:1px solid #ddd">Orç</td>
+      ${orcV.map(v=>`<td style="padding:3px 4px;font-size:9px;text-align:right;border:1px solid #ddd;color:#0A2540;font-weight:600">${v?fmtV2(v):'—'}</td>`).join('')}
+      <td style="padding:3px 5px;font-size:9px;text-align:right;border:1px solid #ddd;font-weight:700;color:#0A2540">${fmtV2(totOrc)}</td>
+    </tr>
+    <tr><td style="padding:3px 5px;font-size:9px;color:#1e5f82;border:1px solid #ddd">Prev</td>
+      ${prevV.map(v=>`<td style="padding:3px 4px;font-size:9px;text-align:right;border:1px solid #ddd;color:#1e5f82">${fmtV2(v)}</td>`).join('')}
+      <td style="padding:3px 5px;font-size:9px;text-align:right;border:1px solid #ddd;font-weight:700;color:#1e5f82">${fmtV2(totPrev)}</td>
+    </tr>
+    <tr style="border-bottom:2px solid #aaa"><td style="padding:3px 5px;font-size:9px;color:#16a34a;border:1px solid #ddd">Real</td>
+      ${realV.map(v=>`<td style="padding:3px 4px;font-size:9px;text-align:right;border:1px solid #ddd;color:#16a34a">${fmtV2(v)}</td>`).join('')}
+      <td style="padding:3px 5px;font-size:9px;text-align:right;border:1px solid #ddd;font-weight:700;color:#16a34a">${fmtV2(totReal)}</td>
+    </tr>`;
+  }).join('');
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Orçamento ${orcAno}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Calibri,Arial,sans-serif;padding:12mm 10mm}
+  .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:3px solid #0A2540}
+  table{width:100%;border-collapse:collapse}thead tr{background:#0A2540;color:#fff}th{padding:5px 4px;font-size:9px;text-align:center}
+  th:first-child{text-align:left;min-width:90px}
+  .footer{margin-top:16px;text-align:center;font-size:9px;color:#999;border-top:1px solid #ddd;padding-top:6px}
+  @media print{@page{size:A4 landscape;margin:0}}</style></head><body>
+  <div class="hdr">
+    <div style="display:flex;align-items:center;gap:10px">
+      ${LOGO?`<img src="${LOGO}" style="height:40px">`:''}
+      <div><div style="font-size:16px;font-weight:700;color:#0A2540">Orçamento de Receitas ${orcAno}</div>
+      <div style="font-size:10px;color:#666">MK LOGÍSTICA LTDA · Emitido em ${hojeStr}</div></div>
+    </div>
+    <div style="font-size:10px;color:#666;text-align:right">VERUS ERP</div>
+  </div>
+  <table><thead><tr>
+    <th style="min-width:90px">Cliente</th><th>Linha</th>
+    ${MESES_ABREV.map(m=>`<th>${m}</th>`).join('')}<th>Total</th>
+  </tr></thead><tbody>${rows}</tbody></table>
+  <div class="footer">MK LOGÍSTICA LTDA · contato@mklogistica.com · www.mklogistica.com</div>
+  </body></html>`;
+
+  const old=ge('orc-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='orc-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:297mm;height:210mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  const oldTitle=document.title;
+  document.title=`Orcamento_Receitas_${orcAno}`;
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>{document.title=oldTitle;iframe.remove();},3000);},600);
 }
 
 // ── CONTAS A RECEBER ──
