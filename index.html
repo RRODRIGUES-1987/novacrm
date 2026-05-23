@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.37 | Gerado: 2026-05-22 21:50 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.38 | Gerado: 2026-05-23 12:24 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -580,7 +580,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.37';
+const APP_VERSION='v1.0.38';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2613,7 +2613,10 @@ function rFaturamento(){
           ${isGestor&&f.status==='aguardando'?`<button class="bicon btn-sm" title="Aprovar" style="color:var(--green)" onclick="aprovarFatura('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </button>`:''}
-          ${f.status==='aprovado'?`<button class="bicon btn-sm" title="Registrar autorização cliente" onclick="registrarAutorizacao('${f.id}')">
+          ${f.status==='aprovado'?`<button class="bicon btn-sm" title="Enviar fatura por e-mail ao cliente" style="color:var(--accent)" onclick="event.stopPropagation();enviarFaturaEmail('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </button>
+          <button class="bicon btn-sm" title="Registrar autorização cliente" onclick="event.stopPropagation();registrarAutorizacao('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg>
           </button>`:''}
           ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Registrar NFS-e" onclick="registrarNFSe('${f.id}')">
@@ -3035,6 +3038,160 @@ function _imprimirFatura(f,contatoResp){
   },800);
 }
 
+
+
+const RESEND_KEY='re_K8Zg8qFd_CZDb7rP9trD34v7A9rkZnQqg';
+const EMAIL_FROM='onboarding@resend.dev';
+
+async function enviarFaturaEmail(id){
+  const f=faturamento.find(x=>x.id===id);
+  if(!f){alert('Fatura não encontrada.');return;}
+
+  // Busca contato responsável
+  let contatos=[];
+  try{contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${f.cliente_id}`);}catch(e){}
+  const contatoResp=contatos.find(c=>c.id===f.responsavel_id)||
+    (f.tipo_operacao?contatos.find(c=>c.tipo_operacao===f.tipo_operacao):null)||
+    contatos[0];
+
+  const emailDestinatario=contatoResp?.email||'';
+  const nomeDestinatario=contatoResp?.nome||'';
+  const cli=clientes.find(c=>c.id===f.cliente_id);
+
+  // Modal de confirmação
+  const old=ge('modal-email-fat');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-email-fat';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:24px;width:460px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">Enviar fatura por e-mail</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${f.numero_fatura} · ${cli?.nome||f.cliente_nome}</div>
+    <div class="fg"><label class="fl">E-mail do destinatário *</label>
+      <input class="fi" id="email-dest" value="${emailDestinatario}" placeholder="contato@empresa.com.br">
+    </div>
+    <div class="fg"><label class="fl">Nome do destinatário</label>
+      <input class="fi" id="email-nome" value="${nomeDestinatario}" placeholder="Nome do responsável">
+    </div>
+    <div class="fg"><label class="fl">Assunto</label>
+      <input class="fi" id="email-assunto" value="Fatura ${f.numero_fatura} · ${cli?.nome||f.cliente_nome||''} · Aprovação solicitada">
+    </div>
+    <div class="fg"><label class="fl">Mensagem</label>
+      <textarea class="fi" id="email-msg" style="min-height:90px;resize:vertical">Prezado(a) ${nomeDestinatario||'responsável'},
+
+Segue em anexo a fatura ${f.numero_fatura} referente ao período ${f.periodo_inicio?new Date(f.periodo_inicio+'T00:00').toLocaleDateString('pt-BR'):''} a ${f.periodo_fim?new Date(f.periodo_fim+'T00:00').toLocaleDateString('pt-BR'):''}, no valor de ${fmtV(f.total||0)}.
+
+Solicitamos sua aprovação para prosseguirmos com a emissão da nota fiscal de serviço.
+
+Atenciosamente,
+MK LOGÍSTICA LTDA.</textarea>
+    </div>
+    <div id="email-status" style="display:none;padding:10px;border-radius:8px;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="ge('modal-email-fat').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="confirmarEnvioEmail('${id}')" id="btn-enviar-email" style="flex:1;padding:9px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-weight:600">📧 Enviar</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function confirmarEnvioEmail(id){
+  const dest=ge('email-dest')?.value?.trim();
+  if(!dest){alert('Informe o e-mail do destinatário.');return;}
+  const f=faturamento.find(x=>x.id===id);
+  if(!f)return;
+
+  const btn=ge('btn-enviar-email');
+  const statusEl=ge('email-status');
+  btn.disabled=true;btn.textContent='Enviando...';
+  statusEl.style.display='none';
+
+  // Gera HTML da fatura para anexar como HTML inline
+  let contatos=[];
+  try{contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${f.cliente_id}`);}catch(e){}
+  const contatoResp=contatos.find(c=>c.id===f.responsavel_id)||contatos[0];
+
+  const cli=clientes.find(c=>c.id===f.cliente_id);
+  let linhas=[];
+  try{linhas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
+  const subtotal=linhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const issVal=f.iss_incluso?0:subtotal*0.02;
+  const total=subtotal+issVal;
+  const fmtBRL=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2});
+  const fmtDt=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'';
+
+  const linhasHTML=linhas.filter(l=>l.servico).map(l=>`
+    <tr>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px">${l.servico}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">${l.unidade||''}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">${l.preco_unitario||''}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">${l.quantidade||'—'}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:600">${fmtBRL(l.subtotal||0)}</td>
+    </tr>`).join('');
+
+  const msgTexto=(ge('email-msg')?.value||'').replace(/\n/g,'<br>');
+  const assunto=ge('email-assunto')?.value||`Fatura ${f.numero_fatura}`;
+  const nomeDestinatario=ge('email-nome')?.value||dest;
+
+  const htmlEmail=`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:Calibri,Arial,sans-serif;color:#222;max-width:700px;margin:0 auto;padding:20px">
+    <div style="background:#1e5f82;padding:20px 24px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center">
+      <div style="color:#fff;font-size:20px;font-weight:700">MK LOGÍSTICA LTDA.</div>
+      <div style="color:#fff;font-size:16px;font-weight:700">${f.numero_fatura}</div>
+    </div>
+    <div style="background:#f8f9fa;padding:20px 24px;border:1px solid #dee2e6;border-top:none">
+      <p style="font-size:14px;line-height:1.7;color:#444">${msgTexto}</p>
+    </div>
+    <div style="background:#fff;padding:20px 24px;border:1px solid #dee2e6;border-top:none">
+      <div style="font-size:11px;font-weight:700;color:#1e5f82;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;border-bottom:2px solid #1e5f82;padding-bottom:4px">Detalhes da fatura</div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <tr style="background:#1e5f82"><th style="padding:6px 10px;color:#fff;font-size:11px;text-align:left">Serviço</th><th style="padding:6px 10px;color:#fff;font-size:11px;text-align:center">Un.</th><th style="padding:6px 10px;color:#fff;font-size:11px;text-align:right">Preço</th><th style="padding:6px 10px;color:#fff;font-size:11px;text-align:center">Qtd</th><th style="padding:6px 10px;color:#fff;font-size:11px;text-align:right">Subtotal</th></tr>
+        ${linhasHTML}
+      </table>
+      <div style="text-align:right;font-size:13px">
+        <div>Subtotal: <strong>${fmtBRL(subtotal)}</strong></div>
+        ${!f.iss_incluso?`<div>ISS (2%): <strong>${fmtBRL(issVal)}</strong></div>`:''}
+        <div style="font-size:16px;color:#1e5f82;font-weight:700;margin-top:6px;border-top:2px solid #1e5f82;padding-top:6px">TOTAL: ${fmtBRL(total)}</div>
+      </div>
+      <div style="margin-top:16px;padding:12px;background:#f0f7ff;border-radius:8px;font-size:12px;color:#1e5f82">
+        <strong>Período:</strong> ${fmtDt(f.periodo_inicio)} a ${fmtDt(f.periodo_fim)} &nbsp;|&nbsp;
+        <strong>Vencimento estimado:</strong> ${f.vencimento_dias||7} dias após autorização
+      </div>
+    </div>
+    <div style="background:#f8f9fa;padding:14px 24px;border:1px solid #dee2e6;border-top:none;border-radius:0 0 10px 10px;font-size:11px;color:#888;text-align:center">
+      MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com
+    </div>
+  </body></html>`;
+
+  try{
+    const res=await fetch('https://api.resend.com/emails',{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${RESEND_KEY}`,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        from:`MK LOGÍSTICA <${EMAIL_FROM}>`,
+        to:[dest],
+        subject:assunto,
+        html:htmlEmail,
+        reply_to:'faturamento@mklogistica.com',
+      })
+    });
+    const data=await res.json();
+    if(res.ok){
+      // Registra envio
+      await dbUpdate('faturamento',id,{status:'enviado',enviado_em:new Date().toISOString(),enviado_para:dest});
+      faturamento=faturamento.map(x=>x.id===id?{...x,status:'enviado',enviado_para:dest}:x);
+      statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
+      statusEl.textContent=`✓ E-mail enviado com sucesso para ${dest}!`;
+      btn.textContent='✓ Enviado';
+      setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2000);
+    } else {
+      throw new Error(data.message||data.name||'Erro ao enviar');
+    }
+  }catch(err){
+    statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
+    statusEl.textContent=`✗ Erro: ${err.message}`;
+    btn.disabled=false;btn.textContent='📧 Enviar';
+  }
+}
 
 
 function closeFaturaEditor(){
