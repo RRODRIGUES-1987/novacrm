@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.40 | Gerado: 2026-05-23 18:51 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.41 | Gerado: 2026-05-23 19:29 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -585,7 +585,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.40';
+const APP_VERSION='v1.0.41';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5409,7 +5409,7 @@ function rAdmin(){
 
 // ── CONTAS A RECEBER ──
 let crPeriodo={ano:new Date().getFullYear(),mes:new Date().getMonth()};
-let crAgrup='quinzena'; // semana | quinzena | mes
+let crAgrup='dia'; // dia | semana | quinzena | mes
 
 function getDiasUteis(ano,mes){
   const dias=[];
@@ -5475,7 +5475,7 @@ function rContasReceber(){
       <button onclick="crNavMes(1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">›</button>
     </div>
     <div style="display:flex;gap:6px">
-      ${['semana','quinzena','mes'].map(a=>`<button onclick="crSetAgrup('${a}')" style="padding:5px 12px;border:1px solid var(--border);border-radius:99px;font-size:12px;cursor:pointer;background:${crAgrup===a?'var(--accent)':'var(--bg)'};color:${crAgrup===a?'var(--accent-text)':'var(--text)'}">${a.charAt(0).toUpperCase()+a.slice(1)}</button>`).join('')}
+      ${['dia','semana','quinzena','mes'].map(a=>`<button onclick="crSetAgrup('${a}')" style="padding:5px 12px;border:1px solid var(--border);border-radius:99px;font-size:12px;cursor:pointer;background:${crAgrup===a?'var(--accent)':'var(--bg)'};color:${crAgrup===a?'var(--accent-text)':'var(--text)'}">${a.charAt(0).toUpperCase()+a.slice(1)}</button>`).join('')}
     </div>
     <button onclick="baixarContaReceber()" style="padding:7px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">+ Registrar baixa</button>
   </div>
@@ -5517,134 +5517,159 @@ function renderCRMatrix(){
   const el=ge('cr-matrix');if(!el)return;
   const hoje=new Date();hoje.setHours(0,0,0,0);
 
-  const dias=getDiasUteis(crPeriodo.ano,crPeriodo.mes);
-  const grupos=agruparDias(dias,crAgrup);
+  const diasUteis=getDiasUteis(crPeriodo.ano,crPeriodo.mes);
 
-  // Clientes com CR no mês
+  // CR do mês atual (pelo vencimento)
   const crMes=contasReceber.filter(cr=>{
     if(!cr.vencimento)return false;
     const v=new Date(cr.vencimento+'T00:00');
     return v.getFullYear()===crPeriodo.ano&&v.getMonth()===crPeriodo.mes;
   });
 
-  const clienteIds=[...new Set(crMes.map(cr=>cr.cliente_id||cr.cliente_nome))];
+  // Todos os clientes com CR no mês OU que aparecem em contasReceber
+  const clienteIds=[...new Set(crMes.map(cr=>cr.cliente_id).filter(Boolean))];
   const clienteNomes=clienteIds.map(cid=>{
     const cli=clientes.find(c=>c.id===cid);
     return{id:cid,nome:cli?.nome||crMes.find(cr=>cr.cliente_id===cid)?.cliente_nome||cid};
   });
 
-  if(!clienteNomes.length){
-    el.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)">Nenhum título no período</div>';
+  const fmtV2=v=>v?'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0}):'';
+  const fmtDiaSemana=d=>['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()];
+
+  // Define colunas baseado no agrupamento
+  let colunas=[];
+  if(crAgrup==='dia'){
+    colunas=diasUteis.map(d=>({
+      label:`${fmtDiaSemana(d)} ${d.getDate()}`,
+      sublabel:'',
+      dias:[d],
+      key:d.toISOString().slice(0,10),
+      isHoje:d.getTime()===hoje.getTime(),
+      minWidth:'52px',
+    }));
+  } else if(crAgrup==='semana'){
+    let sem=[];let semNum=1;
+    diasUteis.forEach((d,i)=>{
+      sem.push(d);
+      if(d.getDay()===5||i===diasUteis.length-1){
+        const ini=sem[0].getDate();const fim=sem[sem.length-1].getDate();
+        colunas.push({label:`Sem ${semNum}`,sublabel:`${ini}-${fim}/${crPeriodo.mes+1}`,dias:[...sem],key:`sem-${semNum}`,isHoje:sem.some(x=>x.getTime()===hoje.getTime()),minWidth:'80px'});
+        sem=[];semNum++;
+      }
+    });
+  } else if(crAgrup==='quinzena'){
+    const q1=diasUteis.filter(d=>d.getDate()<=15);
+    const q2=diasUteis.filter(d=>d.getDate()>15);
+    if(q1.length)colunas.push({label:'1ª Quinzena',sublabel:`01-15/${crPeriodo.mes+1}`,dias:q1,key:'q1',isHoje:q1.some(x=>x.getTime()===hoje.getTime()),minWidth:'100px'});
+    if(q2.length)colunas.push({label:'2ª Quinzena',sublabel:`16-${diasUteis[diasUteis.length-1]?.getDate()}/${crPeriodo.mes+1}`,dias:q2,key:'q2',isHoje:q2.some(x=>x.getTime()===hoje.getTime()),minWidth:'100px'});
+  } else {
+    // mes
+    const nomeMes=new Date(crPeriodo.ano,crPeriodo.mes,1).toLocaleDateString('pt-BR',{month:'long'});
+    colunas.push({label:nomeMes,sublabel:`${diasUteis.length} dias úteis`,dias:diasUteis,key:'mes',isHoje:true,minWidth:'120px'});
+  }
+
+  if(!clienteNomes.length&&crMes.length===0){
+    // Mostra matriz vazia com os dias mas sem linhas de clientes
+    let html=`<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">Nenhum lançamento neste mês</div>`;
+    el.innerHTML=html;
     return;
   }
 
-  // Totais por dia
-  const totalPorDia={};
-  dias.forEach(d=>{
-    const key=d.toISOString().slice(0,10);
-    const crs=crMes.filter(cr=>cr.vencimento===key);
-    totalPorDia[key]=crs.reduce((s,cr)=>s+Number(cr.valor||0),0);
-  });
-
-  const fmtDiaSemana=d=>['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()];
-  const fmtV2=v=>v?'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0}):'';
-
-  // Monta HTML da matriz
+  // Monta tabela
   let html=`<table style="border-collapse:collapse;min-width:100%;font-size:11px">
   <thead>
     <tr>
-      <th style="position:sticky;left:0;background:var(--bg2);padding:8px 14px;text-align:left;border-right:2px solid var(--border);white-space:nowrap;z-index:2;min-width:160px">Cliente</th>`;
+      <th style="position:sticky;left:0;background:var(--bg2);padding:8px 14px;text-align:left;border-right:2px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;z-index:2;min-width:160px;font-size:12px">Cliente</th>`;
 
-  // Cabeçalho grupos
-  grupos.forEach(g=>{
-    html+=`<th colspan="${g.dias.length}" style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);border-right:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:10px;font-weight:600">${g.label}</th>`;
-  });
-  html+=`<th style="padding:8px 12px;background:var(--bg2);border-left:2px solid var(--border);white-space:nowrap">Total</th></tr>
-
-  <tr>
-    <th style="position:sticky;left:0;background:var(--bg2);padding:4px 14px;border-right:2px solid var(--border);z-index:2"></th>`;
-
-  // Sub-cabeçalho dias
-  dias.forEach(d=>{
-    const key=d.toISOString().slice(0,10);
-    const isHoje=d.getTime()===hoje.getTime();
-    html+=`<th style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);min-width:52px;background:${isHoje?'var(--accent)':'var(--bg2)'};color:${isHoje?'var(--accent-text)':'var(--text2)'};font-weight:${isHoje?'700':'400'}">
-      <div style="font-size:10px">${fmtDiaSemana(d)}</div>
-      <div style="font-size:11px;font-weight:600">${d.getDate()}</div>
+  colunas.forEach(col=>{
+    html+=`<th style="padding:6px 4px;text-align:center;border-bottom:1px solid var(--border);border-right:1px solid var(--border2);background:${col.isHoje?'var(--accent)':'var(--bg2)'};color:${col.isHoje?'var(--accent-text)':'var(--text2)'};min-width:${col.minWidth};font-weight:600">
+      <div style="font-size:11px">${col.label}</div>
+      ${col.sublabel?`<div style="font-size:9px;opacity:.7;font-weight:400">${col.sublabel}</div>`:''}
     </th>`;
   });
-  html+=`<th style="background:var(--bg2);border-left:2px solid var(--border)"></th></tr></thead><tbody>`;
+  html+=`<th style="padding:8px 12px;background:var(--bg2);border-left:2px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;font-size:12px">Total</th></tr></thead><tbody>`;
 
   // Linhas clientes
   let totalGeral=0;
+  const totaisColunas={};
+
   clienteNomes.forEach((cli,ri)=>{
-    const crCli=crMes.filter(cr=>cr.cliente_id===cli.id||cr.cliente_nome===cli.nome);
+    const crCli=crMes.filter(cr=>cr.cliente_id===cli.id);
     const totalCli=crCli.reduce((s,cr)=>s+Number(cr.valor||0),0);
     totalGeral+=totalCli;
-    html+=`<tr style="border-bottom:1px solid var(--border2);background:${ri%2===0?'var(--bg)':'var(--bg2)'}">
-      <td style="position:sticky;left:0;padding:8px 14px;font-weight:600;border-right:2px solid var(--border);white-space:nowrap;background:${ri%2===0?'var(--bg)':'var(--bg2)'};z-index:1">${cli.nome}</td>`;
 
-    dias.forEach(d=>{
-      const key=d.toISOString().slice(0,10);
-      const isHoje=d.getTime()===hoje.getTime();
-      const crsNoDia=crCli.filter(cr=>cr.vencimento===key);
-      const valorDia=crsNoDia.reduce((s,cr)=>s+Number(cr.valor||0),0);
-      const st=crsNoDia.length?crStatusInfo(crsNoDia[0]):{};
-      html+=`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);cursor:${crsNoDia.length?'pointer':'default'};background:${isHoje?'rgba(var(--accent-rgb,30,95,130),.05)':''}"
-        ${crsNoDia.length?`onclick="abrirCRDia('${cli.id}','${key}')"`:''}>
-        ${valorDia?`<span style="display:inline-block;padding:2px 5px;border-radius:5px;background:${st.bg};color:${st.color};font-weight:600;font-size:10px;white-space:nowrap">${fmtV2(valorDia)}</span>`:'<span style="color:var(--border2)">—</span>'}
+    html+=`<tr style="border-bottom:1px solid var(--border2);background:${ri%2===0?'var(--bg)':'var(--bg2)'}">
+      <td style="position:sticky;left:0;padding:8px 14px;font-weight:600;border-right:2px solid var(--border);white-space:nowrap;background:${ri%2===0?'var(--bg)':'var(--bg2)'};z-index:1;font-size:12px">${cli.nome}</td>`;
+
+    colunas.forEach(col=>{
+      const crsNaCol=crCli.filter(cr=>col.dias.some(d=>d.toISOString().slice(0,10)===cr.vencimento));
+      const valorCol=crsNaCol.reduce((s,cr)=>s+Number(cr.valor||0),0);
+      totaisColunas[col.key]=(totaisColunas[col.key]||0)+valorCol;
+
+      // Status predominante
+      const temVencido=crsNaCol.some(cr=>{const v=new Date(cr.vencimento+'T00:00');return v<hoje&&cr.status!=='pago'&&cr.status!=='pago_atraso';});
+      const temPago=crsNaCol.some(cr=>cr.status==='pago'||cr.status==='pago_atraso');
+      const bg=valorCol?(temVencido?'#fee2e2':temPago?'#dcfce7':'#dbeafe'):'';
+      const color=valorCol?(temVencido?'#991b1b':temPago?'#166534':'#1e40af'):'';
+
+      // Chave para onclick — no modo dia usa a data, nos outros usa os dias do grupo
+      const onclickParam=crAgrup==='dia'?`'${cli.id}','${col.key}'`:`'${cli.id}','${col.dias.map(d=>d.toISOString().slice(0,10)).join(',')}'`;
+
+      html+=`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);cursor:${crsNaCol.length?'pointer':'default'};background:${col.isHoje?'rgba(30,95,130,.04)':''}"
+        ${crsNaCol.length?`onclick="abrirCRPeriodo(${onclickParam})"`:''}>
+        ${valorCol?`<span style="display:inline-block;padding:2px 6px;border-radius:5px;background:${bg};color:${color};font-weight:700;font-size:10px;white-space:nowrap">${fmtV2(valorCol)}</span>`:`<span style="color:var(--border2);font-size:10px">—</span>`}
       </td>`;
     });
 
-    html+=`<td style="padding:8px 12px;text-align:right;font-weight:700;border-left:2px solid var(--border);white-space:nowrap">${fmtV(totalCli)}</td></tr>`;
+    html+=`<td style="padding:8px 12px;text-align:right;font-weight:700;border-left:2px solid var(--border);white-space:nowrap;font-size:12px;color:var(--accent)">${fmtV(totalCli)}</td></tr>`;
   });
 
   // Linha totais
   html+=`<tr style="background:var(--bg3);border-top:2px solid var(--border);font-weight:700">
-    <td style="position:sticky;left:0;padding:8px 14px;border-right:2px solid var(--border);background:var(--bg3);z-index:1">TOTAL</td>`;
+    <td style="position:sticky;left:0;padding:8px 14px;border-right:2px solid var(--border);background:var(--bg3);z-index:1;font-size:12px">TOTAL</td>`;
 
-  dias.forEach(d=>{
-    const key=d.toISOString().slice(0,10);
-    const val=totalPorDia[key]||0;
-    const isHoje=d.getTime()===hoje.getTime();
-    html+=`<td style="padding:6px;text-align:center;border-right:1px solid var(--border2);background:${isHoje?'rgba(30,95,130,.08)':''}">
+  colunas.forEach(col=>{
+    const val=totaisColunas[col.key]||0;
+    html+=`<td style="padding:6px 4px;text-align:center;border-right:1px solid var(--border2);background:${col.isHoje?'rgba(30,95,130,.06)':''}">
       ${val?`<span style="font-size:10px;font-weight:700;color:var(--accent)">${fmtV2(val)}</span>`:''}
     </td>`;
   });
 
-  html+=`<td style="padding:8px 12px;text-align:right;border-left:2px solid var(--border);color:var(--accent);font-size:13px">${fmtV(totalGeral)}</td></tr>`;
+  html+=`<td style="padding:8px 12px;text-align:right;border-left:2px solid var(--border);color:var(--accent);font-size:13px;font-weight:700">${fmtV(totalGeral)}</td></tr>`;
   html+=`</tbody></table>`;
-
   el.innerHTML=html;
 }
 
-function abrirCRDia(clienteId,data){
-  const crs=contasReceber.filter(cr=>(cr.cliente_id===clienteId||cr.cliente_nome===clienteId)&&cr.vencimento===data);
+// Abre CR para um período (dia ou grupo de dias)
+function abrirCRPeriodo(clienteId, datas){
+  const dataArr=datas.split(',');
+  const crs=contasReceber.filter(cr=>(cr.cliente_id===clienteId)&&dataArr.includes(cr.vencimento));
   if(!crs.length)return;
   const cli=clientes.find(c=>c.id===clienteId);
   const old=ge('modal-cr-dia');if(old)old.remove();
   const modal=document.createElement('div');
   modal.id='modal-cr-dia';
   modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
-  const dt=new Date(data+'T00:00').toLocaleDateString('pt-BR');
-  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:480px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+  const label=dataArr.length===1?new Date(dataArr[0]+'T00:00').toLocaleDateString('pt-BR'):`${new Date(dataArr[0]+'T00:00').toLocaleDateString('pt-BR')} a ${new Date(dataArr[dataArr.length-1]+'T00:00').toLocaleDateString('pt-BR')}`;
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:480px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:80vh;overflow-y:auto">
     <div style="font-size:15px;font-weight:600;margin-bottom:4px">${cli?.nome||clienteId}</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Vencimento: ${dt}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${label}</div>
     ${crs.map(cr=>{
       const st=crStatusInfo(cr);
       const fat=faturamento.find(f=>f.id===cr.fatura_id);
+      const vencDt=cr.vencimento?new Date(cr.vencimento+'T00:00').toLocaleDateString('pt-BR'):'';
       return`<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div style="font-weight:600;font-size:13px">${fat?.numero_fatura||cr.id.slice(0,8)}</div>
-            <div style="font-size:11px;color:var(--text2)">${fat?.tipo_operacao||''}</div>
+            <div style="font-weight:600;font-size:13px">${fat?.numero_fatura||'—'}</div>
+            <div style="font-size:11px;color:var(--text2)">${fat?.tipo_operacao||''} ${vencDt?'· Venc: '+vencDt:''}</div>
           </div>
           <div style="text-align:right">
             <div style="font-weight:700;font-size:14px;color:var(--accent)">${fmtV(cr.valor)}</div>
             <span style="font-size:10px;padding:2px 7px;border-radius:99px;background:${st.bg};color:${st.color}">${st.label}</span>
           </div>
         </div>
-        ${['a_vencer','vencido'].includes(cr.status)||!cr.status?`<button onclick="abrirBaixaCR('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Registrar baixa</button>`:''}
+        ${!['pago','pago_atraso'].includes(cr.status)?`<button onclick="abrirBaixaCR('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Registrar baixa</button>`:''}
       </div>`;
     }).join('')}
     <button onclick="ge('modal-cr-dia').remove()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;margin-top:4px">Fechar</button>
