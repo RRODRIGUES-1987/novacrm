@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.43 | Gerado: 2026-05-23 19:58 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.44 | Gerado: 2026-05-23 20:04 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -585,7 +585,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.43';
+const APP_VERSION='v1.0.44';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5488,10 +5488,10 @@ function rContasReceber(){
       <div style="font-size:22px;font-weight:700;color:#1e5f82">${fmtV(totalReceber)}</div>
       <div style="font-size:11px;color:var(--text2);margin-top:4px">${contasReceber.filter(cr=>!['pago','pago_atraso'].includes(cr.status)).length} título(s)</div>
     </div>
-    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border);cursor:pointer" onclick="abrirFaturasAtraso()">
       <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Total em atraso</div>
       <div style="font-size:22px;font-weight:700;color:${totalAtraso>0?'#991b1b':'var(--text)'}">${fmtV(totalAtraso)}</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:4px">${contasReceber.filter(cr=>{if(['pago','pago_atraso'].includes(cr.status))return false;const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;return v&&v<hoje;}).length} título(s)</div>
+      <div style="font-size:11px;color:${totalAtraso>0?'#991b1b':'var(--text2)'};margin-top:4px">${contasReceber.filter(cr=>{if(['pago','pago_atraso'].includes(cr.status))return false;const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;return v&&v<hoje;}).length} título(s) ${totalAtraso>0?'· clique para ver':''}</div>
     </div>
   </div>
 
@@ -5524,11 +5524,11 @@ function rContasReceber(){
     <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--text2)">
       <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#1e5f82;border-radius:2px;display:inline-block"></span>Previsto</span>
       <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#16a34a;border-radius:2px;display:inline-block"></span>Realizado</span>
+      <span style="color:var(--text3);font-size:11px">· % = variação realizado vs previsto</span>
     </div>
-    <div style="position:relative;width:100%;height:220px">
-      <canvas id="cr-chart-barras" role="img" aria-label="Gráfico de barras previsto vs realizado por mês"></canvas>
+    <div style="position:relative;width:100%;height:260px">
+      <canvas id="cr-chart-barras" role="img" aria-label="Gráfico de barras previsto vs realizado por mês com variação percentual"></canvas>
     </div>
-    <div id="cr-tabela-diff" style="margin-top:14px;overflow-x:auto"></div>
   </div>`;
 }
 
@@ -5588,22 +5588,67 @@ function renderCRChart(){
       });
     }
 
-    // Gráfico barras — previsto vs realizado
+    // Gráfico barras — previsto vs realizado com variação %
     const c2=ge('cr-chart-barras');
     if(c2){
       if(c2._chart)c2._chart.destroy();
+
+      // Plugin inline para mostrar % sobre as barras do realizado
+      const variacaoPlugin={
+        id:'variacao',
+        afterDatasetsDraw(chart){
+          const{ctx,data,scales:{x,y}}=chart;
+          const prevDs=chart.getDatasetMeta(0);
+          const realDs=chart.getDatasetMeta(1);
+          data.labels.forEach((_,i)=>{
+            const prev=data.datasets[0].data[i]||0;
+            const real=data.datasets[1].data[i]||0;
+            if(!prev&&!real)return;
+            const variacao=prev>0?((real-prev)/prev*100):real>0?100:null;
+            if(variacao===null)return;
+            const bar=realDs.data[i];
+            if(!bar)return;
+            const x2=bar.x;
+            const y2=bar.y-6;
+            const txt=(variacao>0?'+':'')+variacao.toFixed(1)+'%';
+            ctx.save();
+            ctx.font='bold 9px sans-serif';
+            ctx.fillStyle=variacao>0?'#16a34a':variacao<0?'#991b1b':'#888';
+            ctx.textAlign='center';
+            ctx.fillText(txt,x2,y2);
+            ctx.restore();
+          });
+        }
+      };
+
       c2._chart=new Chart(c2,{
         type:'bar',
+        plugins:[variacaoPlugin],
         data:{
           labels:meses,
           datasets:[
-            {label:'Previsto',data:totaisPrev,backgroundColor:'rgba(30,95,130,0.8)',borderRadius:4},
-            {label:'Realizado',data:totaisReal,backgroundColor:'rgba(22,163,74,0.8)',borderRadius:4},
+            {label:'Previsto',data:totaisPrev,backgroundColor:'rgba(30,95,130,0.75)',borderRadius:4},
+            {label:'Realizado',data:totaisReal,backgroundColor:'rgba(22,163,74,0.75)',borderRadius:4},
           ]
         },
         options:{
           responsive:true,maintainAspectRatio:false,
-          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtBRL2(ctx.raw)}`}}},
+          layout:{padding:{top:20}},
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{
+              afterBody:ctx=>{
+                const i=ctx[0].dataIndex;
+                const prev=totaisPrev[i]||0;
+                const real=totaisReal[i]||0;
+                const diff=real-prev;
+                const variacao=prev>0?((diff/prev)*100).toFixed(1):real>0?'100':null;
+                const lines=[`Diferença: ${diff>=0?'+':''}${fmtBRL2(diff)}`];
+                if(variacao!==null)lines.push(`Variação: ${diff>=0?'+':''}${variacao}%`);
+                return lines;
+              }
+            }}
+          },
           scales:{
             x:{grid:{display:false},ticks:{font:{size:10},autoSkip:false,maxRotation:0}},
             y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},callback:v=>fmtBRL(v)}}
@@ -5612,48 +5657,8 @@ function renderCRChart(){
       });
     }
 
-    // Tabela diferença
-    const el=ge('cr-tabela-diff');
-    if(el){
-      const rows=meses.map((mes,m)=>{
-        const prev=totaisPrev[m];
-        const real=totaisReal[m];
-        const diff=real-prev;
-        const variacao=prev>0?((diff/prev)*100).toFixed(1):real>0?'100':'-';
-        const diffColor=diff>0?'#16a34a':diff<0?'#991b1b':'var(--text2)';
-        return`<tr style="border-bottom:1px solid var(--border2)">
-          <td style="padding:5px 10px;font-size:11px;font-weight:600">${mes}</td>
-          <td style="padding:5px 10px;font-size:11px;text-align:right;color:#1e5f82">${prev?fmtBRL2(prev):'—'}</td>
-          <td style="padding:5px 10px;font-size:11px;text-align:right;color:#16a34a">${real?fmtBRL2(real):'—'}</td>
-          <td style="padding:5px 10px;font-size:11px;text-align:right;font-weight:600;color:${diffColor}">${diff!==0?(diff>0?'+':'')+fmtBRL2(diff):'—'}</td>
-          <td style="padding:5px 10px;font-size:11px;text-align:right;color:${diffColor}">${variacao!=='-'?(diff>0?'+':'')+variacao+'%':'—'}</td>
-        </tr>`;
-      }).join('');
-
-      // Totais
-      const totPrev=totaisPrev.reduce((a,b)=>a+b,0);
-      const totReal=totaisReal.reduce((a,b)=>a+b,0);
-      const totDiff=totReal-totPrev;
-      const totVar=totPrev>0?((totDiff/totPrev)*100).toFixed(1):'—';
-
-      el.innerHTML=`<table style="width:100%;border-collapse:collapse">
-        <thead><tr style="background:#0A2540;color:#fff">
-          <th style="padding:6px 10px;text-align:left;font-size:11px">Mês</th>
-          <th style="padding:6px 10px;text-align:right;font-size:11px">Previsto</th>
-          <th style="padding:6px 10px;text-align:right;font-size:11px">Realizado</th>
-          <th style="padding:6px 10px;text-align:right;font-size:11px">Diferença</th>
-          <th style="padding:6px 10px;text-align:right;font-size:11px">Variação</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr style="background:#e8eaed;font-weight:700;border-top:2px solid #0A2540">
-          <td style="padding:6px 10px;font-size:11px">TOTAL</td>
-          <td style="padding:6px 10px;font-size:11px;text-align:right;color:#1e5f82">${fmtBRL2(totPrev)}</td>
-          <td style="padding:6px 10px;font-size:11px;text-align:right;color:#16a34a">${fmtBRL2(totReal)}</td>
-          <td style="padding:6px 10px;font-size:11px;text-align:right;color:${totDiff>0?'#16a34a':totDiff<0?'#991b1b':'var(--text2)'}">${totDiff!==0?(totDiff>0?'+':'')+fmtBRL2(totDiff):'—'}</td>
-          <td style="padding:6px 10px;font-size:11px;text-align:right;color:${totDiff>0?'#16a34a':totDiff<0?'#991b1b':'var(--text2)'}">${totVar!=='—'?(totDiff>0?'+':'')+totVar+'%':'—'}</td>
-        </tr></tfoot>
-      </table>`;
-    }
+    // Remove tabela se existir
+    const tbl=ge('cr-tabela-diff');if(tbl)tbl.innerHTML='';
   };
 
   if(window.Chart){renderCharts();}
@@ -5905,7 +5910,56 @@ async function confirmarBaixaCR(crId){
   alert(`✓ Baixa registrada como "${status==='pago'?'Pago no prazo':'Pago em atraso'}"!`);
 }
 
-function baixarContaReceber(){abrirBaixaCR('');}
+function abrirFaturasAtraso(){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const atrasados=contasReceber.filter(cr=>{
+    if(['pago','pago_atraso'].includes(cr.status))return false;
+    const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+    return v&&v<hoje;
+  }).sort((a,b)=>a.vencimento<b.vencimento?-1:1);
+
+  const old=ge('modal-atraso-cr');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-atraso-cr';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+
+  const rows=atrasados.map(cr=>{
+    const cli=clientes.find(c=>c.id===cr.cliente_id);
+    const fat=faturamento.find(f=>f.id===cr.fatura_id);
+    const venc=new Date(cr.vencimento+'T00:00');
+    const diasAtraso=Math.floor((hoje-venc)/(1000*60*60*24));
+    return`<div style="padding:12px;border:1px solid #fee2e2;border-radius:8px;margin-bottom:8px;background:#fff8f8">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:600;font-size:13px">${cli?.nome||cr.cliente_nome}</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${fat?.numero_fatura||'—'} · Venc: ${venc.toLocaleDateString('pt-BR')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;font-size:14px;color:#991b1b">${fmtV(cr.valor)}</div>
+          <div style="font-size:11px;color:#991b1b;font-weight:600">${diasAtraso}d em atraso</div>
+        </div>
+      </div>
+      <button onclick="abrirBaixaCR('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#991b1b">Registrar baixa</button>
+    </div>`;
+  }).join('');
+
+  const total=atrasados.reduce((s,cr)=>s+Number(cr.valor||0),0);
+
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:500px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:80vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div style="font-size:15px;font-weight:600;color:#991b1b">Faturas em atraso</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${atrasados.length} título(s) · Total: ${fmtV(total)}</div>
+      </div>
+      <button onclick="ge('modal-atraso-cr').remove()" style="padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">✕</button>
+    </div>
+    ${rows||'<div style="text-align:center;color:var(--text2);padding:20px">Nenhuma fatura em atraso!</div>'}
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+
 
 // Cria lançamento em contas a receber ao emitir NFS-e
 async function criarLancamentoCR(faturaId){
