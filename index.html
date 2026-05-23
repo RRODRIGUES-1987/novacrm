@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.38 | Gerado: 2026-05-23 12:24 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.39 | Gerado: 2026-05-23 18:36 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -344,6 +344,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
           <span>Tabelas Tarifárias</span>
         </button>
+        <button class="navitem sub" id="nav-contas-receber" onclick="pg('contas-receber')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Contas a Receber</span>
+        </button>
       </div>
     </div>
 
@@ -548,6 +552,7 @@ let tarefasGestao=[],atas=[],planoAcao=[];
 let rhFuncoes=[],rhHorarios=[];
 let faturamento=[];
 let workflowConfig=[];
+let contasReceber=[];
 let tabelasTarifarias=[];
 let representantes=[];
 let propostas=[];
@@ -580,7 +585,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.38';
+const APP_VERSION='v1.0.39';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -942,6 +947,7 @@ async function loadData(){
         dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`),
       ]);
       workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
+      contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}&order=vencimento.asc`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
         dbSelect('contacts','select=*'),
@@ -1112,6 +1118,7 @@ function render(){
   else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
+  else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
   else if(curPage==='tarefas-gestao')c.innerHTML=rTarefasGestao();
   else if(curPage==='atas')c.innerHTML=rAtas();
   else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
@@ -3533,6 +3540,7 @@ async function confirmarNFSe(id){
   });
   faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento}:f);
   ge('modal-nfse')?.remove();
+  await criarLancamentoCR(id);
   alert(`NFS-e registrada! Vencimento calculado: ${dtNfse.toLocaleDateString('pt-BR')}`);
   render();
 }
@@ -5389,7 +5397,324 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
 }
 
-// ── WORKFLOW ──
+// ── CONTAS A RECEBER ──
+let crPeriodo={ano:new Date().getFullYear(),mes:new Date().getMonth()};
+let crAgrup='quinzena'; // semana | quinzena | mes
+
+function getDiasUteis(ano,mes){
+  const dias=[];
+  const d=new Date(ano,mes,1);
+  while(d.getMonth()===mes){
+    const dow=d.getDay();
+    if(dow!==0&&dow!==6)dias.push(new Date(d));
+    d.setDate(d.getDate()+1);
+  }
+  return dias;
+}
+
+function getDiasUteisRange(inicio,fim){
+  const dias=[];
+  const d=new Date(inicio);
+  while(d<=fim){
+    const dow=d.getDay();
+    if(dow!==0&&dow!==6)dias.push(new Date(d));
+    d.setDate(d.getDate()+1);
+  }
+  return dias;
+}
+
+function agruparDias(dias,agrup){
+  if(agrup==='mes')return[{label:dias[0]?.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})||'',dias}];
+  const grupos=[];
+  if(agrup==='quinzena'){
+    const q1=dias.filter(d=>d.getDate()<=15);
+    const q2=dias.filter(d=>d.getDate()>15);
+    if(q1.length)grupos.push({label:`1ª quinzena`,dias:q1});
+    if(q2.length)grupos.push({label:`2ª quinzena`,dias:q2});
+  } else {
+    // semana
+    let semAtual=[];let semNum=1;
+    dias.forEach((d,i)=>{
+      semAtual.push(d);
+      if(d.getDay()===5||i===dias.length-1){
+        grupos.push({label:`Sem ${semNum}`,dias:[...semAtual]});
+        semAtual=[];semNum++;
+      }
+    });
+    if(semAtual.length)grupos.push({label:`Sem ${semNum}`,dias:semAtual});
+  }
+  return grupos;
+}
+
+function crStatusInfo(cr){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const venc=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;
+  if(cr.status==='pago')return{label:'Pago',bg:'#dcfce7',color:'#166534'};
+  if(cr.status==='pago_atraso')return{label:'Pago atraso',bg:'#fef9c3',color:'#854d0e'};
+  if(venc&&venc<hoje)return{label:'Vencido',bg:'#fee2e2',color:'#991b1b'};
+  return{label:'A vencer',bg:'#dbeafe',color:'#1e40af'};
+}
+
+function rContasReceber(){
+  const nomeMes=new Date(crPeriodo.ano,crPeriodo.mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  return`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="crNavMes(-1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">‹</button>
+      <div style="font-size:15px;font-weight:600;min-width:160px;text-align:center;text-transform:capitalize">${nomeMes}</div>
+      <button onclick="crNavMes(1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">›</button>
+    </div>
+    <div style="display:flex;gap:6px">
+      ${['semana','quinzena','mes'].map(a=>`<button onclick="crSetAgrup('${a}')" style="padding:5px 12px;border:1px solid var(--border);border-radius:99px;font-size:12px;cursor:pointer;background:${crAgrup===a?'var(--accent)':'var(--bg)'};color:${crAgrup===a?'var(--accent-text)':'var(--text)'}">${a.charAt(0).toUpperCase()+a.slice(1)}</button>`).join('')}
+    </div>
+    <button onclick="baixarContaReceber()" style="padding:7px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">+ Registrar baixa</button>
+  </div>
+  <div id="cr-matrix-wrap" style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
+    <div id="cr-matrix">Carregando...</div>
+  </div>
+  <div id="cr-totais-wrap" style="margin-top:12px"></div>`;
+}
+
+function initContasReceber(){
+  renderCRMatrix();
+}
+
+function crNavMes(d){
+  crPeriodo.mes+=d;
+  if(crPeriodo.mes>11){crPeriodo.mes=0;crPeriodo.ano++;}
+  if(crPeriodo.mes<0){crPeriodo.mes=11;crPeriodo.ano--;}
+  renderCRMatrix();
+  // Atualiza label do mês
+  const nomeMes=new Date(crPeriodo.ano,crPeriodo.mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  const lbl=document.querySelector('#cr-matrix-wrap')?.previousElementSibling?.querySelector('div[style*="min-width"]');
+  if(lbl)lbl.textContent=nomeMes;
+  // Re-render completo
+  if(curPage==='contas-receber'){
+    const c=ge('content');
+    if(c){c.innerHTML=rContasReceber();initContasReceber();}
+  }
+}
+
+function crSetAgrup(a){
+  crAgrup=a;
+  if(curPage==='contas-receber'){
+    const c=ge('content');
+    if(c){c.innerHTML=rContasReceber();initContasReceber();}
+  }
+}
+
+function renderCRMatrix(){
+  const el=ge('cr-matrix');if(!el)return;
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+
+  const dias=getDiasUteis(crPeriodo.ano,crPeriodo.mes);
+  const grupos=agruparDias(dias,crAgrup);
+
+  // Clientes com CR no mês
+  const crMes=contasReceber.filter(cr=>{
+    if(!cr.vencimento)return false;
+    const v=new Date(cr.vencimento+'T00:00');
+    return v.getFullYear()===crPeriodo.ano&&v.getMonth()===crPeriodo.mes;
+  });
+
+  const clienteIds=[...new Set(crMes.map(cr=>cr.cliente_id||cr.cliente_nome))];
+  const clienteNomes=clienteIds.map(cid=>{
+    const cli=clientes.find(c=>c.id===cid);
+    return{id:cid,nome:cli?.nome||crMes.find(cr=>cr.cliente_id===cid)?.cliente_nome||cid};
+  });
+
+  if(!clienteNomes.length){
+    el.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)">Nenhum título no período</div>';
+    return;
+  }
+
+  // Totais por dia
+  const totalPorDia={};
+  dias.forEach(d=>{
+    const key=d.toISOString().slice(0,10);
+    const crs=crMes.filter(cr=>cr.vencimento===key);
+    totalPorDia[key]=crs.reduce((s,cr)=>s+Number(cr.valor||0),0);
+  });
+
+  const fmtDiaSemana=d=>['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()];
+  const fmtV2=v=>v?'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0}):'';
+
+  // Monta HTML da matriz
+  let html=`<table style="border-collapse:collapse;min-width:100%;font-size:11px">
+  <thead>
+    <tr>
+      <th style="position:sticky;left:0;background:var(--bg2);padding:8px 14px;text-align:left;border-right:2px solid var(--border);white-space:nowrap;z-index:2;min-width:160px">Cliente</th>`;
+
+  // Cabeçalho grupos
+  grupos.forEach(g=>{
+    html+=`<th colspan="${g.dias.length}" style="padding:4px 8px;text-align:center;border-bottom:1px solid var(--border);border-right:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:10px;font-weight:600">${g.label}</th>`;
+  });
+  html+=`<th style="padding:8px 12px;background:var(--bg2);border-left:2px solid var(--border);white-space:nowrap">Total</th></tr>
+
+  <tr>
+    <th style="position:sticky;left:0;background:var(--bg2);padding:4px 14px;border-right:2px solid var(--border);z-index:2"></th>`;
+
+  // Sub-cabeçalho dias
+  dias.forEach(d=>{
+    const key=d.toISOString().slice(0,10);
+    const isHoje=d.getTime()===hoje.getTime();
+    html+=`<th style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);min-width:52px;background:${isHoje?'var(--accent)':'var(--bg2)'};color:${isHoje?'var(--accent-text)':'var(--text2)'};font-weight:${isHoje?'700':'400'}">
+      <div style="font-size:10px">${fmtDiaSemana(d)}</div>
+      <div style="font-size:11px;font-weight:600">${d.getDate()}</div>
+    </th>`;
+  });
+  html+=`<th style="background:var(--bg2);border-left:2px solid var(--border)"></th></tr></thead><tbody>`;
+
+  // Linhas clientes
+  let totalGeral=0;
+  clienteNomes.forEach((cli,ri)=>{
+    const crCli=crMes.filter(cr=>cr.cliente_id===cli.id||cr.cliente_nome===cli.nome);
+    const totalCli=crCli.reduce((s,cr)=>s+Number(cr.valor||0),0);
+    totalGeral+=totalCli;
+    html+=`<tr style="border-bottom:1px solid var(--border2);background:${ri%2===0?'var(--bg)':'var(--bg2)'}">
+      <td style="position:sticky;left:0;padding:8px 14px;font-weight:600;border-right:2px solid var(--border);white-space:nowrap;background:${ri%2===0?'var(--bg)':'var(--bg2)'};z-index:1">${cli.nome}</td>`;
+
+    dias.forEach(d=>{
+      const key=d.toISOString().slice(0,10);
+      const isHoje=d.getTime()===hoje.getTime();
+      const crsNoDia=crCli.filter(cr=>cr.vencimento===key);
+      const valorDia=crsNoDia.reduce((s,cr)=>s+Number(cr.valor||0),0);
+      const st=crsNoDia.length?crStatusInfo(crsNoDia[0]):{};
+      html+=`<td style="padding:4px 6px;text-align:center;border-right:1px solid var(--border2);cursor:${crsNoDia.length?'pointer':'default'};background:${isHoje?'rgba(var(--accent-rgb,30,95,130),.05)':''}"
+        ${crsNoDia.length?`onclick="abrirCRDia('${cli.id}','${key}')"`:''}>
+        ${valorDia?`<span style="display:inline-block;padding:2px 5px;border-radius:5px;background:${st.bg};color:${st.color};font-weight:600;font-size:10px;white-space:nowrap">${fmtV2(valorDia)}</span>`:'<span style="color:var(--border2)">—</span>'}
+      </td>`;
+    });
+
+    html+=`<td style="padding:8px 12px;text-align:right;font-weight:700;border-left:2px solid var(--border);white-space:nowrap">${fmtV(totalCli)}</td></tr>`;
+  });
+
+  // Linha totais
+  html+=`<tr style="background:var(--bg3);border-top:2px solid var(--border);font-weight:700">
+    <td style="position:sticky;left:0;padding:8px 14px;border-right:2px solid var(--border);background:var(--bg3);z-index:1">TOTAL</td>`;
+
+  dias.forEach(d=>{
+    const key=d.toISOString().slice(0,10);
+    const val=totalPorDia[key]||0;
+    const isHoje=d.getTime()===hoje.getTime();
+    html+=`<td style="padding:6px;text-align:center;border-right:1px solid var(--border2);background:${isHoje?'rgba(30,95,130,.08)':''}">
+      ${val?`<span style="font-size:10px;font-weight:700;color:var(--accent)">${fmtV2(val)}</span>`:''}
+    </td>`;
+  });
+
+  html+=`<td style="padding:8px 12px;text-align:right;border-left:2px solid var(--border);color:var(--accent);font-size:13px">${fmtV(totalGeral)}</td></tr>`;
+  html+=`</tbody></table>`;
+
+  el.innerHTML=html;
+}
+
+function abrirCRDia(clienteId,data){
+  const crs=contasReceber.filter(cr=>(cr.cliente_id===clienteId||cr.cliente_nome===clienteId)&&cr.vencimento===data);
+  if(!crs.length)return;
+  const cli=clientes.find(c=>c.id===clienteId);
+  const old=ge('modal-cr-dia');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-cr-dia';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  const dt=new Date(data+'T00:00').toLocaleDateString('pt-BR');
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:480px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:4px">${cli?.nome||clienteId}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Vencimento: ${dt}</div>
+    ${crs.map(cr=>{
+      const st=crStatusInfo(cr);
+      const fat=faturamento.find(f=>f.id===cr.fatura_id);
+      return`<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;font-size:13px">${fat?.numero_fatura||cr.id.slice(0,8)}</div>
+            <div style="font-size:11px;color:var(--text2)">${fat?.tipo_operacao||''}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700;font-size:14px;color:var(--accent)">${fmtV(cr.valor)}</div>
+            <span style="font-size:10px;padding:2px 7px;border-radius:99px;background:${st.bg};color:${st.color}">${st.label}</span>
+          </div>
+        </div>
+        ${['a_vencer','vencido'].includes(cr.status)||!cr.status?`<button onclick="abrirBaixaCR('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Registrar baixa</button>`:''}
+      </div>`;
+    }).join('')}
+    <button onclick="ge('modal-cr-dia').remove()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;margin-top:4px">Fechar</button>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+function abrirBaixaCR(crId){
+  const cr=contasReceber.find(x=>x.id===crId);if(!cr)return;
+  const old=ge('modal-baixa-cr');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-baixa-cr';
+  modal.style.cssText='position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar baixa</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Valor: <strong>${fmtV(cr.valor)}</strong> · Vencimento: <strong>${new Date(cr.vencimento+'T00:00').toLocaleDateString('pt-BR')}</strong></div>
+    <div class="fg"><label class="fl">Data de pagamento *</label>
+      <input class="fi" id="baixa-data" type="date" value="${new Date().toISOString().slice(0,10)}">
+    </div>
+    <div class="fg"><label class="fl">Valor pago (R$)</label>
+      <input class="fi" id="baixa-valor" type="number" step="0.01" value="${cr.valor||''}">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="ge('modal-baixa-cr').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      <button onclick="confirmarBaixaCR('${crId}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-weight:600">Confirmar baixa</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function confirmarBaixaCR(crId){
+  const cr=contasReceber.find(x=>x.id===crId);if(!cr)return;
+  const dataPgto=ge('baixa-data')?.value;
+  const valorPago=parseFloat(ge('baixa-valor')?.value||cr.valor);
+  if(!dataPgto){alert('Informe a data de pagamento.');return;}
+
+  const venc=new Date(cr.vencimento+'T00:00');
+  const pgto=new Date(dataPgto+'T00:00');
+  const status=pgto<=venc?'pago':'pago_atraso';
+
+  await dbUpdate('contas_receber',crId,{status,data_pagamento:dataPgto,valor_pago:valorPago});
+  contasReceber=contasReceber.map(x=>x.id===crId?{...x,status,data_pagamento:dataPgto}:x);
+
+  // Sincroniza status da fatura
+  if(cr.fatura_id){
+    const novoStatusFat=status==='pago'?'pago':'pago_atraso';
+    await dbUpdate('faturamento',cr.fatura_id,{status:novoStatusFat,data_pagamento:dataPgto});
+    faturamento=faturamento.map(f=>f.id===cr.fatura_id?{...f,status:novoStatusFat}:f);
+  }
+
+  ge('modal-baixa-cr')?.remove();
+  ge('modal-cr-dia')?.remove();
+  renderCRMatrix();
+  alert(`✓ Baixa registrada como "${status==='pago'?'Pago no prazo':'Pago em atraso'}"!`);
+}
+
+function baixarContaReceber(){abrirBaixaCR('');}
+
+// Cria lançamento em contas a receber ao emitir NFS-e
+async function criarLancamentoCR(faturaId){
+  const f=faturamento.find(x=>x.id===faturaId);if(!f||!f.vencimento)return;
+  const cid=company?.id||profile?.company_id||null;
+  const existing=contasReceber.find(cr=>cr.fatura_id===faturaId);
+  if(existing)return; // já existe
+  const obj={
+    company_id:cid,
+    fatura_id:faturaId,
+    cliente_id:f.cliente_id||null,
+    cliente_nome:f.cliente_nome||'',
+    valor:f.total||0,
+    vencimento:f.vencimento,
+    status:'a_vencer',
+  };
+  const res=await dbInsert('contas_receber',obj);
+  if(res)contasReceber.push(res);
+}
+
+
 const WF_ROTINAS={
   proposta:      {label:'Aprovação de proposta',      icon:'📋', modulo:'CRM → Propostas'},
   fatura:        {label:'Aprovação de fatura',         icon:'💰', modulo:'Financeiro → Faturamento'},
