@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.41 | Gerado: 2026-05-23 19:29 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.42 | Gerado: 2026-05-23 19:39 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -585,7 +585,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.41';
+const APP_VERSION='v1.0.42';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5482,11 +5482,77 @@ function rContasReceber(){
   <div id="cr-matrix-wrap" style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
     <div id="cr-matrix">Carregando...</div>
   </div>
-  <div id="cr-totais-wrap" style="margin-top:12px"></div>`;
+  <div id="cr-totais-wrap" style="margin-top:20px">
+    <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:16px;color:var(--text)">Previsão de recebimentos — ${crPeriodo.ano}</div>
+      <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:var(--text2)">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:24px;height:3px;background:#1e5f82;border-radius:2px;display:inline-block"></span>Previsto</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:24px;height:3px;background:#16a34a;border-radius:2px;display:inline-block;border-top:2px dashed #16a34a"></span>Realizado</span>
+      </div>
+      <div style="position:relative;width:100%;height:240px">
+        <canvas id="cr-chart" role="img" aria-label="Gráfico de linha com total de recebimentos por mês do ano"></canvas>
+      </div>
+    </div>
+  </div>`;
 }
 
 function initContasReceber(){
   renderCRMatrix();
+  renderCRChart();
+}
+
+function renderCRChart(){
+  const ano=crPeriodo.ano;
+  const meses=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const totaisPrev=meses.map((_,m)=>{
+    return contasReceber.filter(cr=>{
+      if(!cr.vencimento)return false;
+      const v=new Date(cr.vencimento+'T00:00');
+      return v.getFullYear()===ano&&v.getMonth()===m&&cr.status!=='pago'&&cr.status!=='pago_atraso';
+    }).reduce((s,cr)=>s+Number(cr.valor||0),0);
+  });
+  const totaisReal=meses.map((_,m)=>{
+    return contasReceber.filter(cr=>{
+      if(!cr.vencimento)return false;
+      const v=new Date(cr.vencimento+'T00:00');
+      return v.getFullYear()===ano&&v.getMonth()===m&&(cr.status==='pago'||cr.status==='pago_atraso');
+    }).reduce((s,cr)=>s+Number(cr.valor||0),0);
+  });
+
+  // Carrega Chart.js se necessário
+  const renderChart=()=>{
+    const canvas=ge('cr-chart');if(!canvas)return;
+    if(canvas._chart)canvas._chart.destroy();
+    canvas._chart=new Chart(canvas,{
+      type:'line',
+      data:{
+        labels:meses,
+        datasets:[
+          {label:'Previsto',data:totaisPrev,borderColor:'#1e5f82',backgroundColor:'rgba(30,95,130,0.08)',fill:true,tension:0.3,pointRadius:4,pointBackgroundColor:'#1e5f82',borderDash:[],borderWidth:2},
+          {label:'Realizado',data:totaisReal,borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,0.08)',fill:true,tension:0.3,pointRadius:4,pointBackgroundColor:'#16a34a',borderDash:[5,3],borderWidth:2},
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: R$ ${Number(ctx.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}`}}
+        },
+        scales:{
+          x:{grid:{color:'rgba(0,0,0,0.05)'},ticks:{font:{size:11}}},
+          y:{grid:{color:'rgba(0,0,0,0.05)'},ticks:{font:{size:10},callback:v=>'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0})}}
+        }
+      }
+    });
+  };
+
+  if(window.Chart){renderChart();}
+  else{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    s.onload=renderChart;
+    document.head.appendChild(s);
+  }
 }
 
 function crNavMes(d){
@@ -5579,15 +5645,16 @@ function renderCRMatrix(){
   let html=`<table style="border-collapse:collapse;min-width:100%;font-size:11px">
   <thead>
     <tr>
-      <th style="position:sticky;left:0;background:var(--bg2);padding:8px 14px;text-align:left;border-right:2px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;z-index:2;min-width:160px;font-size:12px">Cliente</th>`;
+      <th style="position:sticky;left:0;background:#0A2540;color:#fff;padding:8px 14px;text-align:left;border-right:2px solid #1a3a5c;border-bottom:1px solid #1a3a5c;white-space:nowrap;z-index:2;min-width:160px;font-size:12px">Cliente</th>`
 
   colunas.forEach(col=>{
-    html+=`<th style="padding:6px 4px;text-align:center;border-bottom:1px solid var(--border);border-right:1px solid var(--border2);background:${col.isHoje?'var(--accent)':'var(--bg2)'};color:${col.isHoje?'var(--accent-text)':'var(--text2)'};min-width:${col.minWidth};font-weight:600">
+    const isHj=col.isHoje;
+    html+=`<th style="padding:6px 4px;text-align:center;border-bottom:1px solid #1a3a5c;border-right:1px solid #1e4a70;background:${isHj?'#1e5f82':'#0A2540'};color:#fff;min-width:${col.minWidth};font-weight:600">
       <div style="font-size:11px">${col.label}</div>
       ${col.sublabel?`<div style="font-size:9px;opacity:.7;font-weight:400">${col.sublabel}</div>`:''}
     </th>`;
   });
-  html+=`<th style="padding:8px 12px;background:var(--bg2);border-left:2px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;font-size:12px">Total</th></tr></thead><tbody>`;
+  html+=`<th style="padding:8px 12px;background:#0A2540;color:#fff;border-left:2px solid #1a3a5c;border-bottom:1px solid #1a3a5c;white-space:nowrap;font-size:12px">Total</th></tr></thead><tbody>`;
 
   // Linhas clientes
   let totalGeral=0;
@@ -5625,17 +5692,17 @@ function renderCRMatrix(){
   });
 
   // Linha totais
-  html+=`<tr style="background:var(--bg3);border-top:2px solid var(--border);font-weight:700">
-    <td style="position:sticky;left:0;padding:8px 14px;border-right:2px solid var(--border);background:var(--bg3);z-index:1;font-size:12px">TOTAL</td>`;
+  html+=`<tr style="background:#e8eaed;border-top:2px solid #0A2540;font-weight:700">
+    <td style="position:sticky;left:0;padding:8px 14px;border-right:2px solid #0A2540;background:#e8eaed;z-index:1;font-size:12px;font-weight:700;color:#000">TOTAL</td>`;
 
   colunas.forEach(col=>{
     const val=totaisColunas[col.key]||0;
-    html+=`<td style="padding:6px 4px;text-align:center;border-right:1px solid var(--border2);background:${col.isHoje?'rgba(30,95,130,.06)':''}">
-      ${val?`<span style="font-size:10px;font-weight:700;color:var(--accent)">${fmtV2(val)}</span>`:''}
+    html+=`<td style="padding:6px 4px;text-align:center;border-right:1px solid #c0c4cc;background:${col.isHoje?'#d0d8e8':'#e8eaed'}">
+      ${val?`<span style="font-size:10px;font-weight:700;color:#0A2540">${fmtV2(val)}</span>`:''}
     </td>`;
   });
 
-  html+=`<td style="padding:8px 12px;text-align:right;border-left:2px solid var(--border);color:var(--accent);font-size:13px;font-weight:700">${fmtV(totalGeral)}</td></tr>`;
+  html+=`<td style="padding:8px 12px;text-align:right;border-left:2px solid #0A2540;color:#0A2540;font-size:13px;font-weight:700;background:#e8eaed">${fmtV(totalGeral)}</td></tr>`;
   html+=`</tbody></table>`;
   el.innerHTML=html;
 }
