@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.53 | Gerado: 2026-05-24 23:09 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.54 | Gerado: 2026-05-24 23:19 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -455,6 +455,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span>DRE/Projetos</span>
         </button>
+        <button class="navitem sub" id="nav-perf-clientes" onclick="pg('perf-clientes')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+          <span>Performance Clientes</span>
+        </button>
       </div>
     </div>
 
@@ -622,7 +626,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.53';
+const APP_VERSION='v1.0.54';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1178,6 +1182,7 @@ function render(){
   else if(curPage==='performance')c.innerHTML=rPerformance();
   else if(curPage==='representantes')c.innerHTML=rRepresentantes();
   else if(curPage==='dre-projetos'){c.innerHTML=rDREProjetos();}
+  else if(curPage==='perf-clientes'){c.innerHTML=rPerfClientes();initPerfClientes();}
   else if(curPage==='propostas')c.innerHTML=rPropostas();
   else if(curPage==='aprovar-propostas')c.innerHTML=rAprovarPropostas();
   else if(curPage==='tarifario-padrao')c.innerHTML=rTarifarioPadrao();
@@ -5449,6 +5454,266 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
     <div class="admin-tab-panel" data-tab="workflow" style="display:none">${rWorkflow()}</div>
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
+}
+
+// ── PERFORMANCE CLIENTES ──
+let perfClienteId=null;
+let perfDataIni='';
+let perfDataFim='';
+
+function rPerfClientes(){
+  const cliOpts=clientes.filter(c=>c.status!=='pendente').map(c=>`<option value="${c.id}" ${perfClienteId===c.id?'selected':''}>${c.nome}</option>`).join('');
+
+  return`
+  <!-- Seletor -->
+  <div style="background:var(--bg);border-radius:10px;padding:16px;border:1px solid var(--border);margin-bottom:16px">
+    <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+      <div class="fg" style="flex:2;min-width:200px;margin:0">
+        <label class="fl">Cliente</label>
+        <select class="fi" id="perf-cli-sel" onchange="perfSetCliente(this.value)">
+          <option value="">— Selecione um cliente —</option>${cliOpts}
+        </select>
+      </div>
+      <div class="fg" style="margin:0"><label class="fl">De</label>
+        <input class="fi" id="perf-ini" type="date" value="${perfDataIni}" onchange="perfDataIni=this.value;renderPerfCliente()">
+      </div>
+      <div class="fg" style="margin:0"><label class="fl">Até</label>
+        <input class="fi" id="perf-fim" type="date" value="${perfDataFim}" onchange="perfDataFim=this.value;renderPerfCliente()">
+      </div>
+      <button onclick="perfLimparFiltro()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px;white-space:nowrap">Limpar filtro</button>
+    </div>
+  </div>
+  <div id="perf-content">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:40vh;color:var(--text3);gap:12px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      <div style="font-size:14px;color:var(--text2)">Selecione um cliente para ver a performance</div>
+    </div>
+  </div>`;
+}
+
+function initPerfClientes(){
+  if(perfClienteId)renderPerfCliente();
+}
+
+function perfSetCliente(id){
+  perfClienteId=id||null;
+  // Define período padrão: desde criação do deal
+  if(id){
+    const deal=deals.find(d=>{
+      const cli=clientes.find(c=>c.id===id);
+      return d.empresa===cli?.nome||(faturamento.find(f=>f.cliente_id===id&&f.created_at));
+    });
+    const primFat=faturamento.filter(f=>f.cliente_id===id).sort((a,b)=>a.created_at<b.created_at?-1:1)[0];
+    const dataRef=deal?.created_at||primFat?.created_at||new Date().toISOString();
+    if(!perfDataIni){
+      perfDataIni=dataRef.slice(0,10);
+      const el=ge('perf-ini');if(el)el.value=perfDataIni;
+    }
+    if(!perfDataFim){
+      perfDataFim=new Date().toISOString().slice(0,10);
+      const el=ge('perf-fim');if(el)el.value=perfDataFim;
+    }
+  }
+  renderPerfCliente();
+}
+
+function perfLimparFiltro(){
+  perfDataIni='';perfDataFim='';
+  const ei=ge('perf-ini');const ef=ge('perf-fim');
+  if(ei)ei.value='';if(ef)ef.value='';
+  renderPerfCliente();
+}
+
+function renderPerfCliente(){
+  const el=ge('perf-content');if(!el)return;
+  if(!perfClienteId){
+    el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">Selecione um cliente</div>';
+    return;
+  }
+
+  const cli=clientes.find(c=>c.id===perfClienteId);
+  if(!cli){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">Cliente não encontrado</div>';return;}
+
+  // Filtra faturas do cliente no período
+  const fatCli=faturamento.filter(f=>{
+    if(f.cliente_id!==perfClienteId)return false;
+    if(perfDataIni&&f.created_at<perfDataIni)return false;
+    if(perfDataFim&&f.created_at>perfDataFim+'T23:59:59')return false;
+    return true;
+  });
+
+  const crCli=contasReceber.filter(cr=>{
+    if(cr.cliente_id!==perfClienteId)return false;
+    if(perfDataIni&&cr.vencimento<perfDataIni)return false;
+    if(perfDataFim&&cr.vencimento>perfDataFim)return false;
+    return true;
+  });
+
+  const tabela=tabelasTarifarias.find(t=>t.cliente_id===perfClienteId&&t.status!=='pendente');
+  const prazoContratoDesp=parseInt(tabela?.cond_prazo_pagamento_dias||'0')||0;
+  const prazoAprovContrato=tabela?.prazo_aprovacao||'—';
+
+  // Deal do cliente
+  const dealCli=deals.find(d=>{
+    const fatCheck=faturamento.find(f=>f.cliente_id===perfClienteId);
+    return d.empresa===cli.nome||fatCheck;
+  })||deals.find(d=>d.empresa===cli.nome);
+
+  // --- 0. LINHA DO TEMPO ---
+  const marcos=[];
+  if(dealCli){marcos.push({data:dealCli.created_at?.slice(0,10),label:'Deal criado',icon:'🎯',cor:'#0A2540'});}
+  const fatOrdenadas=fatCli.sort((a,b)=>a.created_at<b.created_at?-1:1);
+  if(fatOrdenadas.length){
+    marcos.push({data:fatOrdenadas[0].created_at?.slice(0,10),label:'1ª fatura emitida',icon:'📄',cor:'#1e5f82'});
+    const primaPaga=fatOrdenadas.find(f=>f.status==='pago'||f.status==='pago_atraso');
+    if(primaPaga)marcos.push({data:primaPaga.data_pagamento||primaPaga.created_at?.slice(0,10),label:'1º pagamento recebido',icon:'✅',cor:'#16a34a'});
+  }
+  marcos.push({data:new Date().toISOString().slice(0,10),label:'Hoje',icon:'📍',cor:'#666'});
+  marcos.sort((a,b)=>a.data<b.data?-1:1);
+
+  // --- 1. FATURAMENTO MENSAL ---
+  const mesesSet=new Set(fatCli.map(f=>(f.periodo_inicio||f.created_at||'').slice(0,7)).filter(Boolean));
+  const mesesLista=[...mesesSet].sort();
+  const fatPorMes=mesesLista.map(m=>({
+    mes:m,
+    total:fatCli.filter(f=>(f.periodo_inicio||f.created_at||'').startsWith(m)).reduce((s,f)=>s+Number(f.total||0),0)
+  }));
+
+  // --- 2. ATRASOS ---
+  const atrasados=crCli.filter(cr=>{
+    if(!cr.vencimento||!cr.data_pagamento)return cr.status==='pago_atraso';
+    return new Date(cr.data_pagamento+'T00:00')>new Date(cr.vencimento+'T00:00');
+  });
+  const totalAtraso=atrasados.reduce((s,cr)=>s+Number(cr.valor||0),0);
+  const diasAtrasoMedio=atrasados.length?
+    Math.round(atrasados.reduce((s,cr)=>{
+      if(!cr.data_pagamento||!cr.vencimento)return s+0;
+      return s+Math.max(0,Math.floor((new Date(cr.data_pagamento+'T00:00')-new Date(cr.vencimento+'T00:00'))/(1000*60*60*24)));
+    },0)/atrasados.length):0;
+
+  // --- 3. PRAZO MÉDIO PAGAMENTO ---
+  const pagas=crCli.filter(cr=>cr.data_pagamento&&cr.nfse_em);
+  const prazoPgtoMedio=pagas.length?
+    Math.round(pagas.reduce((s,cr)=>s+Math.max(0,Math.floor((new Date(cr.data_pagamento+'T00:00')-new Date(cr.nfse_em+'T00:00'))/(1000*60*60*24))),0)/pagas.length):null;
+
+  // --- 4. PRAZO MÉDIO APROVAÇÃO ---
+  const autorizadas=fatCli.filter(f=>f.aprovado_em&&f.autorizado_em);
+  const prazoAprovMedio=autorizadas.length?
+    Math.round(autorizadas.reduce((s,f)=>s+Math.max(0,Math.floor((new Date(f.autorizado_em+'T00:00')-new Date(f.aprovado_em+'T00:00'))/(1000*60*60*24))),0)/autorizadas.length):null;
+
+  const fmtData=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'—';
+  const cor=v=>v>=0?'#16a34a':'#991b1b';
+
+  el.innerHTML=`
+  <!-- 0. LINHA DO TEMPO -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:16px;color:#0A2540">📅 Linha do tempo — ${cli.nome}</div>
+    <div style="position:relative;padding-left:24px">
+      <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
+      ${marcos.map(m=>`<div style="position:relative;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+        <div style="position:absolute;left:-20px;width:16px;height:16px;border-radius:50%;background:${m.cor};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0">${m.icon}</div>
+        <div style="background:var(--bg2);border-radius:8px;padding:8px 14px;flex:1">
+          <div style="font-size:12px;font-weight:600;color:${m.cor}">${m.label}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${fmtData(m.data)}</div>
+        </div>
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <!-- 1. FATURAMENTO MENSAL -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📈 Faturamento mensal</div>
+    ${fatPorMes.length?`
+    <div style="position:relative;width:100%;height:180px">
+      <canvas id="perf-fat-chart"></canvas>
+    </div>`:`<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">Nenhuma fatura no período</div>`}
+  </div>
+
+  <!-- 2. ATRASOS -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">⚠ Faturas em atraso</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      <div style="padding:12px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Ocorrências</div>
+        <div style="font-size:22px;font-weight:700;color:${atrasados.length>0?'#991b1b':'#16a34a'}">${atrasados.length}</div>
+      </div>
+      <div style="padding:12px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Valor total atrasado</div>
+        <div style="font-size:16px;font-weight:700;color:${atrasados.length>0?'#991b1b':'#16a34a'}">${fmtV(totalAtraso)}</div>
+      </div>
+      <div style="padding:12px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Dias médios de atraso</div>
+        <div style="font-size:22px;font-weight:700;color:${diasAtrasoMedio>0?'#991b1b':'#16a34a'}">${diasAtrasoMedio}d</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. PRAZO PAGAMENTO -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">💳 Prazo médio de pagamento</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:14px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Prazo contratado</div>
+        <div style="font-size:28px;font-weight:700;color:#0A2540">${prazoContratoDesp}<span style="font-size:14px;font-weight:400"> dias</span></div>
+      </div>
+      <div style="padding:14px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Prazo médio real</div>
+        <div style="font-size:28px;font-weight:700;color:${prazoPgtoMedio===null?'var(--text2)':prazoPgtoMedio<=prazoContratoDesp?'#16a34a':'#991b1b'}">
+          ${prazoPgtoMedio===null?'—':prazoPgtoMedio}<span style="font-size:14px;font-weight:400">${prazoPgtoMedio!==null?' dias':''}</span>
+        </div>
+        ${prazoPgtoMedio!==null&&prazoContratoDesp?`<div style="font-size:11px;font-weight:600;color:${prazoPgtoMedio<=prazoContratoDesp?'#16a34a':'#991b1b'};margin-top:4px">
+          ${prazoPgtoMedio<=prazoContratoDesp?'✓ Dentro do prazo':'⚠ '+( prazoPgtoMedio-prazoContratoDesp)+'d acima do contratado'}
+        </div>`:''}
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. PRAZO APROVAÇÃO -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">⏱ Prazo médio de aprovação de fatura</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:14px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Prazo contratado</div>
+        <div style="font-size:22px;font-weight:700;color:#0A2540">${prazoAprovContrato}</div>
+      </div>
+      <div style="padding:14px;background:var(--bg2);border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Prazo médio real</div>
+        <div style="font-size:28px;font-weight:700;color:${prazoAprovMedio===null?'var(--text2)':'#1e5f82'}">
+          ${prazoAprovMedio===null?'—':prazoAprovMedio}<span style="font-size:14px;font-weight:400">${prazoAprovMedio!==null?' dias':''}</span>
+        </div>
+        ${prazoAprovMedio===null?'<div style="font-size:11px;color:var(--text3);margin-top:4px">Nenhuma autorização registrada</div>':''}
+      </div>
+    </div>
+  </div>`;
+
+  // Renderiza gráfico de faturamento
+  if(fatPorMes.length){
+    const renderChart=()=>{
+      const c=ge('perf-fat-chart');if(!c)return;
+      if(c._chart)c._chart.destroy();
+      c._chart=new Chart(c,{
+        type:'line',
+        data:{
+          labels:fatPorMes.map(m=>m.mes),
+          datasets:[{
+            label:'Faturamento',data:fatPorMes.map(m=>m.total),
+            borderColor:'#0A2540',backgroundColor:'rgba(10,37,64,0.08)',
+            fill:true,tension:0.3,pointRadius:4,pointBackgroundColor:'#0A2540',borderWidth:2
+          }]
+        },
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'R$ '+Number(ctx.raw).toLocaleString('pt-BR',{minimumFractionDigits:2})}}},
+          scales:{
+            x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
+            y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},callback:v=>'R$'+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:0})}}
+          }
+        }
+      });
+    };
+    if(window.Chart)renderChart();
+    else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=renderChart;document.head.appendChild(s);}
+  }
 }
 
 // ── DRE AVULSO ──
