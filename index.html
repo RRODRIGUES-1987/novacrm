@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.54 | Gerado: 2026-05-24 23:19 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.55 | Gerado: 2026-05-24 23:25 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -626,7 +626,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.54';
+const APP_VERSION='v1.0.55';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5463,6 +5463,7 @@ let perfDataFim='';
 
 function rPerfClientes(){
   const cliOpts=clientes.filter(c=>c.status!=='pendente').map(c=>`<option value="${c.id}" ${perfClienteId===c.id?'selected':''}>${c.nome}</option>`).join('');
+  const hoje=new Date().toISOString().slice(0,10);
 
   return`
   <!-- Seletor -->
@@ -5478,7 +5479,7 @@ function rPerfClientes(){
         <input class="fi" id="perf-ini" type="date" value="${perfDataIni}" onchange="perfDataIni=this.value;renderPerfCliente()">
       </div>
       <div class="fg" style="margin:0"><label class="fl">Até</label>
-        <input class="fi" id="perf-fim" type="date" value="${perfDataFim}" onchange="perfDataFim=this.value;renderPerfCliente()">
+        <input class="fi" id="perf-fim" type="date" value="${perfDataFim||hoje}" onchange="perfDataFim=this.value;renderPerfCliente()">
       </div>
       <button onclick="perfLimparFiltro()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px;white-space:nowrap">Limpar filtro</button>
     </div>
@@ -5497,30 +5498,20 @@ function initPerfClientes(){
 
 function perfSetCliente(id){
   perfClienteId=id||null;
-  // Define período padrão: desde criação do deal
-  if(id){
-    const deal=deals.find(d=>{
-      const cli=clientes.find(c=>c.id===id);
-      return d.empresa===cli?.nome||(faturamento.find(f=>f.cliente_id===id&&f.created_at));
-    });
-    const primFat=faturamento.filter(f=>f.cliente_id===id).sort((a,b)=>a.created_at<b.created_at?-1:1)[0];
-    const dataRef=deal?.created_at||primFat?.created_at||new Date().toISOString();
-    if(!perfDataIni){
-      perfDataIni=dataRef.slice(0,10);
-      const el=ge('perf-ini');if(el)el.value=perfDataIni;
-    }
-    if(!perfDataFim){
-      perfDataFim=new Date().toISOString().slice(0,10);
-      const el=ge('perf-fim');if(el)el.value=perfDataFim;
-    }
-  }
+  const hoje=new Date().toISOString().slice(0,10);
+  // Início sempre zerado, fim sempre hoje
+  perfDataIni='';
+  perfDataFim=hoje;
+  const ei=ge('perf-ini');if(ei)ei.value='';
+  const ef=ge('perf-fim');if(ef)ef.value=hoje;
   renderPerfCliente();
 }
 
 function perfLimparFiltro(){
-  perfDataIni='';perfDataFim='';
+  const hoje=new Date().toISOString().slice(0,10);
+  perfDataIni='';perfDataFim=hoje;
   const ei=ge('perf-ini');const ef=ge('perf-fim');
-  if(ei)ei.value='';if(ef)ef.value='';
+  if(ei)ei.value='';if(ef)ef.value=hoje;
   renderPerfCliente();
 }
 
@@ -5605,18 +5596,26 @@ function renderPerfCliente(){
   const cor=v=>v>=0?'#16a34a':'#991b1b';
 
   el.innerHTML=`
-  <!-- 0. LINHA DO TEMPO -->
+  <!-- 0. LINHA DO TEMPO HORIZONTAL -->
   <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
-    <div style="font-size:13px;font-weight:600;margin-bottom:16px;color:#0A2540">📅 Linha do tempo — ${cli.nome}</div>
-    <div style="position:relative;padding-left:24px">
-      <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
-      ${marcos.map(m=>`<div style="position:relative;margin-bottom:16px;display:flex;align-items:center;gap:12px">
-        <div style="position:absolute;left:-20px;width:16px;height:16px;border-radius:50%;background:${m.cor};display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0">${m.icon}</div>
-        <div style="background:var(--bg2);border-radius:8px;padding:8px 14px;flex:1">
-          <div style="font-size:12px;font-weight:600;color:${m.cor}">${m.label}</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px">${fmtData(m.data)}</div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:20px;color:#0A2540">📅 Linha do tempo — ${cli.nome}</div>
+    <div style="overflow-x:auto;padding-bottom:8px">
+      <div style="position:relative;min-width:${Math.max(600,marcos.length*160)}px;padding:40px 20px 10px">
+        <!-- Linha central -->
+        <div style="position:absolute;top:20px;left:20px;right:20px;height:3px;background:linear-gradient(to right,#0A2540,#1e5f82,#16a34a);border-radius:2px"></div>
+        <!-- Marcos -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          ${marcos.map((m,i)=>`<div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;position:relative">
+            <!-- Bolinha -->
+            <div style="width:36px;height:36px;border-radius:50%;background:${m.cor};display:flex;align-items:center;justify-content:center;font-size:16px;position:absolute;top:-29px;box-shadow:0 2px 8px rgba(0,0,0,0.15);border:3px solid #fff">${m.icon}</div>
+            <!-- Conteúdo abaixo -->
+            <div style="text-align:center;padding-top:16px">
+              <div style="font-size:11px;font-weight:700;color:${m.cor};margin-bottom:2px">${m.label}</div>
+              <div style="font-size:10px;color:var(--text2)">${fmtData(m.data)}</div>
+            </div>
+          </div>`).join('')}
         </div>
-      </div>`).join('')}
+      </div>
     </div>
   </div>
 
