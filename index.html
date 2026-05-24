@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.52 | Gerado: 2026-05-24 22:47 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.53 | Gerado: 2026-05-24 23:09 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -451,6 +451,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
           <span>Representantes</span>
         </button>
+        <button class="navitem sub" id="nav-dre-projetos" onclick="pg('dre-projetos')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>DRE/Projetos</span>
+        </button>
       </div>
     </div>
 
@@ -584,6 +588,7 @@ let workflowConfig=[];
 let contasReceber=[];
 let orcamentoReceitas=[];
 let dresProjeto=[];
+let dreAvulso=[];
 let tabelasTarifarias=[];
 let representantes=[];
 let propostas=[];
@@ -601,6 +606,7 @@ const TELAS=[
   {id:'tarefas',            label:'CRM · Tarefas',                   modulo:'CRM'},
   {id:'performance',        label:'CRM · Performance',               modulo:'CRM'},
   {id:'representantes',     label:'CRM · Representantes',            modulo:'CRM'},
+  {id:'dre-projetos',       label:'CRM · DRE/Projetos',              modulo:'CRM'},
   {id:'propostas',          label:'CRM · Propostas',                 modulo:'CRM'},
   {id:'aprovar-propostas',  label:'CRM · Aprovar Propostas',         modulo:'CRM'},
   {id:'tarifario-padrao',   label:'CRM · Tarifário Padrão',          modulo:'CRM'},
@@ -616,7 +622,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.52';
+const APP_VERSION='v1.0.53';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -981,6 +987,7 @@ async function loadData(){
       contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}&order=vencimento.asc`);
       orcamentoReceitas=await dbSelect('orcamento_receitas',`company_id=eq.${cid}&order=ano.asc,mes.asc`);
       dresProjeto=await dbSelect('dre_projeto',`company_id=eq.${cid}`);
+      dreAvulso=await dbSelect('dre_avulso',`company_id=eq.${cid}&order=created_at.desc`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
         dbSelect('contacts','select=*'),
@@ -1170,6 +1177,7 @@ function render(){
   else if(curPage==='plano-acao')c.innerHTML=rPlanoAcao();
   else if(curPage==='performance')c.innerHTML=rPerformance();
   else if(curPage==='representantes')c.innerHTML=rRepresentantes();
+  else if(curPage==='dre-projetos'){c.innerHTML=rDREProjetos();}
   else if(curPage==='propostas')c.innerHTML=rPropostas();
   else if(curPage==='aprovar-propostas')c.innerHTML=rAprovarPropostas();
   else if(curPage==='tarifario-padrao')c.innerHTML=rTarifarioPadrao();
@@ -5443,7 +5451,308 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
 }
 
-// ── DRE/PROJETO ──
+// ── DRE AVULSO ──
+function rDREProjetos(){
+  const cliOpts=clientes.filter(c=>c.status!=='pendente').map(c=>`<option value="${c.id}">${c.nome}</option>`).join('');
+  const rows=dreAvulso.map((d,i)=>{
+    const cli=clientes.find(c=>c.id===d.cliente_id);
+    const fatAposImp=Number(d.fat_bruto||0)*(1-IMPOSTOS_PCT);
+    const comissao=fatAposImp*(Number(d.comissao_pct||3)/100);
+    const fatLiq=fatAposImp-comissao;
+    const despTot=Number(d.aluguel||0)+Number(d.folha||0)+Number(d.despesas_gerais||0)+(Number(d.investimento_total||0)*Number(d.investimento_pct||1)/100);
+    const resultado=fatLiq-despTot;
+    const margem=fatLiq>0?(resultado/fatLiq*100):0;
+    const cor=resultado>=0?'#16a34a':'#991b1b';
+    return`<div class="li" style="cursor:pointer" onclick="abrirDREAvulso('${d.id}')">
+      <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">DRE</div>
+      <div class="linfo">
+        <div class="lname">${d.titulo}</div>
+        <div class="lsub">${cli?.nome||d.cliente_nome||'Avulso'} · Fat. bruto: ${fmtV(d.fat_bruto||0)}</div>
+      </div>
+      <div class="lright">
+        <div style="font-size:13px;font-weight:700;color:${cor}">${Number(margem).toLocaleString('pt-BR',{minimumFractionDigits:1})}%</div>
+        <div style="font-size:11px;color:${cor}">${fmtV(resultado)}</div>
+        <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
+          <button class="bicon btn-sm" title="Imprimir" onclick="imprimirDREAvulso('${d.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          </button>
+          <button class="bicon btn-sm" title="Excluir" style="color:var(--red-text)" onclick="delDREAvulso('${d.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return`
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="font-size:13px;color:var(--text2)">${dreAvulso.length} DRE(s) cadastrado(s)</div>
+    <button onclick="abrirDREAvulso()" style="padding:7px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Novo DRE</button>
+  </div>
+  <div id="dre-avulso-list">
+    ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhum DRE cadastrado</p></div>'}
+  </div>`;
+}
+
+function abrirDREAvulso(id=null){
+  const d=id?dreAvulso.find(x=>x.id===id):null;
+  const cliOpts=clientes.filter(c=>c.status!=='pendente').map(c=>`<option value="${c.id}" ${d?.cliente_id===c.id?'selected':''}>${c.nome}</option>`).join('');
+
+  const old=ge('modal-dre-avulso');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-dre-avulso';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4);overflow-y:auto;padding:20px';
+
+  const fatBruto=Number(d?.fat_bruto||0);
+  const fatAposImp=fatBruto*(1-IMPOSTOS_PCT);
+  const comissaoPct=Number(d?.comissao_pct||3);
+  const comissao=fatAposImp*(comissaoPct/100);
+  const fatLiq=fatAposImp-comissao;
+  const aluguel=Number(d?.aluguel||0);
+  const folha=Number(d?.folha||0);
+  const despGerais=Number(d?.despesas_gerais||0);
+  const investTotal=Number(d?.investimento_total||0);
+  const investPct=Number(d?.investimento_pct||1);
+  const investMensal=investTotal*(investPct/100);
+  const totalDesp=aluguel+folha+despGerais+investMensal;
+  const resultado=fatLiq-totalDesp;
+  const margem=fatLiq>0?(resultado/fatLiq*100):0;
+
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:24px;width:560px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+    <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:#0A2540">${d?'Editar DRE':'Novo DRE/Projeto'}</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg" style="grid-column:1/-1"><label class="fl">Título *</label>
+        <input class="fi" id="drea-titulo" value="${d?.titulo||''}" placeholder="Ex: DRE Projeto Gama - Cenário 1">
+      </div>
+      <div class="fg"><label class="fl">Cliente (opcional)</label>
+        <select class="fi" id="drea-cliente">
+          <option value="">— Avulso —</option>${cliOpts}
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Faturamento bruto (R$)</label>
+        <input class="fi" id="drea-fatbruto" type="number" step="0.01" value="${d?.fat_bruto||''}" placeholder="0,00" oninput="atualizarDREAvulso()">
+      </div>
+    </div>
+
+    <div style="background:#0A2540;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;margin-bottom:10px">Parâmetros</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="fg"><label class="fl">Comissão (%)</label>
+        <input class="fi" id="drea-comissao" type="number" step="0.1" value="${d?.comissao_pct||3}" oninput="atualizarDREAvulso()">
+      </div>
+      <div class="fg"><label class="fl">Aluguel (R$/mês)</label>
+        <input class="fi" id="drea-aluguel" type="number" step="0.01" value="${d?.aluguel||''}" placeholder="0,00" oninput="atualizarDREAvulso()">
+      </div>
+      <div class="fg"><label class="fl">Folha de pagamento</label>
+        <input class="fi" id="drea-folha" type="number" step="0.01" value="${d?.folha||''}" placeholder="0,00" oninput="atualizarDREAvulso()">
+      </div>
+      <div class="fg"><label class="fl">Despesas gerais</label>
+        <input class="fi" id="drea-despgerais" type="number" step="0.01" value="${d?.despesas_gerais||''}" placeholder="0,00" oninput="atualizarDREAvulso()">
+      </div>
+      <div class="fg"><label class="fl">Investimento total (R$)</label>
+        <input class="fi" id="drea-investtotal" type="number" step="0.01" value="${d?.investimento_total||''}" placeholder="0,00" oninput="atualizarDREAvulso()">
+      </div>
+      <div class="fg"><label class="fl">Retorno investimento (%/mês)</label>
+        <input class="fi" id="drea-investpct" type="number" step="0.1" value="${d?.investimento_pct||1}" oninput="atualizarDREAvulso()">
+      </div>
+    </div>
+
+    <!-- DRE Preview -->
+    <div style="background:#0A2540;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;margin-bottom:10px">Resultado</div>
+    <div id="drea-preview" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
+      ${rDREAvulsoPreview({fat_bruto:fatBruto,comissao_pct:comissaoPct,aluguel,folha,despesas_gerais:despGerais,investimento_total:investTotal,investimento_pct:investPct})}
+    </div>
+
+    <div class="fg"><label class="fl">Observações</label>
+      <input class="fi" id="drea-obs" value="${d?.observacoes||''}" placeholder="Notas, premissas do cenário...">
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="ge('modal-dre-avulso').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
+      ${d?`<button onclick="imprimirDREAvulso('${d.id}')" style="padding:9px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">🖨</button>`:''}
+      <button onclick="salvarDREAvulso('${id||''}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar</button>
+    </div>
+  </div>`;
+
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+function rDREAvulsoPreview(d){
+  const fatBruto=Number(d.fat_bruto||0);
+  const fatAposImp=fatBruto*(1-IMPOSTOS_PCT);
+  const comissaoPct=Number(d.comissao_pct||3)/100;
+  const comissao=fatAposImp*comissaoPct;
+  const fatLiq=fatAposImp-comissao;
+  const aluguel=Number(d.aluguel||0);
+  const folha=Number(d.folha||0);
+  const despGerais=Number(d.despesas_gerais||0);
+  const investMensal=Number(d.investimento_total||0)*(Number(d.investimento_pct||1)/100);
+  const totalDesp=aluguel+folha+despGerais+investMensal;
+  const resultado=fatLiq-totalDesp;
+  const margem=fatLiq>0?(resultado/fatLiq*100):0;
+  const fmtV2=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const cor=resultado>=0?'#16a34a':'#991b1b';
+
+  const linhas=[
+    {l:'(+) Faturamento Bruto',v:fatBruto,cor:'var(--text)',bold:false},
+    {l:`(-) Impostos (${(IMPOSTOS_PCT*100).toFixed(2)}%)`,v:fatBruto*IMPOSTOS_PCT,cor:'#991b1b',bold:false,neg:true},
+    {l:'(=) Fat. após impostos',v:fatAposImp,cor:'#0A2540',bold:true,bg:'var(--bg2)'},
+    {l:`(-) Comissões (${(comissaoPct*100).toFixed(1)}%)`,v:comissao,cor:'#991b1b',bold:false,neg:true},
+    {l:'(=) Faturamento Líquido',v:fatLiq,cor:'#0A2540',bold:true,bg:'var(--bg2)'},
+    {l:'(-) Aluguel',v:aluguel,cor:'#991b1b',bold:false,neg:true},
+    {l:'(-) Folha de Pagamento',v:folha,cor:'#991b1b',bold:false,neg:true},
+    {l:'(-) Despesas Gerais',v:despGerais,cor:'#991b1b',bold:false,neg:true},
+    {l:`(-) Investimento (${Number(d.investimento_pct||1).toFixed(1)}%/mês)`,v:investMensal,cor:'#991b1b',bold:false,neg:true},
+    {l:'(=) Total Despesas',v:totalDesp,cor:'#0A2540',bold:true,bg:'var(--bg2)',neg:true},
+    {l:'(=) Resultado Operacional',v:resultado,cor,bold:true,bg:resultado>=0?'#f0fdf4':'#fef2f2'},
+    {l:'Margem operacional',v:null,pct:margem,cor,bold:true,bg:resultado>=0?'#dcfce7':'#fee2e2'},
+  ];
+
+  return linhas.map(l=>`<div style="display:flex;justify-content:space-between;padding:5px 12px;border-bottom:1px solid var(--border2);background:${l.bg||''};font-size:11px;font-weight:${l.bold?'700':'400'}">
+    <span style="color:var(--text)">${l.l}</span>
+    <span style="color:${l.cor}">${l.pct!==undefined?(l.pct>=0?'+':'')+Number(l.pct).toLocaleString('pt-BR',{minimumFractionDigits:1})+'%':l.neg?'('+fmtV2(l.v)+')':fmtV2(l.v)}</span>
+  </div>`).join('');
+}
+
+function atualizarDREAvulso(){
+  const el=ge('drea-preview');if(!el)return;
+  el.innerHTML=rDREAvulsoPreview({
+    fat_bruto:parseFloat(ge('drea-fatbruto')?.value||0),
+    comissao_pct:parseFloat(ge('drea-comissao')?.value||3),
+    aluguel:parseFloat(ge('drea-aluguel')?.value||0),
+    folha:parseFloat(ge('drea-folha')?.value||0),
+    despesas_gerais:parseFloat(ge('drea-despgerais')?.value||0),
+    investimento_total:parseFloat(ge('drea-investtotal')?.value||0),
+    investimento_pct:parseFloat(ge('drea-investpct')?.value||1),
+  });
+}
+
+async function salvarDREAvulso(id){
+  const titulo=ge('drea-titulo')?.value?.trim();
+  if(!titulo){alert('Informe o título do DRE.');return;}
+  const cid=company?.id||profile?.company_id||null;
+  const clienteId=ge('drea-cliente')?.value||null;
+  const cli=clientes.find(c=>c.id===clienteId);
+  const obj={
+    company_id:cid,owner_id:cu.id,
+    titulo,
+    cliente_id:clienteId||null,
+    cliente_nome:cli?.nome||null,
+    fat_bruto:parseFloat(ge('drea-fatbruto')?.value||0),
+    comissao_pct:parseFloat(ge('drea-comissao')?.value||3),
+    aluguel:parseFloat(ge('drea-aluguel')?.value||0),
+    folha:parseFloat(ge('drea-folha')?.value||0),
+    despesas_gerais:parseFloat(ge('drea-despgerais')?.value||0),
+    investimento_total:parseFloat(ge('drea-investtotal')?.value||0),
+    investimento_pct:parseFloat(ge('drea-investpct')?.value||1),
+    observacoes:ge('drea-obs')?.value||null,
+  };
+  if(id){
+    await dbUpdate('dre_avulso',id,obj);
+    dreAvulso=dreAvulso.map(d=>d.id===id?{...d,...obj}:d);
+  } else {
+    const res=await dbInsert('dre_avulso',obj);
+    if(res)dreAvulso.unshift(res);
+  }
+  ge('modal-dre-avulso')?.remove();
+  render();
+}
+
+async function delDREAvulso(id){
+  if(!confirm('Excluir este DRE?'))return;
+  await dbDelete('dre_avulso',id);
+  dreAvulso=dreAvulso.filter(d=>d.id!==id);
+  render();
+}
+
+function imprimirDREAvulso(id){
+  const d=dreAvulso.find(x=>x.id===id);if(!d)return;
+  const cli=clientes.find(c=>c.id===d.cliente_id);
+  const fatBruto=Number(d.fat_bruto||0);
+  const fatAposImp=fatBruto*(1-IMPOSTOS_PCT);
+  const comissaoPct=Number(d.comissao_pct||3)/100;
+  const comissao=fatAposImp*comissaoPct;
+  const fatLiq=fatAposImp-comissao;
+  const aluguel=Number(d.aluguel||0);
+  const folha=Number(d.folha||0);
+  const despGerais=Number(d.despesas_gerais||0);
+  const investMensal=Number(d.investimento_total||0)*(Number(d.investimento_pct||1)/100);
+  const totalDesp=aluguel+folha+despGerais+investMensal;
+  const resultado=fatLiq-totalDesp;
+  const margem=fatLiq>0?(resultado/fatLiq*100):0;
+  const fmtV=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtPct=v=>(v>=0?'+':'')+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:1})+'%';
+  const cor=resultado>=0?'#16a34a':'#991b1b';
+  const hojeStr=new Date().toLocaleDateString('pt-BR');
+  let LOGO='';
+  const m=document.documentElement.innerHTML.match(/data:image\/png;base64,[A-Za-z0-9+/=]{5000,}/);
+  if(m)LOGO=m[0];
+
+  const RODAPE='MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com';
+
+  const linhas=[
+    {l:'(+) Faturamento Bruto',v:fatBruto,tipo:'normal'},
+    {l:`(-) Impostos (${(IMPOSTOS_PCT*100).toFixed(2)}%)`,v:fatBruto*IMPOSTOS_PCT,tipo:'deducao'},
+    {l:'(=) Fat. após impostos',v:fatAposImp,tipo:'subtotal'},
+    {l:`(-) Comissões (${(comissaoPct*100).toFixed(1)}%)`,v:comissao,tipo:'deducao'},
+    {l:'(=) Faturamento Líquido',v:fatLiq,tipo:'subtotal'},
+    {l:'(-) Aluguel',v:aluguel,tipo:'deducao'},
+    {l:'(-) Folha de Pagamento (c/ encargos)',v:folha,tipo:'deducao'},
+    {l:'(-) Despesas Gerais',v:despGerais,tipo:'deducao'},
+    {l:`(-) Investimento (${Number(d.investimento_pct||1).toFixed(1)}%/mês s/ ${fmtV(d.investimento_total||0)})`,v:investMensal,tipo:'deducao'},
+    {l:'(=) Total Despesas',v:totalDesp,tipo:'subtotal'},
+    {l:'(=) Resultado Operacional',v:resultado,tipo:'resultado'},
+    {l:'Margem operacional',v:null,pct:margem,tipo:'margem'},
+  ];
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>DRE - ${d.titulo}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Calibri,Arial,sans-serif;padding:15mm 18mm}
+  .hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:3px solid #0A2540}
+  table{width:100%;border-collapse:collapse}
+  .footer{position:fixed;bottom:12mm;left:18mm;right:18mm;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:6px}
+  @media print{@page{size:A4;margin:0}}</style></head><body>
+  <div class="hdr">
+    <div style="display:flex;align-items:center;gap:12px">
+      ${LOGO?`<img src="${LOGO}" style="height:44px">`:''}
+      <div>
+        <div style="font-size:18px;font-weight:700;color:#0A2540">${d.titulo}</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">${cli?.nome||d.cliente_nome||'DRE Avulso'}</div>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:11px;color:#666"><div>VERUS ERP</div><div style="color:#0A2540;font-weight:600;margin-top:2px">${hojeStr}</div></div>
+  </div>
+  <table>
+    <thead><tr style="background:#0A2540;color:#fff"><th style="padding:8px 14px;text-align:left;font-size:12px">Descrição</th><th style="padding:8px 14px;text-align:right;font-size:12px">Valor mensal</th></tr></thead>
+    <tbody>${linhas.map(l=>{
+      const bgMap={subtotal:'#f3f4f6',resultado:resultado>=0?'#f0fdf4':'#fef2f2',margem:resultado>=0?'#dcfce7':'#fee2e2'};
+      const bold=l.tipo==='subtotal'||l.tipo==='resultado'||l.tipo==='margem';
+      const lCor=l.tipo==='resultado'||l.tipo==='margem'?cor:l.tipo==='deducao'?'#991b1b':l.tipo==='subtotal'?'#0A2540':'#222';
+      return`<tr style="border-bottom:1px solid #e5e7eb;background:${bgMap[l.tipo]||''}">
+        <td style="padding:7px 14px;font-size:12px;font-weight:${bold?700:400}">${l.l}</td>
+        <td style="padding:7px 14px;text-align:right;font-size:12px;font-weight:${bold?700:400};color:${lCor}">
+          ${l.pct!==undefined?fmtPct(l.pct):l.tipo==='deducao'?'('+fmtV(l.v)+')':fmtV(l.v)}
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>
+  ${d.observacoes?`<div style="margin-top:14px;padding:10px 14px;background:#f8f9fa;border-radius:6px;font-size:11px;color:#666"><strong>Obs:</strong> ${d.observacoes}</div>`:''}
+  <div class="footer">${RODAPE}</div>
+  </body></html>`;
+
+  const old=ge('drea-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='drea-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  const oldTitle=document.title;
+  document.title=`DRE_${d.titulo.replace(/\s+/g,'_')}`;
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>{document.title=oldTitle;iframe.remove();},3000);},600);
+}
+
+
 const IMPOSTOS_PCT=0.1381;
 
 function rDREProjeto(dealId){
@@ -5469,8 +5778,9 @@ function rDREProjeto(dealId){
 
   const comissaoPct=Number(dre.comissao_pct||3)/100;
   const impostos=fatBruto*IMPOSTOS_PCT;
-  const comissao=fatBruto*comissaoPct;
-  const fatLiquido=fatBruto-impostos-comissao;
+  const fatAposImpostos=fatBruto-impostos;
+  const comissao=fatAposImpostos*comissaoPct;
+  const fatLiquido=fatAposImpostos-comissao;
 
   const aluguel=Number(dre.aluguel||0);
   const folha=Number(dre.folha||0);
@@ -5489,6 +5799,7 @@ function rDREProjeto(dealId){
   const linhasDRE=[
     {label:'(+) Faturamento Bruto',valor:fatBruto,tipo:'receita',bold:false},
     {label:`(-) Impostos (${(IMPOSTOS_PCT*100).toFixed(2)}%)`,valor:-impostos,tipo:'deducao',bold:false},
+    {label:'(=) Fat. após impostos',valor:fatAposImpostos,tipo:'subtotal',bold:false},
     {label:`(-) Comissões (${(comissaoPct*100).toFixed(1)}%)`,valor:-comissao,tipo:'deducao',bold:false},
     {label:'(=) Faturamento Líquido',valor:fatLiquido,tipo:'subtotal',bold:true},
     {label:'(-) Aluguel',valor:-aluguel,tipo:'deducao',bold:false},
@@ -5587,8 +5898,9 @@ function atualizarDRE(dealId){
 
   const comissaoPct=dreTemp.comissao_pct/100;
   const impostos=fatBruto*IMPOSTOS_PCT;
-  const comissao=fatBruto*comissaoPct;
-  const fatLiquido=fatBruto-impostos-comissao;
+  const fatAposImpostos=fatBruto-impostos;
+  const comissao=fatAposImpostos*comissaoPct;
+  const fatLiquido=fatAposImpostos-comissao;
   const investMensal=dreTemp.investimento_total*(dreTemp.investimento_pct/100);
   const totalDespesas=dreTemp.aluguel+dreTemp.folha+dreTemp.despesas_gerais+investMensal;
   const resultado=fatLiquido-totalDespesas;
@@ -5600,6 +5912,7 @@ function atualizarDRE(dealId){
   const linhas=[
     {label:'(+) Faturamento Bruto',valor:fatBruto,tipo:'receita',bold:false},
     {label:`(-) Impostos (${(IMPOSTOS_PCT*100).toFixed(2)}%)`,valor:-impostos,tipo:'deducao',bold:false},
+    {label:'(=) Fat. após impostos',valor:fatAposImpostos,tipo:'subtotal',bold:false},
     {label:`(-) Comissões (${(comissaoPct*100).toFixed(1)}%)`,valor:-comissao,tipo:'deducao',bold:false},
     {label:'(=) Faturamento Líquido',valor:fatLiquido,tipo:'subtotal',bold:true},
     {label:'(-) Aluguel',valor:-dreTemp.aluguel,tipo:'deducao',bold:false},
@@ -5661,8 +5974,9 @@ function imprimirDRE(dealId){
 
   const comissaoPct=Number(dre.comissao_pct||3)/100;
   const impostos=fatBruto*IMPOSTOS_PCT;
-  const comissao=fatBruto*comissaoPct;
-  const fatLiquido=fatBruto-impostos-comissao;
+  const fatAposImpostos=fatBruto-impostos;
+  const comissao=fatAposImpostos*comissaoPct;
+  const fatLiquido=fatAposImpostos-comissao;
   const aluguel=Number(dre.aluguel||0);
   const folha=Number(dre.folha||0);
   const despGerais=Number(dre.despesas_gerais||0);
@@ -5728,7 +6042,7 @@ function imprimirDRE(dealId){
     }).join('')}
     </tbody>
   </table>
-  <div class="footer">MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363</div>
+  <div style="position:fixed;bottom:12mm;left:18mm;right:18mm;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:6px">MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com</div>
   </body></html>`;
 
   const old=ge('dre-print-frame');if(old)old.remove();
@@ -6998,7 +7312,7 @@ function imprimirVisaoAcionista(){
     <tfoot><tr class="tfoot-row"><td colspan="3">TOTAL PENDENTE</td><td style="text-align:right">${fmtBRL(totalPend)}</td><td></td></tr></tfoot>
   </table>`}
 
-  <div class="footer">MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com</div>
+  <div style="position:fixed;bottom:12mm;left:18mm;right:18mm;text-align:center;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:6px">MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com</div>
   </body></html>`;
 
   const old=ge('visao-acionista-frame');if(old)old.remove();
