@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.62 | Gerado: 2026-05-25 16:11 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.63 | Gerado: 2026-05-25 16:14 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -636,7 +636,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.62';
+const APP_VERSION='v1.0.63';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5656,8 +5656,10 @@ function renderRHPerf(){
   window._rhPerfAvs=avs;
   window._rhPerfTodasComps=todasComps;
 
-  // Renderiza gráfico de nota geral
+  // Renderiza gráfico de nota geral — deduplica por período
   if(avs.length){
+    const seen={};
+    const avsUniq=avs.filter(a=>{const k=a.periodo||a.data_avaliacao;if(seen[k])return false;seen[k]=true;return true;});
     const renderGeralChart=()=>{
       const c1=ge('rhperf-geral-chart');
       if(c1){
@@ -5665,9 +5667,9 @@ function renderRHPerf(){
         c1._chart=new Chart(c1,{
           type:'line',
           data:{
-            labels:avs.map(a=>a.periodo||fmtData(a.data_avaliacao)),
+            labels:avsUniq.map(a=>a.periodo||fmtData(a.data_avaliacao)),
             datasets:[{
-              label:'Nota geral',data:avs.map(a=>a.total||0),
+              label:'Nota geral',data:avsUniq.map(a=>a.total||0),
               borderColor:'#0A2540',backgroundColor:'rgba(10,37,64,0.08)',
               fill:true,tension:0.3,pointRadius:5,pointBackgroundColor:'#0A2540',borderWidth:2
             }]
@@ -5708,8 +5710,22 @@ function renderRHPerfCompChart(){
   if(periodoIni)avs=avs.filter(a=>a.data_avaliacao>=periodoIni);
   if(periodoFim)avs=avs.filter(a=>a.data_avaliacao<=periodoFim);
 
+  // Remove duplicatas por período (mantém a mais recente por período)
+  const seen={};
+  avs=avs.filter(a=>{
+    const key=a.periodo||a.data_avaliacao;
+    if(seen[key])return false;
+    seen[key]=true;return true;
+  });
+
+  // Filtra apenas avaliações onde a competência existe
+  avs=avs.filter(av=>{
+    const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
+    return form.perguntas.some(p=>p.label===compSel);
+  });
+
   if(!avs.length){
-    if(msg){msg.style.display='block';msg.textContent='Nenhuma avaliação no período selecionado';}
+    if(msg){msg.style.display='block';msg.textContent='Nenhuma avaliação com esta competência no período';}
     if(wrap)wrap.style.display='none';
     return;
   }
@@ -5732,13 +5748,12 @@ function renderRHPerfCompChart(){
           data:dados.map(d=>d.val),
           borderColor:'#1e5f82',backgroundColor:'rgba(30,95,130,0.08)',
           fill:true,tension:0.3,pointRadius:5,pointBackgroundColor:'#1e5f82',borderWidth:2,
-          spanGaps:true,
+          spanGaps:false,
         }]
       },
       options:{
         responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const labels=['','Abaixo','Dentro','Supera'];return compSel+': '+(labels[ctx.raw]||ctx.raw);
-        }}}},
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const labels=['','Abaixo','Dentro','Supera'];return compSel+': '+(labels[ctx.raw]||ctx.raw);}}}},
         scales:{
           x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
           y:{min:0,max:3,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:1,callback:v=>['','Abaixo','Dentro','Supera'][v]||''}}
