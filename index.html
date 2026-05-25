@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.58 | Gerado: 2026-05-25 13:26 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.59 | Gerado: 2026-05-25 14:39 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -406,6 +406,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           <span>Avaliações</span>
         </button>
+        <button class="navitem sub" id="nav-rh-performance" onclick="pg('rh-performance')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+          <span>Performance</span>
+        </button>
       </div>
     </div>
 
@@ -598,6 +602,7 @@ let orcamentoReceitas=[];
 let dresProjeto=[];
 let dreAvulso=[];
 let rhAvaliacoes=[];
+let historicoProfissional=[];
 let tabelasTarifarias=[];
 let representantes=[];
 let propostas=[];
@@ -631,7 +636,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.58';
+const APP_VERSION='v1.0.59';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -998,6 +1003,7 @@ async function loadData(){
       dresProjeto=await dbSelect('dre_projeto',`company_id=eq.${cid}`);
       dreAvulso=await dbSelect('dre_avulso',`company_id=eq.${cid}&order=created_at.desc`);
       rhAvaliacoes=await dbSelect('rh_avaliacoes',`company_id=eq.${cid}&order=data_avaliacao.desc`);
+      historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}&order=data.asc`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
         dbSelect('contacts','select=*'),
@@ -1176,6 +1182,7 @@ function render(){
   else if(curPage==='rh-funcoes')c.innerHTML=rRHFuncoes();
   else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
   else if(curPage==='rh-avaliacoes'){c.innerHTML=rRHAvaliacoes();}
+  else if(curPage==='rh-performance'){c.innerHTML=rRHPerformance();}
   else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
@@ -5467,6 +5474,339 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
     <div class="admin-tab-panel" data-tab="workflow" style="display:none">${rWorkflow()}</div>
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>`;
+}
+
+// ── RH PERFORMANCE ──
+let rhPerfPessoaId=null;
+
+function rRHPerformance(){
+  const pessoaOpts=pessoas.filter(p=>p.ativo!==false).map(p=>`<option value="${p.id}" ${rhPerfPessoaId===p.id?'selected':''}>${p.nome}</option>`).join('');
+  return`
+  <div style="background:var(--bg);border-radius:10px;padding:16px;border:1px solid var(--border);margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="fg" style="flex:2;min-width:200px;margin:0">
+        <label class="fl">Colaborador</label>
+        <select class="fi" id="rhperf-sel" onchange="rhPerfSetPessoa(this.value)">
+          <option value="">— Selecione —</option>${pessoaOpts}
+        </select>
+      </div>
+    </div>
+  </div>
+  <div id="rhperf-content">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:40vh;color:var(--text3);gap:12px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <div style="font-size:14px;color:var(--text2)">Selecione um colaborador</div>
+    </div>
+  </div>`;
+}
+
+function rhPerfSetPessoa(id){
+  rhPerfPessoaId=id||null;
+  renderRHPerf();
+}
+
+function renderRHPerf(){
+  const el=ge('rhperf-content');if(!el)return;
+  if(!rhPerfPessoaId){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">Selecione um colaborador</div>';return;}
+
+  const p=pessoas.find(x=>x.id===rhPerfPessoaId);
+  if(!p){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">Colaborador não encontrado</div>';return;}
+
+  // Cálculos
+  const hoje=new Date();
+  const admissao=p.data_admissao?new Date(p.data_admissao+'T00:00'):null;
+  const tempoCasa=admissao?Math.floor((hoje-admissao)/(1000*60*60*24*30)):0;
+  const anosTemp=Math.floor(tempoCasa/12);
+  const mesesTemp=tempoCasa%12;
+  const tempoLabel=anosTemp>0?`${anosTemp}a ${mesesTemp}m`:`${mesesTemp} meses`;
+
+  // Avaliações do colaborador ordenadas
+  const avs=rhAvaliacoes.filter(a=>a.pessoa_id===rhPerfPessoaId).sort((a,b)=>a.data_avaliacao<b.data_avaliacao?-1:1);
+
+  // Histórico profissional
+  const hist=historicoProfissional.filter(h=>h.pessoa_id===rhPerfPessoaId).sort((a,b)=>a.data<b.data?-1:1);
+
+  // Linha do tempo — marcos
+  const marcos=[];
+  if(admissao)marcos.push({data:p.data_admissao,label:'Admissão',sub:p.cargo||'',icon:'🎯',cor:'#0A2540'});
+  hist.forEach(h=>{
+    const tipoIcon={promocao:'⬆',transferencia:'↔',alteracao_salario:'💰',desligamento:'🚪'}[h.tipo]||'📌';
+    const tipoLabel={promocao:'Promoção',transferencia:'Transferência',alteracao_salario:'Alteração salarial',desligamento:'Desligamento'}[h.tipo]||h.tipo;
+    marcos.push({data:h.data,label:tipoLabel,sub:h.cargo_novo||h.observacao||'',icon:tipoIcon,cor:'#1e5f82'});
+  });
+  marcos.push({data:hoje.toISOString().slice(0,10),label:'Hoje',sub:p.cargo||'',icon:'📍',cor:'#16a34a'});
+
+  const fmtData=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'—';
+  const fmtBRL=v=>v?'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—';
+
+  // Competências únicas de todas as avaliações
+  const todasComps=[...new Set(avs.flatMap(a=>{
+    const form=a.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
+    return form.perguntas.map(p=>p.label);
+  }))];
+
+  el.innerHTML=`
+  <!-- TOPO: Foto + Cards -->
+  <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+    <!-- Foto -->
+    <div style="background:var(--bg);border-radius:10px;padding:16px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:10px;min-width:140px">
+      <div id="rhperf-foto-wrap" style="width:100px;height:100px;border-radius:50%;overflow:hidden;background:var(--bg2);display:flex;align-items:center;justify-content:center;border:3px solid #0A2540">
+        ${p.foto_url?`<img src="${p.foto_url}" style="width:100%;height:100%;object-fit:cover">`:`<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0A2540" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`}
+      </div>
+      <div style="font-size:13px;font-weight:700;text-align:center;color:#0A2540">${p.nome}</div>
+      <label style="cursor:pointer;font-size:11px;color:var(--text2);text-decoration:underline">
+        <input type="file" accept="image/*" style="display:none" onchange="uploadFotoPessoa('${p.id}',this)">
+        ${p.foto_url?'Trocar foto':'Adicionar foto'}
+      </label>
+    </div>
+
+    <!-- Cards -->
+    <div style="flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+      <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Função</div>
+        <div style="font-size:14px;font-weight:700;color:#0A2540">${p.cargo||'—'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${p.departamento||''}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Salário</div>
+        <div style="font-size:14px;font-weight:700;color:#0A2540">${fmtBRL(p.salario)}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${p.tipo_contrato||''}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Tempo de casa</div>
+        <div style="font-size:18px;font-weight:700;color:#0A2540">${tempoLabel}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">Desde ${fmtData(p.data_admissao)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:10px;padding:14px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Avaliações</div>
+        <div style="font-size:18px;font-weight:700;color:#0A2540">${avs.length}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${avs.length?'Última: '+fmtData(avs[avs.length-1]?.data_avaliacao):'Nenhuma ainda'}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Botão histórico -->
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <button onclick="abrirHistoricoProf('${p.id}')" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px">+ Registrar movimentação</button>
+  </div>
+
+  <!-- LINHA DO TEMPO HORIZONTAL -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:20px;color:#0A2540">📅 Linha do tempo</div>
+    <div style="overflow-x:auto;padding-bottom:8px">
+      <div style="position:relative;min-width:${Math.max(500,marcos.length*160)}px;padding:40px 20px 10px">
+        <div style="position:absolute;top:20px;left:20px;right:20px;height:3px;background:linear-gradient(to right,#0A2540,#1e5f82,#16a34a);border-radius:2px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          ${marcos.map(m=>`<div style="display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;position:relative">
+            <div style="width:36px;height:36px;border-radius:50%;background:${m.cor};display:flex;align-items:center;justify-content:center;font-size:16px;position:absolute;top:-29px;box-shadow:0 2px 8px rgba(0,0,0,0.15);border:3px solid #fff">${m.icon}</div>
+            <div style="text-align:center;padding-top:16px">
+              <div style="font-size:11px;font-weight:700;color:${m.cor};margin-bottom:2px">${m.label}</div>
+              <div style="font-size:10px;color:var(--text2)">${fmtData(m.data)}</div>
+              ${m.sub?`<div style="font-size:10px;color:var(--text3);margin-top:2px">${m.sub}</div>`:''}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  ${avs.length?`
+  <!-- GRÁFICO: Nota geral ao longo do tempo -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📈 Evolução da nota geral</div>
+    <div style="position:relative;width:100%;height:180px">
+      <canvas id="rhperf-geral-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- GRÁFICO: Linha por competência -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📊 Evolução por competência</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px" id="rhperf-legend"></div>
+    <div style="position:relative;width:100%;height:220px">
+      <canvas id="rhperf-comp-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- TABELA: Histórico de avaliações -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📋 Histórico de avaliações</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#0A2540;color:#fff">
+        <th style="padding:7px 10px;text-align:left">Data</th>
+        <th style="padding:7px 10px;text-align:left">Formulário</th>
+        <th style="padding:7px 10px;text-align:left">Gestor</th>
+        <th style="padding:7px 10px;text-align:center">Total</th>
+        <th style="padding:7px 10px;text-align:center">Performance</th>
+        <th style="padding:7px 10px;text-align:center">Ações</th>
+      </tr></thead>
+      <tbody>
+        ${avs.map((av,i)=>{
+          const perf=getPerformanceLabel(av.total||0);
+          const form=av.tipo_formulario==='lideranca'?'Liderança':'Funcionário';
+          return`<tr style="border-bottom:1px solid var(--border2);background:${i%2===0?'var(--bg)':'var(--bg2)'}">
+            <td style="padding:6px 10px">${fmtData(av.data_avaliacao)}</td>
+            <td style="padding:6px 10px">${form}</td>
+            <td style="padding:6px 10px">${av.gestor_nome||'—'}</td>
+            <td style="padding:6px 10px;text-align:center;font-weight:700">${av.total||0}/21</td>
+            <td style="padding:6px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:99px;background:${perf.bg};color:${perf.cor};font-weight:600">${perf.label}</span></td>
+            <td style="padding:6px 10px;text-align:center">
+              <button onclick="imprimirAvaliacao('${av.id}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">🖨</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`:'<div style="background:var(--bg);border-radius:10px;padding:30px;border:1px solid var(--border);text-align:center;color:var(--text3)">Nenhuma avaliação registrada para este colaborador</div>'}`;
+
+  // Renderiza gráficos se há avaliações
+  if(avs.length){
+    const CORES_COMP=['#0A2540','#1e5f82','#16a34a','#d97706','#7c3aed','#db2777','#0891b2'];
+    const renderCharts=()=>{
+      // Gráfico nota geral
+      const c1=ge('rhperf-geral-chart');
+      if(c1){
+        if(c1._chart)c1._chart.destroy();
+        c1._chart=new Chart(c1,{
+          type:'line',
+          data:{
+            labels:avs.map(a=>fmtData(a.data_avaliacao)),
+            datasets:[{
+              label:'Nota geral',data:avs.map(a=>a.total||0),
+              borderColor:'#0A2540',backgroundColor:'rgba(10,37,64,0.08)',
+              fill:true,tension:0.3,pointRadius:5,pointBackgroundColor:'#0A2540',borderWidth:2
+            }]
+          },
+          options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`Nota: ${ctx.raw}/21`}}},
+            scales:{
+              x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
+              y:{min:0,max:21,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:3}}
+            }
+          }
+        });
+      }
+
+      // Gráfico por competência
+      const c2=ge('rhperf-comp-chart');
+      const legEl=ge('rhperf-legend');
+      if(c2&&todasComps.length){
+        const datasets=todasComps.map((comp,ci)=>({
+          label:comp,
+          data:avs.map(av=>{
+            const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
+            const perg=form.perguntas.find(p=>p.label===comp);
+            return perg?(av.respostas||{})[perg.id]||0:null;
+          }),
+          borderColor:CORES_COMP[ci%CORES_COMP.length],
+          backgroundColor:'transparent',
+          tension:0.3,pointRadius:4,borderWidth:2,
+          spanGaps:true,
+        }));
+
+        if(legEl){
+          legEl.innerHTML=datasets.map(d=>`<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)">
+            <span style="width:16px;height:3px;background:${d.borderColor};border-radius:2px;display:inline-block"></span>${d.label}
+          </span>`).join('');
+        }
+
+        if(c2._chart)c2._chart.destroy();
+        c2._chart=new Chart(c2,{
+          type:'line',
+          data:{labels:avs.map(a=>fmtData(a.data_avaliacao)),datasets},
+          options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false}},
+            scales:{
+              x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
+              y:{min:0,max:3,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:1,callback:v=>['','Abaixo','Dentro','Supera'][v]||v}}
+            }
+          }
+        });
+      }
+    };
+    if(window.Chart)renderCharts();
+    else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=renderCharts;document.head.appendChild(s);}
+  }
+}
+
+async function uploadFotoPessoa(pessoaId,input){
+  const file=input.files[0];if(!file)return;
+  // Converte para base64 e salva como data URL (simples, sem storage externo)
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    const dataUrl=e.target.result;
+    await dbUpdate('pessoas',pessoaId,{foto_url:dataUrl});
+    pessoas=pessoas.map(p=>p.id===pessoaId?{...p,foto_url:dataUrl}:p);
+    // Atualiza foto na tela
+    const wrap=ge('rhperf-foto-wrap');
+    if(wrap)wrap.innerHTML=`<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function abrirHistoricoProf(pessoaId){
+  const old=ge('modal-hist-prof');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-hist-prof';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+    <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar movimentação</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fg"><label class="fl">Data *</label>
+        <input class="fi" id="hist-data" type="date" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="fg"><label class="fl">Tipo *</label>
+        <select class="fi" id="hist-tipo">
+          <option value="promocao">Promoção</option>
+          <option value="transferencia">Transferência</option>
+          <option value="alteracao_salario">Alteração salarial</option>
+          <option value="desligamento">Desligamento</option>
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Cargo anterior</label>
+        <input class="fi" id="hist-cargo-ant" placeholder="Ex: Auxiliar">
+      </div>
+      <div class="fg"><label class="fl">Cargo novo</label>
+        <input class="fi" id="hist-cargo-novo" placeholder="Ex: Analista">
+      </div>
+      <div class="fg"><label class="fl">Salário anterior (R$)</label>
+        <input class="fi" id="hist-sal-ant" type="number" step="0.01">
+      </div>
+      <div class="fg"><label class="fl">Salário novo (R$)</label>
+        <input class="fi" id="hist-sal-novo" type="number" step="0.01">
+      </div>
+      <div class="fg" style="grid-column:1/-1"><label class="fl">Observação</label>
+        <input class="fi" id="hist-obs" placeholder="Detalhes da movimentação">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="ge('modal-hist-prof').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer">Cancelar</button>
+      <button onclick="salvarHistoricoProf('${pessoaId}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar</button>
+    </div>
+  </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function salvarHistoricoProf(pessoaId){
+  const cid=company?.id||profile?.company_id||null;
+  const obj={
+    company_id:cid,pessoa_id:pessoaId,
+    data:ge('hist-data')?.value,
+    tipo:ge('hist-tipo')?.value,
+    cargo_anterior:ge('hist-cargo-ant')?.value||null,
+    cargo_novo:ge('hist-cargo-novo')?.value||null,
+    salario_anterior:parseFloat(ge('hist-sal-ant')?.value)||null,
+    salario_novo:parseFloat(ge('hist-sal-novo')?.value)||null,
+    observacao:ge('hist-obs')?.value||null,
+  };
+  if(!obj.data){alert('Informe a data.');return;}
+  const res=await dbInsert('historico_profissional',obj);
+  if(res)historicoProfissional.push(res);
+  ge('modal-hist-prof')?.remove();
+  renderRHPerf();
 }
 
 // ── RH AVALIAÇÕES ──
