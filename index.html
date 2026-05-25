@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.59 | Gerado: 2026-05-25 14:39 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.60 | Gerado: 2026-05-25 16:03 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -636,7 +636,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.59';
+const APP_VERSION='v1.0.60';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5551,7 +5551,7 @@ function renderRHPerf(){
     <!-- Foto -->
     <div style="background:var(--bg);border-radius:10px;padding:16px;border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:10px;min-width:140px">
       <div id="rhperf-foto-wrap" style="width:100px;height:100px;border-radius:50%;overflow:hidden;background:var(--bg2);display:flex;align-items:center;justify-content:center;border:3px solid #0A2540">
-        ${p.foto_url?`<img src="${p.foto_url}" style="width:100%;height:100%;object-fit:cover">`:`<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0A2540" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`}
+        ${p.foto_url?'<img src="'+p.foto_url+'" style="width:100%;height:100%;object-fit:cover">':`<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0A2540" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`}
       </div>
       <div style="font-size:13px;font-weight:700;text-align:center;color:#0A2540">${p.nome}</div>
       <label style="cursor:pointer;font-size:11px;color:var(--text2);text-decoration:underline">
@@ -5585,10 +5585,98 @@ function renderRHPerf(){
     </div>
   </div>
 
-  <!-- Botão histórico -->
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <button onclick="abrirHistoricoProf('${p.id}')" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px">+ Registrar movimentação</button>
+  <!-- GRÁFICO: Linha por competência com filtros -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">📊 Evolução por competência</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end">
+      <div class="fg" style="margin:0;min-width:180px">
+        <label class="fl">Competência</label>
+        <select class="fi" id="rhperf-comp-sel" onchange="renderRHPerfCompChart()">
+          <option value="">— Selecione —</option>
+          ${todasComps.map(c=>`<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg" style="margin:0;min-width:130px">
+        <label class="fl">Período de</label>
+        <select class="fi" id="rhperf-periodo-ini" onchange="renderRHPerfCompChart()">
+          <option value="">Todos</option>
+          ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg" style="margin:0;min-width:130px">
+        <label class="fl">Até</label>
+        <select class="fi" id="rhperf-periodo-fim" onchange="renderRHPerfCompChart()">
+          <option value="">Todos</option>
+          ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="rhperf-comp-msg" style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Selecione uma competência para visualizar</div>
+    <div style="position:relative;width:100%;height:200px;display:none" id="rhperf-comp-wrap">
+      <canvas id="rhperf-comp-chart"></canvas>
+    </div>
   </div>
+
+  <!-- TABELA: Histórico de avaliações -->
+  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📋 Histórico de avaliações</div>
+    ${avs.length?`<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#0A2540;color:#fff">
+        <th style="padding:7px 10px;text-align:left">Data</th>
+        <th style="padding:7px 10px;text-align:left">Formulário</th>
+        <th style="padding:7px 10px;text-align:left">Gestor</th>
+        <th style="padding:7px 10px;text-align:center">Total</th>
+        <th style="padding:7px 10px;text-align:center">Performance</th>
+      </tr></thead>
+      <tbody>
+        ${avs.map((av,i)=>{
+          const perf=getPerformanceLabel(av.total||0);
+          const form=av.tipo_formulario==='lideranca'?'Liderança':'Funcionário';
+          return`<tr style="border-bottom:1px solid var(--border2);background:${i%2===0?'var(--bg)':'var(--bg2)'};cursor:pointer" onclick="imprimirAvaliacao('${av.id}')" title="Clique para visualizar/imprimir">
+            <td style="padding:6px 10px">${fmtData(av.data_avaliacao)}</td>
+            <td style="padding:6px 10px">${form} · ${av.periodo||''}</td>
+            <td style="padding:6px 10px">${av.gestor_nome||'—'}</td>
+            <td style="padding:6px 10px;text-align:center;font-weight:700">${av.total||0}/21</td>
+            <td style="padding:6px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:99px;background:${perf.bg};color:${perf.cor};font-weight:600">${perf.label}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`:'<div style="text-align:center;padding:20px;color:var(--text3)">Nenhuma avaliação registrada</div>'}
+  </div>
+  window._rhPerfAvs=avs;
+  window._rhPerfTodasComps=todasComps;
+
+  // Renderiza gráfico de nota geral
+  if(avs.length){
+    const renderGeralChart=()=>{
+      const c1=ge('rhperf-geral-chart');
+      if(c1){
+        if(c1._chart)c1._chart.destroy();
+        c1._chart=new Chart(c1,{
+          type:'line',
+          data:{
+            labels:avs.map(a=>a.periodo||fmtData(a.data_avaliacao)),
+            datasets:[{
+              label:'Nota geral',data:avs.map(a=>a.total||0),
+              borderColor:'#0A2540',backgroundColor:'rgba(10,37,64,0.08)',
+              fill:true,tension:0.3,pointRadius:5,pointBackgroundColor:'#0A2540',borderWidth:2
+            }]
+          },
+          options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'Nota: '+ctx.raw+'/21'}},},
+            scales:{
+              x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
+              y:{min:0,max:21,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:3}}
+            }
+          }
+        });
+      }
+    };
+    if(window.Chart)renderGeralChart();
+    else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=renderGeralChart;document.head.appendChild(s);}
+  }
+}
 
   <!-- LINHA DO TEMPO HORIZONTAL -->
   <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
@@ -5608,69 +5696,22 @@ function renderRHPerf(){
         </div>
       </div>
     </div>
-  </div>
+  </div>`;
 
-  ${avs.length?`
-  <!-- GRÁFICO: Nota geral ao longo do tempo -->
-  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
-    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📈 Evolução da nota geral</div>
-    <div style="position:relative;width:100%;height:180px">
-      <canvas id="rhperf-geral-chart"></canvas>
-    </div>
-  </div>
+  // Guarda avs no window para o filtro de competência
+  window._rhPerfAvs=avs;
+  window._rhPerfTodasComps=todasComps;
 
-  <!-- GRÁFICO: Linha por competência -->
-  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
-    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📊 Evolução por competência</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px" id="rhperf-legend"></div>
-    <div style="position:relative;width:100%;height:220px">
-      <canvas id="rhperf-comp-chart"></canvas>
-    </div>
-  </div>
-
-  <!-- TABELA: Histórico de avaliações -->
-  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border)">
-    <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:#0A2540">📋 Histórico de avaliações</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="background:#0A2540;color:#fff">
-        <th style="padding:7px 10px;text-align:left">Data</th>
-        <th style="padding:7px 10px;text-align:left">Formulário</th>
-        <th style="padding:7px 10px;text-align:left">Gestor</th>
-        <th style="padding:7px 10px;text-align:center">Total</th>
-        <th style="padding:7px 10px;text-align:center">Performance</th>
-        <th style="padding:7px 10px;text-align:center">Ações</th>
-      </tr></thead>
-      <tbody>
-        ${avs.map((av,i)=>{
-          const perf=getPerformanceLabel(av.total||0);
-          const form=av.tipo_formulario==='lideranca'?'Liderança':'Funcionário';
-          return`<tr style="border-bottom:1px solid var(--border2);background:${i%2===0?'var(--bg)':'var(--bg2)'}">
-            <td style="padding:6px 10px">${fmtData(av.data_avaliacao)}</td>
-            <td style="padding:6px 10px">${form}</td>
-            <td style="padding:6px 10px">${av.gestor_nome||'—'}</td>
-            <td style="padding:6px 10px;text-align:center;font-weight:700">${av.total||0}/21</td>
-            <td style="padding:6px 10px;text-align:center"><span style="font-size:10px;padding:2px 8px;border-radius:99px;background:${perf.bg};color:${perf.cor};font-weight:600">${perf.label}</span></td>
-            <td style="padding:6px 10px;text-align:center">
-              <button onclick="imprimirAvaliacao('${av.id}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">🖨</button>
-            </td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-  </div>`:'<div style="background:var(--bg);border-radius:10px;padding:30px;border:1px solid var(--border);text-align:center;color:var(--text3)">Nenhuma avaliação registrada para este colaborador</div>'}`;
-
-  // Renderiza gráficos se há avaliações
+  // Renderiza gráfico de nota geral
   if(avs.length){
-    const CORES_COMP=['#0A2540','#1e5f82','#16a34a','#d97706','#7c3aed','#db2777','#0891b2'];
-    const renderCharts=()=>{
-      // Gráfico nota geral
+    const renderGeralChart=()=>{
       const c1=ge('rhperf-geral-chart');
       if(c1){
         if(c1._chart)c1._chart.destroy();
         c1._chart=new Chart(c1,{
           type:'line',
           data:{
-            labels:avs.map(a=>fmtData(a.data_avaliacao)),
+            labels:avs.map(a=>a.periodo||fmtData(a.data_avaliacao)),
             datasets:[{
               label:'Nota geral',data:avs.map(a=>a.total||0),
               borderColor:'#0A2540',backgroundColor:'rgba(10,37,64,0.08)',
@@ -5679,7 +5720,7 @@ function renderRHPerf(){
           },
           options:{
             responsive:true,maintainAspectRatio:false,
-            plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`Nota: ${ctx.raw}/21`}}},
+            plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'Nota: '+ctx.raw+'/21'}},},
             scales:{
               x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
               y:{min:0,max:21,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:3}}
@@ -5687,49 +5728,75 @@ function renderRHPerf(){
           }
         });
       }
-
-      // Gráfico por competência
-      const c2=ge('rhperf-comp-chart');
-      const legEl=ge('rhperf-legend');
-      if(c2&&todasComps.length){
-        const datasets=todasComps.map((comp,ci)=>({
-          label:comp,
-          data:avs.map(av=>{
-            const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
-            const perg=form.perguntas.find(p=>p.label===comp);
-            return perg?(av.respostas||{})[perg.id]||0:null;
-          }),
-          borderColor:CORES_COMP[ci%CORES_COMP.length],
-          backgroundColor:'transparent',
-          tension:0.3,pointRadius:4,borderWidth:2,
-          spanGaps:true,
-        }));
-
-        if(legEl){
-          legEl.innerHTML=datasets.map(d=>`<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)">
-            <span style="width:16px;height:3px;background:${d.borderColor};border-radius:2px;display:inline-block"></span>${d.label}
-          </span>`).join('');
-        }
-
-        if(c2._chart)c2._chart.destroy();
-        c2._chart=new Chart(c2,{
-          type:'line',
-          data:{labels:avs.map(a=>fmtData(a.data_avaliacao)),datasets},
-          options:{
-            responsive:true,maintainAspectRatio:false,
-            plugins:{legend:{display:false}},
-            scales:{
-              x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
-              y:{min:0,max:3,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:1,callback:v=>['','Abaixo','Dentro','Supera'][v]||v}}
-            }
-          }
-        });
-      }
     };
-    if(window.Chart)renderCharts();
-    else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=renderCharts;document.head.appendChild(s);}
+    if(window.Chart)renderGeralChart();
+    else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=renderGeralChart;document.head.appendChild(s);}
   }
 }
+
+function renderRHPerfCompChart(){
+  const compSel=ge('rhperf-comp-sel')?.value;
+  const periodoIni=ge('rhperf-periodo-ini')?.value;
+  const periodoFim=ge('rhperf-periodo-fim')?.value;
+  const msg=ge('rhperf-comp-msg');
+  const wrap=ge('rhperf-comp-wrap');
+
+  if(!compSel){
+    if(msg)msg.style.display='block';
+    if(wrap)wrap.style.display='none';
+    return;
+  }
+  if(msg)msg.style.display='none';
+  if(wrap)wrap.style.display='block';
+
+  let avs=window._rhPerfAvs||[];
+  // Filtra por período
+  if(periodoIni)avs=avs.filter(a=>a.data_avaliacao>=periodoIni);
+  if(periodoFim)avs=avs.filter(a=>a.data_avaliacao<=periodoFim);
+
+  if(!avs.length){
+    if(msg){msg.style.display='block';msg.textContent='Nenhuma avaliação no período selecionado';}
+    if(wrap)wrap.style.display='none';
+    return;
+  }
+
+  const dados=avs.map(av=>{
+    const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
+    const perg=form.perguntas.find(p=>p.label===compSel);
+    return{label:av.periodo||av.data_avaliacao?.slice(0,10),val:perg?(av.respostas||{})[perg.id]||0:null};
+  });
+
+  const render=()=>{
+    const c=ge('rhperf-comp-chart');if(!c)return;
+    if(c._chart)c._chart.destroy();
+    c._chart=new Chart(c,{
+      type:'line',
+      data:{
+        labels:dados.map(d=>d.label),
+        datasets:[{
+          label:compSel,
+          data:dados.map(d=>d.val),
+          borderColor:'#1e5f82',backgroundColor:'rgba(30,95,130,0.08)',
+          fill:true,tension:0.3,pointRadius:5,pointBackgroundColor:'#1e5f82',borderWidth:2,
+          spanGaps:true,
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const labels=['','Abaixo','Dentro','Supera'];return compSel+': '+(labels[ctx.raw]||ctx.raw);
+        }}}},
+        scales:{
+          x:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10}}},
+          y:{min:0,max:3,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},stepSize:1,callback:v=>['','Abaixo','Dentro','Supera'][v]||''}}
+        }
+      }
+    });
+  };
+  if(window.Chart)render();
+  else{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';s.onload=render;document.head.appendChild(s);}
+}
+
+
 
 async function uploadFotoPessoa(pessoaId,input){
   const file=input.files[0];if(!file)return;
@@ -5741,51 +5808,39 @@ async function uploadFotoPessoa(pessoaId,input){
     pessoas=pessoas.map(p=>p.id===pessoaId?{...p,foto_url:dataUrl}:p);
     // Atualiza foto na tela
     const wrap=ge('rhperf-foto-wrap');
-    if(wrap)wrap.innerHTML=`<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    if(wrap)wrap.innerHTML='<img src="'+dataUrl+'" style="width:100%;height:100%;object-fit:cover">';
   };
   reader.readAsDataURL(file);
 }
 
 function abrirHistoricoProf(pessoaId){
+  const hoje=new Date().toISOString().slice(0,10);
   const old=ge('modal-hist-prof');if(old)old.remove();
   const modal=document.createElement('div');
   modal.id='modal-hist-prof';
   modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
-  modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
-    <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar movimentação</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="fg"><label class="fl">Data *</label>
-        <input class="fi" id="hist-data" type="date" value="${new Date().toISOString().slice(0,10)}">
-      </div>
-      <div class="fg"><label class="fl">Tipo *</label>
-        <select class="fi" id="hist-tipo">
-          <option value="promocao">Promoção</option>
-          <option value="transferencia">Transferência</option>
-          <option value="alteracao_salario">Alteração salarial</option>
-          <option value="desligamento">Desligamento</option>
-        </select>
-      </div>
-      <div class="fg"><label class="fl">Cargo anterior</label>
-        <input class="fi" id="hist-cargo-ant" placeholder="Ex: Auxiliar">
-      </div>
-      <div class="fg"><label class="fl">Cargo novo</label>
-        <input class="fi" id="hist-cargo-novo" placeholder="Ex: Analista">
-      </div>
-      <div class="fg"><label class="fl">Salário anterior (R$)</label>
-        <input class="fi" id="hist-sal-ant" type="number" step="0.01">
-      </div>
-      <div class="fg"><label class="fl">Salário novo (R$)</label>
-        <input class="fi" id="hist-sal-novo" type="number" step="0.01">
-      </div>
-      <div class="fg" style="grid-column:1/-1"><label class="fl">Observação</label>
-        <input class="fi" id="hist-obs" placeholder="Detalhes da movimentação">
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button onclick="ge('modal-hist-prof').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer">Cancelar</button>
-      <button onclick="salvarHistoricoProf('${pessoaId}')" style="flex:1;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar</button>
-    </div>
-  </div>`;
+  modal.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:20px;width:440px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar movimentação</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+      '<div class="fg"><label class="fl">Data *</label>'+
+        '<input class="fi" id="hist-data" type="date" value="'+hoje+'"></div>'+
+      '<div class="fg"><label class="fl">Tipo *</label>'+
+        '<select class="fi" id="hist-tipo">'+
+          '<option value="promocao">Promoção</option>'+
+          '<option value="transferencia">Transferência</option>'+
+          '<option value="alteracao_salario">Alteração salarial</option>'+
+          '<option value="desligamento">Desligamento</option>'+
+        '</select></div>'+
+      '<div class="fg"><label class="fl">Cargo anterior</label><input class="fi" id="hist-cargo-ant" placeholder="Ex: Auxiliar"></div>'+
+      '<div class="fg"><label class="fl">Cargo novo</label><input class="fi" id="hist-cargo-novo" placeholder="Ex: Analista"></div>'+
+      '<div class="fg"><label class="fl">Salário anterior (R$)</label><input class="fi" id="hist-sal-ant" type="number" step="0.01"></div>'+
+      '<div class="fg"><label class="fl">Salário novo (R$)</label><input class="fi" id="hist-sal-novo" type="number" step="0.01"></div>'+
+      '<div class="fg" style="grid-column:1/-1"><label class="fl">Observação</label><input class="fi" id="hist-obs" placeholder="Detalhes da movimentação"></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:12px">'+
+      '<button onclick="ge(\'modal-hist-prof\').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer">Cancelar</button>'+
+      '<button onclick="salvarHistoricoProf(\''+pessoaId+'\')" style="flex:1;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">Salvar</button>'+
+    '</div></div>';
   modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
   document.body.appendChild(modal);
 }
