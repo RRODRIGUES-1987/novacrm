@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.69 | Gerado: 2026-05-26 10:47 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.70 | Gerado: 2026-05-26 11:11 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -636,7 +636,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.69';
+const APP_VERSION='v1.0.70';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -9102,7 +9102,7 @@ function openModal(mode,id=null){
         <input class="fi" id="funame" value="${p?p.full_name||'':''}" placeholder="Nome">
       </div>
       <div class="fg"><label class="fl">Email</label>
-        <input class="fi" id="fuemail" type="email" value="${p?p.email||'':''}" placeholder="email@empresa.com">
+        <input class="fi" type="email" id="fuemail" value="${p?p.email||'':''}" placeholder="email@empresa.com">
       </div>
       <div class="fg"><label class="fl">Perfil</label>
         <select class="fi" id="furole">
@@ -9116,8 +9116,47 @@ function openModal(mode,id=null){
         <select class="fi" id="fucomp">
           <option value="">Sem empresa</option>${compOpts}
         </select>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
+          <input type="checkbox" id="fu-aprovacao" ${p?.realiza_aprovacao?'checked':''} style="width:16px;height:16px;accent-color:#0A2540" onchange="toggleAssinaturaUpload(this.checked)">
+          <div>
+            <div style="font-size:13px;font-weight:600">Realiza aprovação</div>
+            <div style="font-size:11px;color:var(--text2)">Habilita assinatura digital em documentos aprovados</div>
+          </div>
+        </label>
+        <div id="fu-assinatura-wrap" style="display:${p?.realiza_aprovacao?'block':'none'}">
+          <div class="fg">
+            <label class="fl">Assinatura digital</label>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              ${p?.assinatura_url?`<img src="${p.assinatura_url}" style="height:50px;border:1px solid var(--border);border-radius:6px;padding:4px;background:#fff" alt="Assinatura atual">`:''}
+              <label style="cursor:pointer;padding:7px 14px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--text2)">
+                <input type="file" id="fu-assinatura-file" accept="image/*,.png,.jpg,.jpeg" style="display:none" onchange="previewAssinatura(this)">
+                ${p?.assinatura_url?'Trocar assinatura':'Fazer upload da assinatura'}
+              </label>
+            </div>
+            <div id="fu-assinatura-preview" style="margin-top:8px"></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">PNG com fundo transparente recomendado · máx 200KB</div>
+          </div>
+        </div>
       </div>`;
   }
+}
+
+function toggleAssinaturaUpload(checked){
+  const wrap=ge('fu-assinatura-wrap');
+  if(wrap)wrap.style.display=checked?'block':'none';
+}
+
+function previewAssinatura(input){
+  const file=input.files[0];if(!file)return;
+  if(file.size>250000){alert('Arquivo muito grande. Use uma imagem menor que 200KB.');input.value='';return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const preview=ge('fu-assinatura-preview');
+    if(preview)preview.innerHTML='<img src="'+e.target.result+'" style="height:60px;border:1px solid var(--border);border-radius:6px;padding:4px;background:#fff" alt="Preview">';
+  };
+  reader.readAsDataURL(file);
 }
 
 // ── DOCUMENTOS ──
@@ -9607,8 +9646,21 @@ async function saveModal(){
       const email=ge('fuemail')?.value.trim();
       const role=ge('furole').value;
       const comp=ge('fucomp').value;
-      const obj={full_name:name,role,company_id:comp||null};
-      if(email) obj.email=email;
+      const realizaAprovacao=ge('fu-aprovacao')?.checked||false;
+      const obj={full_name:name,role,company_id:comp||null,realiza_aprovacao:realizaAprovacao};
+      if(email)obj.email=email;
+
+      // Processa upload de assinatura se houver
+      const assinaturaFile=ge('fu-assinatura-file')?.files[0];
+      if(assinaturaFile&&realizaAprovacao){
+        await new Promise((resolve,reject)=>{
+          const reader=new FileReader();
+          reader.onload=e=>{obj.assinatura_url=e.target.result;resolve();};
+          reader.onerror=reject;
+          reader.readAsDataURL(assinaturaFile);
+        });
+      }
+
       await dbUpdate('profiles',mid,obj);
       profiles=profiles.map(p=>p.id===mid?{...p,...obj}:p);
     }
