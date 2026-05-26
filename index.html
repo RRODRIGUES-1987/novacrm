@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.81 | Gerado: 2026-05-26 14:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.82 | Gerado: 2026-05-26 15:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -41,6 +41,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .pw-strength{height:3px;border-radius:2px;margin-top:5px;background:var(--border)}.pw-bar{height:100%;border-radius:2px;transition:all .3s;width:0}.pw-hint{font-size:11px;margin-top:3px}
 /* APP */
 .app{display:none;height:100vh;height:100dvh;flex-direction:column;overflow:hidden}.app.on{display:flex}
+
+/* ── SELETOR DE UNIDADE ── */
+.unit-selector-bar{display:none;align-items:center;gap:6px;padding:7px 18px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.unit-selector-bar.visible{display:flex}
+.unit-btn{display:flex;align-items:center;gap:5px;padding:4px 12px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;font-size:12px;font-weight:500;color:var(--text2);white-space:nowrap;transition:all .15s;flex-shrink:0}
+.unit-btn:hover{border-color:var(--accent);color:var(--text)}
+.unit-btn.active{border-color:var(--accent);background:var(--accent);color:var(--accent-text);font-weight:600}
+.unit-btn .unit-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.7}
+.unit-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;background:var(--accent);color:var(--accent-text);margin-left:4px}
+/* mobile: seletor no topbar */
+@media(max-width:767px){
+  .unit-selector-bar{padding:6px 12px;gap:5px}
+  .unit-btn{font-size:11px;padding:3px 10px}
+}
+
 .topbar{background:var(--bg);border-bottom:1px solid var(--border);padding:calc(var(--safe-top)+12px) 16px 12px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .logo{font-size:17px;font-weight:600;letter-spacing:-0.3px}.logo span{color:var(--text2);font-weight:400}
 .logo-sub{font-size:10px;color:var(--text3);font-weight:400;margin-top:1px}
@@ -542,12 +557,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <div class="logo">VERUS<span style="font-weight:300;color:var(--text2)"> ERP</span></div>
         <div class="logo-sub" id="topbar-company">—</div>
       </div>
+      <div id="unit-selector-mobile" style="display:none;align-items:center;gap:4px;overflow-x:auto;flex:1;padding:0 8px"></div>
       <div class="user-chip" onclick="toggleMenu()">
         <div class="uav" id="tbav">?</div>
         <div class="uname" id="tbnm">—</div>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
     </div>
+    <div class="unit-selector-bar" id="unit-selector-bar"></div>
     <div class="dtopbar">
       <div class="dtitle" id="dtitle">Dashboard</div>
       <button class="btn btn-p btn-sm" id="dadd" onclick="openFor()" style="display:none">+ Novo contato</button>
@@ -623,6 +640,8 @@ const ROLES={admin:'Admin',adm:'ADM',gestor:'Gestor',vendedor:'Vendedor'};
 const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-gestor',vendedor:'role-vendedor'};
 
 let cu=null,tok=null,profile=null,company=null;
+let activeUnit=null; // null = consolidado | UUID = unidade específica
+let userUnits=[]; // unidades disponíveis para o usuário logado
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
 let contacts=[],deals=[],tasks=[],companies=[],profiles=[],users_cache=[];
 let clientes=[],fornecedores=[],pessoas=[];
@@ -670,7 +689,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.81';
+const APP_VERSION='v1.0.82';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1032,6 +1051,8 @@ async function loadData(){
         dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`),
       ]);
       workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
+  // Carrega unidades do usuário
+  await loadUserUnits();
       contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}&order=vencimento.asc`);
       [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
         dbSelect('compras_solicitacoes',`company_id=eq.${cid}&order=created_at.desc`),
@@ -1083,6 +1104,8 @@ async function loadData(){
       dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`),
     ]);
     workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
+  // Carrega unidades do usuário
+  await loadUserUnits();
     contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}&order=vencimento.asc`);
     [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
       dbSelect('compras_solicitacoes',`company_id=eq.${cid}&order=created_at.desc`),
@@ -11061,6 +11084,109 @@ async function testarEnvioEmail(){
     result.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:12px;border-radius:8px;font-size:12px';
     result.innerHTML=`❌ <strong>Erro de conexão</strong><br>${e.message}`;
   }
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// SELETOR DE UNIDADE (FILIAIS)
+// ══════════════════════════════════════════════════════════════════════
+
+async function loadUserUnits(){
+  if(!company?.id) return;
+  try{
+    // Busca unidades da empresa que o usuário tem acesso
+    const isAdmin=(profile?.role==='admin'||profile?.role==='gestor');
+    let unidades=[];
+    if(isAdmin){
+      // Admin/Gestor vê todas as unidades da empresa
+      unidades=await dbSelect('units',`company_id=eq.${company.id}&active=eq.true&order=is_main.desc,name.asc`);
+    } else {
+      // Usuário vê só as unidades vinculadas
+      const vinculos=await dbSelect('user_units',`user_id=eq.${cu.id}&company_id=eq.${company.id}`);
+      if(vinculos?.length){
+        const ids=vinculos.map(v=>v.unit_id).join(',');
+        unidades=await dbSelect('units',`id=in.(${ids})&active=eq.true&order=is_main.desc,name.asc`);
+      }
+    }
+    userUnits=unidades||[];
+    // Restaura seleção salva na sessão
+    const saved=sessionStorage.getItem('verus_unit_'+company.id);
+    if(saved&&userUnits.find(u=>u.id===saved)){
+      activeUnit=saved;
+    } else {
+      activeUnit=null; // consolidado por padrão
+    }
+    renderUnitSelector();
+  }catch(e){
+    console.warn('loadUserUnits:',e);
+    userUnits=[];
+  }
+}
+
+function renderUnitSelector(){
+  const bar=ge('unit-selector-bar');
+  const mob=ge('unit-selector-mobile');
+  if(!bar) return;
+
+  // Só exibe se houver mais de 1 unidade
+  if(!userUnits||userUnits.length<=1){
+    bar.classList.remove('visible');
+    if(mob) mob.style.display='none';
+    return;
+  }
+
+  bar.classList.add('visible');
+  if(mob) mob.style.display='flex';
+
+  const activeLabel=activeUnit
+    ? (userUnits.find(u=>u.id===activeUnit)?.name||'Unidade')
+    : 'Consolidado';
+
+  function btnHtml(id, label, isMain){
+    const active=(id===null&&activeUnit===null)||(id!==null&&activeUnit===id);
+    const dot=isMain?'▸ ':'';
+    return`<button class="unit-btn${active?' active':''}" onclick="setActiveUnit(${id?`'${id}'`:null})">${dot}${label}</button>`;
+  }
+
+  let html=btnHtml(null,'Consolidado',false);
+  userUnits.forEach(u=>{
+    html+=btnHtml(u.id, u.name, u.is_main);
+  });
+
+  bar.innerHTML=html;
+  if(mob) mob.innerHTML=`<span style="font-size:10px;color:var(--text3);white-space:nowrap">Visão:</span>`+html;
+}
+
+function setActiveUnit(uid){
+  activeUnit=uid||null;
+  if(company?.id){
+    if(activeUnit) sessionStorage.setItem('verus_unit_'+company.id, activeUnit);
+    else sessionStorage.removeItem('verus_unit_'+company.id);
+  }
+  renderUnitSelector();
+  // Recarrega os dados com o novo filtro
+  loadData().catch(console.error);
+}
+
+// Retorna o filtro de unit_id para usar nas queries
+// Uso: const uf=unitFilter(); → ex: '&unit_id=eq.UUID' ou '' (consolidado)
+function unitFilter(){
+  if(!activeUnit) return ''; // consolidado = sem filtro de unit
+  return `&unit_id=eq.${activeUnit}`;
+}
+
+// Retorna objeto para injetar no INSERT/UPDATE
+function unitPayload(){
+  if(!activeUnit) return {};
+  return {unit_id: activeUnit};
+}
+
+// Retorna label da visão atual (para relatórios/PDFs)
+function unitLabel(){
+  if(!activeUnit) return 'Visão Consolidada';
+  const u=userUnits.find(x=>x.id===activeUnit);
+  return u?`Unidade: ${u.name}`:'Unidade';
 }
 
 
