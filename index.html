@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.76 | Gerado: 2026-05-26 13:23 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.77 | Gerado: 2026-05-26 13:23 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -670,7 +670,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.76';
+const APP_VERSION='v1.0.77';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -9923,7 +9923,7 @@ function openSolicitacaoEditor(id){
   const isEdit=!!sol;
   const html=`<div class="modal-overlay" id="modal-compra-sol" onclick="if(event.target===this)this.remove()">
     <div class="modal" style="max-width:580px;width:95%">
-      <div class="modal-hdr"><span>${isEdit?'Editar Solicitação':'Nova Solicitação de Compra'}</span><button class="modal-x" onclick="ge('modal-compra-sol').remove()">×</button></div>
+      <div class="modal-hdr"><span>${isEdit?'Editar Solicitação':'Nova Solicitação de Compra'}</span></div>
       <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
         <div>
           <label class="lbl">Título / Descrição do Item *</label>
@@ -9953,8 +9953,7 @@ function openSolicitacaoEditor(id){
         <div id="sol-status-msg" style="display:none"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px">
           <button class="btn" onclick="ge('modal-compra-sol').remove()">Cancelar</button>
-          <button class="btn" style="background:var(--bg3);color:var(--text)" onclick="salvarSolicitacao('${id||''}',false)">Salvar Rascunho</button>
-          <button class="btn btn-primary" onclick="salvarSolicitacao('${id||''}',true)">Enviar para Aprovação</button>
+          <button class="btn btn-primary" onclick="salvarSolicitacao('${id||''}')">Salvar</button>
         </div>
       </div>
     </div>
@@ -9962,7 +9961,7 @@ function openSolicitacaoEditor(id){
   document.body.insertAdjacentHTML('beforeend',html);
 }
 
-async function salvarSolicitacao(id,enviar){
+async function salvarSolicitacao(id){
   const titulo=ge('sol-titulo')?.value?.trim();
   const categoria=ge('sol-categoria')?.value;
   const prioridade=ge('sol-prioridade')?.value;
@@ -9974,17 +9973,21 @@ async function salvarSolicitacao(id,enviar){
     statusEl.textContent='Preencha título e categoria.';return;
   }
 
+  const btn=document.querySelector('#modal-compra-sol .btn-primary');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+
   const cid=company?.id;
   const dados={
     titulo,categoria,prioridade,justificativa,
     company_id:cid,owner_id:cu?.id,
     solicitante_nome:profile?.nome||cu?.email,
-    status:enviar?'aguardando_aprovacao_cotacao':'rascunho',
+    status:'aguardando_aprovacao_cotacao',
   };
 
+  try{
   let salvo;
   if(id){
-    salvo=await dbUpdate('compras_solicitacoes',id,dados);
+    await dbUpdate('compras_solicitacoes',id,dados);
     comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,...dados}:s);
   } else {
     dados.numero=gerarNumSolicitacao();
@@ -9993,6 +9996,11 @@ async function salvarSolicitacao(id,enviar){
   }
   ge('modal-compra-sol')?.remove();
   render();
+  }catch(err){
+    statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
+    statusEl.textContent='Erro ao salvar: '+err.message;
+    if(btn){btn.disabled=false;btn.textContent='Salvar';}
+  }
 }
 
 async function aprovarParaCotacao(id){
