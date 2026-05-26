@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.79 | Gerado: 2026-05-26 13:23 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.80 | Gerado: 2026-05-26 13:23 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -670,7 +670,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.79';
+const APP_VERSION='v1.0.80';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -10191,8 +10191,8 @@ function openCotacaoEditor(solId){
       <div><label class="lbl" style="font-size:10px">E-mail de Contato *</label>
         <input class="fi" id="forn-email-${i}" type="email" placeholder="contato@fornecedor.com.br" value="${f.email||''}" style="font-size:12px">
       </div>
-      <div><label class="lbl" style="font-size:10px">Prazo de Retorno Solicitado</label>
-        <input class="fi" id="forn-prazo-${i}" placeholder="Ex: até 15/06/2026" value="${f.prazo_retorno||''}" style="font-size:12px">
+      <div><label class="lbl" style="font-size:10px">Prazo de Retorno</label>
+        <input class="fi" id="forn-prazo-${i}" type="date" value="${f.prazo_retorno||''}" style="font-size:12px">
       </div>
       <div><label class="lbl" style="font-size:10px">Observações</label>
         <input class="fi" id="forn-obs-${i}" placeholder="Especificações, condições..." value="${f.observacoes||''}" style="font-size:12px">
@@ -10251,7 +10251,7 @@ function adicionarFornCot(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div><label class="lbl" style="font-size:10px">Nome do Fornecedor *</label><input class="fi" id="forn-nome-${i}" placeholder="Nome / Razão social" style="font-size:12px"></div>
       <div><label class="lbl" style="font-size:10px">E-mail de Contato *</label><input class="fi" id="forn-email-${i}" type="email" placeholder="contato@fornecedor.com.br" style="font-size:12px"></div>
-      <div><label class="lbl" style="font-size:10px">Prazo de Retorno Solicitado</label><input class="fi" id="forn-prazo-${i}" placeholder="Ex: até 15/06/2026" style="font-size:12px"></div>
+      <div><label class="lbl" style="font-size:10px">Prazo de Retorno</label><input class="fi" id="forn-prazo-${i}" type="date" style="font-size:12px"></div>
       <div><label class="lbl" style="font-size:10px">Observações</label><input class="fi" id="forn-obs-${i}" placeholder="Especificações, condições..." style="font-size:12px"></div>
     </div>
   </div>`;
@@ -10376,7 +10376,6 @@ function gerarHTMLSolicitacaoCotacao(sol,forn,empresa){
 function baixarSCPDF(solId,idx){
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
   const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
-  // Pega dados do formulário se modal aberto, ou do cot salvo
   let forn;
   if(ge(`forn-nome-${idx}`)){
     forn={
@@ -10390,61 +10389,38 @@ function baixarSCPDF(solId,idx){
   }
   const empresa=company;
   const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,empresa);
-  const win=window.open('','_blank');
-  win.document.write(htmlSC);
-  win.document.close();
-  setTimeout(()=>win.print(),500);
+  const old=ge('sc-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='sc-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(htmlSC);doc.close();
+  setTimeout(()=>{
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(()=>iframe.remove(),3000);
+  },400);
 }
 
 async function enviarSolicitacaoFornecedor(solId,idx){
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
-  // Pega dados do formulário (modal aberto)
   const nome=ge(`forn-nome-${idx}`)?.value?.trim();
   const email=ge(`forn-email-${idx}`)?.value?.trim();
   const prazo_retorno=ge(`forn-prazo-${idx}`)?.value?.trim()||'';
   const observacoes=ge(`forn-obs-${idx}`)?.value?.trim()||'';
-
-  if(!nome||!email){
-    alert('Preencha o nome e e-mail do fornecedor antes de enviar.');return;
-  }
-
   const empresa=company;
   const forn={nome,email,prazo_retorno,observacoes};
   const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,empresa);
-
-  // Modal de confirmação com opção de baixar ou enviar
-  const confirmHtml=`<div class="modal-overlay" id="modal-sc-envio" onclick="if(event.target===this)this.remove()">
-    <div class="modal" style="max-width:460px;width:95%">
-      <div class="modal-hdr"><span>Enviar SC — ${sol?.numero}</span></div>
-      <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        <div style="background:var(--bg2);border-radius:8px;padding:12px">
-          <div style="font-size:12px;color:var(--text2);margin-bottom:6px">Destinatário</div>
-          <div style="font-weight:600">${nome}</div>
-          <div style="font-size:12px;color:var(--text3)">${email}</div>
-        </div>
-        <div id="sc-envio-status" style="display:none"></div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn" style="width:100%;justify-content:center;background:var(--bg3)" onclick="baixarSCPDF('${solId}',${idx});ge('modal-sc-envio').remove()">
-            📄 Visualizar / Baixar PDF
-          </button>
-          <button class="btn btn-primary" style="width:100%;justify-content:center" id="btn-sc-email" onclick="confirmarEnvioSC('${solId}',${idx},'${email}','${nome}')">
-            📧 Enviar por E-mail
-          </button>
-        </div>
-        <button class="btn" onclick="ge('modal-sc-envio').remove()" style="width:100%;justify-content:center">Cancelar</button>
-      </div>
-    </div>
-  </div>`;
-  document.body.insertAdjacentHTML('beforeend',confirmHtml);
   window._scHtml=htmlSC;
-  window._scSolId=solId;
-  window._scIdx=idx;
+  // Dispara e-mail e imprime direto — sem modal intermediário
+  baixarSCPDF(solId,idx);
+  await confirmarEnvioSC(solId,idx,email,nome);
 }
 
 async function confirmarEnvioSC(solId,idx,email,nome){
-  const btn=ge('btn-sc-email');
-  const statusEl=ge('sc-envio-status');
-  if(btn){btn.disabled=true;btn.textContent='Enviando...';}
+  const btn=null;
+  const statusEl=null;
 
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
   const htmlSC=window._scHtml||'';
@@ -10480,14 +10456,14 @@ async function confirmarEnvioSC(solId,idx,email,nome){
       statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:8px;border-radius:8px;font-size:12px';
       statusEl.textContent=`✓ SC enviada com sucesso para ${email}!`;
       if(btn){btn.textContent='✓ Enviado';}
-      setTimeout(()=>ge('modal-sc-envio')?.remove(),2000);
+      // SC enviada com sucesso
     } else {
       throw new Error(data.message||data.error||'Erro ao enviar');
     }
   }catch(err){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px;border-radius:8px;font-size:12px';
     statusEl.textContent='Erro: '+err.message;
-    if(btn){btn.disabled=false;btn.textContent='📧 Enviar por E-mail';}
+
   }
 }
 
