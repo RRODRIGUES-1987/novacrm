@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.95 | Gerado: 2026-05-27 20:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.96 | Gerado: 2026-05-27 21:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.95';
+const APP_VERSION='v1.0.96';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -5713,29 +5713,52 @@ function rUserUnitMatrix(){
 
 function openUnitEditor(id){
   const u=id?userUnits.find(x=>x.id===id):null;
-  openModal(id?'Editar Unidade':'Nova Unidade',`
-    <div class="fg"><label class="fl">Nome da unidade *</label>
-      <input class="fi" id="unit-nome" placeholder="Ex: Filial São Paulo" value="${u?.name||''}">
-    </div>
-    <div class="fg"><label class="fl">CNPJ</label>
-      <input class="fi" id="unit-cnpj" placeholder="00.000.000/0001-00" value="${u?.cnpj||''}">
-    </div>
-    <div class="fg"><label class="fl">Status</label>
-      <select class="fi" id="unit-active">
-        <option value="true" ${u?.active!==false?'selected':''}>Ativa</option>
-        <option value="false" ${u?.active===false?'selected':''}>Inativa</option>
-      </select>
-    </div>
-    ${u?.is_main?'<div style="font-size:12px;color:var(--text3);padding:8px;background:var(--bg2);border-radius:8px">Esta é a unidade principal da empresa.</div>':''}
-    <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="salvarUnit('${id||''}')">Salvar</button>
-  `);
+  const titulo=id?'Editar Unidade':'Nova Unidade';
+
+  const old=ge('modal-unit-editor');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-unit-editor';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
+  modal.innerHTML=`
+    <div style="background:var(--bg);border-radius:14px;padding:24px;width:420px;max-width:92vw;box-shadow:0 8px 32px rgba(0,0,0,0.22)">
+      <div style="font-size:15px;font-weight:700;margin-bottom:20px">${titulo}</div>
+      <div class="fg">
+        <label class="fl">Nome da unidade *</label>
+        <input class="fi" id="unit-nome" placeholder="Ex: Filial São Paulo" value="${u?.name||''}">
+      </div>
+      <div class="fg">
+        <label class="fl">CNPJ</label>
+        <input class="fi" id="unit-cnpj" placeholder="00.000.000/0001-00" value="${u?.cnpj||''}">
+      </div>
+      <div class="fg">
+        <label class="fl">Status</label>
+        <select class="fi" id="unit-active">
+          <option value="true" ${u?.active!==false?'selected':''}>Ativa</option>
+          <option value="false" ${u?.active===false?'selected':''}>Inativa</option>
+        </select>
+      </div>
+      ${u?.is_main?'<div style="font-size:12px;color:var(--text3);padding:8px;background:var(--bg2);border-radius:8px;margin-bottom:12px">Esta é a unidade principal da empresa.</div>':''}
+      <div id="unit-editor-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" style="flex:1" onclick="ge('modal-unit-editor').remove()">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1" onclick="salvarUnit('${id||''}')">Salvar</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+  setTimeout(()=>ge('unit-nome')?.focus(),100);
 }
 
 async function salvarUnit(id){
   const nome=ge('unit-nome')?.value?.trim();
   const cnpj=ge('unit-cnpj')?.value?.trim()||null;
   const active=ge('unit-active')?.value!=='false';
-  if(!nome){showModalErr('Informe o nome da unidade.');return;}
+  const errEl=ge('unit-editor-err');
+  if(!nome){
+    if(errEl){errEl.style.display='block';errEl.textContent='Informe o nome da unidade.';}
+    return;
+  }
+  if(errEl) errEl.style.display='none';
 
   const dados={name:nome,cnpj,active,company_id:company.id};
   try{
@@ -5746,14 +5769,18 @@ async function salvarUnit(id){
       const nova=await dbInsert('units',{...dados,is_main:false});
       if(nova) userUnits=[...userUnits,nova];
     }
-    closeModal();
+    ge('modal-unit-editor')?.remove();
     renderUnitSelector();
     // Re-renderiza painel
     const panel=document.querySelector('.admin-tab-panel[data-tab="unidades"]');
     if(panel) panel.innerHTML=rUnidades();
     // Carrega matriz de acessos
     await loadUserUnitMatrix();
-  }catch(e){showModalErr('Erro ao salvar: '+e.message);}
+  }catch(e){
+    const errEl=ge('unit-editor-err');
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro ao salvar: '+e.message;}
+    else alert('Erro: '+e.message);
+  }
 }
 
 async function toggleUnitActive(id, currentActive){
