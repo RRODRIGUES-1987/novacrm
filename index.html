@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.91 | Gerado: 2026-05-27 16:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.92 | Gerado: 2026-05-27 17:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.91';
+const APP_VERSION='v1.0.92';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3360,7 +3360,7 @@ async function confirmarEnvioEmail(id){
       <div style="background:#fff;padding:24px;border:1px solid #dee2e6;border-top:none">
         <p style="font-size:14px;line-height:1.8;color:#333">${msgTexto}</p>
         <div style="background:#f0f7ff;border-radius:8px;padding:14px;margin-top:16px;font-size:12px;color:#1e5f82;border:1px solid #cce4f7">
-          📎 A fatura <strong>${f.numero_fatura}</strong> está em anexo neste e-mail.
+          📎 A fatura <strong>${f.numero_fatura}</strong> está em anexo neste e-mail (arquivo HTML — abra no navegador e use Ctrl+P para salvar como PDF).
         </div>
       </div>
       <div style="background:#f8f9fa;padding:12px 24px;border:1px solid #dee2e6;border-top:none;border-radius:0 0 10px 10px;font-size:11px;color:#888;text-align:center">
@@ -3383,9 +3383,9 @@ async function confirmarEnvioEmail(id){
     };
     if(faturaBase64){
       payload.attachments=[{
-        filename:`Fatura-${f.numero_fatura}.pdf`,
+        filename:`Fatura-${f.numero_fatura}.html`,
         content:faturaBase64,
-        type:'application/pdf',
+        type:'text/html',
         disposition:'attachment',
       }];
     }
@@ -3400,7 +3400,7 @@ async function confirmarEnvioEmail(id){
       await dbUpdate('faturamento',id,{status:'enviado',enviado_em:new Date().toISOString(),enviado_para:dest});
       faturamento=faturamento.map(x=>x.id===id?{...x,status:'enviado',enviado_para:dest}:x);
       statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
-      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Fatura em anexo.':''}<br><small style="opacity:.7">CC: ${ccList.join(', ')||'—'}</small>`;
+      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Anexo HTML enviado.':''}<br><small style="opacity:.7">CC: ${ccList.join(', ')||'—'}</small>`;
       btn.textContent='✓ Enviado';
       setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2500);
     } else {
@@ -10756,9 +10756,9 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
     };
     if(pdfBase64){
       body.attachments=[{
-        filename:`SC-${sol.numero||solId}.pdf`,
+        filename:`SC-${sol.numero||solId}.html`,
         content:pdfBase64,
-        type:'application/pdf',
+        type:'text/html',
         disposition:'attachment',
       }];
     }
@@ -10794,70 +10794,21 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
   }
 }
 
-// Gera PDF real em base64 usando jsPDF + html2canvas
-async function gerarPDFBase64(htmlContent){
-  try{
-    // Carrega jsPDF
-    if(!window.jspdf){
-      await new Promise((res)=>{
-        const s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        s.onload=res;s.onerror=res;document.head.appendChild(s);
-      });
+// Converte HTML para base64 para envio como anexo
+// O destinatário abre no browser e usa Ctrl+P > Salvar como PDF
+function gerarPDFBase64(htmlContent){
+  return new Promise(resolve=>{
+    try{
+      const blob=new Blob([htmlContent],{type:'text/html;charset=utf-8'});
+      const reader=new FileReader();
+      reader.onloadend=()=>resolve(reader.result.split(',')[1]);
+      reader.onerror=()=>resolve(null);
+      reader.readAsDataURL(blob);
+    }catch(e){
+      console.warn('gerarPDFBase64 erro:',e.message);
+      resolve(null);
     }
-    // Carrega html2canvas
-    if(!window.html2canvas){
-      await new Promise((res)=>{
-        const s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        s.onload=res;s.onerror=res;document.head.appendChild(s);
-      });
-    }
-    if(!window.jspdf||!window.html2canvas){
-      console.warn('Libs PDF indisponíveis');return null;
-    }
-
-    // Renderiza em div no body (sem iframe — evita CORS)
-    const wrap=document.createElement('div');
-    wrap.style.cssText='position:absolute;left:-9999px;top:0;width:794px;background:#fff;z-index:-1';
-    // Insere apenas o body do HTML (evita conflito de <head>/<style>)
-    const parser=new DOMParser();
-    const doc=parser.parseFromString(htmlContent,'text/html');
-    // Copia estilos do documento original para o wrap
-    const styleStr=Array.from(doc.querySelectorAll('style')).map(s=>s.textContent).join('\n');
-    if(styleStr){
-      const styleEl=document.createElement('style');
-      styleEl.textContent=styleStr;
-      wrap.appendChild(styleEl);
-    }
-    // Insere o body
-    wrap.innerHTML+=doc.body.innerHTML;
-    document.body.appendChild(wrap);
-
-    await new Promise(r=>setTimeout(r,600));
-
-    const canvas=await window.html2canvas(wrap,{
-      scale:2,useCORS:true,logging:false,
-      width:794,windowWidth:794,backgroundColor:'#ffffff',
-    });
-    document.body.removeChild(wrap);
-
-    const {jsPDF}=window.jspdf;
-    const A4W=210,A4H=297; // mm
-    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    const imgW=A4W;
-    const imgH=(canvas.height/canvas.width)*imgW;
-    let y=0;
-    while(y<imgH){
-      if(y>0)pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',0,-(y),imgW,imgH);
-      y+=A4H;
-    }
-    return pdf.output('datauristring').split(',')[1];
-  }catch(e){
-    console.warn('gerarPDFBase64 erro:',e.message);
-    return null;
-  }
+  });
 }
 
 
@@ -10899,7 +10850,7 @@ ${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
       subject:assunto,html:corpo,
       reply_to:'compras@mklogistica.com',
     };
-    if(pdfBase64) body.attachments=[{filename:`SC-${sol?.numero||solId}.pdf`,content:pdfBase64,type:'application/pdf',disposition:'attachment'}];
+    if(pdfBase64) body.attachments=[{filename:`SC-${sol?.numero||solId}.html`,content:pdfBase64,type:'text/html',disposition:'attachment'}];
 
     const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
