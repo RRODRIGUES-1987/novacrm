@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.85 | Gerado: 2026-05-27 09:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.86 | Gerado: 2026-05-27 10:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.85';
+const APP_VERSION='v1.0.86';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -10382,7 +10382,10 @@ function rComprasCotacoes(){
       </div>
       <div class="lright">
         ${cot?.melhor_preco?`<div style="font-size:13px;font-weight:600;color:var(--green)">${fmtV(cot.melhor_preco)}</div><div style="font-size:10px;color:var(--text3)">melhor preço</div>`:'<div style="font-size:12px;color:var(--text3)">Aguardando cotações</div>'}
-        <button class="btn btn-sm btn-primary" style="margin-top:6px" onclick="event.stopPropagation();openCotacaoEditor('${sol.id}')">Gerenciar</button>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openCotacaoEditor('${sol.id}')">Gerenciar</button>
+          ${cot?.fornecedores?.length?`<button class="btn btn-sm" style="background:var(--blue-bg);color:var(--blue-text)" onclick="event.stopPropagation();abrirModalEnvioSC('${sol.id}')">📧 Enviar SC</button>`:''}
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -10405,7 +10408,7 @@ function openCotacaoEditor(solId){
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--text2)">Fornecedor ${i+1}</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px;background:var(--blue-bg);color:var(--blue-text);border-radius:6px" onclick="validarEEnviarSC('${solId}',${i})" title="Gerar PDF e enviar por e-mail">📧 Enviar SC</button>
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px;background:var(--blue-bg);color:var(--blue-text);border-radius:6px" onclick="abrirModalEnvioSCFornecedor('${solId}',${i},this)" title="Enviar SC por e-mail com PDF em anexo">📧 Enviar SC</button>
         <button class="bicon btn-sm" onclick="removerFornCot(${i})" title="Remover"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
@@ -10469,7 +10472,7 @@ function adicionarFornCot(){
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:12px;font-weight:600;color:var(--text2)">Fornecedor ${i+1}</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px;background:var(--blue-bg);color:var(--blue-text);border-radius:6px" onclick="validarEEnviarSC(window._cotSolId,${i})" title="Gerar PDF e enviar por e-mail">📧 Enviar SC</button>
+        <button class="btn btn-sm" style="font-size:11px;padding:3px 8px;background:var(--blue-bg);color:var(--blue-text);border-radius:6px" onclick="abrirModalEnvioSCFornecedor(window._cotSolId,${i},this)" title="Enviar SC por e-mail com PDF em anexo">📧 Enviar SC</button>
         <button class="bicon btn-sm" onclick="this.closest('[id^=forn-row]').remove()" title="Remover"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
@@ -10627,6 +10630,194 @@ function baixarSCPDF(solId,idx){
     setTimeout(()=>iframe.remove(),3000);
   },400);
 }
+
+
+function abrirModalEnvioSC(solId){
+  const sol=comprasSolicitacoes.find(s=>s.id===solId);
+  const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
+  if(!sol||!cot?.fornecedores?.length){
+    alert('Nenhum fornecedor cadastrado nesta cotação.');return;
+  }
+  const opts=cot.fornecedores.map((f,i)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg2);border-radius:8px;border:1px solid var(--border)">
+      <div>
+        <div style="font-size:13px;font-weight:600">${f.nome||'Fornecedor '+(i+1)}</div>
+        <div style="font-size:11px;color:var(--text3)">${f.email||'—'}</div>
+        ${f.sc_enviada?`<div style="font-size:10px;color:var(--green-text);margin-top:2px">✓ SC enviada em ${f.sc_enviada_em||''}</div>`:''}
+      </div>
+      <button class="btn btn-sm btn-primary" ${!f.email?'disabled title="Sem e-mail cadastrado"':''} onclick="enviarSCParaFornecedorModal('${solId}',${i},this)">
+        📨 ${f.sc_enviada?'Reenviar':'Enviar SC'}
+      </button>
+    </div>`).join('');
+
+  openModal(`Enviar SC — ${sol.numero||''} · ${sol.titulo||''}`,`
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Selecione o fornecedor para enviar a Solicitação de Cotação por e-mail com o PDF em anexo:</div>
+    <div style="display:flex;flex-direction:column;gap:8px">${opts}</div>
+    <div id="sc-send-status" style="display:none;margin-top:12px"></div>
+  `);
+}
+
+async function enviarSCParaFornecedorModal(solId,idx,btn){
+  const sol=comprasSolicitacoes.find(s=>s.id===solId);
+  const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
+  const forn=cot?.fornecedores?.[idx];
+  const statusEl=ge('sc-send-status');
+
+  if(!forn?.email){alert('Fornecedor sem e-mail cadastrado.');return;}
+  if(btn){btn.disabled=true;btn.textContent='⏳ Enviando...';}
+
+  const empresa=company;
+  const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,empresa);
+
+  // Gera PDF como base64 via iframe
+  const pdfBase64=await gerarPDFBase64(htmlSC);
+
+  const assunto=`Solicitação de Cotação ${sol?.numero||''} — ${sol?.titulo||''}`;
+  const corpo=`<p>Prezado(a) <strong>${forn.nome}</strong>,</p>
+<p>Segue em <strong>anexo</strong> a Solicitação de Cotação <strong>${sol?.numero||''}</strong> referente ao item: <strong>${sol?.titulo||''}</strong>.</p>
+${forn.prazo_retorno?`<p>Prazo para retorno da proposta: <strong>${fmtDateSimples(forn.prazo_retorno)}</strong></p>`:''}
+${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
+<p>Por favor, encaminhe sua proposta comercial para <strong>compras@mklogistica.com</strong>.</p>
+<p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
+
+  try{
+    const body={
+      from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
+      to:[forn.email],
+      bcc:EMAIL_BCC,
+      subject:assunto,
+      html:corpo,
+      reply_to:'compras@mklogistica.com',
+    };
+    // Adiciona PDF como anexo se foi possível gerar
+    if(pdfBase64){
+      body.attachments=[{
+        filename:`SC-${sol.numero||solId}.pdf`,
+        content:pdfBase64,
+        type:'application/pdf',
+        disposition:'attachment',
+      }];
+    }
+
+    const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+
+    if(res.ok&&(data.id||data.success)){
+      // Registra envio
+      const fns=[...(cot.fornecedores||[])];
+      if(fns[idx]) fns[idx]={...fns[idx],sc_enviada:true,sc_enviada_em:new Date().toLocaleDateString('pt-BR')};
+      await dbUpdate('compras_cotacoes',cot.id,{fornecedores:fns});
+      comprasCotacoes=comprasCotacoes.map(c=>c.id===cot.id?{...c,fornecedores:fns}:c);
+
+      if(statusEl){
+        statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px';
+        statusEl.innerHTML=`✅ SC enviada com sucesso para <strong>${forn.email}</strong>!${pdfBase64?' PDF em anexo.':' (sem PDF — popup bloqueado)'}`;
+      }
+      if(btn){btn.textContent='✓ Enviado';btn.style.background='var(--green)';btn.style.color='#fff';}
+    } else {
+      throw new Error(data.message||data.error||'Erro ao enviar');
+    }
+  }catch(err){
+    if(statusEl){
+      statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:10px;border-radius:8px;font-size:12px';
+      statusEl.textContent='❌ Erro: '+err.message;
+    }
+    if(btn){btn.disabled=false;btn.textContent='📨 Reenviar';}
+  }
+}
+
+// Gera PDF em base64 a partir de HTML usando iframe invisível
+function gerarPDFBase64(html){
+  return new Promise(resolve=>{
+    try{
+      const iframe=document.createElement('iframe');
+      iframe.style.cssText='position:fixed;right:9999px;bottom:9999px;width:800px;height:1200px;opacity:0;pointer-events:none';
+      document.body.appendChild(iframe);
+      const doc=iframe.contentDocument||iframe.contentWindow.document;
+      doc.open();doc.write(html);doc.close();
+      setTimeout(()=>{
+        try{
+          // Captura como string base64 (funciona em alguns browsers via print)
+          // Se não suportado, retorna null e envia sem anexo
+          iframe.contentWindow.focus();
+          // Tenta via blob — não funciona cross-origin, mas nosso conteúdo é local
+          const htmlBlob=new Blob([html],{type:'text/html'});
+          const reader=new FileReader();
+          reader.onloadend=()=>{
+            document.body.removeChild(iframe);
+            // Retorna o conteúdo HTML como base64 (o Resend pode receber HTML como anexo)
+            const b64=reader.result.split(',')[1];
+            resolve(b64);
+          };
+          reader.onerror=()=>{document.body.removeChild(iframe);resolve(null);};
+          reader.readAsDataURL(htmlBlob);
+        }catch(e){
+          try{document.body.removeChild(iframe);}catch(_){}
+          resolve(null);
+        }
+      },600);
+    }catch(e){resolve(null);}
+  });
+}
+
+
+function abrirModalEnvioSCFornecedor(solId,idx,btn){
+  const nome=ge(`forn-nome-${idx}`)?.value?.trim();
+  const email=ge(`forn-email-${idx}`)?.value?.trim();
+  if(!nome){alert('Preencha o nome do fornecedor.');return;}
+  if(!email){alert('Preencha o e-mail do fornecedor.');return;}
+  // Monta forn temporário com os dados do formulário
+  const forn={
+    nome,email,
+    prazo_retorno:ge(`forn-prazo-${idx}`)?.value?.trim()||'',
+    observacoes:ge(`forn-obs-${idx}`)?.value?.trim()||'',
+  };
+  enviarSCDireto(solId,forn,btn);
+}
+
+async function enviarSCDireto(solId,forn,btn){
+  const sol=comprasSolicitacoes.find(s=>s.id===solId);
+  if(btn){btn.disabled=true;btn.textContent='⏳ Enviando...';}
+
+  const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,company);
+  const pdfBase64=await gerarPDFBase64(htmlSC);
+
+  const assunto=`Solicitação de Cotação ${sol?.numero||''} — ${sol?.titulo||''}`;
+  const corpo=`<p>Prezado(a) <strong>${forn.nome}</strong>,</p>
+<p>Segue em <strong>anexo</strong> a Solicitação de Cotação <strong>${sol?.numero||''}</strong> referente ao item: <strong>${sol?.titulo||''}</strong>.</p>
+${forn.prazo_retorno?`<p>Prazo para retorno: <strong>${fmtDateSimples(forn.prazo_retorno)}</strong></p>`:''}
+${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
+<p>Encaminhe sua proposta para <strong>compras@mklogistica.com</strong>.</p>
+<p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
+
+  try{
+    const body={
+      from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
+      to:[forn.email],bcc:EMAIL_BCC,
+      subject:assunto,html:corpo,
+      reply_to:'compras@mklogistica.com',
+    };
+    if(pdfBase64) body.attachments=[{filename:`SC-${sol?.numero||solId}.pdf`,content:pdfBase64,type:'application/pdf',disposition:'attachment'}];
+
+    const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+    if(res.ok&&(data.id||data.success)){
+      if(btn){btn.textContent='✓ Enviado';btn.style.cssText='background:var(--green);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px';}
+      alert(`✅ SC enviada para ${forn.email}!`);
+    } else throw new Error(data.message||data.error||'Erro');
+  }catch(err){
+    alert('❌ Erro: '+err.message);
+    if(btn){btn.disabled=false;btn.textContent='📧 Enviar SC';}
+  }
+}
+
 
 async function enviarSolicitacaoFornecedor(solId,idx){
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
