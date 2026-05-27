@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.89 | Gerado: 2026-05-27 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.90 | Gerado: 2026-05-27 14:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.89';
+const APP_VERSION='v1.0.90';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3245,6 +3245,9 @@ async function enviarFaturaEmail(id){
     <div class="fg"><label class="fl">Nome do destinatário</label>
       <input class="fi" id="email-nome" value="${nomeDestinatario}" placeholder="Nome do responsável">
     </div>
+    <div class="fg"><label class="fl">Cópia (CC) <span style="font-size:10px;color:var(--text3)">— separe múltiplos por vírgula</span></label>
+      <input class="fi" id="email-cc" placeholder="cc@empresa.com, outro@empresa.com" value="${EMAIL_BCC.join(', ')}">
+    </div>
     <div class="fg"><label class="fl">Assunto</label>
       <input class="fi" id="email-assunto" value="Fatura ${f.numero_fatura} · ${cli?.nome||f.cliente_nome||''} · Aprovação solicitada">
     </div>
@@ -3367,20 +3370,22 @@ async function confirmarEnvioEmail(id){
 
     // Destinatários: cliente + BCC internos no mesmo array (garantia de entrega)
     // bcc também enviado como campo separado (Resend suporta após atualização da Edge Function)
-    const todosDestinatarios=[dest,...EMAIL_BCC.filter(e=>e!==dest)];
+    // CC: lê campo do modal, divide por vírgula, filtra vazios
+    const ccRaw=ge('email-cc')?.value||'';
+    const ccList=ccRaw.split(',').map(e=>e.trim()).filter(e=>e&&e!==dest);
     const payload={
       from:`MK LOGÍSTICA <${EMAIL_FROM}>`,
-      to:todosDestinatarios,
-      bcc:EMAIL_BCC,
+      to:[dest],
+      ...(ccList.length?{cc:ccList}:{}),
       subject:assunto,
       html:corpoEmail,
       reply_to:'faturamento@mklogistica.com',
     };
     if(faturaBase64){
       payload.attachments=[{
-        filename:`Fatura-${f.numero_fatura}.html`,
+        filename:`Fatura-${f.numero_fatura}.pdf`,
         content:faturaBase64,
-        type:'text/html',
+        type:'application/pdf',
         disposition:'attachment',
       }];
     }
@@ -10701,6 +10706,10 @@ function abrirModalEnvioSC(solId){
       <div style="font-size:15px;font-weight:700;margin-bottom:4px">📧 Enviar SC</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${sol.numero||''} · ${sol.titulo||''}</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Selecione o fornecedor para enviar a Solicitação de Cotação com o documento em anexo:</div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:4px">Cópia (CC) <span style="font-size:10px;font-weight:400;color:var(--text3)">— separe múltiplos por vírgula</span></label>
+        <input class="fi" id="sc-email-cc" placeholder="cc@empresa.com, outro@empresa.com" value="${EMAIL_BCC.join(', ')}">
+      </div>
       <div style="display:flex;flex-direction:column;gap:8px">${opts}</div>
       <div id="sc-send-status" style="display:none;margin-top:12px"></div>
       <div style="margin-top:16px;text-align:right">
@@ -10735,15 +10744,16 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
 <p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
 
   try{
+    const ccRaw=ge('sc-email-cc')?.value||'';
+    const ccListSC=ccRaw.split(',').map(e=>e.trim()).filter(e=>e&&e!==forn.email);
     const body={
       from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
       to:[forn.email],
-      bcc:EMAIL_BCC,
+      ...(ccListSC.length?{cc:ccListSC}:{}),
       subject:assunto,
       html:corpo,
       reply_to:'compras@mklogistica.com',
     };
-    // Adiciona PDF como anexo se foi possível gerar
     if(pdfBase64){
       body.attachments=[{
         filename:`SC-${sol.numero||solId}.pdf`,
@@ -10784,38 +10794,56 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
   }
 }
 
-// Gera PDF em base64 a partir de HTML usando iframe invisível
-function gerarPDFBase64(html){
-  return new Promise(resolve=>{
-    try{
-      const iframe=document.createElement('iframe');
-      iframe.style.cssText='position:fixed;right:9999px;bottom:9999px;width:800px;height:1200px;opacity:0;pointer-events:none';
-      document.body.appendChild(iframe);
-      const doc=iframe.contentDocument||iframe.contentWindow.document;
-      doc.open();doc.write(html);doc.close();
-      setTimeout(()=>{
-        try{
-          // Captura como string base64 (funciona em alguns browsers via print)
-          // Se não suportado, retorna null e envia sem anexo
-          iframe.contentWindow.focus();
-          // Tenta via blob — não funciona cross-origin, mas nosso conteúdo é local
-          const htmlBlob=new Blob([html],{type:'text/html'});
-          const reader=new FileReader();
-          reader.onloadend=()=>{
-            document.body.removeChild(iframe);
-            // Retorna o conteúdo HTML como base64 (o Resend pode receber HTML como anexo)
-            const b64=reader.result.split(',')[1];
-            resolve(b64);
-          };
-          reader.onerror=()=>{document.body.removeChild(iframe);resolve(null);};
-          reader.readAsDataURL(htmlBlob);
-        }catch(e){
-          try{document.body.removeChild(iframe);}catch(_){}
-          resolve(null);
-        }
-      },600);
-    }catch(e){resolve(null);}
-  });
+// Gera PDF real em base64 usando jsPDF + html2canvas
+async function gerarPDFBase64(html){
+  try{
+    // Carrega jsPDF e html2canvas dinamicamente se ainda não carregados
+    if(!window.jspdf){
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        s.onload=res;s.onerror=rej;document.head.appendChild(s);
+      });
+    }
+    if(!window.html2canvas){
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        s.onload=res;s.onerror=rej;document.head.appendChild(s);
+      });
+    }
+    // Renderiza HTML em div temporária
+    const div=document.createElement('div');
+    div.style.cssText='position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:0;margin:0;z-index:-1';
+    div.innerHTML=html;
+    document.body.appendChild(div);
+
+    await new Promise(r=>setTimeout(r,400)); // aguarda renderização
+
+    const canvas=await window.html2canvas(div,{
+      scale:1.5,useCORS:true,logging:false,
+      width:794,windowWidth:794,
+    });
+    document.body.removeChild(div);
+
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const imgW=210; // A4 largura mm
+    const imgH=(canvas.height*imgW)/canvas.width;
+    const pageH=297;
+    let posY=0;
+    // Adiciona páginas se conteúdo for maior que A4
+    while(posY<imgH){
+      if(posY>0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',0,-posY,imgW,imgH);
+      posY+=pageH;
+    }
+    // Retorna base64 sem o prefixo data:
+    return pdf.output('datauristring').split(',')[1];
+  }catch(e){
+    console.warn('gerarPDFBase64 erro:',e);
+    return null;
+  }
 }
 
 
@@ -10849,9 +10877,11 @@ ${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
 <p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
 
   try{
+    const ccListDireto=EMAIL_BCC.filter(e=>e!==forn.email);
     const body={
       from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
-      to:[forn.email],bcc:EMAIL_BCC,
+      to:[forn.email],
+      ...(ccListDireto.length?{cc:ccListDireto}:{}),
       subject:assunto,html:corpo,
       reply_to:'compras@mklogistica.com',
     };
