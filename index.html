@@ -3248,6 +3248,9 @@ async function enviarFaturaEmail(id){
     <div class="fg"><label class="fl">Cópia (CC) <span style="font-size:10px;color:var(--text3)">— separe múltiplos por vírgula</span></label>
       <input class="fi" id="email-cc" placeholder="cc@empresa.com, outro@empresa.com" value="${EMAIL_BCC.join(', ')}">
     </div>
+    <div class="fg"><label class="fl">Cópia (CC) <span style="font-size:10px;color:var(--text3)">— separe por vírgula</span></label>
+      <input class="fi" id="email-cc" placeholder="cc@empresa.com" value="${EMAIL_BCC.join(', ')}">
+    </div>
     <div class="fg"><label class="fl">Assunto</label>
       <input class="fi" id="email-assunto" value="Fatura ${f.numero_fatura} · ${cli?.nome||f.cliente_nome||''} · Aprovação solicitada">
     </div>
@@ -10795,53 +10798,77 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
 }
 
 // Gera PDF real em base64 usando jsPDF + html2canvas
-async function gerarPDFBase64(html){
+async function gerarPDFBase64(htmlContent){
   try{
-    // Carrega jsPDF e html2canvas dinamicamente se ainda não carregados
+    // Carrega libs dinamicamente se não estiverem disponíveis
     if(!window.jspdf){
       await new Promise((res,rej)=>{
         const s=document.createElement('script');
         s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        s.onload=res;s.onerror=rej;document.head.appendChild(s);
+        s.onload=res;s.onerror=()=>{console.warn('jsPDF falhou');res();};
+        document.head.appendChild(s);
       });
     }
     if(!window.html2canvas){
       await new Promise((res,rej)=>{
         const s=document.createElement('script');
         s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        s.onload=res;s.onerror=rej;document.head.appendChild(s);
+        s.onload=res;s.onerror=()=>{console.warn('html2canvas falhou');res();};
+        document.head.appendChild(s);
       });
     }
-    // Renderiza HTML em div temporária
-    const div=document.createElement('div');
-    div.style.cssText='position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:0;margin:0;z-index:-1';
-    div.innerHTML=html;
-    document.body.appendChild(div);
 
-    await new Promise(r=>setTimeout(r,400)); // aguarda renderização
+    if(!window.jspdf||!window.html2canvas){
+      console.warn('Libs PDF não disponíveis');
+      return null;
+    }
 
-    const canvas=await window.html2canvas(div,{
-      scale:1.5,useCORS:true,logging:false,
-      width:794,windowWidth:794,
+    // Cria iframe oculto para renderizar o HTML com estilos corretos
+    const iframe=document.createElement('iframe');
+    iframe.style.cssText='position:fixed;left:-9999px;top:0;width:794px;height:1123px;border:none;visibility:hidden;';
+    document.body.appendChild(iframe);
+
+    const iDoc=iframe.contentDocument||iframe.contentWindow.document;
+    iDoc.open();iDoc.write(htmlContent);iDoc.close();
+
+    // Aguarda renderização completa
+    await new Promise(r=>setTimeout(r,800));
+
+    const canvas=await window.html2canvas(iDoc.body,{
+      scale:2,
+      useCORS:true,
+      logging:false,
+      width:794,
+      windowWidth:794,
+      backgroundColor:'#ffffff',
+      allowTaint:false,
     });
-    document.body.removeChild(div);
+
+    document.body.removeChild(iframe);
 
     const {jsPDF}=window.jspdf;
-    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    const imgW=210; // A4 largura mm
-    const imgH=(canvas.height*imgW)/canvas.width;
-    const pageH=297;
-    let posY=0;
-    // Adiciona páginas se conteúdo for maior que A4
-    while(posY<imgH){
-      if(posY>0) pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',0,-posY,imgW,imgH);
-      posY+=pageH;
+    const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[794,1123]});
+
+    const pdfW=pdf.internal.pageSize.getWidth();
+    const pdfH=pdf.internal.pageSize.getHeight();
+    const imgH=(canvas.height*pdfW)/canvas.width;
+
+    let yOffset=0;
+    while(yOffset<canvas.height){
+      if(yOffset>0) pdf.addPage();
+      // Cria canvas para esta página
+      const pageCanvas=document.createElement('canvas');
+      pageCanvas.width=canvas.width;
+      pageCanvas.height=Math.min(canvas.height-yOffset, Math.round(pdfH*(canvas.width/pdfW)));
+      const ctx=pageCanvas.getContext('2d');
+      ctx.drawImage(canvas,0,-yOffset);
+      pdf.addImage(pageCanvas.toDataURL('image/jpeg',0.95),'JPEG',0,0,pdfW,Math.min(pdfH,(imgH-yOffset*(pdfW/canvas.width))));
+      yOffset+=pageCanvas.height;
     }
-    // Retorna base64 sem o prefixo data:
+
     return pdf.output('datauristring').split(',')[1];
   }catch(e){
-    console.warn('gerarPDFBase64 erro:',e);
+    console.warn('gerarPDFBase64 erro:',e.message);
     return null;
   }
 }
@@ -10878,10 +10905,11 @@ ${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
 
   try{
     const ccListDireto=EMAIL_BCC.filter(e=>e!==forn.email);
+    const ccDireto=EMAIL_BCC.filter(e=>e!==forn.email);
     const body={
       from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
       to:[forn.email],
-      ...(ccListDireto.length?{cc:ccListDireto}:{}),
+      ...(ccDireto.length?{cc:ccDireto}:{}),
       subject:assunto,html:corpo,
       reply_to:'compras@mklogistica.com',
     };
