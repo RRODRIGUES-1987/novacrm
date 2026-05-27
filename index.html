@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.90';
+const APP_VERSION='v1.0.91';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3245,9 +3245,6 @@ async function enviarFaturaEmail(id){
     <div class="fg"><label class="fl">Nome do destinatário</label>
       <input class="fi" id="email-nome" value="${nomeDestinatario}" placeholder="Nome do responsável">
     </div>
-    <div class="fg"><label class="fl">Cópia (CC) <span style="font-size:10px;color:var(--text3)">— separe múltiplos por vírgula</span></label>
-      <input class="fi" id="email-cc" placeholder="cc@empresa.com, outro@empresa.com" value="${EMAIL_BCC.join(', ')}">
-    </div>
     <div class="fg"><label class="fl">Cópia (CC) <span style="font-size:10px;color:var(--text3)">— separe por vírgula</span></label>
       <input class="fi" id="email-cc" placeholder="cc@empresa.com" value="${EMAIL_BCC.join(', ')}">
     </div>
@@ -3403,7 +3400,7 @@ async function confirmarEnvioEmail(id){
       await dbUpdate('faturamento',id,{status:'enviado',enviado_em:new Date().toISOString(),enviado_para:dest});
       faturamento=faturamento.map(x=>x.id===id?{...x,status:'enviado',enviado_para:dest}:x);
       statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
-      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Fatura em anexo.':''}<br><small style="opacity:.7">BCC: ${EMAIL_BCC.join(', ')}</small>`;
+      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Fatura em anexo.':''}<br><small style="opacity:.7">CC: ${ccList.join(', ')||'—'}</small>`;
       btn.textContent='✓ Enviado';
       setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2500);
     } else {
@@ -10800,72 +10797,62 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
 // Gera PDF real em base64 usando jsPDF + html2canvas
 async function gerarPDFBase64(htmlContent){
   try{
-    // Carrega libs dinamicamente se não estiverem disponíveis
+    // Carrega jsPDF
     if(!window.jspdf){
-      await new Promise((res,rej)=>{
+      await new Promise((res)=>{
         const s=document.createElement('script');
         s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        s.onload=res;s.onerror=()=>{console.warn('jsPDF falhou');res();};
-        document.head.appendChild(s);
+        s.onload=res;s.onerror=res;document.head.appendChild(s);
       });
     }
+    // Carrega html2canvas
     if(!window.html2canvas){
-      await new Promise((res,rej)=>{
+      await new Promise((res)=>{
         const s=document.createElement('script');
         s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        s.onload=res;s.onerror=()=>{console.warn('html2canvas falhou');res();};
-        document.head.appendChild(s);
+        s.onload=res;s.onerror=res;document.head.appendChild(s);
       });
     }
-
     if(!window.jspdf||!window.html2canvas){
-      console.warn('Libs PDF não disponíveis');
-      return null;
+      console.warn('Libs PDF indisponíveis');return null;
     }
 
-    // Cria iframe oculto para renderizar o HTML com estilos corretos
-    const iframe=document.createElement('iframe');
-    iframe.style.cssText='position:fixed;left:-9999px;top:0;width:794px;height:1123px;border:none;visibility:hidden;';
-    document.body.appendChild(iframe);
+    // Renderiza em div no body (sem iframe — evita CORS)
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:absolute;left:-9999px;top:0;width:794px;background:#fff;z-index:-1';
+    // Insere apenas o body do HTML (evita conflito de <head>/<style>)
+    const parser=new DOMParser();
+    const doc=parser.parseFromString(htmlContent,'text/html');
+    // Copia estilos do documento original para o wrap
+    const styleStr=Array.from(doc.querySelectorAll('style')).map(s=>s.textContent).join('\n');
+    if(styleStr){
+      const styleEl=document.createElement('style');
+      styleEl.textContent=styleStr;
+      wrap.appendChild(styleEl);
+    }
+    // Insere o body
+    wrap.innerHTML+=doc.body.innerHTML;
+    document.body.appendChild(wrap);
 
-    const iDoc=iframe.contentDocument||iframe.contentWindow.document;
-    iDoc.open();iDoc.write(htmlContent);iDoc.close();
+    await new Promise(r=>setTimeout(r,600));
 
-    // Aguarda renderização completa
-    await new Promise(r=>setTimeout(r,800));
-
-    const canvas=await window.html2canvas(iDoc.body,{
-      scale:2,
-      useCORS:true,
-      logging:false,
-      width:794,
-      windowWidth:794,
-      backgroundColor:'#ffffff',
-      allowTaint:false,
+    const canvas=await window.html2canvas(wrap,{
+      scale:2,useCORS:true,logging:false,
+      width:794,windowWidth:794,backgroundColor:'#ffffff',
     });
-
-    document.body.removeChild(iframe);
+    document.body.removeChild(wrap);
 
     const {jsPDF}=window.jspdf;
-    const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[794,1123]});
-
-    const pdfW=pdf.internal.pageSize.getWidth();
-    const pdfH=pdf.internal.pageSize.getHeight();
-    const imgH=(canvas.height*pdfW)/canvas.width;
-
-    let yOffset=0;
-    while(yOffset<canvas.height){
-      if(yOffset>0) pdf.addPage();
-      // Cria canvas para esta página
-      const pageCanvas=document.createElement('canvas');
-      pageCanvas.width=canvas.width;
-      pageCanvas.height=Math.min(canvas.height-yOffset, Math.round(pdfH*(canvas.width/pdfW)));
-      const ctx=pageCanvas.getContext('2d');
-      ctx.drawImage(canvas,0,-yOffset);
-      pdf.addImage(pageCanvas.toDataURL('image/jpeg',0.95),'JPEG',0,0,pdfW,Math.min(pdfH,(imgH-yOffset*(pdfW/canvas.width))));
-      yOffset+=pageCanvas.height;
+    const A4W=210,A4H=297; // mm
+    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const imgW=A4W;
+    const imgH=(canvas.height/canvas.width)*imgW;
+    let y=0;
+    while(y<imgH){
+      if(y>0)pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',0,-(y),imgW,imgH);
+      y+=A4H;
     }
-
     return pdf.output('datauristring').split(',')[1];
   }catch(e){
     console.warn('gerarPDFBase64 erro:',e.message);
@@ -10904,7 +10891,6 @@ ${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
 <p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
 
   try{
-    const ccListDireto=EMAIL_BCC.filter(e=>e!==forn.email);
     const ccDireto=EMAIL_BCC.filter(e=>e!==forn.email);
     const body={
       from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
@@ -10966,9 +10952,9 @@ async function confirmarEnvioSC(solId,idx,email,nome){
       body:JSON.stringify({
         from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
         to:[email],
-        bcc:EMAIL_BCC,
+        cc:EMAIL_BCC,
         subject:assunto,
-        html:corpo+`<hr><h3>Solicitação de Cotação</h3>${htmlSC}`,
+        html:corpo,
         reply_to:'compras@mklogistica.com',
       })
     });
