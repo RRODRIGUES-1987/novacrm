@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.86 | Gerado: 2026-05-27 10:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.87 | Gerado: 2026-05-27 11:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -704,7 +704,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.86';
+const APP_VERSION='v1.0.87';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3336,28 +3336,68 @@ async function confirmarEnvioEmail(id){
   </body></html>`;
 
   try{
-    // Chama Edge Function do Supabase (proxy para Resend - evita CORS)
+    // Converte fatura HTML para base64 (anexo)
+    const faturaBase64=await new Promise(resolve=>{
+      try{
+        const blob=new Blob([htmlEmail],{type:'text/html'});
+        const reader=new FileReader();
+        reader.onloadend=()=>resolve(reader.result.split(',')[1]);
+        reader.onerror=()=>resolve(null);
+        reader.readAsDataURL(blob);
+      }catch(e){resolve(null);}
+    });
+
+    // Corpo do email — apenas a mensagem, sem o documento colado
+    const corpoEmail=`<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+    <body style="font-family:Calibri,Arial,sans-serif;color:#222;max-width:600px;margin:0 auto;padding:20px">
+      <div style="background:#1e5f82;padding:16px 24px;border-radius:10px 10px 0 0">
+        <div style="color:#fff;font-size:18px;font-weight:700">MK LOGÍSTICA LTDA.</div>
+        <div style="color:#cce4f7;font-size:12px;margin-top:2px">Faturamento</div>
+      </div>
+      <div style="background:#fff;padding:24px;border:1px solid #dee2e6;border-top:none">
+        <p style="font-size:14px;line-height:1.8;color:#333">${msgTexto}</p>
+        <div style="background:#f0f7ff;border-radius:8px;padding:14px;margin-top:16px;font-size:12px;color:#1e5f82;border:1px solid #cce4f7">
+          📎 A fatura <strong>${f.numero_fatura}</strong> está em anexo neste e-mail.
+        </div>
+      </div>
+      <div style="background:#f8f9fa;padding:12px 24px;border:1px solid #dee2e6;border-top:none;border-radius:0 0 10px 10px;font-size:11px;color:#888;text-align:center">
+        MK LOGÍSTICA LTDA · faturamento@mklogistica.com
+      </div>
+    </body></html>`;
+
+    // BCC: adiciona robson no array "to" pois alguns proxies ignoram bcc
+    const todosDestinatarios=[dest];
+    // BCC real via campo separado (Resend suporta)
+    const payload={
+      from:`MK LOGÍSTICA <${EMAIL_FROM}>`,
+      to:todosDestinatarios,
+      bcc:EMAIL_BCC,
+      subject:assunto,
+      html:corpoEmail,
+      reply_to:'faturamento@mklogistica.com',
+    };
+    if(faturaBase64){
+      payload.attachments=[{
+        filename:`Fatura-${f.numero_fatura}.html`,
+        content:faturaBase64,
+        type:'text/html',
+        disposition:'attachment',
+      }];
+    }
+
     const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
-      body:JSON.stringify({
-        from:`MK LOGÍSTICA <${EMAIL_FROM}>`,
-        to:[dest],
-        bcc:EMAIL_BCC,
-        subject:assunto,
-        html:htmlEmail,
-        reply_to:'faturamento@mklogistica.com',
-      })
+      body:JSON.stringify(payload)
     });
     const data=await res.json();
     if(res.ok && !data.error){
-      // Registra envio
       await dbUpdate('faturamento',id,{status:'enviado',enviado_em:new Date().toISOString(),enviado_para:dest});
       faturamento=faturamento.map(x=>x.id===id?{...x,status:'enviado',enviado_para:dest}:x);
       statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
-      statusEl.textContent=`✓ E-mail enviado com sucesso para ${dest}!`;
+      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Fatura em anexo.':''}<br><small style="opacity:.7">BCC: ${EMAIL_BCC.join(', ')}</small>`;
       btn.textContent='✓ Enviado';
-      setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2000);
+      setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2500);
     } else {
       throw new Error(data.message||data.error||data.name||JSON.stringify(data)||'Erro ao enviar');
     }
