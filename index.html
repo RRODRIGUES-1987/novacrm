@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.102 | Gerado: 2026-05-28 11:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.103 | Gerado: 2026-05-28 12:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -738,7 +738,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.102';
+const APP_VERSION='v1.0.103';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2623,6 +2623,7 @@ function renderTTQuadros(){
             <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;width:50%">Serviço</th>
             <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;width:30%">Unidade de Cobrança</th>
             <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;width:15%">Valor</th>
+            <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;width:12%" title="Quantidade mínima cobrada">Qtde Mín</th>
             <th style="width:5%"></th>
           </tr>
         </thead>
@@ -2647,6 +2648,10 @@ function renderTTRow(qi, ii, item){
     <td style="padding:5px 8px">
       <input value="${item.valor||''}" onchange="ttQuadros[${qi}].itens[${ii}].valor=this.value"
         style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:var(--text);text-align:right" placeholder="0,00" type="number" step="0.01">
+    </td>
+    <td style="padding:5px 8px">
+      <input value="${item.qtde_minima||''}" onchange="ttQuadros[${qi}].itens[${ii}].qtde_minima=this.value?Number(this.value):null"
+        style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:var(--text);text-align:right" placeholder="—" type="number" step="1" min="0" title="Quantidade mínima">
     </td>
     <td style="padding:5px 4px;text-align:center">
       <button onclick="removeItemQuadro(${qi},${ii})" style="border:none;background:none;cursor:pointer;color:var(--text3);padding:2px">
@@ -2751,7 +2756,7 @@ async function saveTabelaTarifaria(){
     for(let ii=0;ii<q.itens.length;ii++){
       const item=q.itens[ii];
       if(!item.servico)continue;
-      await dbInsert('tabelas_itens',{quadro_id:qd.id,servico:item.servico,unidade_cobranca:item.unidade_cobranca||null,valor:item.valor?Number(item.valor):null,ordem:ii});
+      await dbInsert('tabelas_itens',{quadro_id:qd.id,servico:item.servico,unidade_cobranca:item.unidade_cobranca||null,valor:item.valor?Number(item.valor):null,qtde_minima:item.qtde_minima?Number(item.qtde_minima):null,ordem:ii});
     }
   }
   ttQuadros=[];
@@ -3612,7 +3617,15 @@ function calcLinhaFatura(idx){
   const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
   const precoStr=String(l.preco_unitario).replace('%','').trim();
   const preco=parseFloat(precoStr.replace(/\./g,'').replace(',','.'))||0;
-  const qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
+  let qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
+  // Aplica quantidade mínima se configurada e qtd digitada for menor
+  const qtdMin=l.qtde_minima?Number(l.qtde_minima):0;
+  if(!isPerc && qtdMin>0 && qtd>0 && qtd<qtdMin){
+    qtd=qtdMin;
+    fatLinhas[idx].quantidade=qtdMin;
+    const inp=document.querySelector(`[onchange*="fatLinhas[${idx}].quantidade"]`);
+    if(inp) inp.value=qtdMin;
+  }
   if(isPerc){l.subtotal=(preco/100)*qtd;}
   else{l.subtotal=preco*qtd;}
   const el=ge(`sub-${idx}`);
@@ -3625,8 +3638,24 @@ function addLinhaFatura(){
 }
 
 function recalcFatura(){
-  const subtotal=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalLinhas=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
+
+  // Verificar faturamento mínimo da tabela tarifária selecionada
+  const tabelaId=ge('fat-tabela')?.value;
+  const tabela=tabelasTarifarias.find(t=>t.id===tabelaId);
+  let fatMinVal=0;
+  let complemento=0;
+  if(tabela?.cond_fat_minimo){
+    // Extrai valor numérico do campo cond_fat_minimo (ex: "R$ 10.000,00" ou "10000")
+    const minStr=String(tabela.cond_fat_minimo).replace(/[R$\s.]/g,'').replace(',','.');
+    fatMinVal=parseFloat(minStr)||0;
+    if(fatMinVal>0 && subtotalLinhas<fatMinVal){
+      complemento=fatMinVal-subtotalLinhas;
+    }
+  }
+
+  const subtotal=subtotalLinhas+complemento;
   const issVal=issIncluso?0:subtotal*0.02;
   const total=subtotal+issVal;
 
@@ -3635,9 +3664,18 @@ function recalcFatura(){
   el.innerHTML=`
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div style="display:flex;gap:40px;font-size:13px">
-        <span style="color:var(--text2)">Subtotal:</span>
-        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
+        <span style="color:var(--text2)">Subtotal serviços:</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalLinhas)}</span>
       </div>
+      ${complemento>0?`
+      <div style="display:flex;gap:40px;font-size:13px">
+        <span style="color:var(--amber-text)">⚡ Complemento fat. mínimo:</span>
+        <span style="font-weight:600;min-width:120px;text-align:right;color:var(--amber-text)">${fmtV(complemento)}</span>
+      </div>
+      <div style="display:flex;gap:40px;font-size:13px;border-top:1px dashed var(--border);padding-top:6px">
+        <span style="color:var(--text2)">Subtotal (c/ mínimo):</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
+      </div>`:''}
       ${!issIncluso?`<div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">ISS (2%):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(issVal)}</span>
@@ -3647,6 +3685,10 @@ function recalcFatura(){
         <span style="font-weight:700;color:var(--accent);min-width:120px;text-align:right">${fmtV(total)}</span>
       </div>
     </div>`;
+
+  // Expor complemento para uso no salvarFatura
+  window._fatComplemento=complemento;
+  window._fatMinVal=fatMinVal;
 }
 
 function getFatV(id){const e=ge(id);return e?e.value||null:null;}
@@ -3657,10 +3699,26 @@ async function salvarFatura(status){
   const cli=clientes.find(c=>c.id===clienteId);
   const responsavelId=getFatV('fat-responsavel');
   const tipoOp=getFatV('fat-tipo-op');
-  const subtotal=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalLinhas=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const complemento=window._fatComplemento||0;
+  const subtotal=subtotalLinhas+complemento;
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
   const issVal=issIncluso?0:subtotal*0.02;
   const total=subtotal+issVal;
+  // Adiciona linha de complemento nas linhas a salvar
+  const linhasParaSalvar=[...fatLinhas];
+  if(complemento>0){
+    linhasParaSalvar.push({
+      quadro:'Complemento',
+      servico:'Complemento Faturamento Mínimo',
+      unidade:'',
+      preco_unitario:complemento,
+      quantidade:1,
+      subtotal:complemento,
+      tipo:'unitario',
+      is_complemento:true,
+    });
+  }
   const num=getFatV('fat-num');
 
   const obj={
