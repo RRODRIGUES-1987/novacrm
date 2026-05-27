@@ -3339,18 +3339,11 @@ async function confirmarEnvioEmail(id){
   </body></html>`;
 
   try{
-    // Converte fatura HTML para base64 (anexo)
-    const faturaBase64=await new Promise(resolve=>{
-      try{
-        const blob=new Blob([htmlEmail],{type:'text/html'});
-        const reader=new FileReader();
-        reader.onloadend=()=>resolve(reader.result.split(',')[1]);
-        reader.onerror=()=>resolve(null);
-        reader.readAsDataURL(blob);
-      }catch(e){resolve(null);}
-    });
+    // CC: lê campo do modal
+    const ccRaw=ge('email-cc')?.value||'';
+    const ccList=ccRaw.split(',').map(e=>e.trim()).filter(e=>e&&e!==dest);
 
-    // Corpo do email — apenas a mensagem, sem o documento colado
+    // Corpo do email — mensagem limpa
     const corpoEmail=`<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
     <body style="font-family:Calibri,Arial,sans-serif;color:#222;max-width:600px;margin:0 auto;padding:20px">
       <div style="background:#1e5f82;padding:16px 24px;border-radius:10px 10px 0 0">
@@ -3360,7 +3353,7 @@ async function confirmarEnvioEmail(id){
       <div style="background:#fff;padding:24px;border:1px solid #dee2e6;border-top:none">
         <p style="font-size:14px;line-height:1.8;color:#333">${msgTexto}</p>
         <div style="background:#f0f7ff;border-radius:8px;padding:14px;margin-top:16px;font-size:12px;color:#1e5f82;border:1px solid #cce4f7">
-          📎 A fatura <strong>${f.numero_fatura}</strong> está em anexo neste e-mail.
+          📎 A fatura <strong>${f.numero_fatura}</strong> está em anexo (PDF).
         </div>
       </div>
       <div style="background:#f8f9fa;padding:12px 24px;border:1px solid #dee2e6;border-top:none;border-radius:0 0 10px 10px;font-size:11px;color:#888;text-align:center">
@@ -3368,11 +3361,27 @@ async function confirmarEnvioEmail(id){
       </div>
     </body></html>`;
 
-    // Destinatários: cliente + BCC internos no mesmo array (garantia de entrega)
-    // bcc também enviado como campo separado (Resend suporta após atualização da Edge Function)
-    // CC: lê campo do modal, divide por vírgula, filtra vazios
-    const ccRaw=ge('email-cc')?.value||'';
-    const ccList=ccRaw.split(',').map(e=>e.trim()).filter(e=>e&&e!==dest);
+    // Dados estruturados para a Edge Function gerar o PDF com pdf-lib
+    const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado'};
+    const pdf_dados={
+      empresa_nome:company?.name||'MK LOGÍSTICA LTDA.',
+      numero:f.numero_fatura||'—',
+      status_label:FAT_STATUS_LABELS[f.status]||f.status||'',
+      cliente_nome:cli?.nome||f.cliente_nome||'—',
+      contato_nome:contatoResp?.nome||'',
+      contato_email:contatoResp?.email||'',
+      periodo_inicio:fmtDt(f.periodo_inicio),
+      periodo_fim:fmtDt(f.periodo_fim),
+      tipo_operacao:f.tipo_operacao||'',
+      vencimento_dias:f.vencimento_dias||7,
+      observacoes:f.observacoes||'',
+      linhas,
+      subtotal,
+      iss:issVal,
+      total,
+    };
+
+    btn.textContent='Gerando PDF...';
     const payload={
       from:`MK LOGÍSTICA <${EMAIL_FROM}>`,
       to:[dest],
@@ -3380,16 +3389,11 @@ async function confirmarEnvioEmail(id){
       subject:assunto,
       html:corpoEmail,
       reply_to:'faturamento@mklogistica.com',
+      pdf_dados,
+      pdf_filename:`Fatura-${f.numero_fatura}.pdf`,
     };
-    if(faturaBase64){
-      payload.attachments=[{
-        filename:`Fatura-${f.numero_fatura}.pdf`,
-        content:faturaBase64,
-        type:'application/pdf',
-        disposition:'attachment',
-      }];
-    }
 
+    btn.textContent='Enviando...';
     const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
@@ -3400,7 +3404,7 @@ async function confirmarEnvioEmail(id){
       await dbUpdate('faturamento',id,{status:'enviado',enviado_em:new Date().toISOString(),enviado_para:dest});
       faturamento=faturamento.map(x=>x.id===id?{...x,status:'enviado',enviado_para:dest}:x);
       statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px;margin-top:8px';
-      statusEl.innerHTML=`✓ E-mail enviado com sucesso para <strong>${dest}</strong>!${faturaBase64?' Anexo HTML enviado.':''}<br><small style="opacity:.7">CC: ${ccList.join(', ')||'—'}</small>`;
+      statusEl.innerHTML=`✓ E-mail enviado! PDF gerado e anexado.<br><small style="opacity:.7">Para: ${dest}${ccList.length?' · CC: '+ccList.join(', '):''}</small>`;
       btn.textContent='✓ Enviado';
       setTimeout(()=>{ge('modal-email-fat')?.remove();render();},2500);
     } else {
@@ -10730,17 +10734,14 @@ async function enviarSCParaFornecedorModal(solId,idx,btn){
   if(btn){btn.disabled=true;btn.textContent='⏳ Enviando...';}
 
   const empresa=company;
-  const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,empresa);
-
-  // Gera PDF como base64 via iframe
-  const pdfBase64=await gerarPDFBase64(htmlSC);
+  const pdf_dados_sc=montarPdfDadosSC(sol,forn,empresa);
 
   const assunto=`Solicitação de Cotação ${sol?.numero||''} — ${sol?.titulo||''}`;
   const corpo=`<p>Prezado(a) <strong>${forn.nome}</strong>,</p>
-<p>Segue em <strong>anexo</strong> a Solicitação de Cotação <strong>${sol?.numero||''}</strong> referente ao item: <strong>${sol?.titulo||''}</strong>.</p>
-${forn.prazo_retorno?`<p>Prazo para retorno da proposta: <strong>${fmtDateSimples(forn.prazo_retorno)}</strong></p>`:''}
+<p>Segue em <strong>anexo (PDF)</strong> a Solicitação de Cotação <strong>${sol?.numero||''}</strong> referente ao item: <strong>${sol?.titulo||''}</strong>.</p>
+${forn.prazo_retorno?`<p>Prazo para retorno: <strong>${fmtDateSimples(forn.prazo_retorno)}</strong></p>`:''}
 ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
-<p>Por favor, encaminhe sua proposta comercial para <strong>compras@mklogistica.com</strong>.</p>
+<p>Encaminhe sua proposta para <strong>compras@mklogistica.com</strong>.</p>
 <p>Atenciosamente,<br><strong>MK LOGÍSTICA — Departamento de Compras</strong></p>`;
 
   try{
@@ -10753,15 +10754,9 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
       subject:assunto,
       html:corpo,
       reply_to:'compras@mklogistica.com',
+      pdf_dados:pdf_dados_sc,
+      pdf_filename:`SC-${sol.numero||solId}.pdf`,
     };
-    if(pdfBase64){
-      body.attachments=[{
-        filename:`SC-${sol.numero||solId}.pdf`,
-        content:pdfBase64,
-        type:'application/pdf',
-        disposition:'attachment',
-      }];
-    }
 
     const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
       method:'POST',
@@ -10779,7 +10774,7 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
 
       if(statusEl){
         statusEl.style.cssText='display:block;background:var(--green-bg);color:var(--green-text);padding:10px;border-radius:8px;font-size:12px';
-        statusEl.innerHTML=`✅ SC enviada com sucesso para <strong>${forn.email}</strong>!${pdfBase64?' PDF em anexo.':' (sem PDF — popup bloqueado)'}`;
+        statusEl.innerHTML=`✅ SC enviada com sucesso para <strong>${forn.email}</strong>! PDF gerado e anexado.`;
       }
       if(btn){btn.textContent='✓ Enviado';btn.style.background='var(--green)';btn.style.color='#fff';}
     } else {
@@ -10794,21 +10789,27 @@ ${forn.observacoes?`<p>Observações: ${forn.observacoes}</p>`:''}
   }
 }
 
-// Converte HTML para base64 para envio como anexo
-// O destinatário abre no browser e usa Ctrl+P > Salvar como PDF
-function gerarPDFBase64(htmlContent){
-  return new Promise(resolve=>{
-    try{
-      const blob=new Blob([htmlContent],{type:'application/pdf'});
-      const reader=new FileReader();
-      reader.onloadend=()=>resolve(reader.result.split(',')[1]);
-      reader.onerror=()=>resolve(null);
-      reader.readAsDataURL(blob);
-    }catch(e){
-      console.warn('gerarPDFBase64 erro:',e.message);
-      resolve(null);
-    }
-  });
+// Monta pdf_dados estruturado para a Edge Function gerar PDF com pdf-lib
+function montarPdfDadosSC(sol, forn, empresa){
+  const itens=[];
+  if(sol.categoria) itens.push({servico:sol.categoria,unidade:'',preco_unitario:'',quantidade:'',subtotal:0});
+  if(sol.justificativa) itens.push({servico:'Justificativa: '+sol.justificativa,unidade:'',preco_unitario:'',quantidade:'',subtotal:0});
+  return {
+    tipo:'SC',
+    empresa_nome:empresa?.name||'MK LOGÍSTICA LTDA.',
+    numero:sol.numero||'SC',
+    status_label:'Solicitação de Cotação',
+    cliente_nome:'Fornecedor: '+forn.nome,
+    contato_nome:forn.nome,
+    contato_email:forn.email,
+    periodo_inicio:new Date().toLocaleDateString('pt-BR'),
+    periodo_fim:forn.prazo_retorno?new Date(forn.prazo_retorno+'T00:00').toLocaleDateString('pt-BR'):'—',
+    tipo_operacao:'Cotação',
+    vencimento_dias:'',
+    observacoes:forn.observacoes||sol.observacoes||'',
+    linhas:itens.length?itens:[{servico:sol.titulo||'Item a cotar',unidade:'un',preco_unitario:'',quantidade:1,subtotal:0}],
+    subtotal:0,iss:0,total:0,
+  };
 }
 
 
@@ -10830,9 +10831,6 @@ async function enviarSCDireto(solId,forn,btn){
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
   if(btn){btn.disabled=true;btn.textContent='⏳ Enviando...';}
 
-  const htmlSC=gerarHTMLSolicitacaoCotacao(sol,forn,company);
-  const pdfBase64=await gerarPDFBase64(htmlSC);
-
   const assunto=`Solicitação de Cotação ${sol?.numero||''} — ${sol?.titulo||''}`;
   const corpo=`<p>Prezado(a) <strong>${forn.nome}</strong>,</p>
 <p>Segue em <strong>anexo</strong> a Solicitação de Cotação <strong>${sol?.numero||''}</strong> referente ao item: <strong>${sol?.titulo||''}</strong>.</p>
@@ -10843,14 +10841,16 @@ ${forn.observacoes?`<p>Obs: ${forn.observacoes}</p>`:''}
 
   try{
     const ccDireto=EMAIL_BCC.filter(e=>e!==forn.email);
+    const pdfDadosDireto=montarPdfDadosSC(sol,forn,company);
     const body={
       from:`MK LOGÍSTICA Compras <${EMAIL_FROM}>`,
       to:[forn.email],
       ...(ccDireto.length?{cc:ccDireto}:{}),
       subject:assunto,html:corpo,
       reply_to:'compras@mklogistica.com',
+      pdf_dados:pdfDadosDireto,
+      pdf_filename:`SC-${sol?.numero||solId}.pdf`,
     };
-    if(pdfBase64) body.attachments=[{filename:`SC-${sol?.numero||solId}.pdf`,content:pdfBase64,type:'application/pdf',disposition:'attachment'}];
 
     const res=await fetch('https://trngaecaurksscwmkfsf.supabase.co/functions/v1/send-email',{
       method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
