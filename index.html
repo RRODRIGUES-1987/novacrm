@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.117 | Gerado: 2026-05-29 19:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.118 | Gerado: 2026-05-29 20:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -743,7 +743,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.117';
+const APP_VERSION='v1.0.118';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4352,6 +4352,107 @@ function rDashboardGeral(){
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
     RH em dia — nenhuma ação necessária no momento.
   </div>`:''}
+
+  ${(()=>{
+    // ── SEÇÃO FINANCEIRO ──────────────────────────────────────────
+    const podeVerFin=['admin','adm','gestor','financeiro'].includes(role);
+    if(!podeVerFin) return '';
+
+    const agora = new Date();
+
+    // Contas a Receber
+    const crAtrasadas = contasReceber.filter(cr=>cr.status!=='pago'&&cr.vencimento&&new Date(cr.vencimento+'T00:00')<agora);
+    const crNoPrazo   = contasReceber.filter(cr=>cr.status!=='pago'&&cr.vencimento&&new Date(cr.vencimento+'T00:00')>=agora);
+    const totalAtrasado = crAtrasadas.reduce((s,cr)=>s+Number(cr.valor||0),0);
+    const totalNoPrazo  = crNoPrazo.reduce((s,cr)=>s+Number(cr.valor||0),0);
+
+    // Faturas pendentes de aprovação
+    const fatAguardando = faturamento.filter(f=>f.status==='aguardando');
+    const fatDentro5 = fatAguardando.filter(f=>{
+      const criado = new Date(f.created_at);
+      const dias = Math.floor((agora-criado)/(1000*60*60*24));
+      return dias<=5;
+    });
+    const fatFora5 = fatAguardando.filter(f=>{
+      const criado = new Date(f.created_at);
+      const dias = Math.floor((agora-criado)/(1000*60*60*24));
+      return dias>5;
+    });
+
+    const temFinAlerta = crAtrasadas.length||fatAguardando.length;
+
+    return \`
+    <div style="margin-bottom:24px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Financeiro
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">
+
+        <!-- Card Contas a Receber -->
+        <div onclick="pg('financeiro-dashboard')" style="background:var(--bg);border:1.5px solid \${crAtrasadas.length?'var(--red-text)':'var(--border)'};border-radius:14px;padding:16px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)'" onmouseout="this.style.boxShadow=''">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <div style="width:36px;height:36px;background:\${crAtrasadas.length?'var(--red-bg)':'var(--blue-bg)'};border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">\${crAtrasadas.length?'⚠':'💰'}</div>
+            <div>
+              <div style="font-size:13px;font-weight:700">Contas a Receber</div>
+              <div style="font-size:11px;color:var(--text3)">\${contasReceber.filter(cr=>cr.status!=='pago').length} título\${contasReceber.filter(cr=>cr.status!=='pago').length!==1?'s':''} em aberto</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:var(--red-bg);border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:10px;font-weight:600;color:var(--red-text);margin-bottom:4px">ATRASADO</div>
+              <div style="font-size:15px;font-weight:700;color:var(--red-text)">\${fmtV(totalAtrasado)}</div>
+              <div style="font-size:10px;color:var(--red-text);opacity:.8">\${crAtrasadas.length} título\${crAtrasadas.length!==1?'s':''}</div>
+            </div>
+            <div style="background:var(--green-bg);border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:10px;font-weight:600;color:var(--green-text);margin-bottom:4px">NO PRAZO</div>
+              <div style="font-size:15px;font-weight:700;color:var(--green-text)">\${fmtV(totalNoPrazo)}</div>
+              <div style="font-size:10px;color:var(--green-text);opacity:.8">\${crNoPrazo.length} título\${crNoPrazo.length!==1?'s':''}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Faturas para Aprovação -->
+        \${fatAguardando.length?\`
+        <div onclick="pg('faturamento')" style="background:var(--bg);border:1.5px solid \${fatFora5.length?'var(--red-text)':'var(--amber-text)'};border-radius:14px;padding:16px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)'" onmouseout="this.style.boxShadow=''">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <div style="width:36px;height:36px;background:\${fatFora5.length?'var(--red-bg)':'var(--amber-bg)'};border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">\${fatFora5.length?'🚨':'📄'}</div>
+            <div>
+              <div style="font-size:13px;font-weight:700">Faturas Aguardando Aprovação</div>
+              <div style="font-size:11px;color:var(--text3)">\${fatAguardando.length} fatura\${fatAguardando.length!==1?'s':''} pendente\${fatAguardando.length!==1?'s':''}</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:var(--green-bg);border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:10px;font-weight:600;color:var(--green-text);margin-bottom:4px">≤ 5 DIAS</div>
+              <div style="font-size:22px;font-weight:700;color:var(--green-text)">\${fatDentro5.length}</div>
+              <div style="font-size:10px;color:var(--green-text);opacity:.8">no prazo</div>
+            </div>
+            <div style="background:\${fatFora5.length?'var(--red-bg)':'var(--bg2)'};border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:10px;font-weight:600;color:\${fatFora5.length?'var(--red-text)':'var(--text3)'};margin-bottom:4px">> 5 DIAS</div>
+              <div style="font-size:22px;font-weight:700;color:\${fatFora5.length?'var(--red-text)':'var(--text2)'}">\${fatFora5.length}</div>
+              <div style="font-size:10px;color:\${fatFora5.length?'var(--red-text)':'var(--text3)'};opacity:.8">atrasadas</div>
+            </div>
+          </div>
+          \${fatFora5.length?\`<div style="margin-top:10px">
+            \${fatFora5.slice(0,3).map(f=>\`<div style="font-size:11px;padding:5px 8px;background:var(--red-bg);border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between;color:var(--red-text)">
+              <span style="font-weight:600">\${f.cliente_nome||'—'}</span>
+              <span>\${fmtV(f.total||0)} · \${Math.floor((agora-new Date(f.created_at))/(1000*60*60*24))}d</span>
+            </div>\`).join('')}
+            \${fatFora5.length>3?\`<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px">+\${fatFora5.length-3} outras</div>\`:''}
+          </div>\`:''}
+        </div>\`:''}
+
+      </div>
+
+      \${!temFinAlerta?\`
+      <div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:12px;padding:12px 16px;font-size:13px;color:var(--green-text);display:flex;align-items:center;gap:8px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Financeiro em dia — nenhuma ação necessária.
+      </div>\`:''}
+    </div>\`;
+  })()}
+
   `;
 }
 
