@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.115 | Gerado: 2026-05-29 17:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.116 | Gerado: 2026-05-29 18:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -743,7 +743,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.115';
+const APP_VERSION='v1.0.116';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4238,13 +4238,77 @@ function rDashboardGeral(){
     ${alerta.vencido?'Tarifário vencido! Clique para atualizar os valores.': `Tarifário vence em ${alerta.dias} dia(s). Clique para preparar o reajuste.`}
   </div>`:'';
 
-  return`${alertaHTML}${rWorkflowAlertas()}<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;color:var(--text3);text-align:center;gap:16px">
+  // Seção RH — só para quem tem acesso ao RH
+  const podeVerRH = ['admin','adm','rh','gestor'].includes(profile?.role||'');
+  const rhSection = podeVerRH ? `
+    <div style="margin-top:20px">
+      <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        RH
+      </div>
+      ${rCardFerias()}
+    </div>` : '';
+
+  return`${alertaHTML}${rWorkflowAlertas()}${rhSection}
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:${podeVerRH?'30':'60'}vh;color:var(--text3);text-align:center;gap:16px;margin-top:24px">
     <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     <div>
       <div style="font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px">Visão Geral</div>
       <div style="font-size:13px;max-width:280px;line-height:1.6">Em breve — este painel será personalizado com os indicadores do sistema.</div>
     </div>
   </div>`;
+}
+
+
+function calcFeriasAlertas(){
+  const hoje = new Date();
+  const pendentes = [];
+  pessoas.filter(p=>['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false&&p.data_admissao).forEach(p=>{
+    let pi=new Date(p.data_admissao+'T00:00:00');
+    let pf,dl;
+    while(true){
+      const _pf=new Date(pi);_pf.setFullYear(_pf.getFullYear()+1);
+      const _dl=new Date(_pf);_dl.setMonth(_dl.getMonth()+11);
+      pf=_pf;dl=_dl;
+      if(_dl>=hoje)break;
+      pi=_pf;
+    }
+    const dias=Math.floor((dl-hoje)/(1000*60*60*24));
+    const temProg=rhFerias.some(f=>f.pessoa_id===p.id&&!['cancelado','concluido'].includes(f.status));
+    if(!temProg&&dias>=0&&dias<60) pendentes.push({nome:p.nome,dias,escalar:dias<=10});
+  });
+  return pendentes.sort((a,b)=>a.dias-b.dias);
+}
+
+function rCardFerias(){
+  const pendentes = calcFeriasAlertas();
+  if(!pendentes.length) return `
+    <div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:12px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--green-text)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Férias em dia
+      </div>
+      <div style="font-size:12px;color:var(--green-text);margin-top:4px;opacity:.8">Nenhuma pendência crítica no momento.</div>
+    </div>`;
+
+  const escalados = pendentes.filter(p=>p.escalar);
+  const normais   = pendentes.filter(p=>!p.escalar);
+  const cor = escalados.length ? 'var(--red' : 'var(--amber';
+
+  return `
+    <div style="background:${cor}-bg);border:1px solid ${cor}-text);border-radius:12px;padding:14px 16px;cursor:pointer" onclick="pg('rh-ferias')">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:${cor}-text)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          ${pendentes.length} pendência${pendentes.length>1?'s':''} de férias
+        </div>
+        <span style="font-size:11px;color:${cor}-text);opacity:.7">Ver todas →</span>
+      </div>
+      ${escalados.length?`<div style="font-size:12px;font-weight:600;color:var(--red-text);margin-bottom:6px">🚨 Escalonamento necessário (≤10 dias):</div>`:''}
+      ${escalados.map(p=>`<div style="font-size:12px;color:var(--red-text);margin-bottom:3px">· <strong>${p.nome}</strong> — ${p.dias} dia${p.dias!==1?'s':''} restante${p.dias!==1?'s':''}</div>`).join('')}
+      ${normais.length&&escalados.length?`<div style="font-size:12px;font-weight:600;color:var(--amber-text);margin:8px 0 6px">⚠ Atenção (≤60 dias):</div>`:''}
+      ${normais.map(p=>`<div style="font-size:12px;color:var(--amber-text);margin-bottom:3px">· <strong>${p.nome}</strong> — ${p.dias} dia${p.dias!==1?'s':''} restante${p.dias!==1?'s':''}</div>`).join('')}
+    </div>`;
 }
 
 // ── RENDER DASHBOARD CRM ──
@@ -6127,7 +6191,13 @@ function rRHFerias(){
     const alertaCor = diasLimite<=10?'var(--red-text)':diasLimite<=30?'var(--amber-text)':diasLimite<=60?'var(--amber-text)':'var(--text3)';
     const inicioPrevisto = feriasPessoa[0]?.inicio_previsto?new Date(feriasPessoa[0].inicio_previsto+'T00:00:00').toLocaleDateString('pt-BR'):'—';
     const diasPrevistos = feriasPessoa[0]?.dias_previstos||'—';
-    return `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openFeriasModal('${p.id}')">
+    const semPrograma = feriasPessoa.length===0;
+    const rowBg = semPrograma && diasLimite<=10
+      ? 'background:rgba(234,88,12,0.10)'   // laranja — escalonamento
+      : semPrograma && diasLimite<=60
+      ? 'background:rgba(234,179,8,0.10)'   // amarelo — atenção
+      : '';
+    return `<tr style="border-top:1px solid var(--border);cursor:pointer;${rowBg}" onclick="openFeriasModal('${p.id}')">
       <td style="padding:10px 12px">
         <div style="font-weight:600;font-size:13px">${p.nome}</div>
         <div style="font-size:11px;color:var(--text3)">${p.departamento||'—'} · ${p.cargo||'—'}</div>
