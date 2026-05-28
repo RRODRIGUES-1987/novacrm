@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.113 | Gerado: 2026-05-29 15:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.114 | Gerado: 2026-05-29 16:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -743,7 +743,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.113';
+const APP_VERSION='v1.0.114';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1608,7 +1608,13 @@ function buildCadastroForm(tipo, record, id=null){
           <div class="fg"><label class="fl">Salário (R$)</label>
             <input class="fi" id="cad-salario" type="number" step="0.01" value="${r.salario||''}" placeholder="0,00">
           </div>
-          <div class="fg"><label class="fl">Turno</label>
+          <div class="fg"><label class="fl">Gestor responsável</label>
+        <select class="fi" id="cad-gestor_id">
+          <option value="">Sem gestor definido</option>
+          ${profiles.filter(p=>['gestor','adm','admin'].includes(p.role)&&p.company_id===cid).map(p=>`<option value="${p.id}" ${r.gestor_id===p.id?'selected':''}>${p.full_name||p.email}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fg"><label class="fl">Turno</label>
             <select class="fi" id="cad-turno">
               <option value="">Selecione</option>
               ${['Matutino','Vespertino','Noturno','Integral','Flexível'].map(s=>`<option value="${s}" ${r.turno===s?'selected':''}>${s}</option>`).join('')}
@@ -2215,6 +2221,7 @@ async function saveCadastro(){
   }
   if(tipo==='pessoas'){
     obj.tipo_pessoa='funcionario';
+    obj.gestor_id=ge('cad-gestor_id')?.value||null;
     obj.cipa=ge('cad-cipa')?.checked||false;
     obj.estabilidade=ge('cad-estabilidade')?.checked||false;
     obj.estabilidade_inicio=getV('cad-estabilidade_inicio')||null;
@@ -6057,7 +6064,13 @@ function rRHFerias(){
 
   // Calcular alertas
   const alertas = [];
-  pessoas.filter(p=>p.data_admissao&&['funcionario','colaborador'].includes(p.tipo_pessoa)).forEach(p=>{
+  const _isGestor = profile?.role==='gestor';
+  const _isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  pessoas.filter(p=>{
+    if(!p.data_admissao||!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
+    if(_isGestor && !_isRH) return p.gestor_id === cu?.id;
+    return true;
+  }).forEach(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
     // Calcular período aquisitivo atual
     let periodoInicio = new Date(adm);
@@ -6075,12 +6088,21 @@ function rRHFerias(){
     // Verifica se já tem férias programadas neste período
     const feriasPeriodo = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
     if(feriasPeriodo.length===0&&diasParaLimite<60&&diasParaLimite>=0){
-      alertas.push({pessoa:p, diasParaLimite, dataLimite});
+      alertas.push({pessoa:p, diasParaLimite, dataLimite, escalar:diasParaLimite<=10});
     }
   });
 
   // Grid de colaboradores
-  const pessoasAtivas = pessoas.filter(p=>['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false&&p.data_admissao);
+  // Filtro por perfil: gestor vê só os seus; RH/admin veem todos
+  const isGestor = profile?.role==='gestor';
+  const isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  const pessoasAtivas = pessoas.filter(p=>{
+    if(!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
+    if(p.ativo===false) return false;
+    if(!p.data_admissao) return false;
+    if(isGestor && !isRH) return p.gestor_id === cu?.id;
+    return true;
+  });
 
   const rows = pessoasAtivas.map(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
@@ -6122,8 +6144,8 @@ function rRHFerias(){
   const alertasHtml = alertas.length>0?`
     <div style="background:var(--amber-bg);border:1px solid var(--amber-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">
       <div style="font-size:13px;font-weight:700;color:var(--amber-text);margin-bottom:8px">⚠ ${alertas.length} colaborador(es) sem férias programadas próximas do vencimento</div>
-      ${alertas.map(a=>`<div style="font-size:12px;color:var(--amber-text);margin-bottom:4px">
-        · <strong>${a.pessoa.nome}</strong> — limite em ${a.dataLimite.toLocaleDateString('pt-BR')} <span style="font-size:11px">(${a.diasParaLimite} dias)</span>
+      ${alertas.map(a=>`<div style="font-size:12px;margin-bottom:4px;color:${a.escalar?'var(--red-text)':'var(--amber-text)'}">
+        ${a.escalar?'🚨':'⚠'} <strong>${a.pessoa.nome}</strong> — limite em ${a.dataLimite.toLocaleDateString('pt-BR')} <span style="font-size:11px">(${a.diasParaLimite} dias)${a.escalar?' · ESCALANDO PARA SUPERIOR':''}</span>
       </div>`).join('')}
     </div>`:
     `<div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--green-text)">
@@ -6134,7 +6156,6 @@ function rRHFerias(){
     ${alertasHtml}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:14px;font-weight:600">${pessoasAtivas.length} colaboradores</div>
-      <button class="btn btn-primary" onclick="openFeriasModal()">+ Programar Férias</button>
     </div>
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:auto">
       <table style="width:100%;border-collapse:collapse;min-width:800px">
