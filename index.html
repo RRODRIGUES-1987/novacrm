@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.116 | Gerado: 2026-05-29 18:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.117 | Gerado: 2026-05-29 19:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -743,7 +743,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.116';
+const APP_VERSION='v1.0.117';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4232,31 +4232,127 @@ function ownerName(owner_id){
 
 // ── DASHBOARD GERAL (em construção) ──
 function rDashboardGeral(){
+  const hoje = new Date();
+  const role = profile?.role||'';
+  const isAdmin = ['admin','adm'].includes(role);
+  const isGestor = role==='gestor';
+  const podeVerRH = isAdmin||isGestor||role==='rh';
+
+  // ── Alertas de tarifário ─────────────────────────────────────
   const alerta=checkVigenciaAlert();
-  const alertaHTML=alerta?`<div onclick="pg('tarifario-padrao')" style="background:${alerta.vencido?'var(--red-bg)':'var(--amber-bg)'};color:${alerta.vencido?'var(--red-text)':'var(--amber-text)'};border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">
+
+  // ── Cálculo RH: férias ────────────────────────────────────────
+  const feriasEscalonadas=[], feriasVencidas=[], feriasAguardando=[];
+  if(podeVerRH){
+    pessoas.filter(p=>['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false&&p.data_admissao).forEach(p=>{
+      let pi=new Date(p.data_admissao+'T00:00:00');
+      let pf,dl;
+      while(true){
+        const _pf=new Date(pi);_pf.setFullYear(_pf.getFullYear()+1);
+        const _dl=new Date(_pf);_dl.setMonth(_dl.getMonth()+11);
+        pf=_pf;dl=_dl;
+        if(_dl>=hoje)break;
+        pi=_pf;
+      }
+      const dias=Math.floor((dl-hoje)/(1000*60*60*24));
+      const temProg=rhFerias.some(f=>f.pessoa_id===p.id&&!['cancelado','concluido'].includes(f.status));
+      if(!temProg){
+        if(dias<0) feriasVencidas.push({...p,diasLimite:dias,dataLimite:dl});
+        else if(dias<=10) feriasEscalonadas.push({...p,diasLimite:dias,dataLimite:dl});
+      }
+    });
+    rhFerias.filter(f=>f.status==='programado').forEach(f=>{
+      const p=pessoas.find(x=>x.id===f.pessoa_id);
+      if(p) feriasAguardando.push({...f,nome:p.nome});
+    });
+  }
+
+  const temRHAlerta = feriasEscalonadas.length||feriasVencidas.length||feriasAguardando.length;
+
+  // ── Saudação ─────────────────────────────────────────────────
+  const hora = hoje.getHours();
+  const saudacao = hora<12?'Bom dia':hora<18?'Boa tarde':'Boa noite';
+  const nome = profile?.full_name?.split(' ')[0]||'';
+  const dataStr = hoje.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  return`
+  <div style="margin-bottom:24px">
+    <div style="font-size:22px;font-weight:700;letter-spacing:-0.3px">${saudacao}${nome?', '+nome:''}! 👋</div>
+    <div style="font-size:13px;color:var(--text3);margin-top:2px;text-transform:capitalize">${dataStr}</div>
+  </div>
+
+  ${alerta?`<div onclick="pg('tarifario-padrao')" style="background:${alerta.vencido?'var(--red-bg)':'var(--amber-bg)'};color:${alerta.vencido?'var(--red-text)':'var(--amber-text)'};border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid ${alerta.vencido?'var(--red-text)':'var(--amber-text)'}">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    ${alerta.vencido?'Tarifário vencido! Clique para atualizar os valores.': `Tarifário vence em ${alerta.dias} dia(s). Clique para preparar o reajuste.`}
-  </div>`:'';
+    ${alerta.vencido?'Tarifário vencido — clique para atualizar':`Tarifário vence em ${alerta.dias} dia(s) — clique para preparar o reajuste`}
+  </div>`:''}
 
-  // Seção RH — só para quem tem acesso ao RH
-  const podeVerRH = ['admin','adm','rh','gestor'].includes(profile?.role||'');
-  const rhSection = podeVerRH ? `
-    <div style="margin-top:20px">
-      <div style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        RH
-      </div>
-      ${rCardFerias()}
-    </div>` : '';
+  ${rWorkflowAlertas()}
 
-  return`${alertaHTML}${rWorkflowAlertas()}${rhSection}
-  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:${podeVerRH?'30':'60'}vh;color:var(--text3);text-align:center;gap:16px;margin-top:24px">
-    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    <div>
-      <div style="font-size:16px;font-weight:600;color:var(--text2);margin-bottom:6px">Visão Geral</div>
-      <div style="font-size:13px;max-width:280px;line-height:1.6">Em breve — este painel será personalizado com os indicadores do sistema.</div>
+  ${podeVerRH&&temRHAlerta?`
+  <!-- SEÇÃO RH -->
+  <div style="margin-bottom:24px">
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      Recursos Humanos — Ações Necessárias
     </div>
-  </div>`;
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">
+
+      ${feriasEscalonadas.length?`
+      <div onclick="pg('rh-ferias')" style="background:var(--bg);border:1.5px solid var(--red-text);border-radius:14px;padding:16px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)'" onmouseout="this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:36px;height:36px;background:var(--red-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">🚨</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--red-text)">Escalonamento de Férias</div>
+            <div style="font-size:11px;color:var(--text3)">${feriasEscalonadas.length} colaborador${feriasEscalonadas.length>1?'es':''} · limite crítico</div>
+          </div>
+        </div>
+        ${feriasEscalonadas.map(p=>`<div style="font-size:12px;padding:6px 8px;background:var(--red-bg);border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between">
+          <span style="color:var(--red-text);font-weight:600">${p.nome}</span>
+          <span style="color:var(--red-text);font-size:11px">${p.diasLimite<=0?'Vencida':p.diasLimite+' dias'}</span>
+        </div>`).join('')}
+      </div>`:``}
+
+      ${feriasVencidas.length?`
+      <div onclick="pg('rh-ferias')" style="background:var(--bg);border:1.5px solid var(--red-text);border-radius:14px;padding:16px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)'" onmouseout="this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:36px;height:36px;background:var(--red-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">⛔</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--red-text)">Férias Vencidas</div>
+            <div style="font-size:11px;color:var(--text3)">${feriasVencidas.length} colaborador${feriasVencidas.length>1?'es':''} · limite ultrapassado</div>
+          </div>
+        </div>
+        ${feriasVencidas.slice(0,4).map(p=>`<div style="font-size:12px;padding:6px 8px;background:var(--red-bg);border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between">
+          <span style="color:var(--red-text);font-weight:600">${p.nome}</span>
+          <span style="color:var(--red-text);font-size:11px">${Math.abs(p.diasLimite)}d vencida</span>
+        </div>`).join('')}
+        ${feriasVencidas.length>4?`<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px">+${feriasVencidas.length-4} outros</div>`:''}
+      </div>`:``}
+
+      ${feriasAguardando.length?`
+      <div onclick="pg('rh-ferias')" style="background:var(--bg);border:1.5px solid var(--amber-text);border-radius:14px;padding:16px;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)'" onmouseout="this.style.boxShadow=''">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:36px;height:36px;background:var(--amber-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">📋</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--amber-text)">Férias para Aprovar</div>
+            <div style="font-size:11px;color:var(--text3)">${feriasAguardando.length} programação${feriasAguardando.length>1?'s':''} aguardando RH</div>
+          </div>
+        </div>
+        ${feriasAguardando.slice(0,4).map(f=>`<div style="font-size:12px;padding:6px 8px;background:var(--amber-bg);border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between">
+          <span style="color:var(--amber-text);font-weight:600">${f.nome}</span>
+          <span style="color:var(--amber-text);font-size:11px">${f.inicio_previsto?new Date(f.inicio_previsto+'T00:00').toLocaleDateString('pt-BR'):''}</span>
+        </div>`).join('')}
+        ${feriasAguardando.length>4?`<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px">+${feriasAguardando.length-4} outros</div>`:''}
+      </div>`:``}
+
+    </div>
+  </div>`:``}
+
+  ${!temRHAlerta&&podeVerRH?`
+  <div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--green-text);display:flex;align-items:center;gap:8px">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    RH em dia — nenhuma ação necessária no momento.
+  </div>`:''}
+  `;
 }
 
 
