@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.106 | Gerado: 2026-05-28 15:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.107 | Gerado: 2026-05-29 09:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -455,6 +455,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span>Horários</span>
         </button>
+        <button class="navitem sub" id="nav-rh-ferias" onclick="pg('rh-ferias')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+          <span>Férias</span>
+        </button>
         <button class="navitem sub" id="nav-rh-avaliacoes" onclick="pg('rh-avaliacoes')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           <span>Avaliações</span>
@@ -689,6 +693,7 @@ const ROLES={admin:'Admin',adm:'ADM',gestor:'Gestor',vendedor:'Vendedor'};
 const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-gestor',vendedor:'role-vendedor'};
 
 let cu=null,tok=null,profile=null,company=null;
+let rhFerias=[];
 let activeUnit=null; // null = consolidado | UUID = unidade específica
 let userUnits=[]; // unidades disponíveis para o usuário logado
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
@@ -738,7 +743,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.106';
+const APP_VERSION='v1.0.107';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1101,6 +1106,8 @@ async function loadData(){
       ]);
       workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
       await loadUserUnits();
+      await loadRHFerias().catch(console.warn);
+      setTimeout(verificarAlertasFerias,2000);
       contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`);
       [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
         dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
@@ -1296,6 +1303,7 @@ function render(){
   else if(curPage==='rh-funcoes')c.innerHTML=rRHFuncoes();
   else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
   else if(curPage==='rh-avaliacoes'){c.innerHTML=rRHAvaliacoes();}
+  else if(curPage==='rh-ferias'){c.innerHTML=rRHFerias();loadRHFerias();}
   else if(curPage==='rh-performance'){c.innerHTML=rRHPerformance();}
   else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
@@ -6006,6 +6014,312 @@ async function toggleUserUnit(userId, unitId, checked){
     // Reverte checkbox
     const cb=ge(`uu-${userId}-${unitId}`);
     if(cb) cb.checked=!checked;
+  }
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+// RH — FÉRIAS
+// ══════════════════════════════════════════════════════════════════════
+
+const STATUS_FERIAS = {
+  pendente:   {label:'Pendente',   cor:'var(--amber-bg)',  txt:'var(--amber-text)'},
+  programado: {label:'Programado', cor:'var(--blue-bg)',   txt:'var(--blue-text)'},
+  aprovado:   {label:'Aprovado',   cor:'var(--green-bg)',  txt:'var(--green-text)'},
+  gozando:    {label:'Gozando',    cor:'var(--accent)',    txt:'var(--accent-text)'},
+  concluido:  {label:'Concluído',  cor:'var(--bg2)',       txt:'var(--text2)'},
+  cancelado:  {label:'Cancelado',  cor:'var(--red-bg)',    txt:'var(--red-text)'},
+};
+
+function rRHFerias(){
+  const cid = company?.id;
+  const hoje = new Date();
+
+  // Calcular alertas
+  const alertas = [];
+  pessoas.filter(p=>p.data_admissao&&p.tipo_pessoa==='funcionario').forEach(p=>{
+    const adm = new Date(p.data_admissao+'T00:00:00');
+    // Calcular período aquisitivo atual
+    let periodoInicio = new Date(adm);
+    while(true){
+      const proximoAno = new Date(periodoInicio);
+      proximoAno.setFullYear(proximoAno.getFullYear()+1);
+      if(proximoAno > hoje) break;
+      periodoInicio = proximoAno;
+    }
+    const periodoFim = new Date(periodoInicio);
+    periodoFim.setFullYear(periodoFim.getFullYear()+1);
+    const dataLimite = new Date(periodoFim);
+    dataLimite.setMonth(dataLimite.getMonth()+11);
+    const diasParaLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
+    // Verifica se já tem férias programadas neste período
+    const feriasPeriodo = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
+    if(feriasPeriodo.length===0&&diasParaLimite<60&&diasParaLimite>=0){
+      alertas.push({pessoa:p, diasParaLimite, dataLimite});
+    }
+  });
+
+  // Grid de colaboradores
+  const pessoasAtivas = pessoas.filter(p=>p.tipo_pessoa==='funcionario'&&p.ativo!==false&&p.data_admissao);
+
+  const rows = pessoasAtivas.map(p=>{
+    const adm = new Date(p.data_admissao+'T00:00:00');
+    let periodoInicio = new Date(adm);
+    while(true){
+      const prox = new Date(periodoInicio);
+      prox.setFullYear(prox.getFullYear()+1);
+      if(prox>hoje) break;
+      periodoInicio = prox;
+    }
+    const periodoFim = new Date(periodoInicio); periodoFim.setFullYear(periodoFim.getFullYear()+1);
+    const dataLimite = new Date(periodoFim); dataLimite.setMonth(dataLimite.getMonth()+11);
+    const diasLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
+    const feriasPessoa = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
+    const st = feriasPessoa[0]?.status||'pendente';
+    const stInfo = STATUS_FERIAS[st]||STATUS_FERIAS.pendente;
+    const alertaCor = diasLimite<=10?'var(--red-text)':diasLimite<=30?'var(--amber-text)':diasLimite<=60?'var(--amber-text)':'var(--text3)';
+    const inicioPrevisto = feriasPessoa[0]?.inicio_previsto?new Date(feriasPessoa[0].inicio_previsto+'T00:00:00').toLocaleDateString('pt-BR'):'—';
+    const diasPrevistos = feriasPessoa[0]?.dias_previstos||'—';
+    return `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openFeriasModal('${p.id}')">
+      <td style="padding:10px 12px">
+        <div style="font-weight:600;font-size:13px">${p.nome}</div>
+        <div style="font-size:11px;color:var(--text3)">${p.departamento||'—'} · ${p.cargo||'—'}</div>
+      </td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${fmtDt(p.data_admissao)}</td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${periodoInicio.toLocaleDateString('pt-BR')} → ${periodoFim.toLocaleDateString('pt-BR')}</td>
+      <td style="padding:10px 12px;font-size:12px;color:${alertaCor};font-weight:${diasLimite<=30?'600':'400'}">${dataLimite.toLocaleDateString('pt-BR')}${diasLimite<=30?` <span style="font-size:10px">(${diasLimite}d)</span>`:''}</td>
+      <td style="padding:10px 12px">
+        <span style="background:${stInfo.cor};color:${stInfo.txt};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">${stInfo.label}</span>
+      </td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${inicioPrevisto}</td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${diasPrevistos}</td>
+      <td style="padding:10px 12px;text-align:right">
+        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openFeriasModal('${p.id}')">Programar</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const alertasHtml = alertas.length>0?`
+    <div style="background:var(--amber-bg);border:1px solid var(--amber-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--amber-text);margin-bottom:8px">⚠ ${alertas.length} colaborador(es) sem férias programadas próximas do vencimento</div>
+      ${alertas.map(a=>`<div style="font-size:12px;color:var(--amber-text);margin-bottom:4px">
+        · <strong>${a.pessoa.nome}</strong> — limite em ${a.dataLimite.toLocaleDateString('pt-BR')} <span style="font-size:11px">(${a.diasParaLimite} dias)</span>
+      </div>`).join('')}
+    </div>`:
+    `<div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--green-text)">
+      ✅ Nenhuma pendência crítica de férias no momento.
+    </div>`;
+
+  return`<div>
+    ${alertasHtml}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:600">${pessoasAtivas.length} colaboradores</div>
+      <button class="btn btn-primary" onclick="openFeriasModal()">+ Programar Férias</button>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:800px">
+        <thead>
+          <tr style="background:var(--bg2)">
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Colaborador</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Admissão</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Período Aquisitivo</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Data Limite</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Status</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Início Previsto</th>
+            <th style="text-align:left;padding:10px 12px;font-size:12px;font-weight:600">Dias</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows||'<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text3)">Nenhum funcionário cadastrado</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+async function loadRHFerias(){
+  if(!company?.id) return;
+  try{
+    rhFerias = await dbSelect('rh_ferias',`company_id=eq.${company.id}&order=data_limite.asc`) || [];
+    // Re-renderiza se estiver na página
+    if(curPage==='rh-ferias'){
+      const c=ge('content');
+      if(c) c.innerHTML=rRHFerias();
+    }
+  }catch(e){ console.warn('loadRHFerias:',e); rhFerias=[]; }
+}
+
+function openFeriasModal(pessoaId){
+  const p = pessoaId ? pessoas.find(x=>x.id===pessoaId) : null;
+  const ferias = pessoaId ? rhFerias.filter(f=>f.pessoa_id===pessoaId&&f.status!=='cancelado'&&f.status!=='concluido') : [];
+  const f = ferias[0] || null;
+
+  // Calcular período aquisitivo
+  let periodoInicioStr='', periodoFimStr='', dataLimiteStr='', diasRestantes=null;
+  if(p?.data_admissao){
+    const adm = new Date(p.data_admissao+'T00:00:00');
+    const hoje = new Date();
+    let pi = new Date(adm);
+    while(true){ const prox=new Date(pi); prox.setFullYear(prox.getFullYear()+1); if(prox>hoje)break; pi=prox; }
+    const pf=new Date(pi); pf.setFullYear(pf.getFullYear()+1);
+    const dl=new Date(pf); dl.setMonth(dl.getMonth()+11);
+    diasRestantes=Math.floor((dl-hoje)/(1000*60*60*24));
+    periodoInicioStr=pi.toLocaleDateString('pt-BR');
+    periodoFimStr=pf.toLocaleDateString('pt-BR');
+    dataLimiteStr=dl.toLocaleDateString('pt-BR');
+  }
+
+  const old=ge('modal-ferias');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='modal-ferias';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
+  modal.innerHTML=`
+    <div style="background:var(--bg);border-radius:14px;padding:24px;width:520px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.22)">
+      <div style="font-size:15px;font-weight:700;margin-bottom:4px">Programação de Férias</div>
+      ${p?`<div style="font-size:13px;color:var(--text2);margin-bottom:16px">${p.nome} · ${p.departamento||''}</div>`:''}
+
+      ${p&&periodoInicioStr?`
+      <div style="background:var(--bg2);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12px">
+        <div><div style="color:var(--text3);margin-bottom:2px">Período aquisitivo</div><div style="font-weight:600">${periodoInicioStr} → ${periodoFimStr}</div></div>
+        <div><div style="color:var(--text3);margin-bottom:2px">Data limite</div><div style="font-weight:600;color:${diasRestantes<=30?'var(--red-text)':diasRestantes<=60?'var(--amber-text)':'var(--text)'}">${dataLimiteStr}</div></div>
+        <div><div style="color:var(--text3);margin-bottom:2px">Dias restantes</div><div style="font-weight:600;color:${diasRestantes<=30?'var(--red-text)':diasRestantes<=60?'var(--amber-text)':'var(--text)'}">${diasRestantes} dias</div></div>
+      </div>`:''}
+
+      ${!p?`<div class="fg"><label class="fl">Colaborador</label>
+        <select class="fi" id="ferias-pessoa-id">
+          <option value="">Selecione...</option>
+          ${pessoas.filter(x=>x.tipo_pessoa==='funcionario'&&x.ativo!==false).map(x=>`<option value="${x.id}">${x.nome}</option>`).join('')}
+        </select>
+      </div>`:`<input type="hidden" id="ferias-pessoa-id" value="${p.id}">`}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label class="fl">Início previsto *</label>
+          <input class="fi" id="ferias-inicio" type="date" value="${f?.inicio_previsto||''}">
+        </div>
+        <div class="fg"><label class="fl">Dias efetivos *</label>
+          <input class="fi" id="ferias-dias" type="number" min="5" max="30" value="${f?.dias_previstos||30}" placeholder="30">
+        </div>
+        <div class="fg"><label class="fl">Abono pecuniário (dias a vender)</label>
+          <input class="fi" id="ferias-abono" type="number" min="0" max="10" value="${f?.abono_pecuniario||0}" placeholder="0">
+        </div>
+        <div class="fg"><label class="fl">Parcela</label>
+          <select class="fi" id="ferias-parcela">
+            <option value="1" ${(!f||f.parcela===1)?'selected':''}>1ª parcela</option>
+            <option value="2" ${f?.parcela===2?'selected':''}>2ª parcela</option>
+            <option value="3" ${f?.parcela===3?'selected':''}>3ª parcela</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label class="fl">Observações</label>
+        <input class="fi" id="ferias-obs" value="${f?.observacoes||''}" placeholder="Informações adicionais...">
+      </div>
+      <div id="ferias-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" style="flex:1" onclick="ge('modal-ferias').remove()">Cancelar</button>
+        ${f?`<button class="btn" style="background:var(--red-bg);color:var(--red-text)" onclick="cancelarFerias('${f.id}')">Cancelar férias</button>`:''}
+        <button class="btn btn-primary" style="flex:1" onclick="salvarFerias('${f?.id||''}')">
+          ${f?'Atualizar':'Programar'}
+        </button>
+      </div>
+    </div>`;
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+}
+
+async function salvarFerias(feriasId){
+  const pessoaId=ge('ferias-pessoa-id')?.value;
+  const inicio=ge('ferias-inicio')?.value;
+  const dias=parseInt(ge('ferias-dias')?.value||'0');
+  const abono=parseInt(ge('ferias-abono')?.value||'0');
+  const parcela=parseInt(ge('ferias-parcela')?.value||'1');
+  const obs=ge('ferias-obs')?.value||'';
+  const errEl=ge('ferias-err');
+
+  if(!pessoaId){if(errEl){errEl.style.display='block';errEl.textContent='Selecione o colaborador.';}return;}
+  if(!inicio){if(errEl){errEl.style.display='block';errEl.textContent='Informe a data de início.';}return;}
+  if(!dias||dias<5){if(errEl){errEl.style.display='block';errEl.textContent='Mínimo de 5 dias.';}return;}
+  if(abono>10){if(errEl){errEl.style.display='block';errEl.textContent='Máximo de 10 dias de abono.';}return;}
+  if(errEl) errEl.style.display='none';
+
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const adm=new Date((p?.data_admissao||'')+'T00:00:00');
+  const hoje=new Date();
+  let pi=new Date(adm);
+  while(true){const prox=new Date(pi);prox.setFullYear(prox.getFullYear()+1);if(prox>hoje)break;pi=prox;}
+  const pf=new Date(pi);pf.setFullYear(pf.getFullYear()+1);
+  const dl=new Date(pf);dl.setMonth(dl.getMonth()+11);
+
+  const obj={
+    company_id:company.id,
+    unit_id:p?.unit_id||null,
+    pessoa_id:pessoaId,
+    periodo_inicio:pi.toISOString().split('T')[0],
+    periodo_fim:pf.toISOString().split('T')[0],
+    data_limite:dl.toISOString().split('T')[0],
+    dias_direito:30,
+    parcela,
+    inicio_previsto:inicio,
+    dias_previstos:dias,
+    abono_pecuniario:abono,
+    status:'programado',
+    observacoes:obs,
+    owner_id:cu.id,
+  };
+
+  try{
+    if(feriasId){
+      await dbUpdate('rh_ferias',feriasId,obj);
+      rhFerias=rhFerias.map(f=>f.id===feriasId?{...f,...obj}:f);
+    } else {
+      const nova=await dbInsert('rh_ferias',obj);
+      if(nova) rhFerias=[...rhFerias,nova];
+    }
+    ge('modal-ferias')?.remove();
+    if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+  }catch(e){
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro ao salvar: '+e.message;}
+  }
+}
+
+async function cancelarFerias(feriasId){
+  if(!confirm('Cancelar a programação de férias?'))return;
+  try{
+    await dbUpdate('rh_ferias',feriasId,{status:'cancelado'});
+    rhFerias=rhFerias.map(f=>f.id===feriasId?{...f,status:'cancelado'}:f);
+    ge('modal-ferias')?.remove();
+    if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+// Verificação de alertas — chamada periodicamente
+async function verificarAlertasFerias(){
+  if(!company?.id||!pessoas?.length) return;
+  const hoje=new Date();
+  const alertas=[];
+
+  pessoas.filter(p=>p.tipo_pessoa==='funcionario'&&p.ativo!==false&&p.data_admissao).forEach(p=>{
+    const adm=new Date(p.data_admissao+'T00:00:00');
+    let pi=new Date(adm);
+    while(true){const prox=new Date(pi);prox.setFullYear(prox.getFullYear()+1);if(prox>hoje)break;pi=prox;}
+    const pf=new Date(pi);pf.setFullYear(pf.getFullYear()+1);
+    const dl=new Date(pf);dl.setMonth(dl.getMonth()+11);
+    const diasLimite=Math.floor((dl-hoje)/(1000*60*60*24));
+    const temProgramado=rhFerias.some(f=>f.pessoa_id===p.id&&!['cancelado','concluido'].includes(f.status));
+    if(!temProgramado&&diasLimite>=0&&diasLimite<=60){
+      alertas.push({nome:p.nome,dias:diasLimite,limite:dl.toLocaleDateString('pt-BR'),escalar:diasLimite<=10});
+    }
+  });
+
+  if(alertas.length>0){
+    // Exibir badge no nav de férias
+    const nav=ge('nav-rh-ferias');
+    if(nav&&!nav.querySelector('.badge-alerta')){
+      const badge=document.createElement('span');
+      badge.className='badge-alerta';
+      badge.style.cssText='background:var(--red-text);color:#fff;border-radius:99px;font-size:10px;padding:1px 5px;margin-left:4px';
+      badge.textContent=alertas.length;
+      nav.appendChild(badge);
+    }
   }
 }
 
