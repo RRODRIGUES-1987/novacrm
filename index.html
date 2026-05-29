@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.121 | Gerado: 2026-05-29 23:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.122 | Gerado: 2026-05-29 24:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -393,6 +393,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           <span>Dashboard</span>
         </button>
+        <button class="navitem sub" id="nav-fat-programacao" onclick="pg('fat-programacao')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M8 18h.01M12 18h.01"/></svg>
+          <span>Programação</span>
+        </button>
         <button class="navitem sub" id="nav-faturamento" onclick="pg('faturamento')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span>Faturamento</span>
@@ -694,6 +698,8 @@ const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-gestor',vendedo
 
 let cu=null,tok=null,profile=null,company=null;
 let rhFerias=[];
+let fatProgramacao=[];
+let gruposClientes=[];
 let activeUnit=null; // null = consolidado | UUID = unidade específica
 let userUnits=[]; // unidades disponíveis para o usuário logado
 let selectedCompanyId=null,pendingUser=null,allCompanies=[];
@@ -743,7 +749,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.121';
+const APP_VERSION='v1.0.122';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1116,6 +1122,10 @@ async function loadData(){
       await loadUserUnits();
       await loadRHFerias().catch(console.warn);
       setTimeout(verificarAlertasFerias,2000);
+      [fatProgramacao, gruposClientes] = await Promise.all([
+        dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
+        dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]),
+      ]);
       contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`);
       [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
         dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
@@ -1237,7 +1247,7 @@ const MODULE_MAP={
   'crm-dashboard':'crm', contatos:'crm', pipeline:'crm', tarefas:'crm', performance:'crm', representantes:'crm', propostas:'crm', 'aprovar-propostas':'crm', 'tarifario-padrao':'crm',
   'tarefas-gestao':'gestao', atas:'gestao', 'plano-acao':'gestao',
   'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh', 'rh-ferias':'rh', 'rh-avaliacoes':'rh', 'rh-performance':'rh',
-  faturamento:'financeiro',
+  faturamento:'financeiro', 'fat-programacao':'financeiro',
     'financeiro-dashboard':'financeiro',
   admin:'admin-sub',
   'tabelas-tarifarias':'financeiro',
@@ -3526,7 +3536,7 @@ async function confirmarEnvioEmail(id){
     </body></html>`;
 
     // Dados estruturados para a Edge Function gerar o PDF com pdf-lib
-    const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado'};
+    const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado','zerada':'Zerada'};
     const pdf_dados={
       empresa_nome:company?.name||'MK LOGÍSTICA LTDA.',
       numero:f.numero_fatura||'—',
@@ -4445,6 +4455,182 @@ function rDashFinanceiro(faturamento, contasReceber, role){
   }
   html += '</div>';
   return html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FATURAMENTO PROGRAMADO — Configuração
+// ══════════════════════════════════════════════════════════════════
+function rFatProgramacao(){
+  const isAdmin = ['admin','adm','gestor'].includes(profile?.role||'');
+  const fatProg = company?.fat_programado;
+
+  let html = '';
+
+  // Banner se desativado
+  if(!fatProg){
+    html += '<div style="background:var(--amber-bg);border:1px solid var(--amber-text);border-radius:12px;padding:14px 16px;margin-bottom:20px;font-size:13px;color:var(--amber-text);display:flex;align-items:center;gap:10px">';
+    html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    html += 'Faturamento programado desativado para esta empresa. Ative em Admin → Empresa.</div>';
+  }
+
+  // Cabeçalho
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+  html += '<div><div style="font-size:15px;font-weight:700">Programação de Faturamento</div>';
+  html += '<div style="font-size:12px;color:var(--text3);margin-top:2px">Configure as faturas geradas automaticamente por período</div></div>';
+  if(isAdmin) html += '<button class="btn btn-primary" onclick="openFatProgModal()">+ Nova programação</button>';
+  html += '</div>';
+
+  // Agrupar por grupo/cliente
+  const semGrupo = fatProgramacao.filter(p=>!p.grupo_id);
+  const comGrupo = {};
+  fatProgramacao.filter(p=>p.grupo_id).forEach(p=>{
+    if(!comGrupo[p.grupo_id]) comGrupo[p.grupo_id]=[];
+    comGrupo[p.grupo_id].push(p);
+  });
+
+  // Renderizar grupos
+  gruposClientes.forEach(g=>{
+    const linhas = comGrupo[g.id]||[];
+    if(!linhas.length) return;
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden">';
+    html += '<div style="background:var(--bg2);padding:10px 14px;display:flex;align-items:center;justify-content:space-between">';
+    html += '<div style="font-size:13px;font-weight:700">'+g.nome+'</div>';
+    html += '<div style="font-size:11px;color:var(--text3)">'+linhas.length+' linha'+(linhas.length>1?'s':'')+' de faturamento</div></div>';
+    html += '<table style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr style="background:var(--bg2)">';
+    ['CNPJ','Responsável','Periodicidade','Rateio','Status',''].forEach(function(h){
+      html += '<th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:var(--text3)">'+h+'</th>';
+    });
+    html += '</tr></thead><tbody>';
+    linhas.forEach(function(p,i){
+      const cli = clientes.find(c=>c.id===p.cliente_id);
+      const cnpj = cli?.cpf_cnpj||'—';
+      const per = p.periodicidade==='quinzenal'?'Quinzenal':'Mensal';
+      const rat = p.fat_minimo_rateio==='unico'?'1 Tipo Op.':p.fat_minimo_rateio==='igualitario'?'Igualitário':'Proporcional';
+      const bg = i%2===0?'':'background:var(--bg2)';
+      html += '<tr style="border-top:1px solid var(--border);'+bg+'">';
+      html += '<td style="padding:9px 12px;font-size:12px;font-family:monospace">'+cnpj+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px">'+( p.responsavel||'—')+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px">'+per+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px">'+rat+'</td>';
+      html += '<td style="padding:9px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+(p.ativo?'var(--green-bg)':'var(--red-bg)')+';color:'+(p.ativo?'var(--green-text)':'var(--red-text)')+';">'+(p.ativo?'Ativa':'Inativa')+'</span></td>';
+      html += '<td style="padding:9px 12px;text-align:right">';
+      if(isAdmin){ const _pid=p.id; html += '<button class="btn btn-sm" onclick="openFatProgModal(\'' +_pid+ '\')">Editar</button>'; }
+      html += '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  });
+
+  // Sem grupo
+  if(semGrupo.length){
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden">';
+    html += '<div style="background:var(--bg2);padding:10px 14px;font-size:13px;font-weight:700">Clientes individuais</div>';
+    html += '<table style="width:100%;border-collapse:collapse"><tbody>';
+    semGrupo.forEach(function(p,i){
+      const cli = clientes.find(c=>c.id===p.cliente_id);
+      const bg = i%2===0?'':'background:var(--bg2)';
+      html += '<tr style="border-top:1px solid var(--border);'+bg+'">';
+      html += '<td style="padding:9px 12px;font-size:13px;font-weight:600">'+(cli?.nome||'—')+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px;font-family:monospace">'+(cli?.cpf_cnpj||'—')+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px">'+(p.responsavel||'—')+'</td>';
+      html += '<td style="padding:9px 12px;font-size:12px">'+(p.periodicidade==='quinzenal'?'Quinzenal':'Mensal')+'</td>';
+      html += '<td style="padding:9px 12px;text-align:right">';
+      if(isAdmin){ const _pid=p.id; html += '<button class="btn btn-sm" onclick="openFatProgModal(\'' +_pid+ '\')">Editar</button>'; }
+      html += '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  if(!fatProgramacao.length){
+    html += '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">Nenhuma programação cadastrada ainda.</div>';
+  }
+
+  return html;
+}
+
+function openFatProgModal(id){
+  const p = id ? fatProgramacao.find(function(x){return x.id===id;}) : null;
+  const old = ge('modal-fat-prog');
+  if(old) old.remove();
+
+  const cliOpts = clientes.filter(function(c){return c.company_id===company?.id;})
+    .map(function(c){return '<option value="'+c.id+'"'+(p&&p.cliente_id===c.id?' selected':'')+'>'+c.nome+' ('+(c.cpf_cnpj||'s/CNPJ')+')</option>';}).join('');
+  const grpOpts = '<option value="">Sem grupo</option>'+gruposClientes
+    .map(function(g){return '<option value="'+g.id+'"'+(p&&p.grupo_id===g.id?' selected':'')+'>'+g.nome+'</option>';}).join('');
+  const tabOpts = '<option value="">Selecione...</option>'+tabelasTarifarias.filter(function(t){return t.company_id===company?.id;})
+    .map(function(t){return '<option value="'+t.id+'"'+(p&&p.tabela_id===t.id?' selected':'')+'>'+t.nome+'</option>';}).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-fat-prog';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
+
+  const inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);border-radius:14px;padding:24px;width:480px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.22)';
+  inner.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:20px">'+(p?'Editar':'Nova')+' Programação</div>'
+    +'<div class="fg"><label class="fl">Cliente *</label><select class="fi" id="fp-cliente">'+cliOpts+'</select></div>'
+    +'<div class="fg"><label class="fl">Grupo</label><select class="fi" id="fp-grupo">'+grpOpts+'</select></div>'
+    +'<div class="fg"><label class="fl">Responsável / Tipo de operação</label><input class="fi" id="fp-responsavel" value="'+(p&&p.responsavel?p.responsavel:'')+'" placeholder="Ex: Armazenagem, Distribuição..."></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div class="fg"><label class="fl">Periodicidade</label><select class="fi" id="fp-periodicidade">'
+    +'<option value="mensal"'+((!p||p.periodicidade==='mensal')?' selected':'')+'>Mensal</option>'
+    +'<option value="quinzenal"'+(p&&p.periodicidade==='quinzenal'?' selected':'')+'>Quinzenal</option>'
+    +'</select></div>'
+    +'<div class="fg"><label class="fl">Rateio do mínimo</label><select class="fi" id="fp-rateio">'
+    +'<option value="proporcional"'+((!p||p.fat_minimo_rateio==='proporcional')?' selected':'')+'>Proporcional</option>'
+    +'<option value="igualitario"'+(p&&p.fat_minimo_rateio==='igualitario'?' selected':'')+'>Igualitário</option>'
+    +'<option value="unico"'+(p&&p.fat_minimo_rateio==='unico'?' selected':'')+'>1 Tipo de Op.</option>'
+    +'</select></div></div>'
+    +'<div class="fg"><label class="fl">Tabela tarifária</label><select class="fi" id="fp-tabela">'+tabOpts+'</select></div>'
+    +'<div class="fg" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg2);border-radius:var(--radius)">'
+    +'<input type="checkbox" id="fp-ativo"'+((!p||p.ativo!==false)?' checked':'')+' style="width:16px;height:16px">'
+    +'<label for="fp-ativo" style="font-size:13px;font-weight:500;cursor:pointer">Programação ativa</label></div>'
+    +'<div id="fp-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin:8px 0"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:16px">'
+    +'<button class="btn" style="flex:1" id="fp-btn-cancelar">Cancelar</button>'
+    +'<button class="btn btn-primary" style="flex:1" id="fp-btn-salvar">Salvar</button>'
+    +'</div>';
+
+  modal.appendChild(inner);
+  modal.addEventListener('click',function(e){if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+
+  ge('fp-btn-cancelar').addEventListener('click',function(){modal.remove();});
+  ge('fp-btn-salvar').addEventListener('click',function(){salvarFatProg(id||'');});
+}
+
+async function salvarFatProg(id){
+  const cliente_id    = document.getElementById('fp-cliente')?.value;
+  const grupo_id      = document.getElementById('fp-grupo')?.value||null;
+  const responsavel   = document.getElementById('fp-responsavel')?.value.trim()||null;
+  const periodicidade = document.getElementById('fp-periodicidade')?.value;
+  const rateio        = document.getElementById('fp-rateio')?.value;
+  const tabela_id     = document.getElementById('fp-tabela')?.value||null;
+  const ativo         = document.getElementById('fp-ativo')?.checked!==false;
+  const errEl         = document.getElementById('fp-err');
+
+  if(!cliente_id){if(errEl){errEl.style.display='block';errEl.textContent='Selecione o cliente.';}return;}
+  if(errEl) errEl.style.display='none';
+
+  const obj = {
+    company_id:company.id, unit_id:company.unit_id||null,
+    cliente_id, grupo_id, responsavel, periodicidade,
+    fat_minimo_rateio:rateio, tabela_id, ativo,
+    ordem: id ? fatProgramacao.find(x=>x.id===id)?.ordem||0 : fatProgramacao.length,
+  };
+
+  try{
+    if(id){
+      await dbUpdate('fat_programacao',id,obj);
+      fatProgramacao = fatProgramacao.map(x=>x.id===id?{...x,...obj}:x);
+    } else {
+      const nova = await dbInsert('fat_programacao',obj);
+      if(nova) fatProgramacao = [...fatProgramacao, nova];
+    }
+    document.getElementById('modal-fat-prog')?.remove();
+    if(curPage==='fat-programacao'){const c=document.getElementById('content');if(c)c.innerHTML=rFatProgramacao();}
+  }catch(e){
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+e.message;}
+  }
 }
 
 // ── RENDER DASHBOARD CRM ──
