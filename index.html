@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.123 | Gerado: 2026-05-30 09:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.124 | Gerado: 2026-05-30 10:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -749,7 +749,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.123';
+const APP_VERSION='v1.0.124';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4478,7 +4478,12 @@ function rFatProgramacao(){
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
   html += '<div><div style="font-size:15px;font-weight:700">Programação de Faturamento</div>';
   html += '<div style="font-size:12px;color:var(--text3);margin-top:2px">Configure as faturas geradas automaticamente por período</div></div>';
-  if(isAdmin) html += '<button class="btn btn-primary" onclick="openFatProgModal()">+ Nova programação</button>';
+  if(isAdmin){
+    html += '<div style="display:flex;gap:8px">';
+    html += '<button class="btn" onclick="gerarSugestoesProg()">✨ Gerar sugestões</button>';
+    html += '<button class="btn btn-primary" onclick="openFatProgModal()">+ Nova programação</button>';
+    html += '</div>';
+  }
   html += '</div>';
 
   // Agrupar por grupo/cliente
@@ -4547,6 +4552,155 @@ function rFatProgramacao(){
   }
 
   return html;
+}
+
+function gerarSugestoesProg(){
+  // Lê tabelas tarifárias e gera sugestões de programação
+  const sugestoes = [];
+  const jaExiste = function(clienteId, tabelaId){
+    return fatProgramacao.some(function(p){ return p.cliente_id===clienteId && p.tabela_id===tabelaId; });
+  };
+
+  tabelasTarifarias.filter(function(t){ return t.company_id===company?.id && t.ativo!==false; }).forEach(function(t){
+    if(!t.cliente_id) return; // sem cliente vinculado
+    if(jaExiste(t.cliente_id, t.id)) return; // já tem programação
+
+    const cli = clientes.find(function(c){ return c.id===t.cliente_id; });
+    if(!cli) return;
+
+    const per = (t.cond_faturamento||'').toLowerCase().includes('quinzenal') ? 'quinzenal' : 'mensal';
+    const grp = cli.grupo_id || null;
+    const grpNome = grp ? (gruposClientes.find(function(g){ return g.id===grp; })?.nome||'') : '';
+
+    sugestoes.push({
+      cliente_id: t.cliente_id,
+      cliente_nome: cli.nome,
+      cpf_cnpj: cli.cpf_cnpj||'',
+      grupo_id: grp,
+      grupo_nome: grpNome,
+      tabela_id: t.id,
+      tabela_nome: t.nome,
+      periodicidade: per,
+      fat_minimo_rateio: 'proporcional',
+      responsavel: '',
+      ativo: true,
+    });
+  });
+
+  if(!sugestoes.length){
+    alert('Nenhuma sugestão disponível — todas as tabelas já têm programação ou estão sem cliente vinculado.');
+    return;
+  }
+
+  // Exibir modal de sugestões
+  const old = ge('modal-sugestoes-prog');
+  if(old) old.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-sugestoes-prog';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
+
+  let rows = '';
+  sugestoes.forEach(function(s, i){
+    const perOpts = '<option value="mensal"'+(s.periodicidade==='mensal'?' selected':'')+'>Mensal</option>'
+      +'<option value="quinzenal"'+(s.periodicidade==='quinzenal'?' selected':'')+'>Quinzenal</option>';
+    const ratOpts = '<option value="proporcional" selected>Proporcional</option>'
+      +'<option value="igualitario">Igualitário</option>'
+      +'<option value="unico">1 Tipo de Op.</option>';
+
+    rows += '<tr style="border-top:1px solid var(--border)">'
+      +'<td style="padding:8px 10px">'
+      +'<input type="checkbox" id="sg-chk-'+i+'" checked style="width:15px;height:15px">'
+      +'</td>'
+      +'<td style="padding:8px 10px">'
+      +'<div style="font-size:12px;font-weight:600">'+s.cliente_nome+'</div>'
+      +'<div style="font-size:11px;color:var(--text3);font-family:monospace">'+s.cpf_cnpj+'</div>'
+      +(s.grupo_nome?'<div style="font-size:10px;color:var(--accent);margin-top:2px">Grupo: '+s.grupo_nome+'</div>':'')
+      +'</td>'
+      +'<td style="padding:8px 10px;font-size:11px;color:var(--text2)">'+s.tabela_nome+'</td>'
+      +'<td style="padding:8px 6px">'
+      +'<input class="fi" id="sg-resp-'+i+'" value="'+s.responsavel+'" placeholder="Tipo de operação" style="font-size:11px;padding:4px 8px">'
+      +'</td>'
+      +'<td style="padding:8px 6px">'
+      +'<select class="fi" id="sg-per-'+i+'" style="font-size:11px;padding:4px 8px">'+perOpts+'</select>'
+      +'</td>'
+      +'<td style="padding:8px 6px">'
+      +'<select class="fi" id="sg-rat-'+i+'" style="font-size:11px;padding:4px 8px">'+ratOpts+'</select>'
+      +'</td>'
+      +'</tr>';
+  });
+
+  const inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);border-radius:14px;padding:24px;width:900px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.22)';
+  inner.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:4px">Sugestões de Programação</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:16px">'+sugestoes.length+' tabela'+(sugestoes.length>1?'s':'')+' sem programação. Ajuste e confirme as que deseja ativar.</div>'
+    +'<div style="overflow-y:auto;flex:1;border:1px solid var(--border);border-radius:10px">'
+    +'<table style="width:100%;border-collapse:collapse">'
+    +'<thead><tr style="background:var(--bg2)">'
+    +'<th style="padding:8px 10px;width:30px"><input type="checkbox" id="sg-chk-all" checked style="width:15px;height:15px"></th>'
+    +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:600">Cliente</th>'
+    +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:600">Tabela</th>'
+    +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:600">Responsável</th>'
+    +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:600">Periodicidade</th>'
+    +'<th style="padding:8px 10px;text-align:left;font-size:11px;font-weight:600">Rateio</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table></div>'
+    +'<div id="sg-prog" style="display:none;font-size:12px;color:var(--text3);margin-top:10px;text-align:center">Salvando...</div>'
+    +'<div style="display:flex;gap:8px;margin-top:16px">'
+    +'<button class="btn" style="flex:1" id="sg-btn-cancelar">Cancelar</button>'
+    +'<button class="btn btn-primary" style="flex:2" id="sg-btn-confirmar">Confirmar selecionadas</button>'
+    +'</div>';
+
+  modal.appendChild(inner);
+  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  ge('sg-btn-cancelar').addEventListener('click', function(){ modal.remove(); });
+  const chkAll = ge('sg-chk-all');
+  if(chkAll) chkAll.addEventListener('change', function(){
+    document.querySelectorAll('[id^="sg-chk-"]').forEach(function(c){ if(c.id!=='sg-chk-all') c.checked=chkAll.checked; });
+  });
+  ge('sg-btn-confirmar').addEventListener('click', async function(){
+    const btn = ge('sg-btn-confirmar');
+    const prog = ge('sg-prog');
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+    if(prog) prog.style.display = 'block';
+
+    let salvos = 0;
+    for(let i=0; i<sugestoes.length; i++){
+      const chk = ge('sg-chk-'+i);
+      if(!chk || !chk.checked) continue;
+      const s = sugestoes[i];
+      const obj = {
+        company_id: company.id,
+        unit_id: null,
+        cliente_id: s.cliente_id,
+        grupo_id: s.grupo_id,
+        tabela_id: s.tabela_id,
+        responsavel: ge('sg-resp-'+i)?.value.trim()||null,
+        periodicidade: ge('sg-per-'+i)?.value||'mensal',
+        fat_minimo_rateio: ge('sg-rat-'+i)?.value||'proporcional',
+        ativo: true,
+        ordem: fatProgramacao.length + salvos,
+      };
+      try{
+        const nova = await dbInsert('fat_programacao', obj);
+        if(nova){ fatProgramacao.push(nova); salvos++; }
+      }catch(e){ console.warn('Erro ao salvar sugestão:', e); }
+    }
+
+    modal.remove();
+    if(curPage==='fat-programacao'){
+      const c = ge('content');
+      if(c) c.innerHTML = rFatProgramacao();
+    }
+    if(salvos) alert(salvos+' programação'+(salvos>1?'s':'')+' criada'+(salvos>1?'s':'')+' com sucesso!');
+  });
+
+  // Setar sugestoes no escopo do modal para o onchange do select-all
+  window._sg_sugestoes = sugestoes;
 }
 
 function openFatProgModal(id){
