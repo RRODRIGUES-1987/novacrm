@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.125 | Gerado: 2026-05-30 11:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.126 | Gerado: 2026-05-30 12:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -749,7 +749,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.125';
+const APP_VERSION='v1.0.126';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3089,6 +3089,12 @@ async function openFaturaEditor(id=null){
       </div>
       <div id="fat-cliente-info" style="display:none;margin-top:10px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label class="fl">Tipo de documento</label>
+            <select class="fi" id="fat-tipo-doc">
+              <option value="fatura">Fatura</option>
+              <option value="nota_debito">Nota de Débito</option>
+            </select>
+          </div>
           <div class="fg"><label class="fl">Tipo de operação</label>
             <select class="fi" id="fat-tipo-op" onchange="onFatTipoChange(this.value)">
               <option value="">Selecione</option>
@@ -3538,6 +3544,7 @@ async function confirmarEnvioEmail(id){
 
     // Dados estruturados para a Edge Function gerar o PDF com pdf-lib
     const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado','zerada':'Zerada'};
+const FAT_TIPOS={'fatura':'Fatura','nota_debito':'Nota de Débito'};
     const pdf_dados={
       empresa_nome:company?.name||'MK LOGÍSTICA LTDA.',
       numero:f.numero_fatura||'—',
@@ -3752,20 +3759,32 @@ function calcLinhaFatura(idx){
   if(!l)return;
   const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
   const precoStr=String(l.preco_unitario).replace('%','').trim();
-  const preco=parseFloat(precoStr.replace(/\./g,'').replace(',','.'))||0;
+  const preco=parseFloat(precoStr.replace(/[.]/g,'').replace(',','.'))||0;
   let qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
-  // Aplica quantidade mínima se configurada e qtd digitada for menor
+
+  // Aplica quantidade mínima se configurada — só quando a tabela NÃO usa fat. mínimo de grupo
   const qtdMin=l.qtde_minima?Number(l.qtde_minima):0;
-  if(!isPerc && qtdMin>0 && qtd>0 && qtd<qtdMin){
+  const tabelaId=ge('fat-tabela')?.value;
+  const tabela=tabelasTarifarias.find(function(t){return t.id===tabelaId;});
+  const temFatMinimo=tabela&&tabela.cond_fat_minimo&&parseFloat(String(tabela.cond_fat_minimo).replace(/[^\d,.-]/g,'').replace(',','.'))||0;
+
+  if(!isPerc && qtdMin>0 && qtd>0 && qtd<qtdMin && !temFatMinimo){
     qtd=qtdMin;
     fatLinhas[idx].quantidade=qtdMin;
-    const inp=document.querySelector(`[onchange*="fatLinhas[${idx}].quantidade"]`);
-    if(inp) inp.value=qtdMin;
+    // Atualizar input visualmente
+    const inputs=document.querySelectorAll('.fat-linha-qtd');
+    if(inputs[idx]) inputs[idx].value=qtdMin;
+    // Mostrar indicador visual
+    const sub=ge('sub-'+idx);
+    if(sub) sub.title='Quantidade mínima aplicada: '+qtdMin;
   }
+
   if(isPerc){l.subtotal=(preco/100)*qtd;}
   else{l.subtotal=preco*qtd;}
-  const el=ge(`sub-${idx}`);
-  if(el)el.textContent=l.subtotal?fmtV(l.subtotal):'—';
+
+  const el=ge('sub-'+idx);
+  if(el) el.textContent=l.subtotal?fmtV(l.subtotal):'—';
+  recalcFatura();
 }
 
 function addLinhaFatura(){
@@ -3863,6 +3882,7 @@ async function salvarFatura(status){
     cliente_id:clienteId||null,
     cliente_nome:cli?.nome||'',
     tabela_id:getFatV('fat-tabela')||null,
+    tipo_documento:ge('fat-tipo-doc')?.value||'fatura',
     tipo_operacao:tipoOp||null,
     responsavel_id:responsavelId||null,
     numero_pedido_cliente:getFatV('fat-pedido')||null,
@@ -4633,7 +4653,6 @@ function gerarSugestoesProg(){
       +(s.temMinimo
         ? '<select class="fi" id="sg-rat-'+i+'" style="font-size:11px;padding:4px 8px">'+ratOpts+'</select>'
         : '<select class="fi" id="sg-rat-'+i+'" disabled style="font-size:11px;padding:4px 8px;opacity:0.4;cursor:not-allowed" title="Sem faturamento mínimo configurado"><option value="sem_minimo">Sem mínimo</option></select>'
-        +(s.fat_minimo_val ? '' : '<div style="font-size:10px;color:var(--text3);margin-top:2px">Sem mínimo</div>')
       )
       +'</td>'
       +'</tr>';
