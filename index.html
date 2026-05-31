@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.131 | Gerado: 2026-05-30 17:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.132 | Gerado: 2026-05-30 18:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -594,6 +594,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           <span>E-mail / DNS</span>
         </button>
+        <button class="navitem sub" id="nav-admin-sessoes" onclick="pg('admin-sessoes')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+          <span>Sessões ativas</span>
+        </button>
       </div>
     </div>
 
@@ -697,6 +701,9 @@ const ROLES={admin:'Admin',adm:'ADM',gestor:'Gestor',vendedor:'Vendedor'};
 const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-gestor',vendedor:'role-vendedor'};
 
 let cu=null,tok=null,profile=null,company=null;
+let _sessionToken=null;
+let _sessionChannel=null;
+let _heartbeatTimer=null;
 let rhFerias=[];
 let fatProgramacao=[];
 let gruposClientes=[];
@@ -749,7 +756,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.131';
+const APP_VERSION='v1.0.132';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -995,9 +1002,17 @@ async function finishEnterApp(user){
   const scParent=ge('sidebar-company-name');if(scParent)scParent.style.display=companyName&&companyName!=='—'?'flex':'none';
   const tc=ge('topbar-company');if(tc)tc.textContent=companyName;
 
+  // Verificar limite de sessões
+  const podeLogar = await verificarLimiteSessoes();
+  if(!podeLogar){
+    alert('Limite de usuários simultâneos atingido para esta empresa. Tente novamente mais tarde.');
+    await sair();
+    return;
+  }
   ge('app').classList.add('on');
   const ld=ge('app-loading');if(ld)ld.style.display='none';
   try{await loadData();}catch(e){console.error('loadData erro:',e);}
+  iniciarSessao();
   try{await loadPermissoes();}catch(e){console.error('loadPermissoes erro:',e);}
 
   // Mostra/oculta Admin APÓS loadPermissoes (para não ser sobrescrito)
@@ -1249,7 +1264,7 @@ const MODULE_MAP={
   'rh-pessoas':'rh', 'rh-funcoes':'rh', 'rh-horarios':'rh', 'rh-ferias':'rh', 'rh-avaliacoes':'rh', 'rh-performance':'rh',
   faturamento:'financeiro', 'fat-programacao':'financeiro',
     'financeiro-dashboard':'financeiro',
-  admin:'admin-sub',
+  admin:'admin-sub', 'admin-sessoes':'admin-sub',
   'tabelas-tarifarias':'financeiro',
 };
 
@@ -1335,6 +1350,7 @@ function render(){
   else if(curPage==='rh-performance'){c.innerHTML=rRHPerformance();}
   else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='fat-programacao'){c.innerHTML=rFatProgramacao();}
+  else if(curPage==='admin-sessoes'){c.innerHTML=rAdminSessoes();}
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
@@ -4831,6 +4847,166 @@ async function salvarFatProg(id){
   }catch(e){
     if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+e.message;}
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CONTROLE DE SESSÕES
+// ══════════════════════════════════════════════════════════════════
+
+function gerarSessionToken(){
+  return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+}
+
+async function iniciarSessao(){
+  if(!cu||!profile) return;
+  _sessionToken = gerarSessionToken();
+  const obj = {
+    user_id: cu.id,
+    company_id: profile.company_id||company?.id||null,
+    email: cu.email,
+    full_name: profile.full_name||cu.email,
+    role: profile.role||'',
+    session_token: _sessionToken,
+    last_seen: new Date().toISOString(),
+    force_logout: false,
+  };
+  try{
+    await dbInsert('user_sessions', obj);
+  }catch(e){ console.warn('iniciarSessao:', e); }
+
+  // Heartbeat a cada 30s
+  _heartbeatTimer = setInterval(async function(){
+    try{
+      // Verificar se foi derrubado
+      const rows = await dbSelect('user_sessions', 'session_token=eq.'+_sessionToken);
+      if(rows&&rows[0]&&rows[0].force_logout){
+        await encerrarSessao();
+        alert('Sua sessão foi encerrada pelo administrador.');
+        window.location.reload();
+        return;
+      }
+      // Atualizar last_seen
+      if(rows&&rows[0]){
+        await dbUpdate('user_sessions', rows[0].id, {last_seen: new Date().toISOString()});
+      }
+    }catch(e){ console.warn('heartbeat:', e); }
+  }, 30000);
+
+  // Realtime — detectar force_logout instantaneamente
+  if(window.supabase&&window.supabase.channel){
+    _sessionChannel = window.supabase.channel('session_'+_sessionToken)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'user_sessions',
+        filter: 'session_token=eq.'+_sessionToken
+      }, async function(payload){
+        if(payload.new&&payload.new.force_logout){
+          await encerrarSessao();
+          alert('Sua sessão foi encerrada pelo administrador.');
+          window.location.reload();
+        }
+      })
+      .subscribe();
+  }
+}
+
+async function encerrarSessao(){
+  if(_heartbeatTimer) clearInterval(_heartbeatTimer);
+  if(_sessionChannel) _sessionChannel.unsubscribe();
+  if(!_sessionToken) return;
+  try{
+    const rows = await dbSelect('user_sessions','session_token=eq.'+_sessionToken);
+    if(rows&&rows[0]) await dbDelete('user_sessions', rows[0].id);
+  }catch(e){ console.warn('encerrarSessao:', e); }
+  _sessionToken = null;
+}
+
+async function verificarLimiteSessoes(){
+  if(!company?.id) return true; // admin global — sem limite
+  try{
+    const maxU = company.max_usuarios||5;
+    const sessoes = await dbSelect('user_sessions',
+      'company_id=eq.'+company.id+
+      '&last_seen=gte.'+new Date(Date.now()-90000).toISOString() // ativos nos últimos 90s
+    );
+    if(sessoes&&sessoes.length>=maxU){
+      return false; // limite atingido
+    }
+  }catch(e){ console.warn('verificarLimiteSessoes:', e); }
+  return true;
+}
+
+async function derrubarSessao(sessionId){
+  if(!confirm('Encerrar a sessão deste usuário?')) return;
+  try{
+    await dbUpdate('user_sessions', sessionId, {force_logout: true});
+    setTimeout(function(){ renderAdminSessoes(); }, 2000);
+  }catch(e){ alert('Erro: '+e.message); }
+}
+
+async function renderAdminSessoes(){
+  const el = document.getElementById('admin-sessoes-content');
+  if(!el) return;
+  try{
+    const agora = new Date();
+    const limite = new Date(agora - 90000).toISOString(); // 90s = 3 heartbeats
+    const rows = await dbSelect('user_sessions',
+      'last_seen=gte.'+limite+'&order=company_id.asc,last_seen.desc'
+    );
+    const comps = companies||[];
+
+    if(!rows||!rows.length){
+      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text3)">Nenhum usuário ativo no momento.</div>';
+      return;
+    }
+
+    let html = '<table style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr style="background:var(--bg2)">';
+    ['Usuário','Empresa','Perfil','Última atividade',''].forEach(function(h){
+      html += '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600;color:var(--text3)">'+h+'</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    rows.forEach(function(s){
+      const comp = comps.find(function(c){ return c.id===s.company_id; });
+      const lastSeen = new Date(s.last_seen);
+      const secsAgo = Math.floor((agora-lastSeen)/1000);
+      const isMe = s.session_token === _sessionToken;
+      const cor = secsAgo<35?'var(--green-text)':secsAgo<70?'var(--amber-text)':'var(--red-text)';
+
+      html += '<tr style="border-top:1px solid var(--border)'+(isMe?';background:var(--bg2)':'')+'">';
+      html += '<td style="padding:10px 12px"><div style="font-size:13px;font-weight:600">'+s.full_name+(isMe?' <span style="font-size:10px;color:var(--text3)">(você)</span>':'')+'</div><div style="font-size:11px;color:var(--text3)">'+s.email+'</div></td>';
+      html += '<td style="padding:10px 12px;font-size:12px">'+(comp?comp.name:'Admin Global')+'</td>';
+      html += '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg2)">'+s.role+'</span></td>';
+      html += '<td style="padding:10px 12px"><span style="font-size:12px;color:'+cor+'">'+secsAgo+'s atrás</span></td>';
+      html += '<td style="padding:10px 12px;text-align:right">';
+      if(!isMe){ const _sid=s.id; html += '<button class="btn btn-sm" style="color:var(--red-text)" onclick="derrubarSessao(\'' +_sid+ '\')">Derrubar</button>'; }
+      html += '</td></tr>';
+    });
+
+    html += '</tbody></table>';
+    html += '<div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:right">'+rows.length+' sessão'+(rows.length>1?'s':'')+' ativa'+(rows.length>1?'s':'')+' · Atualiza automaticamente</div>';
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML = '<div style="color:var(--red-text);padding:16px">Erro ao carregar sessões: '+e.message+'</div>';
+  }
+}
+
+function rAdminSessoes(){
+  // Iniciar polling de atualização
+  if(window._sessoesTimer) clearInterval(window._sessoesTimer);
+  window._sessoesTimer = setInterval(renderAdminSessoes, 15000);
+  setTimeout(renderAdminSessoes, 100);
+
+  return '<div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">'
+    +'<div><div style="font-size:15px;font-weight:700">Usuários ativos</div>'
+    +'<div style="font-size:12px;color:var(--text3)">Monitoramento em tempo real · atualiza a cada 15s</div></div>'
+    +'<button class="btn" onclick="renderAdminSessoes()">↻ Atualizar</button>'
+    +'</div>'
+    +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden">'
+    +'<div id="admin-sessoes-content"><div style="padding:24px;text-align:center;color:var(--text3)">Carregando...</div></div>'
+    +'</div>';
 }
 
 // ── RENDER DASHBOARD CRM ──
