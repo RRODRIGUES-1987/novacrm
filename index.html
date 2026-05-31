@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.134 | Gerado: 2026-05-30 20:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.135 | Gerado: 2026-05-30 21:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -749,7 +749,7 @@ const TELAS=[
 ];
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.134';
+const APP_VERSION='v1.0.135';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4852,20 +4852,50 @@ function gerarSessionToken(){
 
 async function iniciarSessao(){
   if(!cu||!profile) return;
-  _sessionToken = gerarSessionToken();
-  const obj = {
-    user_id: cu.id,
-    company_id: profile.company_id||company?.id||null,
-    email: cu.email,
-    full_name: profile.full_name||cu.email,
-    role: profile.role||'',
-    session_token: _sessionToken,
-    last_seen: new Date().toISOString(),
-    force_logout: false,
-  };
-  try{
-    await dbInsert('user_sessions', obj);
-  }catch(e){ console.warn('iniciarSessao:', e); }
+
+  // Verificar se já temos um token nesta aba (reload/F5)
+  const tokenExistente = sessionStorage.getItem('verus_session_token');
+  if(tokenExistente){
+    // É um reload — reusar o token existente e atualizar last_seen
+    _sessionToken = tokenExistente;
+    try{
+      const rows = await dbSelect('user_sessions','session_token=eq.'+_sessionToken);
+      if(rows&&rows[0]){
+        await dbUpdate('user_sessions', rows[0].id, {last_seen: new Date().toISOString(), force_logout: false});
+      } else {
+        // Sessão expirou — criar nova
+        sessionStorage.removeItem('verus_session_token');
+        await iniciarSessao();
+      }
+    }catch(e){ console.warn('reload sessao:', e); }
+  } else {
+    // Nova aba ou primeiro login — limpar sessões antigas deste usuário (>5min sem heartbeat)
+    _sessionToken = gerarSessionToken();
+    sessionStorage.setItem('verus_session_token', _sessionToken);
+    try{
+      // Remover sessões antigas (last_seen > 5 minutos)
+      const antigas = await dbSelect('user_sessions',
+        'user_id=eq.'+cu.id+'&last_seen=lt.'+new Date(Date.now()-300000).toISOString()
+      );
+      if(antigas&&antigas.length){
+        await Promise.all(antigas.map(function(s){ return dbDelete('user_sessions', s.id); }));
+      }
+    }catch(e){ console.warn('limpar sessoes antigas:', e); }
+
+    const obj = {
+      user_id: cu.id,
+      company_id: profile.company_id||company?.id||null,
+      email: cu.email,
+      full_name: profile.full_name||cu.email,
+      role: profile.role||'',
+      session_token: _sessionToken,
+      last_seen: new Date().toISOString(),
+      force_logout: false,
+    };
+    try{
+      await dbInsert('user_sessions', obj);
+    }catch(e){ console.warn('iniciarSessao:', e); }
+  }
 
   // Heartbeat a cada 30s
   _heartbeatTimer = setInterval(async function(){
@@ -4907,6 +4937,7 @@ async function iniciarSessao(){
 async function encerrarSessao(){
   if(_heartbeatTimer) clearInterval(_heartbeatTimer);
   if(_sessionChannel) _sessionChannel.unsubscribe();
+  sessionStorage.removeItem('verus_session_token');
   if(!_sessionToken) return;
   try{
     const rows = await dbSelect('user_sessions','session_token=eq.'+_sessionToken);
