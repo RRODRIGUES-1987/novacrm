@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.147 | Gerado: 2026-06-01 19:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.149 | Gerado: 2026-06-01 21:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -703,6 +703,7 @@ let _sessionChannel=null;
 let _heartbeatTimer=null;
 let rhFerias=[];
 let rhExperiencia=[];
+let rhCiclos=[];
 let fatProgramacao=[];
 let gruposClientes=[];
 let activeUnit=null; // null = consolidado | UUID = unidade específica
@@ -771,7 +772,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.147';
+const APP_VERSION='v1.0.149';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1152,6 +1153,8 @@ async function loadData(){
       await loadUserUnits();
       await loadRHFerias().catch(console.warn);
       rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
+      rhCiclos = await dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).catch(()=>[]);
+      await verificarAbrirCiclo();
       setTimeout(verificarAlertasFerias,2000);
       [fatProgramacao, gruposClientes] = await Promise.all([
         dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
@@ -4438,6 +4441,10 @@ function rDashRH(role){
 
   html += '</div>';
 
+  // Card Ciclo de Avaliação atual
+  const cardCiclo = rRHCicloCard();
+  if(cardCiclo) html += cardCiclo;
+
   // Card Avaliações de Experiência urgentes
   if(expUrgentes.length){
     html += '<div onclick="pg(\'rh-experiencia\')" style="background:var(--bg);border:1.5px solid var(--red-text);border-radius:14px;padding:16px;cursor:pointer;margin-top:12px" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,.1)\'" onmouseout="this.style.boxShadow=\'\'">';
@@ -7298,18 +7305,7 @@ async function verificarAlertasFerias(){
 // RH — AVALIAÇÃO DE PERÍODO DE EXPERIÊNCIA
 // ══════════════════════════════════════════════════════════════════
 
-const CRITERIOS_EXP = [
-  {id:'assiduidade',      label:'Assiduidade e Pontualidade'},
-  {id:'comprometimento',  label:'Comprometimento com o trabalho'},
-  {id:'relacionamento',   label:'Relacionamento interpessoal'},
-  {id:'prazos',           label:'Cumprimento de prazos e metas'},
-  {id:'conhecimento',     label:'Conhecimento técnico da função'},
-  {id:'organizacao',      label:'Organização e planejamento'},
-  {id:'iniciativa',       label:'Iniciativa e proatividade'},
-  {id:'aprendizagem',     label:'Capacidade de aprendizagem'},
-  {id:'comunicacao',      label:'Comunicação'},
-  {id:'trabalho_equipe',  label:'Trabalho em equipe'},
-];
+// Critérios de experiência: usar FORM_FUNCIONARIO ou FORM_LIDERANCA (mesma escala de performance)
 
 const STATUS_EXP = {
   pendente:              {label:'Pendente',           cor:'var(--bg2)',       txt:'var(--text2)'},
@@ -7397,7 +7393,11 @@ function rRHExperiencia(){
       rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+l.dataFim.toLocaleDateString('pt-BR')+'</td>';
       rows += '<td style="padding:10px 12px;font-size:12px;font-weight:'+(l.urgente?'700':'400')+';color:'+(l.urgente?'var(--red-text)':'var(--text2)')+'">'+l.diasUteis+'d úteis</td>';
       rows += '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+l.stInfo.cor+';color:'+l.stInfo.txt+';font-weight:600">'+l.stInfo.label+'</span></td>';
-      rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+(l.avaliacao?.conclusao==='aprovado'?'✅ Aprovado':l.avaliacao?.conclusao==='reprovado'?'❌ Reprovado':'—')+'</td>';
+      const perfExp = l.avaliacao&&l.avaliacao.total ? getPerformanceLabel(l.avaliacao.total) : null;
+      rows += '<td style="padding:10px 12px">'
+        +(perfExp?'<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:'+perfExp.bg+';color:'+perfExp.cor+'">'+perfExp.label+'</span>':'—')
+        +(l.avaliacao?.conclusao==='reprovado'?' <span style="font-size:10px;color:var(--red-text)">❌</span>':'')
+        +'</td>';
       rows += '<td style="padding:10px 12px;text-align:right">';
       rows += '<button class="btn btn-sm btn-primary" id="exp-btn-'+_eid+'-'+_ep+'">Avaliar</button>';
       rows += '</td></tr>';
@@ -7455,19 +7455,26 @@ function openExpModal(pessoaId, parcela){
   modal.id = 'modal-exp';
   modal.style.cssText = 'position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
 
-  let criteriosHtml = '';
-  CRITERIOS_EXP.forEach(function(c){
-    const val = avaliacao ? avaliacao['criterio_'+c.id]||'' : '';
-    const disabled = jaHomologado ? 'disabled' : '';
-    criteriosHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">';
-    criteriosHtml += '<span style="font-size:12px">'+c.label+'</span>';
-    criteriosHtml += '<select class="fi" id="exp-'+c.id+'" style="width:120px;font-size:12px;padding:3px 6px" '+disabled+'>';
-    criteriosHtml += '<option value="">—</option>';
-    [1,2,3,4,5].forEach(function(n){
-      const labels = ['','Insatisfatório','Regular','Bom','Muito Bom','Excelente'];
-      criteriosHtml += '<option value="'+n+'" '+(val==n?'selected':'')+'>'+n+' - '+labels[n]+'</option>';
+  // Escolher formulário baseado no cargo/função (gestor ou funcionário)
+  const funcao = rhFuncoes.find(function(f){return f.funcao===p.cargo;});
+  const form = (funcao&&funcao.e_gestor) ? FORM_LIDERANCA : FORM_FUNCIONARIO;
+  const respostas = avaliacao ? (avaliacao.respostas||{}) : {};
+
+  let criteriosHtml = '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Formulário: '+form.titulo+' ('+form.codigo+')</div>';
+  form.perguntas.forEach(function(pg){
+    const val = respostas[pg.id]||null;
+    criteriosHtml += '<div style="margin-bottom:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2)">';
+    criteriosHtml += '<div style="font-size:12px;font-weight:700;margin-bottom:3px;color:var(--accent)">'+pg.label+'</div>';
+    criteriosHtml += '<div style="font-size:11px;color:var(--text2);margin-bottom:8px;line-height:1.4">'+pg.desc+'</div>';
+    criteriosHtml += '<div style="display:flex;gap:6px">';
+    NOTAS.forEach(function(n){
+      const checked = val===n.val;
+      const dis = jaHomologado ? 'disabled' : '';
+      criteriosHtml += '<label style="flex:1;display:flex;align-items:center;gap:5px;cursor:pointer;padding:6px 8px;border:2px solid '+(checked?n.cor:'var(--border)')+';border-radius:8px;background:'+(checked?n.bg:'var(--bg)')+'">';
+      criteriosHtml += '<input type="radio" name="exp-'+pg.id+'" value="'+n.val+'" '+(checked?'checked':'')+' '+dis+' style="accent-color:'+n.cor+'">';
+      criteriosHtml += '<span style="font-size:10px;font-weight:600;color:'+n.cor+'">'+n.label+'</span></label>';
     });
-    criteriosHtml += '</select></div>';
+    criteriosHtml += '</div></div>';
   });
 
   const inner = document.createElement('div');
@@ -7533,10 +7540,18 @@ async function salvarExpAvaliacao(pessoaId, parcela, expId){
     avaliado_em: new Date().toISOString(),
   };
 
-  CRITERIOS_EXP.forEach(function(c){
-    const val = document.getElementById('exp-'+c.id)?.value;
-    obj['criterio_'+c.id] = val ? parseInt(val) : null;
+  // Coletar respostas do formulário (mesmo padrão de performance)
+  const funcaoSave = rhFuncoes.find(function(f){return f.funcao===p.cargo;});
+  const formSave = (funcaoSave&&funcaoSave.e_gestor) ? FORM_LIDERANCA : FORM_FUNCIONARIO;
+  const respostasSave = {};
+  formSave.perguntas.forEach(function(pg){
+    const radio = document.querySelector('input[name="exp-'+pg.id+'"]:checked');
+    if(radio) respostasSave[pg.id] = parseInt(radio.value);
   });
+  const totalSave = Object.values(respostasSave).reduce(function(s,v){return s+v;},0);
+  obj.respostas = respostasSave;
+  obj.total = totalSave;
+  obj.tipo_formulario = formSave.tipo;
 
   try{
     if(expId){
@@ -7570,6 +7585,125 @@ async function homologarExp(expId, conclusao){
     if(conclusao==='aprovado') alert('✅ Experiência homologada! O 2º período está liberado se aplicável.');
     else alert('❌ Reprovação homologada. Encaminhar para desligamento.');
   }catch(e){ alert('Erro: '+e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RH — CICLOS DE AVALIAÇÃO DE PERFORMANCE
+// ══════════════════════════════════════════════════════════════════
+
+const MESES_CICLO = [4, 8, 12]; // Abril, Agosto, Dezembro
+
+async function verificarAbrirCiclo(){
+  if(!company?.id||!cu) return;
+  const hoje = new Date();
+  const mes = hoje.getMonth()+1;
+  const ano = hoje.getFullYear();
+  const dia = hoje.getDate();
+
+  if(!MESES_CICLO.includes(mes)) return; // não é mês de avaliação
+
+  const periodo = ['','janeiro','fevereiro','marco','abril','maio','junho',
+    'julho','agosto','setembro','outubro','novembro','dezembro'][mes]+'_'+ano;
+
+  // Verificar se ciclo já existe
+  const cicloExist = rhCiclos.find(function(c){return c.periodo===periodo&&c.company_id===company.id;});
+  if(cicloExist) return; // já aberto
+
+  // Abrir novo ciclo
+  const dataInicio = new Date(ano, mes-1, 1).toISOString().split('T')[0];
+  const dataFim    = new Date(ano, mes-1, 25).toISOString().split('T')[0];
+
+  // Contar colaboradores com gestor_id
+  const colaboradores = pessoas.filter(function(p){
+    return p.tipo_pessoa==='funcionario'&&p.ativo!==false&&p.gestor_id;
+  });
+
+  try{
+    const novoCiclo = await dbInsert('rh_ciclos_avaliacao',{
+      company_id: company.id,
+      ano, mes, periodo,
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      status: 'em_andamento',
+      total_colab: colaboradores.length,
+      total_concl: 0,
+    });
+
+    if(novoCiclo){
+      rhCiclos.unshift(novoCiclo);
+      // Gerar rascunhos para cada colaborador
+      await gerarRascunhosCiclo(novoCiclo);
+    }
+  }catch(e){ console.warn('verificarAbrirCiclo:', e); }
+}
+
+async function gerarRascunhosCiclo(ciclo){
+  const colaboradores = pessoas.filter(function(p){
+    return p.tipo_pessoa==='funcionario'&&p.ativo!==false&&p.gestor_id;
+  });
+
+  const promessas = colaboradores.map(function(p){
+    const funcao = rhFuncoes.find(function(f){return f.funcao===p.cargo;});
+    const tipoForm = (funcao&&funcao.e_gestor)?'lideranca':'funcionario';
+    return dbInsert('rh_avaliacoes',{
+      company_id: company.id,
+      unit_id: p.unit_id||null,
+      pessoa_id: p.id,
+      ciclo_id: ciclo.id,
+      tipo_formulario: tipoForm,
+      periodo: ciclo.periodo,
+      status: 'rascunho',
+      data_avaliacao: ciclo.data_fim,
+      respostas: {},
+      total: 0,
+    }).catch(function(e){ console.warn('rascunho erro:', e); });
+  });
+
+  await Promise.all(promessas);
+  // Recarregar avaliações
+  rhAvaliacoes = await dbSelect('rh_avaliacoes',`company_id=eq.${company.id}&order=created_at.desc`).catch(()=>rhAvaliacoes);
+}
+
+function getCicloAtual(){
+  const hoje = new Date();
+  const mes = hoje.getMonth()+1;
+  const ano = hoje.getFullYear();
+  if(!MESES_CICLO.includes(mes)) return null;
+  const periodo = ['','janeiro','fevereiro','marco','abril','maio','junho',
+    'julho','agosto','setembro','outubro','novembro','dezembro'][mes]+'_'+ano;
+  return rhCiclos.find(function(c){return c.periodo===periodo&&c.company_id===company?.id;})||null;
+}
+
+function getDiasParaFechamento(){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const mes = hoje.getMonth()+1;
+  const ano = hoje.getFullYear();
+  if(!MESES_CICLO.includes(mes)) return null;
+  const fechamento = new Date(ano, mes-1, 25); fechamento.setHours(0,0,0,0);
+  return Math.floor((fechamento-hoje)/(1000*60*60*24));
+}
+
+function rRHCicloCard(){
+  const ciclo = getCicloAtual();
+  if(!ciclo) return '';
+
+  const dias = getDiasParaFechamento();
+  const cor = dias!==null&&dias<=5?'var(--red':'var(--amber';
+  const avalCiclo = rhAvaliacoes.filter(function(a){return a.ciclo_id===ciclo.id;});
+  const concluidas = avalCiclo.filter(function(a){return ['avaliado','homologado'].includes(a.status);}).length;
+  const pct = ciclo.total_colab>0?Math.round(concluidas/ciclo.total_colab*100):0;
+
+  let html = '<div onclick="pg(\'rh-avaliacoes\')" style="background:var(--bg);border:1.5px solid '+cor+'-text);border-radius:14px;padding:16px;cursor:pointer;margin-top:12px">';
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">';
+  html += '<div style="width:36px;height:36px;background:'+cor+'-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">📊</div>';
+  html += '<div><div style="font-size:13px;font-weight:700;color:'+cor+'-text)">Ciclo de Avaliação — '+ciclo.periodo.replace('_',' ').toUpperCase()+'</div>';
+  html += '<div style="font-size:11px;color:var(--text3)">Prazo: 25/'+String(ciclo.mes).padStart(2,'0')+'/'+ciclo.ano+(dias!==null?' · '+dias+' dias restantes':'')+'</div></div></div>';
+  html += '<div style="display:flex;align-items:center;gap:10px">';
+  html += '<div style="flex:1;height:8px;background:var(--bg2);border-radius:99px;overflow:hidden">';
+  html += '<div style="height:100%;width:'+pct+'%;background:'+(pct===100?'var(--green-text)':cor+'-text)')+';border-radius:99px;transition:width .3s"></div></div>';
+  html += '<span style="font-size:12px;font-weight:700;color:'+cor+'-text)">'+concluidas+'/'+ciclo.total_colab+' ('+pct+'%)</span>';
+  html += '</div></div>';
+  return html;
 }
 
 // ── RH PERFORMANCE ──
