@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.150 | Gerado: 2026-06-01 22:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.151 | Gerado: 2026-06-01 23:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -772,7 +772,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.150';
+const APP_VERSION='v1.0.151';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -7519,6 +7519,16 @@ async function salvarExpAvaliacao(pessoaId, parcela, expId){
     if(errEl){errEl.style.display='block';errEl.textContent='Selecione a conclusão da avaliação.';}
     return;
   }
+  // Validar todas as perguntas preenchidas
+  const funcaoVal = rhFuncoes.find(function(f){return f.funcao===(pessoas.find(function(x){return x.id===pessoaId;})||{}).cargo;});
+  const formVal = (funcaoVal&&funcaoVal.e_gestor) ? FORM_LIDERANCA : FORM_FUNCIONARIO;
+  const naoPreenchidas = formVal.perguntas.filter(function(pg){
+    return !document.querySelector('input[name="exp-'+pg.id+'"]:checked');
+  });
+  if(naoPreenchidas.length>0){
+    if(errEl){errEl.style.display='block';errEl.textContent='Preencha todos os critérios antes de salvar. Faltam: '+naoPreenchidas.map(function(p){return p.label;}).join(', ')+'.';}
+    return;
+  }
   if(errEl) errEl.style.display='none';
 
   const p = pessoas.find(function(x){return x.id===pessoaId;});
@@ -7563,6 +7573,15 @@ async function salvarExpAvaliacao(pessoaId, parcela, expId){
     }
     document.getElementById('modal-exp')?.remove();
     if(curPage==='rh-experiencia'){const c=document.getElementById('content');if(c)c.innerHTML=rRHExperiencia();}
+    // Reabrir modal para mostrar botão de homologação se for RH
+    const isRHSave = ['admin','adm','rh'].includes(profile?.role||'');
+    if(!isRHSave){
+      // Gestor — mostrar confirmação
+      setTimeout(function(){alert('✅ Avaliação salva! Aguardando homologação do RH.');},100);
+    } else {
+      // RH — reabrir para homologar
+      setTimeout(function(){openExpModal(pessoaId,parcela);},300);
+    }
   }catch(e){
     if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+e.message;}
   }
@@ -8255,6 +8274,15 @@ async function salvarAvaliacao(tipo,id){
   const obs=ge('av-obs')?.value||'';
   const cid=company?.id||profile?.company_id||null;
   const form=tipo==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
+
+  // Validar todas as perguntas preenchidas
+  const naoPreench = form.perguntas.filter(function(pg){
+    return !document.querySelector('input[name="av-'+pg.id+'"]:checked');
+  });
+  if(naoPreench.length>0){
+    alert('Preencha todos os critérios antes de salvar.\nFaltam: '+naoPreench.map(function(p){return p.label;}).join(', ')+'.');
+    return;
+  }
 
   // Coleta respostas
   const respostas={};
