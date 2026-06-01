@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.142 | Gerado: 2026-06-01 14:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.143 | Gerado: 2026-06-01 15:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -765,7 +765,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.142';
+const APP_VERSION='v1.0.143';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -6912,9 +6912,10 @@ function rRHFerias(){
     const diasParaLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
     // Verifica se já tem férias programadas neste período
     const feriasPeriodo = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
-    const _prazoFer=company?.prazo_ferias||60;
-    if(feriasPeriodo.length===0&&diasParaLimite<_prazoFer&&diasParaLimite>=0){
-      alertas.push({pessoa:p, diasParaLimite, dataLimite, escalar:diasParaLimite<=10});
+    const _prazoAlerta=company?.prazo_ferias_alerta||90;
+    const _prazoEscalona=company?.prazo_ferias_escalona||75;
+    if(feriasPeriodo.length===0&&diasParaLimite<_prazoAlerta&&diasParaLimite>=0){
+      alertas.push({pessoa:p, diasParaLimite, dataLimite, escalar:diasParaLimite<=_prazoEscalona});
     }
   });
 
@@ -6953,9 +6954,11 @@ function rRHFerias(){
     const inicioPrevisto = feriasPessoa[0]?.inicio_previsto?new Date(feriasPessoa[0].inicio_previsto+'T00:00:00').toLocaleDateString('pt-BR'):'—';
     const diasPrevistos = feriasPessoa[0]?.dias_previstos||'—';
     const semPrograma = feriasPessoa.length===0;
-    const rowBg = semPrograma && diasLimite<=10
-      ? 'background:rgba(234,88,12,0.10)'   // laranja — escalonamento
-      : semPrograma && diasLimite<=60
+    const _pEsc = company?.prazo_ferias_escalona||75;
+    const _pAlt = company?.prazo_ferias_alerta||90;
+    const rowBg = semPrograma && diasLimite<=_pEsc
+      ? 'background:rgba(234,88,12,0.10)'   // vermelho/laranja — escalonamento
+      : semPrograma && diasLimite<=_pAlt
       ? 'background:rgba(234,179,8,0.10)'   // amarelo — atenção
       : '';
     return `<tr style="border-top:1px solid var(--border);cursor:pointer;${rowBg}" onclick="openFeriasModal('${p.id}')">
@@ -10850,13 +10853,14 @@ function openModal(mode,id=null){
       +'<input class="fi" id="fcname" value="'+(c?c.name:'')+'" placeholder="Razão social"></div>'
       +'<div class="fg"><label class="fl">CNPJ</label>'
       +'<input class="fi" id="fccnpj" value="'+(c?c.cnpj:'')+'" placeholder="00.000.000/0000-00"></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+'</div>'
+      +'<div style="margin-top:8px;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Parâmetros de Férias</div>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
       +'<div class="fg"><label class="fl">Máx. usuários simultâneos</label>'
       +'<input class="fi" id="emp-max" type="number" min="1" max="100" value="'+(c?c.max_usuarios||5:5)+'" placeholder="5"></div>'
       +'<div class="fg"><label class="fl">Faturamento programado</label>'
       +'<select class="fi" id="emp-fat-prog"><option value="false" '+((!c||!c.fat_programado)?'selected':'')+'>Desativado</option><option value="true" '+(c&&c.fat_programado?'selected':'')+'>Ativado</option></select></div>'
-      +'<div class="fg"><label class="fl">Programação de férias (dias)</label>'
-      +'<input class="fi" id="emp-prazo-ferias" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias?c.prazo_ferias:60)+'" placeholder="60" title="Dias antes do vencimento para alertar férias"></div>'
+      +'<div class="fg"><label class="fl" title="Dias antes do limite para exibir alerta amarelo">⚠ Alerta férias (dias)</label>'+'<input class="fi" id="emp-prazo-alerta" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_alerta?c.prazo_ferias_alerta:90)+'" placeholder="90"></div>'+'<div class="fg"><label class="fl" title="Dias antes do limite para escalonamento vermelho">🔴 Escalonamento (dias)</label>'+'<input class="fi" id="emp-prazo-escalona" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_escalona?c.prazo_ferias_escalona:75)+'" placeholder="75"></div>'+'<div class="fg"><label class="fl" title="Prazo mínimo para início das férias">🚨 Limite programação (dias)</label>'+'<input class="fi" id="emp-prazo-limite" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_limite?c.prazo_ferias_limite:60)+'" placeholder="60"></div>'
       +'</div></div>'
       // Aba Usuários
       +(id?'<div id="emp-panel-usuarios" style="display:none">'+usrRows+'<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="emp-btn-new-user2">+ Novo usuário</button></div></div>':'')
@@ -11459,10 +11463,12 @@ async function saveModal(){
     }else if(mmode==='company'){
       const maxU = parseInt(ge('emp-max')?.value||'5');
       const fatProg = ge('emp-fat-prog')?.value === 'true';
-      const prazoFerias = parseInt(ge('emp-prazo-ferias')?.value||'60');
+      const prazoAlerta   = parseInt(ge('emp-prazo-alerta')?.value||'90');
+      const prazoEscalona = parseInt(ge('emp-prazo-escalona')?.value||'75');
+      const prazoLimite   = parseInt(ge('emp-prazo-limite')?.value||'60');
       const name=ge('fcname').value.trim();const cnpj=ge('fccnpj').value.replace(/\D/g,'');
       if(!name||cnpj.length!==14)return alert('Preencha nome e CNPJ válido (14 dígitos).');
-      const obj={name,cnpj,created_by:cu.id,max_usuarios:maxU,fat_programado:fatProg,prazo_ferias:prazoFerias};
+      const obj={name,cnpj,created_by:cu.id,max_usuarios:maxU,fat_programado:fatProg,prazo_ferias_alerta:prazoAlerta,prazo_ferias_escalona:prazoEscalona,prazo_ferias_limite:prazoLimite};
       if(mid){await dbUpdate('companies',mid,obj);companies=companies.map(c=>c.id===mid?{...c,...obj}:c);company=companies.find(x=>x.id===company?.id)||company;}
       else{const d=await dbInsert('companies',obj);if(d)companies.unshift(d);}
 
