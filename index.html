@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.146 | Gerado: 2026-06-01 18:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.147 | Gerado: 2026-06-01 19:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -459,6 +459,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span>Horários</span>
         </button>
+        <button class="navitem sub" id="nav-rh-experiencia" onclick="pg('rh-experiencia')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Experiência</span>
+        </button>
         <button class="navitem sub" id="nav-rh-ferias" onclick="pg('rh-ferias')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
           <span>Férias</span>
@@ -698,6 +702,7 @@ let _sessionToken=null;
 let _sessionChannel=null;
 let _heartbeatTimer=null;
 let rhFerias=[];
+let rhExperiencia=[];
 let fatProgramacao=[];
 let gruposClientes=[];
 let activeUnit=null; // null = consolidado | UUID = unidade específica
@@ -749,6 +754,7 @@ const TELAS=[
   {id:'rh-funcoes',           label:'RH · Funções',                            modulo:'RH'},
   {id:'rh-horarios',          label:'RH · Horários',                           modulo:'RH'},
   {id:'rh-ferias',            label:'RH · Férias',                             modulo:'RH'},
+  {id:'rh-experiencia',      label:'RH · Avaliação de Experiência',           modulo:'RH'},
   {id:'rh-avaliacoes',        label:'RH · Avaliações',                         modulo:'RH'},
   {id:'rh-performance',       label:'RH · Performance',                        modulo:'RH'},
   // Financeiro
@@ -765,7 +771,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.146';
+const APP_VERSION='v1.0.147';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1145,6 +1151,7 @@ async function loadData(){
       workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
       await loadUserUnits();
       await loadRHFerias().catch(console.warn);
+      rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
       setTimeout(verificarAlertasFerias,2000);
       [fatProgramacao, gruposClientes] = await Promise.all([
         dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
@@ -1347,6 +1354,7 @@ function render(){
   else if(curPage==='rh-funcoes')c.innerHTML=rRHFuncoes();
   else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
   else if(curPage==='rh-avaliacoes'){c.innerHTML=rRHAvaliacoes();}
+  else if(curPage==='rh-experiencia'){c.innerHTML=rRHExperiencia();}
   else if(curPage==='rh-ferias'){
     if(!pessoas||!pessoas.length){
       c.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)"><div class="spin" style="width:24px;height:24px;margin:0 auto 12px"></div>Carregando...</div>';
@@ -4430,10 +4438,26 @@ function rDashRH(role){
 
   html += '</div>';
 
-  if(!temAlerta){
+  // Card Avaliações de Experiência urgentes
+  if(expUrgentes.length){
+    html += '<div onclick="pg(\'rh-experiencia\')" style="background:var(--bg);border:1.5px solid var(--red-text);border-radius:14px;padding:16px;cursor:pointer;margin-top:12px" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,.1)\'" onmouseout="this.style.boxShadow=\'\'">';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="width:36px;height:36px;background:var(--red-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">📋</div>';
+    html += '<div><div style="font-size:13px;font-weight:700;color:var(--red-text)">Avaliação de Experiência — Urgente</div>';
+    html += '<div style="font-size:11px;color:var(--text3)">'+expUrgentes.length+' avaliação'+(expUrgentes.length>1?'ões':'')+' venc'+(expUrgentes.length>1?'em':'e')+' em até 5 dias úteis</div></div></div>';
+    expUrgentes.forEach(function(e){
+      html += '<div style="font-size:12px;padding:6px 8px;background:var(--red-bg);border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between">';
+      html += '<span style="color:var(--red-text);font-weight:600">'+e.nome+' ('+e.parcela+'º período)</span>';
+      html += '<span style="color:var(--red-text);font-size:11px">'+e.fim+' · '+e.du+'d úteis</span></div>';
+    });
+    html += '</div>';
+  }
+
+  if(!temAlerta&&!expUrgentes.length){
     html += '<div style="background:var(--green-bg);border:1px solid var(--green-text);border-radius:12px;padding:12px 16px;font-size:13px;color:var(--green-text);display:flex;align-items:center;gap:8px">';
     html += '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
     html += 'RH em dia — nenhuma ação necessária no momento.</div>';
+  } else if(!temAlerta&&expUrgentes.length){
+    // só experiência urgente, sem alerta de férias
   }
 
   html += '</div>';
@@ -7269,6 +7293,284 @@ async function verificarAlertasFerias(){
   }
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// RH — AVALIAÇÃO DE PERÍODO DE EXPERIÊNCIA
+// ══════════════════════════════════════════════════════════════════
+
+const CRITERIOS_EXP = [
+  {id:'assiduidade',      label:'Assiduidade e Pontualidade'},
+  {id:'comprometimento',  label:'Comprometimento com o trabalho'},
+  {id:'relacionamento',   label:'Relacionamento interpessoal'},
+  {id:'prazos',           label:'Cumprimento de prazos e metas'},
+  {id:'conhecimento',     label:'Conhecimento técnico da função'},
+  {id:'organizacao',      label:'Organização e planejamento'},
+  {id:'iniciativa',       label:'Iniciativa e proatividade'},
+  {id:'aprendizagem',     label:'Capacidade de aprendizagem'},
+  {id:'comunicacao',      label:'Comunicação'},
+  {id:'trabalho_equipe',  label:'Trabalho em equipe'},
+];
+
+const STATUS_EXP = {
+  pendente:              {label:'Pendente',           cor:'var(--bg2)',       txt:'var(--text2)'},
+  aguardando_avaliacao:  {label:'Aguard. Avaliação',  cor:'var(--amber-bg)', txt:'var(--amber-text)'},
+  avaliado:              {label:'Avaliado',            cor:'var(--blue-bg)',  txt:'var(--blue-text)'},
+  homologado:            {label:'Aprovado (RH)',       cor:'var(--green-bg)', txt:'var(--green-text)'},
+  reprovado:             {label:'Reprovado',           cor:'var(--red-bg)',   txt:'var(--red-text)'},
+};
+
+function calcDiasUteisRestantes(dataFim){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const fim = new Date(dataFim+'T00:00:00');
+  let dias = 0, cur = new Date(hoje);
+  while(cur <= fim){
+    const dow = cur.getDay();
+    if(dow!==0 && dow!==6) dias++;
+    cur.setDate(cur.getDate()+1);
+  }
+  return dias;
+}
+
+function rRHExperiencia(){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  const isGestor = profile?.role==='gestor';
+
+  // Coletar colaboradores CLT com experiência em andamento ou pendente
+  const pessoasCLT = pessoas.filter(function(p){
+    return p.tipo_contrato==='clt' && p.data_admissao && p.tipo_pessoa==='funcionario' && p.ativo!==false;
+  });
+
+  // Para cada pessoa CLT, verificar o período atual
+  const linhas = [];
+  pessoasCLT.forEach(function(p){
+    const adm = new Date(p.data_admissao+'T00:00:00');
+    const diasAdm = Math.floor((hoje-adm)/(1000*60*60*24));
+    if(diasAdm > 90) return; // experiência já concluída
+
+    const parcela = diasAdm < 45 ? 1 : 2;
+    const dataFim = new Date(adm);
+    dataFim.setDate(dataFim.getDate() + (parcela===1?45:90));
+
+    // Buscar avaliação existente
+    const avaliacao = rhExperiencia.find(function(e){
+      return e.pessoa_id===p.id && e.parcela===parcela;
+    });
+
+    const diasUteis = calcDiasUteisRestantes(dataFim.toISOString().split('T')[0]);
+    const urgente = diasUteis <= 5;
+    const st = avaliacao ? avaliacao.status : 'pendente';
+    const stInfo = STATUS_EXP[st]||STATUS_EXP.pendente;
+
+    // Filtro por gestor
+    if(isGestor && !isRH && p.gestor_id !== cu?.id) return;
+
+    linhas.push({p, parcela, dataFim, diasUteis, urgente, avaliacao, st, stInfo});
+  });
+
+  // Alertas
+  const urgentes = linhas.filter(function(l){ return l.urgente && l.st==='pendente'; });
+
+  let alertaHtml = '';
+  if(urgentes.length){
+    alertaHtml = '<div style="background:var(--red-bg);border:1px solid var(--red-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">';
+    alertaHtml += '<div style="font-size:13px;font-weight:700;color:var(--red-text);margin-bottom:8px">🚨 '+urgentes.length+' avaliação(ões) vencem em até 5 dias úteis</div>';
+    urgentes.forEach(function(l){
+      alertaHtml += '<div style="font-size:12px;color:var(--red-text);margin-bottom:3px">· <strong>'+l.p.nome+'</strong> — '+l.parcela+'º período vence em '+l.dataFim.toLocaleDateString('pt-BR')+' ('+l.diasUteis+' dia(s) útil/úteis)</div>';
+    });
+    alertaHtml += '</div>';
+  }
+
+  // Grid
+  let rows = '';
+  if(!linhas.length){
+    rows = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">Nenhum colaborador CLT em período de experiência.</td></tr>';
+  } else {
+    linhas.forEach(function(l){
+      const rowBg = l.urgente && l.st==='pendente' ? 'background:rgba(220,38,38,0.07)' :
+                    l.diasUteis<=10 && l.st==='pendente' ? 'background:rgba(234,179,8,0.07)' : '';
+      const _eid=l.p.id; const _ep=l.parcela;
+      rows += '<tr style="border-top:1px solid var(--border);cursor:pointer;'+rowBg+'" id="exp-row-'+_eid+'-'+_ep+'">';
+      rows += '<td style="padding:10px 12px"><div style="font-weight:600;font-size:13px">'+l.p.nome+'</div>';
+      rows += '<div style="font-size:11px;color:var(--text3)">'+( l.p.departamento||'—')+' · '+(l.p.cargo||'—')+'</div></td>';
+      rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2);text-align:center">'+l.parcela+'º</td>';
+      rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+l.dataFim.toLocaleDateString('pt-BR')+'</td>';
+      rows += '<td style="padding:10px 12px;font-size:12px;font-weight:'+(l.urgente?'700':'400')+';color:'+(l.urgente?'var(--red-text)':'var(--text2)')+'">'+l.diasUteis+'d úteis</td>';
+      rows += '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+l.stInfo.cor+';color:'+l.stInfo.txt+';font-weight:600">'+l.stInfo.label+'</span></td>';
+      rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+(l.avaliacao?.conclusao==='aprovado'?'✅ Aprovado':l.avaliacao?.conclusao==='reprovado'?'❌ Reprovado':'—')+'</td>';
+      rows += '<td style="padding:10px 12px;text-align:right">';
+      rows += '<button class="btn btn-sm btn-primary" id="exp-btn-'+_eid+'-'+_ep+'">Avaliar</button>';
+      rows += '</td></tr>';
+    });
+  }
+
+  // Montar o HTML
+  const _html = '<div>'
+    + alertaHtml
+    + '<div style="font-size:14px;font-weight:600;margin-bottom:12px">'+linhas.length+' colaborador'+(linhas.length!==1?'es':'')+' em período de experiência</div>'
+    + '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:auto">'
+    + '<table style="width:100%;border-collapse:collapse;min-width:700px">'
+    + '<thead><tr style="background:var(--bg2)">'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Colaborador</th>'
+    + '<th style="text-align:center;padding:10px 12px;font-size:11px;font-weight:600">Período</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Vencimento</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Dias úteis</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Status</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Conclusão</th>'
+    + '<th></th>'
+    + '</tr></thead>'
+    + '<tbody>'+rows+'</tbody>'
+    + '</table></div></div>';
+
+  setTimeout(function(){
+    linhas.forEach(function(l){
+      const row=document.getElementById('exp-row-'+l.p.id+'-'+l.parcela);
+      if(row) row.addEventListener('click',function(){openExpModal(l.p.id,l.parcela);});
+      const btn=document.getElementById('exp-btn-'+l.p.id+'-'+l.parcela);
+      if(btn) btn.addEventListener('click',function(e){e.stopPropagation();openExpModal(l.p.id,l.parcela);});
+    });
+  },100);
+
+  return _html;
+}
+
+function openExpModal(pessoaId, parcela){
+  const p = pessoas.find(function(x){return x.id===pessoaId;});
+  if(!p) return;
+
+  const adm = new Date(p.data_admissao+'T00:00:00');
+  const dataInicio = new Date(adm); if(parcela===2) dataInicio.setDate(dataInicio.getDate()+45);
+  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?45:90));
+
+  const avaliacao = rhExperiencia.find(function(e){return e.pessoa_id===pessoaId&&e.parcela===parcela;});
+  const isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  const isGestor = profile?.role==='gestor' || ['admin','adm'].includes(profile?.role||'');
+  const podeHomologar = isRH;
+  const podeAvaliar = isGestor || isRH;
+  const jaHomologado = avaliacao?.status==='homologado'||avaliacao?.status==='reprovado';
+
+  const old = document.getElementById('modal-exp');
+  if(old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-exp';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)';
+
+  let criteriosHtml = '';
+  CRITERIOS_EXP.forEach(function(c){
+    const val = avaliacao ? avaliacao['criterio_'+c.id]||'' : '';
+    const disabled = jaHomologado ? 'disabled' : '';
+    criteriosHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">';
+    criteriosHtml += '<span style="font-size:12px">'+c.label+'</span>';
+    criteriosHtml += '<select class="fi" id="exp-'+c.id+'" style="width:120px;font-size:12px;padding:3px 6px" '+disabled+'>';
+    criteriosHtml += '<option value="">—</option>';
+    [1,2,3,4,5].forEach(function(n){
+      const labels = ['','Insatisfatório','Regular','Bom','Muito Bom','Excelente'];
+      criteriosHtml += '<option value="'+n+'" '+(val==n?'selected':'')+'>'+n+' - '+labels[n]+'</option>';
+    });
+    criteriosHtml += '</select></div>';
+  });
+
+  const inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);border-radius:14px;padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.22)';
+  inner.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:4px">Avaliação de Experiência — '+parcela+'º Período</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:16px">'+p.nome+' · '+p.cargo+' · '+dataInicio.toLocaleDateString('pt-BR')+' → '+dataFim.toLocaleDateString('pt-BR')+'</div>'
+    + '<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text2)">Critérios de Avaliação (1 = Insatisfatório · 5 = Excelente)</div>'
+    + criteriosHtml
+    + '<div class="fg" style="margin-top:12px"><label class="fl">Comentários do avaliador</label>'
+    + '<textarea class="fi" id="exp-comentarios" rows="3" style="resize:vertical" '+(jaHomologado?'disabled':'')+'>'+( avaliacao?.comentarios||'')+'</textarea></div>'
+    + '<div class="fg"><label class="fl">Conclusão</label>'
+    + '<select class="fi" id="exp-conclusao" '+(jaHomologado?'disabled':'')+' style="font-size:13px">'
+    + '<option value="">Selecione...</option>'
+    + '<option value="aprovado" '+(avaliacao?.conclusao==='aprovado'?'selected':'')+'>✅ Aprovado — Efetivação recomendada</option>'
+    + '<option value="reprovado" '+(avaliacao?.conclusao==='reprovado'?'selected':'')+'>❌ Reprovado — Fim do vínculo</option>'
+    + '</select></div>'
+    + (avaliacao?.status==='avaliado'&&podeHomologar?'<div style="background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--blue-text);margin-bottom:8px">📋 Aguardando homologação do RH</div>':'')
+    + '<div id="exp-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:12px">'
+    + '<button class="btn" style="flex:1" id="exp-btn-cancelar">Cancelar</button>'
+    + (!jaHomologado&&podeAvaliar?'<button class="btn btn-primary" style="flex:2" id="exp-btn-salvar">Salvar avaliação</button>':'')
+    + (avaliacao?.status==='avaliado'&&podeHomologar?'<button class="btn btn-primary" style="flex:2;background:var(--green-bg);color:var(--green-text);border:1px solid var(--green-text)" id="exp-btn-homologar">Homologar (RH)</button>':'')
+    + '</div>';
+
+  modal.appendChild(inner);
+  modal.addEventListener('click', function(e){if(e.target===modal)modal.remove();});
+  document.body.appendChild(modal);
+
+  document.getElementById('exp-btn-cancelar').addEventListener('click', function(){modal.remove();});
+
+  const btnSalvar = document.getElementById('exp-btn-salvar');
+  if(btnSalvar) btnSalvar.addEventListener('click', function(){salvarExpAvaliacao(pessoaId, parcela, avaliacao?.id||null);});
+
+  const btnHomologar = document.getElementById('exp-btn-homologar');
+  if(btnHomologar) btnHomologar.addEventListener('click', function(){homologarExp(avaliacao.id, avaliacao.conclusao);});
+}
+
+async function salvarExpAvaliacao(pessoaId, parcela, expId){
+  const errEl = document.getElementById('exp-err');
+  const conclusao = document.getElementById('exp-conclusao')?.value;
+  if(!conclusao){
+    if(errEl){errEl.style.display='block';errEl.textContent='Selecione a conclusão da avaliação.';}
+    return;
+  }
+  if(errEl) errEl.style.display='none';
+
+  const p = pessoas.find(function(x){return x.id===pessoaId;});
+  const adm = new Date(p.data_admissao+'T00:00:00');
+  const dataInicio = new Date(adm); if(parcela===2) dataInicio.setDate(dataInicio.getDate()+45);
+  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?45:90));
+
+  const obj = {
+    company_id: company.id,
+    unit_id: p.unit_id||null,
+    pessoa_id: pessoaId,
+    parcela: parcela,
+    data_inicio: dataInicio.toISOString().split('T')[0],
+    data_fim: dataFim.toISOString().split('T')[0],
+    status: 'avaliado',
+    conclusao: conclusao,
+    comentarios: document.getElementById('exp-comentarios')?.value||null,
+    avaliador_id: cu.id,
+    avaliado_em: new Date().toISOString(),
+  };
+
+  CRITERIOS_EXP.forEach(function(c){
+    const val = document.getElementById('exp-'+c.id)?.value;
+    obj['criterio_'+c.id] = val ? parseInt(val) : null;
+  });
+
+  try{
+    if(expId){
+      await dbUpdate('rh_experiencia', expId, obj);
+      rhExperiencia = rhExperiencia.map(function(e){return e.id===expId?{...e,...obj}:e;});
+    } else {
+      const nova = await dbInsert('rh_experiencia', obj);
+      if(nova) rhExperiencia.push(nova);
+    }
+    document.getElementById('modal-exp')?.remove();
+    if(curPage==='rh-experiencia'){const c=document.getElementById('content');if(c)c.innerHTML=rRHExperiencia();}
+  }catch(e){
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+e.message;}
+  }
+}
+
+async function homologarExp(expId, conclusao){
+  if(!confirm('Confirmar homologação? Esta ação não pode ser desfeita.')) return;
+  const novoStatus = conclusao==='aprovado' ? 'homologado' : 'reprovado';
+  try{
+    await dbUpdate('rh_experiencia', expId, {
+      status: novoStatus,
+      homologador_id: cu.id,
+      homologado_em: new Date().toISOString(),
+    });
+    rhExperiencia = rhExperiencia.map(function(e){
+      return e.id===expId?{...e,status:novoStatus,homologador_id:cu.id}:e;
+    });
+    document.getElementById('modal-exp')?.remove();
+    if(curPage==='rh-experiencia'){const c=document.getElementById('content');if(c)c.innerHTML=rRHExperiencia();}
+    if(conclusao==='aprovado') alert('✅ Experiência homologada! O 2º período está liberado se aplicável.');
+    else alert('❌ Reprovação homologada. Encaminhar para desligamento.');
+  }catch(e){ alert('Erro: '+e.message); }
+}
 
 // ── RH PERFORMANCE ──
 let rhPerfPessoaId=null;
