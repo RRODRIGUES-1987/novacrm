@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.145 | Gerado: 2026-06-01 17:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.146 | Gerado: 2026-06-01 18:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -765,7 +765,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.145';
+const APP_VERSION='v1.0.146';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1014,11 +1014,7 @@ async function finishEnterApp(user){
   // Verificar limite de sessões e sessão duplicada
   const verificacao = await verificarLimiteSessoes();
   if(verificacao.bloqueado){
-    if(verificacao.motivo==='sessao_duplicada'){
-      alert('Você já está logado em outro dispositivo ou navegador. Encerre a sessão anterior antes de continuar.');
-    } else {
-      alert('Limite de usuários simultâneos atingido para esta empresa. Tente novamente mais tarde.');
-    }
+    alert('Limite de usuários simultâneos atingido para esta empresa. Tente novamente mais tarde.');
     await sair();
     return;
   }
@@ -4971,17 +4967,22 @@ async function verificarLimiteSessoes(){
   try{
     const limite90s = new Date(Date.now()-90000).toISOString();
 
-    // 1. Verificar sessão duplicada do mesmo usuário
-    // Se já tem token no sessionStorage, é hard refresh — ok
+    // 1. Verificar sessão duplicada — derrubar sessão anterior automaticamente
     const tokenExistente = sessionStorage.getItem('verus_session_token');
     if(!tokenExistente){
-      // Nova sessão — verificar se usuário já está logado em outro lugar
-      const sessoesUsuario = await dbSelect('user_sessions',
-        'user_id=eq.'+cu.id+'&last_seen=gte.'+limite90s+'&force_logout=eq.false'
-      );
-      if(sessoesUsuario&&sessoesUsuario.length>0){
-        return {bloqueado:true, motivo:'sessao_duplicada'};
-      }
+      // Nova sessão — derrubar sessões ativas anteriores do mesmo usuário
+      try{
+        const sessoesAntigas = await dbSelect('user_sessions',
+          'user_id=eq.'+cu.id+'&last_seen=gte.'+limite90s+'&force_logout=eq.false'
+        );
+        if(sessoesAntigas&&sessoesAntigas.length>0){
+          await Promise.all(sessoesAntigas.map(function(s){
+            return dbUpdate('user_sessions', s.id, {force_logout:true});
+          }));
+          // Aguardar 1s para o outro cliente detectar o force_logout
+          await new Promise(function(r){setTimeout(r,1000);});
+        }
+      }catch(e){ console.warn('derrubar sessao anterior:', e); }
     }
 
     // 2. Verificar limite de usuários simultâneos da empresa
