@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.173 | Gerado: 2026-06-03 15:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.174 | Gerado: 2026-06-03 16:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -769,7 +769,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.173';
+const APP_VERSION='v1.0.174';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2054,7 +2054,7 @@ function openCadastro(tipo, id=null){
       const panels = ['cad-panel-pessoal','cad-panel-profissional','cad-panel-situacao','cad-panel-performance','cad-panel-dependentes'];
       panels.forEach(function(pid){
         const p = document.getElementById(pid);
-        if(p){ p.style.overflowY='auto'; p.style.maxHeight='calc(96vh - 160px)'; p.style.paddingRight='4px'; }
+        if(p){ p.style.overflowY='auto'; p.style.flex='1'; p.style.minHeight='0'; p.style.paddingRight='4px'; }
       });
     }, 100);
     // Listeners dos botões de ação do cabeçalho
@@ -2200,6 +2200,32 @@ function switchCadTab(tab){
 }
 
 function abrirModalHistorico(pessoaId){
+  // Abrir linha do tempo HORIZONTAL dentro do modal do colaborador (não novo modal)
+  const pess = pessoas.find(function(x){return x.id===pessoaId;});
+  if(!pess) return;
+  // Usar o painel de situação temporariamente ou criar painel de histórico
+  const el = document.getElementById('cad-panel-historico');
+  if(!el) {
+    // Criar painel dinamicamente se não existir
+    const allPanels = document.querySelectorAll('[id^="cad-panel-"]');
+    allPanels.forEach(function(pl){ pl.style.display='none'; });
+    const newPanel = document.createElement('div');
+    newPanel.id = 'cad-panel-historico';
+    newPanel.style.overflowY = 'auto';
+    newPanel.style.flex = '1';
+    newPanel.style.minHeight = '0';
+    newPanel.style.paddingRight = '4px';
+    // Inserir após o último painel
+    const lastPanel = document.querySelector('[id^="cad-panel-dependentes"]');
+    if(lastPanel && lastPanel.parentNode) lastPanel.parentNode.appendChild(newPanel);
+  }
+  renderHistoricoHorizontal(pessoaId);
+  // Atualizar visual das abas
+  document.querySelectorAll('[id^="cad-tab-"]').forEach(function(b){
+    b.style.borderBottomColor='transparent';b.style.color='var(--text2)';b.style.fontWeight='500';
+  });
+  return; // sair da função original
+  // Código original abaixo mantido mas não executado
   const p = pessoas.find(function(x){return x.id===pessoaId;});
   if(!p) return;
   const hist = historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId;}).sort(function(a,b){return a.data<b.data?-1:1;});
@@ -2242,6 +2268,39 @@ function abrirModalHistorico(pessoaId){
   modal.addEventListener('click', function(e){if(e.target===modal)modal.remove();});
   document.body.appendChild(modal);
   document.getElementById('hist-btn-fechar').addEventListener('click', function(){modal.remove();});
+}
+
+function renderHistoricoHorizontal(pessoaId){
+  const p = pessoas.find(function(x){return x.id===pessoaId;});
+  if(!p) return;
+  const hist = historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId;}).sort(function(a,b){return a.data<b.data?-1:1;});
+  const marcos = [];
+  if(p.data_admissao) marcos.push({data:p.data_admissao,label:'Admissão',sub:p.cargo||'',icon:'🎯',cor:'#0A2540'});
+  hist.forEach(function(h){
+    const icons={promocao:'⬆',transferencia:'↔',alteracao_salario:'💰',desligamento:'🚪'};
+    const labels={promocao:'Promoção',transferencia:'Transferência',alteracao_salario:'Reajuste',desligamento:'Desligamento'};
+    marcos.push({data:h.data,label:labels[h.tipo]||h.tipo,sub:h.cargo_novo||h.observacao||'',icon:icons[h.tipo]||'📌',cor:'#1e5f82'});
+  });
+  marcos.push({data:new Date().toISOString().slice(0,10),label:'Hoje',sub:p.cargo||'',icon:'📍',cor:'#16a34a'});
+
+  let html = '<div style="padding:8px 0 16px"><div style="font-size:13px;font-weight:600;margin-bottom:16px;color:#0A2540">📅 Linha do tempo — '+p.nome+'</div>';
+  html += '<div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:8px;gap:0">';
+  marcos.forEach(function(m, i){
+    html += '<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;min-width:90px;max-width:110px">';
+    html += '<div style="font-size:18px;margin-bottom:4px">'+m.icon+'</div>';
+    html += '<div style="width:10px;height:10px;border-radius:50%;background:'+m.cor+';flex-shrink:0;z-index:1"></div>';
+    html += '<div style="font-size:10px;font-weight:700;text-align:center;color:'+m.cor+';margin-top:6px;line-height:1.3">'+m.label+'</div>';
+    if(m.sub) html += '<div style="font-size:9px;color:var(--text3);text-align:center;margin-top:2px;line-height:1.3">'+m.sub+'</div>';
+    html += '<div style="font-size:9px;color:var(--text3);text-align:center;margin-top:2px">'+new Date(m.data+'T00:00').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})+'</div>';
+    html += '</div>';
+    if(i<marcos.length-1){
+      html += '<div style="flex:1;height:2px;background:var(--border);margin-top:22px;min-width:16px;flex-shrink:0"></div>';
+    }
+  });
+  html += '</div></div>';
+
+  const panel = document.getElementById('cad-panel-historico');
+  if(panel){ panel.style.display=''; panel.innerHTML=html; }
 }
 
 function abrirAbaColaborador(aba, pessoaId){
@@ -8021,33 +8080,24 @@ function renderRHPerf(){
   </div>`:''}
 
   <!-- GRÁFICO: Linha por competência com filtros -->
-  <div style="background:var(--bg);border-radius:10px;padding:18px;border:1px solid var(--border);margin-bottom:14px">
-    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">📊 Evolução por competência</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end">
-      <div class="fg" style="margin:0;min-width:180px">
-        <label class="fl">Competência</label>
-        <select class="fi" id="rhperf-comp-sel" onchange="renderRHPerfCompChart()">
-          <option value="">— Selecione —</option>
-          ${todasComps.map(c=>`<option value="${c}">${c}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fg" style="margin:0;min-width:130px">
-        <label class="fl">Período de</label>
-        <select class="fi" id="rhperf-periodo-ini" onchange="renderRHPerfCompChart()">
-          <option value="">Todos</option>
-          ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fg" style="margin:0;min-width:130px">
-        <label class="fl">Até</label>
-        <select class="fi" id="rhperf-periodo-fim" onchange="renderRHPerfCompChart()">
-          <option value="">Todos</option>
-          ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
-        </select>
-      </div>
+  <div style="background:var(--bg);border-radius:10px;padding:12px 18px;border:1px solid var(--border);margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:12px;font-weight:600;color:#0A2540;white-space:nowrap">📊 Por competência</span>
+      <select style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);height:26px" id="rhperf-comp-sel" onchange="renderRHPerfCompChart()">
+        <option value="">— Selecione —</option>
+        ${todasComps.map(c=>`<option value="${c}">${c}</option>`).join('')}
+      </select>
+      <select style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);height:26px" id="rhperf-periodo-ini" onchange="renderRHPerfCompChart()">
+        <option value="">De: todos</option>
+        ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
+      </select>
+      <select style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);height:26px" id="rhperf-periodo-fim" onchange="renderRHPerfCompChart()">
+        <option value="">Até: todos</option>
+        ${avs.map(a=>`<option value="${a.data_avaliacao}">${a.periodo||a.data_avaliacao}</option>`).join('')}
+      </select>
     </div>
-    <div id="rhperf-comp-msg" style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Selecione uma competência para visualizar</div>
-    <div style="position:relative;width:100%;height:180px;padding-top:0;display:none" id="rhperf-comp-wrap">
+    <div id="rhperf-comp-msg" style="text-align:center;padding:10px;color:var(--text3);font-size:12px">Selecione uma competência</div>
+    <div style="position:relative;width:100%;height:180px;display:none" id="rhperf-comp-wrap">
       <canvas id="rhperf-comp-chart"></canvas>
     </div>
   </div>
