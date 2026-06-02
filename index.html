@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.185 | Gerado: 2026-06-04 20:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.186 | Gerado: 2026-06-04 21:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -532,6 +532,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       </div>
     </div>
 
+    <!-- Módulo Qualidade -->
+    <div class="nav-module">
+      <button class="nav-module-header" id="mod-qualidade" onclick="toggleModule('qualidade')">
+        <div style="display:flex;align-items:center;gap:9px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>Qualidade</span>
+        </div>
+        <svg class="mod-arrow" id="arrow-qualidade" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="nav-sub" id="sub-qualidade" style="display:none">
+        <button class="navitem sub" id="nav-qual-documentos" onclick="pg('qual-documentos')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span>Documentos</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Módulo Compras -->
     <div class="nav-module">
       <button class="nav-module-header" id="mod-compras" onclick="toggleModule('compras')">
@@ -701,6 +718,8 @@ let _heartbeatTimer=null;
 let rhFerias=[];
 let rhExperiencia=[];
 let rhCiclos=[];
+let qualDocumentos=[];
+let qualRevisoes=[];
 let fatProgramacao=[];
 let gruposClientes=[];
 let activeUnit=null; // null = consolidado | UUID = unidade específica
@@ -763,13 +782,14 @@ const TELAS=[
   {id:'contas-receber',       label:'Financeiro · Contas a Receber',           modulo:'Financeiro'},
   // Compras
   {id:'compras',              label:'Compras · Solicitações',                  modulo:'Compras'},
+  {id:'qual-documentos',     label:'Qualidade · Controle de Documentos',      modulo:'Qualidade'},
   // Admin
   {id:'admin-sessoes',        label:'Admin · Sessões Ativas',                  modulo:'Admin'},
 ];
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.185';
+const APP_VERSION='v1.0.186';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1170,6 +1190,8 @@ async function loadData(){
       await loadUserUnits();
       await loadRHFerias().catch(console.warn);
       rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
+      qualDocumentos = await dbSelect('qualidade_documentos',`company_id=eq.${cid}&order=codigo.asc`).catch(()=>[]);
+      qualRevisoes   = await dbSelect('qualidade_revisoes',`company_id=eq.${cid}&order=numero_rev.desc`).catch(()=>[]);
       rhCiclos = await dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).catch(()=>[]);
       await verificarAbrirCiclo();
       setTimeout(verificarAlertasFerias,2000);
@@ -1375,6 +1397,7 @@ function render(){
   else if(curPage==='rh-horarios')c.innerHTML=rRHHorarios();
   else if(curPage==='rh-avaliacoes'){c.innerHTML=rRHAvaliacoes();}
   else if(curPage==='rh-experiencia'){c.innerHTML=rRHExperiencia();}
+  else if(curPage==='qual-documentos'){c.innerHTML=rQualDocumentos();}
   else if(curPage==='rh-ferias'){
     if(!pessoas||!pessoas.length){
       c.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)"><div class="spin" style="width:24px;height:24px;margin:0 auto 12px"></div>Carregando...</div>';
@@ -4770,6 +4793,15 @@ function rDashRH(role){
 
   html += '</div>';
 
+  // Card Qualidade — documentos vencendo
+  const hoje3 = new Date(); hoje3.setHours(0,0,0,0);
+  const prazoQ = company?.prazo_revisao_alerta||30;
+  const docsAlerta = qualDocumentos.filter(function(d){
+    if(d.situacao==='obsoleto'||!d.data_validade) return false;
+    const val = new Date(d.data_validade+'T00:00:00');
+    return Math.floor((val-hoje3)/(1000*60*60*24))<=prazoQ;
+  });
+
   // Card Ciclo de Avaliação atual
   const cardCiclo = rRHCicloCard();
   if(cardCiclo) html += cardCiclo;
@@ -5434,6 +5466,425 @@ function rAdminSessoes(){
     +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden">'
     +'<div id="admin-sessoes-content"><div style="padding:24px;text-align:center;color:var(--text3)">Carregando...</div></div>'
     +'</div>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// QUALIDADE — CONTROLE DE DOCUMENTOS
+// ══════════════════════════════════════════════════════════════════
+
+const TIPOS_DOC = ['Manual','Política','Instrução de Trabalho','Procedimento','Formulário','Organograma','Fluxograma','Registro','Outros'];
+const DEPTS_MAT = [
+  {key:'mat_direcao',   label:'Direção'},
+  {key:'mat_adm_fin',   label:'ADM/FIN'},
+  {key:'mat_comercial', label:'Comercial'},
+  {key:'mat_compras',   label:'Compras'},
+  {key:'mat_operacao',  label:'Operação'},
+  {key:'mat_manutencao',label:'Manutenção'},
+  {key:'mat_qualidade', label:'Qualidade'},
+  {key:'mat_rh',        label:'RH'},
+  {key:'mat_sgq',       label:'SGQ'},
+];
+
+function getDocSituacao(doc){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  if(doc.situacao==='obsoleto') return {label:'Obsoleto', cor:'var(--text3)', bg:'var(--bg2)'};
+  if(doc.data_validade){
+    const val = new Date(doc.data_validade+'T00:00:00');
+    if(val < hoje) return {label:'Vencido', cor:'var(--red-text)', bg:'var(--red-bg)'};
+    const prazo = company?.prazo_revisao_alerta||30;
+    const diff = Math.floor((val-hoje)/(1000*60*60*24));
+    if(diff<=prazo) return {label:'Vence em '+diff+'d', cor:'var(--amber-text)', bg:'var(--amber-bg)'};
+  }
+  return {label:'Vigente', cor:'var(--green-text)', bg:'var(--green-bg)'};
+}
+
+function rQualDocumentos(){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const prazo = company?.prazo_revisao_alerta||30;
+
+  // Alertas
+  const alertas = qualDocumentos.filter(function(d){
+    if(d.situacao==='obsoleto') return false;
+    if(!d.data_validade) return false;
+    const val = new Date(d.data_validade+'T00:00:00');
+    const diff = Math.floor((val-hoje)/(1000*60*60*24));
+    return diff<=prazo;
+  });
+
+  let alertaHtml = '';
+  if(alertas.length){
+    const vencidos = alertas.filter(function(d){ return new Date(d.data_validade+'T00:00:00')<hoje; });
+    const proximos = alertas.filter(function(d){ return new Date(d.data_validade+'T00:00:00')>=hoje; });
+    alertaHtml = '<div style="background:'+(vencidos.length?'var(--red-bg)':'var(--amber-bg)')+';border:1px solid '+(vencidos.length?'var(--red-text)':'var(--amber-text)')+';border-radius:10px;padding:14px 16px;margin-bottom:16px">';
+    alertaHtml += '<div style="font-size:13px;font-weight:700;color:'+(vencidos.length?'var(--red-text)':'var(--amber-text)')+';margin-bottom:8px">'+(vencidos.length?'🔴':'⚠')+' '+alertas.length+' documento(s) vencido(s) ou próximo(s) do vencimento</div>';
+    alertas.forEach(function(d){
+      const val = new Date(d.data_validade+'T00:00:00');
+      const diff = Math.floor((val-hoje)/(1000*60*60*24));
+      const cor = diff<0?'var(--red-text)':'var(--amber-text)';
+      alertaHtml += '<div style="font-size:12px;color:'+cor+';margin-bottom:3px">· <strong>'+d.codigo+'</strong> — '+d.titulo+' — '+(diff<0?'Vencido há '+Math.abs(diff)+'d':'Vence em '+diff+'d')+'</div>';
+    });
+    alertaHtml += '</div>';
+  }
+
+  // Filtros
+  const tipoFiltro = document.getElementById('qual-filtro-tipo')?.value||'';
+  const sitFiltro  = document.getElementById('qual-filtro-sit')?.value||'';
+  const busca      = (document.getElementById('qual-busca')?.value||'').toLowerCase();
+
+  let docs = qualDocumentos.filter(function(d){
+    if(tipoFiltro && d.tipo!==tipoFiltro) return false;
+    if(sitFiltro){
+      const sit = getDocSituacao(d);
+      if(sitFiltro==='vigente' && sit.label!=='Vigente') return false;
+      if(sitFiltro==='vencido' && sit.label.indexOf('Vence')<0 && sit.label!=='Vencido') return false;
+      if(sitFiltro==='obsoleto' && d.situacao!=='obsoleto') return false;
+    }
+    if(busca && !d.titulo.toLowerCase().includes(busca) && !d.codigo.toLowerCase().includes(busca)) return false;
+    return true;
+  });
+
+  // Agrupar por tipo
+  const grupos = {};
+  docs.forEach(function(d){
+    const t = d.tipo||'Outros';
+    if(!grupos[t]) grupos[t]=[];
+    grupos[t].push(d);
+  });
+
+  let rows = '';
+  Object.keys(grupos).sort().forEach(function(tipo){
+    rows += '<tr><td colspan="8" style="background:var(--bg2);padding:8px 12px;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">'+tipo+'</td></tr>';
+    grupos[tipo].forEach(function(d){
+      const sit = getDocSituacao(d);
+      const rev = qualRevisoes.find(function(r){return r.documento_id===d.id&&r.status==='aprovado';});
+      rows += '<tr style="border-top:1px solid var(--border);cursor:pointer" id="qual-row-'+d.id+'">';
+      rows += '<td style="padding:10px 12px;font-size:12px;font-weight:700;color:var(--accent);white-space:nowrap">'+d.codigo+'</td>';
+      rows += '<td style="padding:10px 12px;font-size:11px;color:var(--text3)">'+( d.req_norma||'—')+'</td>';
+      rows += '<td style="padding:10px 12px;font-size:12px">'+d.titulo+'</td>';
+      rows += '<td style="padding:10px 12px;text-align:center;font-size:12px">Rev.'+( d.revisao_atual||0)+'</td>';
+      rows += '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;background:'+sit.bg+';color:'+sit.cor+'">'+sit.label+'</span></td>';
+      rows += '<td style="padding:10px 12px;font-size:11px;color:var(--text2)">'+( d.data_validade?new Date(d.data_validade+'T00:00:00').toLocaleDateString('pt-BR'):'—')+'</td>';
+      rows += '<td style="padding:10px 12px;font-size:11px">';
+      DEPTS_MAT.forEach(function(dept){ if(d[dept.key]) rows += '<span style="font-size:9px;background:var(--blue-bg);color:var(--blue-text);padding:1px 5px;border-radius:3px;margin-right:2px">'+dept.label+'</span>'; });
+      rows += '</td>';
+      rows += '<td style="padding:10px 12px;text-align:right;white-space:nowrap">';
+      if(rev&&rev.arquivo_url) rows += '<a href="'+rev.arquivo_url+'" target="_blank" id="qual-btn-pdf-'+d.id+'" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer;text-decoration:none;color:var(--text2);margin-right:4px">📄 PDF</a>';
+      rows += '<button id="qual-btn-edit-'+d.id+'" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer">Editar</button>';
+      rows += '</td></tr>';
+    });
+  });
+
+  if(!docs.length) rows = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text3)">Nenhum documento encontrado.</td></tr>';
+
+  return '<div>'
+    + alertaHtml
+    + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'
+    + '<input id="qual-busca" class="fi" placeholder="Buscar por código ou título..." oninput="renderQualDoc()" style="max-width:260px;font-size:12px">'
+    + '<select id="qual-filtro-tipo" class="fi" onchange="renderQualDoc()" style="width:auto;font-size:12px"><option value="">Todos os tipos</option>'
+    + TIPOS_DOC.map(function(t){return'<option>'+t+'</option>';}).join('')
+    + '</select>'
+    + '<select id="qual-filtro-sit" class="fi" onchange="renderQualDoc()" style="width:auto;font-size:12px"><option value="">Todas as situações</option><option value="vigente">Vigente</option><option value="vencido">Vencendo/Vencido</option><option value="obsoleto">Obsoleto</option></select>'
+    + '<div style="flex:1"></div>'
+    + '<button id="qual-btn-novo" style="padding:7px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Novo documento</button>'
+    + '</div>'
+    + '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:auto">'
+    + '<table style="width:100%;border-collapse:collapse;min-width:900px">'
+    + '<thead><tr style="background:var(--bg2)">'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Código</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Norma</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Título</th>'
+    + '<th style="text-align:center;padding:10px 12px;font-size:11px;font-weight:600">Revisão</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Situação</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Validade</th>'
+    + '<th style="text-align:left;padding:10px 12px;font-size:11px;font-weight:600">Departamentos</th>'
+    + '<th></th>'
+    + '</tr></thead>'
+    + '<tbody>'+rows+'</tbody>'
+    + '</table></div></div>';
+}
+
+function renderQualDoc(){
+  const c = document.getElementById('content');
+  if(c&&curPage==='qual-documentos') c.innerHTML=rQualDocumentos();
+  // Re-adicionar listeners
+  setTimeout(addQualListeners, 100);
+}
+
+function addQualListeners(){
+  const btnNovo = document.getElementById('qual-btn-novo');
+  if(btnNovo) btnNovo.addEventListener('click', function(){ openQualModal(null); });
+  qualDocumentos.forEach(function(d){
+    const btnEdit = document.getElementById('qual-btn-edit-'+d.id);
+    if(btnEdit) btnEdit.addEventListener('click', function(e){ e.stopPropagation(); openQualModal(d.id); });
+    const row = document.getElementById('qual-row-'+d.id);
+    if(row) row.addEventListener('click', function(){ openQualModal(d.id); });
+  });
+}
+
+function openQualModal(docId){
+  const doc = docId ? qualDocumentos.find(function(d){return d.id===docId;}) : null;
+  const revisoes = docId ? qualRevisoes.filter(function(r){return r.documento_id===docId;}).sort(function(a,b){return b.numero_rev-a.numero_rev;}) : [];
+  const isAdmin = ['admin','adm'].includes(profile?.role||'');
+  const isQual  = profile?.role==='qualidade'||isAdmin;
+
+  const old = document.getElementById('modal-qual');
+  if(old) old.remove();
+  const modal = document.createElement('div');
+  modal.id = 'modal-qual';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:300;display:flex;align-items:flex-end;justify-content:flex-end;background:rgba(0,0,0,0.45)';
+
+  // Abas
+  const abaAtiva = 'dados';
+
+  // Matriz checkboxes
+  let matrizHtml = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">';
+  DEPTS_MAT.forEach(function(dept){
+    const checked = doc&&doc[dept.key]?'checked':'';
+    matrizHtml += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2)">';
+    matrizHtml += '<input type="checkbox" id="qm-'+dept.key+'" '+checked+' style="cursor:pointer"> '+dept.label+'</label>';
+  });
+  matrizHtml += '</div>';
+
+  // Revisões HTML
+  let revHtml = '';
+  if(revisoes.length){
+    revHtml = '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">';
+    revisoes.forEach(function(r){
+      const statusColors = {rascunho:['var(--bg2)','var(--text2)'],em_aprovacao:['var(--amber-bg)','var(--amber-text)'],aprovado:['var(--green-bg)','var(--green-text)'],rejeitado:['var(--red-bg)','var(--red-text)']};
+      const sc = statusColors[r.status]||statusColors.rascunho;
+      revHtml += '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">';
+      revHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+      revHtml += '<span style="font-size:13px;font-weight:700">Rev. '+r.numero_rev+'</span>';
+      revHtml += '<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+sc[0]+';color:'+sc[1]+';font-weight:600">'+r.status.replace('_',' ')+'</span>';
+      revHtml += '</div>';
+      if(r.data_revisao) revHtml += '<div style="font-size:11px;color:var(--text3)">'+new Date(r.data_revisao+'T00:00:00').toLocaleDateString('pt-BR')+'</div>';
+      if(r.descricao) revHtml += '<div style="font-size:12px;color:var(--text2);margin-top:4px">'+r.descricao+'</div>';
+      if(r.arquivo_url) revHtml += '<a href="'+r.arquivo_url+'" target="_blank" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block">📄 Abrir documento</a>';
+      if(r.status==='em_aprovacao'&&isAdmin){
+        revHtml += '<div style="display:flex;gap:6px;margin-top:8px">';
+        revHtml += '<button id="qual-aprovar-'+r.id+'" style="flex:1;padding:5px;font-size:12px;border:none;border-radius:6px;background:var(--green-bg);color:var(--green-text);cursor:pointer;font-weight:600">✅ Aprovar</button>';
+        revHtml += '<button id="qual-rejeitar-'+r.id+'" style="flex:1;padding:5px;font-size:12px;border:none;border-radius:6px;background:var(--red-bg);color:var(--red-text);cursor:pointer;font-weight:600">❌ Rejeitar</button>';
+        revHtml += '</div>';
+      }
+      revHtml += '</div>';
+    });
+    revHtml += '</div>';
+  } else {
+    revHtml = '<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">Nenhuma revisão cadastrada.</div>';
+  }
+
+  const inner = document.createElement('div');
+  inner.style.cssText = 'background:var(--bg);width:100%;max-width:900px;max-height:96vh;overflow-y:auto;padding:24px;box-shadow:-8px 0 32px rgba(0,0,0,.15)';
+  inner.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+    +'<div style="font-size:16px;font-weight:700">'+(doc?doc.codigo+' — '+doc.titulo:'Novo Documento')+'</div>'
+    +'<button id="qual-modal-close" style="font-size:20px;border:none;background:none;cursor:pointer;color:var(--text2)">✕</button>'
+    +'</div>'
+
+    // Abas
+    +'<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">'
+    +'<button id="qtab-dados" style="padding:8px 14px;font-size:12px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">Dados</button>'
+    +'<button id="qtab-revisoes" style="padding:8px 14px;font-size:12px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--text2)">Revisões ('+revisoes.length+')</button>'
+    +'<button id="qtab-matriz" style="padding:8px 14px;font-size:12px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:var(--text2)">Matriz</button>'
+    +'</div>'
+
+    // Painel Dados
+    +'<div id="qpanel-dados">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div class="fg"><label class="fl">Código *</label><input class="fi" id="qd-codigo" value="'+(doc?doc.codigo||'':'')+'" placeholder="ex: MKMAN001"></div>'
+    +'<div class="fg"><label class="fl">Tipo</label><select class="fi" id="qd-tipo"><option value="">Selecione</option>'+TIPOS_DOC.map(function(t){return'<option '+(doc&&doc.tipo===t?'selected':'')+'>'+t+'</option>';}).join('')+'</select></div>'
+    +'<div class="fg" style="grid-column:1/-1"><label class="fl">Título *</label><input class="fi" id="qd-titulo" value="'+(doc?doc.titulo||'':'')+'" placeholder="Título do documento"></div>'
+    +'<div class="fg"><label class="fl">Requisito Norma</label><input class="fi" id="qd-norma" value="'+(doc?doc.req_norma||'':'')+'" placeholder="ex: 4.4"></div>'
+    +'<div class="fg"><label class="fl">Situação</label><select class="fi" id="qd-situacao"><option value="vigente" '+((!doc||doc.situacao==='vigente')?'selected':'')+'>Vigente</option><option value="obsoleto" '+(doc&&doc.situacao==='obsoleto'?'selected':'')+'>Obsoleto</option></select></div>'
+    +'<div class="fg"><label class="fl">Data Aprovação</label><input class="fi" type="date" id="qd-aprovacao" value="'+(doc?doc.data_aprovacao||'':'')+'" ></div>'
+    +'<div class="fg"><label class="fl">Data Validade</label><input class="fi" type="date" id="qd-validade" value="'+(doc?doc.data_validade||'':'')+'" ></div>'
+    +'<div class="fg"><label class="fl">Armazenamento</label><input class="fi" id="qd-armazenamento" value="'+(doc?doc.armazenamento||'':'')+'" ></div>'
+    +'<div class="fg"><label class="fl">Tempo de Retenção</label><input class="fi" id="qd-retencao" value="'+(doc?doc.tempo_retencao||'':'')+'" placeholder="ex: 1 ANO"></div>'
+    +'<div class="fg"><label class="fl">Descarte</label><input class="fi" id="qd-descarte" value="'+(doc?doc.descarte||'':'')+'" placeholder="ex: REDE OBSOLETO"></div>'
+    +'</div>'
+    +'<div id="qual-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:8px"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:16px">'
+    +'<button id="qual-btn-cancelar" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">Cancelar</button>'
+    +(isQual?'<button id="qual-btn-salvar" style="flex:2;padding:9px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar</button>':'')
+    +'</div>'
+    +'</div>'
+
+    // Painel Revisões
+    +'<div id="qpanel-revisoes" style="display:none">'
+    + revHtml
+    +(isQual?'<div style="padding-top:12px;border-top:1px solid var(--border)">'
+    +'<div style="font-size:13px;font-weight:600;margin-bottom:10px">Nova Revisão</div>'
+    +'<div class="fg"><label class="fl">Descrição das alterações</label><textarea class="fi" id="qr-descricao" rows="2" style="resize:vertical"></textarea></div>'
+    +'<div class="fg"><label class="fl">Data da revisão</label><input class="fi" type="date" id="qr-data"></div>'
+    +'<div class="fg"><label class="fl">Arquivo PDF</label><input type="file" id="qr-arquivo" accept=".pdf,.doc,.docx" class="fi" style="padding:6px"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px">'
+    +'<button id="qual-rev-rascunho" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px">Salvar Rascunho</button>'
+    +'<button id="qual-rev-submeter" style="flex:2;padding:7px;border:none;border-radius:8px;background:var(--amber-text);color:#fff;cursor:pointer;font-size:12px;font-weight:600">Submeter para Aprovação</button>'
+    +'</div></div>':'')
+    +'</div>'
+
+    // Painel Matriz
+    +'<div id="qpanel-matriz" style="display:none">'
+    +'<div style="font-size:13px;font-weight:600;margin-bottom:12px">Matriz de Correlação — Departamentos</div>'
+    + matrizHtml
+    +(isQual?'<button id="qual-matriz-salvar" style="margin-top:16px;padding:8px 20px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar Matriz</button>':'')
+    +'</div>';
+
+  modal.appendChild(inner);
+  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  // Listeners abas
+  document.getElementById('qtab-dados')?.addEventListener('click', function(){ switchQualTab('dados'); });
+  document.getElementById('qtab-revisoes')?.addEventListener('click', function(){ switchQualTab('revisoes'); });
+  document.getElementById('qtab-matriz')?.addEventListener('click', function(){ switchQualTab('matriz'); });
+  // Listeners ações
+  document.getElementById('qual-modal-close').addEventListener('click', function(){ modal.remove(); });
+  document.getElementById('qual-btn-cancelar')?.addEventListener('click', function(){ modal.remove(); });
+
+  document.getElementById('qual-btn-salvar')?.addEventListener('click', function(){ salvarQualDoc(docId); });
+  document.getElementById('qual-rev-rascunho')?.addEventListener('click', function(){ salvarQualRevisao(docId,'rascunho'); });
+  document.getElementById('qual-rev-submeter')?.addEventListener('click', function(){ salvarQualRevisao(docId,'em_aprovacao'); });
+  document.getElementById('qual-matriz-salvar')?.addEventListener('click', function(){ salvarQualMatriz(docId); });
+
+  // Aprovação/Rejeição
+  revisoes.forEach(function(r){
+    const btnA = document.getElementById('qual-aprovar-'+r.id);
+    const btnR = document.getElementById('qual-rejeitar-'+r.id);
+    if(btnA) btnA.addEventListener('click', function(){ aprovarQualRevisao(r.id, docId, true); });
+    if(btnR) btnR.addEventListener('click', function(){ aprovarQualRevisao(r.id, docId, false); });
+  });
+}
+
+function switchQualTab(tab){
+  ['dados','revisoes','matriz'].forEach(function(t){
+    const panel = document.getElementById('qpanel-'+t);
+    const btn   = document.getElementById('qtab-'+t);
+    if(panel) panel.style.display = t===tab?'':'none';
+    if(btn){
+      btn.style.borderBottomColor = t===tab?'var(--accent)':'transparent';
+      btn.style.color = t===tab?'var(--accent)':'var(--text2)';
+      btn.style.fontWeight = t===tab?'600':'500';
+    }
+  });
+}
+
+async function salvarQualDoc(docId){
+  const errEl = document.getElementById('qual-err');
+  const codigo = document.getElementById('qd-codigo')?.value.trim();
+  const titulo = document.getElementById('qd-titulo')?.value.trim();
+  if(!codigo||!titulo){ if(errEl){errEl.style.display='block';errEl.textContent='Código e título são obrigatórios.';} return; }
+  if(errEl) errEl.style.display='none';
+
+  const obj = {
+    company_id: company.id,
+    codigo, titulo,
+    tipo:          document.getElementById('qd-tipo')?.value||null,
+    req_norma:     document.getElementById('qd-norma')?.value||null,
+    situacao:      document.getElementById('qd-situacao')?.value||'vigente',
+    data_aprovacao:document.getElementById('qd-aprovacao')?.value||null,
+    data_validade: document.getElementById('qd-validade')?.value||null,
+    armazenamento: document.getElementById('qd-armazenamento')?.value||null,
+    tempo_retencao:document.getElementById('qd-retencao')?.value||null,
+    descarte:      document.getElementById('qd-descarte')?.value||null,
+  };
+
+  try{
+    if(docId){
+      await dbUpdate('qualidade_documentos', docId, obj);
+      qualDocumentos = qualDocumentos.map(function(d){return d.id===docId?{...d,...obj}:d;});
+    } else {
+      const novo = await dbInsert('qualidade_documentos', obj);
+      if(novo) qualDocumentos.unshift(novo);
+    }
+    document.getElementById('modal-qual')?.remove();
+    renderQualDoc();
+  }catch(e){
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+e.message;}
+  }
+}
+
+async function salvarQualRevisao(docId, status){
+  if(!docId){ alert('Salve o documento primeiro.'); return; }
+  const doc = qualDocumentos.find(function(d){return d.id===docId;});
+  if(!doc) return;
+
+  const descricao = document.getElementById('qr-descricao')?.value||null;
+  const data      = document.getElementById('qr-data')?.value||null;
+  const arquivo   = document.getElementById('qr-arquivo')?.files?.[0];
+
+  let arquivo_url  = null;
+  let arquivo_nome = null;
+
+  // Upload do arquivo para o Supabase Storage
+  if(arquivo){
+    const path = 'qualidade/'+company.id+'/'+docId+'/rev_'+Date.now()+'_'+arquivo.name;
+    const { data: upData, error } = await window.supabase.storage.from('qualidade-docs').upload(path, arquivo, {upsert:true});
+    if(!error){
+      const { data: urlData } = window.supabase.storage.from('qualidade-docs').getPublicUrl(path);
+      arquivo_url  = urlData?.publicUrl;
+      arquivo_nome = arquivo.name;
+    }
+  }
+
+  const proxRev = Math.max(0, ...qualRevisoes.filter(function(r){return r.documento_id===docId;}).map(function(r){return r.numero_rev;})) + 1;
+
+  const obj = {
+    documento_id: docId,
+    company_id: company.id,
+    numero_rev: proxRev,
+    descricao, data_revisao: data,
+    arquivo_url, arquivo_nome,
+    status,
+    criado_por: cu.id,
+  };
+
+  try{
+    const nova = await dbInsert('qualidade_revisoes', obj);
+    if(nova) qualRevisoes.unshift(nova);
+    document.getElementById('modal-qual')?.remove();
+    openQualModal(docId); // reabrir para mostrar nova revisão
+  }catch(e){ alert('Erro: '+e.message); }
+}
+
+async function aprovarQualRevisao(revId, docId, aprovar){
+  const msg = aprovar ? 'Aprovar esta revisão?' : 'Rejeitar esta revisão?';
+  if(!confirm(msg)) return;
+
+  const novoStatus = aprovar ? 'aprovado' : 'rejeitado';
+  try{
+    await dbUpdate('qualidade_revisoes', revId, {
+      status: novoStatus,
+      aprovado_por: cu.id,
+      aprovado_em: new Date().toISOString(),
+    });
+    qualRevisoes = qualRevisoes.map(function(r){return r.id===revId?{...r,status:novoStatus}:r;});
+
+    // Se aprovado, atualizar situacao e revisao_atual no documento
+    if(aprovar&&docId){
+      const rev = qualRevisoes.find(function(r){return r.id===revId;});
+      const obj = {situacao:'vigente', revisao_atual: rev?.numero_rev||0};
+      await dbUpdate('qualidade_documentos', docId, obj);
+      qualDocumentos = qualDocumentos.map(function(d){return d.id===docId?{...d,...obj}:d;});
+    }
+
+    document.getElementById('modal-qual')?.remove();
+    if(aprovar) openQualModal(docId);
+    else renderQualDoc();
+  }catch(e){ alert('Erro: '+e.message); }
+}
+
+async function salvarQualMatriz(docId){
+  if(!docId) return;
+  const obj = {};
+  DEPTS_MAT.forEach(function(dept){
+    obj[dept.key] = !!document.getElementById('qm-'+dept.key)?.checked;
+  });
+  try{
+    await dbUpdate('qualidade_documentos', docId, obj);
+    qualDocumentos = qualDocumentos.map(function(d){return d.id===docId?{...d,...obj}:d;});
+    alert('Matriz salva!');
+  }catch(e){ alert('Erro: '+e.message); }
 }
 
 // ── RENDER DASHBOARD CRM ──
