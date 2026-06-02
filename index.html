@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.177 | Gerado: 2026-06-04 10:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.178 | Gerado: 2026-06-04 11:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -769,7 +769,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.177';
+const APP_VERSION='v1.0.178';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1016,7 +1016,13 @@ async function finishEnterApp(user){
   const tc=ge('topbar-company');if(tc)tc.textContent=companyName;
 
   // Verificar limite de sessões e sessão duplicada
-  const verificacao = await verificarLimiteSessoes();
+  let verificacao = {bloqueado:false};
+  try{
+    verificacao = await verificarLimiteSessoes();
+  }catch(e){
+    console.warn('verificarLimiteSessoes erro:', e);
+    verificacao = {bloqueado:false}; // em caso de erro, deixar logar
+  }
   if(verificacao.bloqueado){
     alert('Limite de usuários simultâneos atingido para esta empresa. Tente novamente mais tarde.');
     await sair();
@@ -1024,9 +1030,20 @@ async function finishEnterApp(user){
   }
   ge('app').classList.add('on');
   const ld=ge('app-loading');if(ld)ld.style.display='none';
-  try{await loadData();}catch(e){console.error('loadData erro:',e);}
+  try{
+    await loadData();
+  }catch(e){
+    console.error('loadData erro:',e);
+    // Não bloquear login por erro de carregamento
+  }
   iniciarSessao();
-  try{await loadPermissoes();}catch(e){console.error('loadPermissoes erro:',e);}
+  try{
+    await loadPermissoes();
+  }catch(e){
+    console.error('loadPermissoes erro:',e);
+    // Permissões zeradas — usuário ainda consegue logar
+    minhasPermissoes={};
+  }
 
   // Mostra/oculta Admin APÓS loadPermissoes (para não ser sobrescrito)
   const navAdmin=ge('nav-admin-module');
@@ -11962,6 +11979,7 @@ function togglePermBadge(input, tela, perm){
 }
 
 async function savePermissoes(userId){
+  if(!userId){ alert('Erro: usuário não identificado.'); return; }
   const btn=ge('msave');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>';}
   try{
     const cid=company?.id||null;
