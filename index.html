@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.161 | Gerado: 2026-06-02 18:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.165 | Gerado: 2026-06-02 22:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -245,6 +245,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes su{from{transform:translateY(28px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes rotate{to{transform:rotate(360deg)}}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
 
@@ -768,7 +769,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.161';
+const APP_VERSION='v1.0.165';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2152,35 +2153,79 @@ function switchCadTab(tab){
       if(!el) return;
       // Pegar pessoa_id do contexto atual
       const nomEl = document.getElementById('cad-nome');
-      const pessoaId = nomEl ? nomEl.getAttribute('data-pessoa-id') : null;
+      const pessoaId = (nomEl ? nomEl.getAttribute('data-pessoa-id') : null) || rhPerfPessoaId;
       if(!pessoaId){ el.innerHTML='<div style="text-align:center;padding:24px;color:var(--text3)">Colaborador não identificado.</div>'; return; }
-      const avs = rhAvaliacoes.filter(function(a){return a.pessoa_id===pessoaId&&a.total>0;}).sort(function(a,b){return b.data_avaliacao>a.data_avaliacao?1:-1;});
+      const avs = rhAvaliacoes.filter(function(a){return a.pessoa_id===pessoaId&&a.total>0;}).sort(function(a,b){return a.data_avaliacao>b.data_avaliacao?1:-1;});
       if(!avs.length){ el.innerHTML='<div style="text-align:center;padding:24px;color:var(--text3)">Nenhuma avaliação registrada.</div>'; return; }
-      let html = '<div style="display:flex;flex-direction:column;gap:8px">';
-      avs.forEach(function(a){
+
+      // Gráfico de evolução
+      const chartId = 'perf-chart-'+pessoaId;
+      const labels = avs.map(function(a){ return a.periodo||a.data_avaliacao||'—'; });
+      const dados  = avs.map(function(a){ return a.total||0; });
+      const maxPts = avs[0]?(FORM_LIDERANCA.perguntas.length*3):21;
+
+      let html = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">';
+      html += '<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Evolução de Performance</div>';
+      html += '<canvas id="'+chartId+'" height="100"></canvas>';
+      html += '</div>';
+
+      // Lista compacta
+      html += '<div style="display:flex;flex-direction:column;gap:6px">';
+      avs.slice().reverse().forEach(function(a){
         const perf = getPerformanceLabel(a.total||0);
-        const form = a.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
-        html += '<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2)">';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-        html += '<div style="font-size:13px;font-weight:600">'+(a.periodo||a.data_avaliacao||'—')+'</div>';
-        html += '<span style="font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;background:'+perf.bg+';color:'+perf.cor+'">'+perf.label+' ('+a.total+'pts)</span>';
-        html += '</div>';
-        if(a.respostas&&Object.keys(a.respostas).length){
-          html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
-          form.perguntas.forEach(function(pg){
-            const val = a.respostas[pg.id];
-            if(!val) return;
-            const n = NOTAS.find(function(x){return x.val===val;})||{label:'—',cor:'var(--text2)'};
-            html += '<div style="font-size:11px;display:flex;justify-content:space-between;padding:3px 6px;background:var(--bg);border-radius:4px">';
-            html += '<span style="color:var(--text2)">'+pg.label+'</span>';
-            html += '<span style="font-weight:600;color:'+n.cor+'">'+n.label+'</span></div>';
-          });
-          html += '</div>';
-        }
-        html += '</div>';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">';
+        html += '<div style="font-size:12px;font-weight:600;color:var(--text2)">'+(a.periodo||a.data_avaliacao||'—')+'</div>';
+        html += '<div style="display:flex;align-items:center;gap:8px">';
+        html += '<span style="font-size:11px;padding:2px 10px;border-radius:99px;font-weight:700;background:'+perf.bg+';color:'+perf.cor+'">'+perf.label+' · '+a.total+'pts</span>';
+        const _aid=a.id;
+        html += '<button id="perf-print-'+_aid+'" style="padding:3px 8px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);cursor:pointer" title="Imprimir">🖨️</button>';
+        html += '</div></div>';
       });
       html += '</div>';
+
       el.innerHTML = html;
+
+      // Listeners botões imprimir
+      avs.forEach(function(a){
+        const btn = document.getElementById('perf-print-'+a.id);
+        if(btn) btn.addEventListener('click', function(){ imprimirAvaliacao(a.id); });
+      });
+
+      // Renderizar gráfico após inserir no DOM
+      setTimeout(function(){
+        const ctx = document.getElementById(chartId);
+        if(!ctx||typeof Chart==='undefined') return;
+        // Destruir instância anterior se existir
+        if(ctx._chartInstance) ctx._chartInstance.destroy();
+        ctx._chartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Pontuação',
+              data: dados,
+              borderColor: '#0A2540',
+              backgroundColor: 'rgba(10,37,64,0.08)',
+              borderWidth: 2,
+              pointBackgroundColor: dados.map(function(v){
+                const p=getPerformanceLabel(v);
+                return p.cor;
+              }),
+              pointRadius: 5,
+              tension: 0.3,
+              fill: true,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { min: 0, max: maxPts, ticks: { stepSize: 3, font: { size: 10 } } },
+              x: { ticks: { font: { size: 10 } } }
+            }
+          }
+        });
+      }, 200);
     },100);
   } else if(tab==='dependentes'){
     setTimeout(function(){
@@ -8329,7 +8374,14 @@ function getPerformanceLabel(total,tipo){
 }
 
 function rRHAvaliacoes(){
-  const rows=rhAvaliacoes.map((av,i)=>{
+  // Filtrar: só mostrar avaliações com notas preenchidas ou que foram avaliadas/homologadas
+  const filtroStatus = ge('aval-filtro')?.value||'concluidas';
+  const avalFiltradas = rhAvaliacoes.filter(function(av){
+    if(filtroStatus==='todas') return true;
+    if(filtroStatus==='pendentes') return av.status==='rascunho'&&(!av.total||av.total===0);
+    return av.total>0||['avaliado','homologado'].includes(av.status);
+  });
+  const rows=avalFiltradas.map((av,i)=>{
     const pessoa=pessoas.find(p=>p.id===av.pessoa_id);
     const perf=getPerformanceLabel(av.total||0);
     const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
@@ -8342,9 +8394,9 @@ function rRHAvaliacoes(){
       <div class="lright">
         <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:${perf.bg};color:${perf.cor}">${perf.label}</span>
         <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
-          <button class="bicon btn-sm" title="Imprimir" onclick="imprimirAvaliacao('${av.id}')">
+${av.total>0?`<button class="bicon btn-sm" title="Imprimir" onclick="imprimirAvaliacao('${av.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          </button>
+          </button>`:''}
           <button class="bicon btn-sm" title="Excluir" style="color:var(--red-text)" onclick="delAvaliacao('${av.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -8354,15 +8406,22 @@ function rRHAvaliacoes(){
   }).join('');
 
   return`
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <div style="font-size:13px;color:var(--text2)">${rhAvaliacoes.length} avaliação(ões) registrada(s)</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="font-size:13px;color:var(--text2)">${avalFiltradas.length} avaliação(ões)</div>
+      <select id="aval-filtro" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+        <option value="concluidas">Concluídas</option>
+        <option value="pendentes">Pendentes (rascunho)</option>
+        <option value="todas">Todas</option>
+      </select>
+    </div>
     <div style="display:flex;gap:8px">
       <button onclick="abrirFormAvaliacao('funcionario')" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">+ Funcionário</button>
       <button onclick="abrirFormAvaliacao('lideranca')" style="padding:7px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Liderança</button>
     </div>
   </div>
   <div>
-    ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><p>Nenhuma avaliação registrada</p></div>'}
+    ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><p>Nenhuma avaliação encontrada</p></div>'}
   </div>`;
 }
 
@@ -8658,7 +8717,11 @@ function imprimirAvaliacao(id){
   doc.open();doc.write(html);doc.close();
   const oldTitle=document.title;
   document.title=`Avaliacao_${(pessoa?.nome||'').replace(/\s+/g,'_')}_${av.periodo||''}`;
-  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>{document.title=oldTitle;iframe.remove();},4000);},1200);
+  setTimeout(()=>{
+    try{iframe.contentWindow.focus();iframe.contentWindow.print();}
+    catch(e){console.warn('print err:',e);}
+    setTimeout(()=>{document.title=oldTitle;iframe.remove();},5000);
+  },2000);
 }
 
 // ── PERFORMANCE CLIENTES ──
