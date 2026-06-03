@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.212 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.213 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -830,7 +830,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.212';
+const APP_VERSION='v1.0.213';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1169,9 +1169,11 @@ async function loadPermissoes(){
     cadastros:['clientes','fornecedores','veiculos'],
     gestao:['tarefas-gestao','atas','plano-acao'],
     financeiro:['financeiro-dashboard','faturamento','tabelas-tarifarias'],
+    orcamento:['orc-dashboard','orc-receitas','orc-despesas'],
     rh:['rh-pessoas','rh-funcoes','rh-horarios','rh-organograma'],
-    crm:['crm-dashboard','contatos','pipeline','tarefas','performance'],
+    crm:['crm-dashboard','contatos','pipeline','tarefas','performance','propostas','aprovar-propostas','tarifario-padrao','representantes','dre-projetos','perf-clientes'],
     qualidade:['qual-documentos'],
+    compras:['compras-solicitacoes','compras-cotacoes','compras-aprovacoes','compras-pedidos'],
     portaria:['portaria-painel','portaria-entradas','portaria-autorizacoes','portaria-liberacoes'],
   };
 
@@ -1185,6 +1187,8 @@ async function loadPermissoes(){
     return;
   }
 
+  // Esconde TODOS os módulos nav antes de mostrar os permitidos
+  document.querySelectorAll('.nav-module').forEach(function(m){ m.style.display='none'; });
   // Vendedores — controla por permissão
   Object.entries(modulos).forEach(([mod,telas])=>{
     let algumVisivel=false;
@@ -4783,6 +4787,9 @@ function rDashboardGeral(){
   const role = profile?.role||'';
   const isAdmin = ['admin','adm'].includes(role);
   const podeVerRH = isAdmin||role==='gestor'||role==='rh';
+  const podeVerFin = isAdmin||role==='gestor'||canDo('financeiro-dashboard','pode_ver')||canDo('faturamento','pode_ver');
+  const podeVerCRM = isAdmin||role==='gestor'||canDo('crm-dashboard','pode_ver')||canDo('pipeline','pode_ver')||canDo('propostas','pode_ver');
+  const podeVerTar = isAdmin||role==='gestor'||canDo('tarifario-padrao','pode_ver');
 
   // Saudação
   const hora = hoje.getHours();
@@ -4799,7 +4806,7 @@ function rDashboardGeral(){
   html += '</div>';
 
   // Alerta tarifário
-  const alerta = checkVigenciaAlert();
+  const alerta = podeVerTar ? checkVigenciaAlert() : null;
   if(alerta){
     const cor = alerta.vencido?'var(--red':'var(--amber';
     const msg = alerta.vencido?'Tarifário vencido — clique para atualizar':'Tarifário vence em '+alerta.dias+' dia(s) — clique para preparar o reajuste';
@@ -4809,7 +4816,7 @@ function rDashboardGeral(){
   }
 
   // Workflow alertas
-  html += rWorkflowAlertas();
+  if(podeVerCRM||podeVerFin) html += rWorkflowAlertas();
 
   // Seção RH
   if(podeVerRH){
@@ -4817,7 +4824,7 @@ function rDashboardGeral(){
   }
 
   // Seção Financeiro
-  html += rDashFinanceiro(faturamento, contasReceber, role);
+  if(podeVerFin) html += rDashFinanceiro(faturamento, contasReceber, role);
 
   return html;
 }
