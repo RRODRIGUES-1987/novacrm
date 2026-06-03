@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.213 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.214 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -830,7 +830,7 @@ const TELAS=[
 // REGRA: ao criar nova tela/sub, adicionar aqui para aparecer no controle de acesso
 const PERMS=['pode_ver','pode_criar','pode_editar','pode_excluir','pode_exportar'];
 const PERMS_LBL={pode_ver:'Ver',pode_criar:'Criar',pode_editar:'Editar',pode_excluir:'Excluir',pode_exportar:'Exportar'};
-const APP_VERSION='v1.0.213';
+const APP_VERSION='v1.0.214';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1152,7 +1152,8 @@ async function finishEnterApp(user){
 // ── PERMISSÕES ──
 async function loadPermissoes(){
   const role=profile?.role||'vendedor';
-  if(role==='admin'||role==='adm'){minhasPermissoes={};return;} // admin e adm têm tudo
+
+  // Portaria: vê só o módulo Portaria
   if(role==='portaria'){
     minhasPermissoes={};
     document.querySelectorAll('.nav-module').forEach(function(m){ m.style.display='none'; });
@@ -1160,11 +1161,10 @@ async function loadPermissoes(){
     return;
   }
 
-  const perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
-  minhasPermissoes={};
-  perms.forEach(p=>{minhasPermissoes[p.tela]=p;});
+  // Admin/adm: veem tudo, sai cedo
+  if(role==='admin'||role==='adm'){minhasPermissoes={};return;}
 
-  // Controla visibilidade de itens e módulos
+  // Mapa completo de módulos → telas
   const modulos={
     cadastros:['clientes','fornecedores','veiculos'],
     gestao:['tarefas-gestao','atas','plano-acao'],
@@ -1177,30 +1177,39 @@ async function loadPermissoes(){
     portaria:['portaria-painel','portaria-entradas','portaria-autorizacoes','portaria-liberacoes'],
   };
 
+  // Carrega permissões — falha graciosamente (ainda roda o loop de ocultação)
+  minhasPermissoes={};
+  try{
+    const perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
+    (perms||[]).forEach(p=>{minhasPermissoes[p.tela]=p;});
+  }catch(e){
+    console.warn('permissoes load falhou — tratando como sem permissão:', e);
+  }
+
+  // Gestor: vê tudo que está no mapa
   if(role==='gestor'){
-    // Gestores veem tudo
-    Object.keys(modulos).forEach(mod=>{
-      const el=ge('sub-'+mod)||ge('mod-'+mod);
+    Object.keys(modulos).forEach(function(mod){
       const modEl=ge('sub-'+mod)?.closest('.nav-module');
       if(modEl)modEl.style.display='';
     });
     return;
   }
 
-  // Esconde TODOS os módulos nav antes de mostrar os permitidos
-  document.querySelectorAll('.nav-module').forEach(function(m){ m.style.display='none'; });
-  // Vendedores — controla por permissão
-  Object.entries(modulos).forEach(([mod,telas])=>{
+  // Todos os outros roles (vendedor, rh, qualidade, etc.)
+  // Oculta cada módulo se o usuário não tiver permissão em nenhuma tela
+  // NÃO usa querySelectorAll — o Dashboard fica sempre visível
+  Object.entries(modulos).forEach(function([mod,telas]){
     let algumVisivel=false;
-    telas.forEach(tela=>{
+    telas.forEach(function(tela){
       const navEl=ge('nav-'+tela);
       const perm=minhasPermissoes[tela];
-      const visivel=tela==='crm-dashboard'||tela==='pipeline'||tela==='tarefas'||tela==='performance'||(perm&&perm.pode_ver);
+      // CRM básico sempre visível para vendedores
+      const sempreVisivel=tela==='crm-dashboard'||tela==='pipeline'||tela==='tarefas'||tela==='performance';
+      const visivel=sempreVisivel||(perm&&perm.pode_ver);
       if(navEl)navEl.style.display=visivel?'':'none';
       if(visivel)algumVisivel=true;
     });
-    // Oculta módulo inteiro se nenhuma tela visível
-    const modDiv=ge('sub-'+mod)?.closest?.('.nav-module');
+    const modDiv=ge('sub-'+mod)?.closest('.nav-module');
     if(modDiv)modDiv.style.display=algumVisivel?'':'none';
   });
 }
