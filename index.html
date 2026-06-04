@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.219 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.221 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -865,7 +865,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.219';
+const APP_VERSION='v1.0.221';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1836,7 +1836,7 @@ function buildCadastroForm(tipo, record, id=null){
         <div class="fg"><label class="fl">Gestor responsável</label>
           <select class="fi" id="cad-gestor_id">
             <option value="">Sem gestor</option>
-            ${profiles.filter(function(p){return['gestor','adm','admin'].includes(p.role)&&(p.company_id===company?.id||p.company_id===profile?.company_id);}).map(function(p){return'<option value="'+p.id+'" '+(r.gestor_id===p.id?'selected':'')+'>'+( p.full_name||p.email)+'</option>';}).join('')}
+            ${profiles.filter(function(p){return['gestor','rh','adm','admin'].includes(p.role)&&(p.company_id===company?.id||p.company_id===profile?.company_id);}).map(function(p){return'<option value="'+p.id+'" '+(r.gestor_id===p.id?'selected':'')+'>'+( p.full_name||p.email)+'</option>';}).join('')}
           </select>
         </div>
         <div class="fg"><label class="fl">Cargo</label>
@@ -7975,13 +7975,23 @@ async function toggleUserUnit(userId, unitId, checked){
 // ══════════════════════════════════════════════════════════════════════
 
 const STATUS_FERIAS = {
-  pendente:   {label:'Pendente',   cor:'var(--amber-bg)',  txt:'var(--amber-text)'},
-  programado: {label:'Programado', cor:'var(--blue-bg)',   txt:'var(--blue-text)'},
-  aprovado:   {label:'Aprovado',   cor:'var(--green-bg)',  txt:'var(--green-text)'},
-  gozando:    {label:'Gozando',    cor:'var(--accent)',    txt:'var(--accent-text)'},
-  concluido:  {label:'Concluído',  cor:'var(--bg2)',       txt:'var(--text2)'},
-  cancelado:  {label:'Cancelado',  cor:'var(--red-bg)',    txt:'var(--red-text)'},
+  pendente:              {label:'Pendente',          cor:'var(--amber-bg)',   txt:'var(--amber-text)'},
+  aguardando_aprovacao:  {label:'Aguard. aprovação', cor:'var(--blue-bg)',    txt:'var(--blue-text)'},
+  programado:            {label:'Programado',        cor:'var(--blue-bg)',    txt:'var(--blue-text)'},
+  aprovado:              {label:'Aprovado',          cor:'var(--green-bg)',   txt:'var(--green-text)'},
+  rejeitado:             {label:'Rejeitado',         cor:'var(--red-bg)',     txt:'var(--red-text)'},
+  gozando:               {label:'Gozando',           cor:'var(--accent)',     txt:'var(--accent-text)'},
+  concluido:             {label:'Concluído',         cor:'var(--bg2)',        txt:'var(--text2)'},
+  cancelado:             {label:'Cancelado',         cor:'var(--red-bg)',     txt:'var(--red-text)'},
 };
+function feriasPodeAprovar(){ return ['admin','adm','rh'].includes(profile?.role||''); }
+function feriasPodeProgramar(pessoaId){
+  const role=profile?.role||'';
+  if(['admin','adm','rh'].includes(role)) return true;
+  // Gestor do colaborador pode programar
+  const p=pessoas.find(x=>x.id===pessoaId);
+  return !!(p&&p.gestor_id&&p.gestor_id===cu?.id);
+}
 
 function rRHFerias(){
   try{
@@ -7990,11 +8000,10 @@ function rRHFerias(){
 
   // Calcular alertas
   const alertas = [];
-  const _isGestor = profile?.role==='gestor';
   const _isRH = ['admin','adm','rh'].includes(profile?.role||'');
   pessoas.filter(p=>{
     if(!p.data_admissao||!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
-    if(_isGestor && !_isRH) return p.gestor_id === cu?.id;
+    if(!_isRH && !(p.gestor_id&&p.gestor_id===cu?.id)) return false;
     return true;
   }).forEach(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
@@ -8006,7 +8015,7 @@ function rRHFerias(){
       const pf = new Date(periodoInicio);
       pf.setFullYear(pf.getFullYear()+1);
       const dl = new Date(pf);
-      dl.setMonth(dl.getMonth()+11);
+      dl.setMonth(dl.getMonth()+12);
       dl.setDate(dl.getDate()-1);
       periodoFim = pf;
       dataLimite = dl;
@@ -8025,14 +8034,14 @@ function rRHFerias(){
 
   // Grid de colaboradores
   // Filtro por perfil: gestor vê só os seus; RH/admin veem todos
-  const isGestor = profile?.role==='gestor';
   const isRH = ['admin','adm','rh'].includes(profile?.role||'');
   const pessoasAtivas = pessoas.filter(p=>{
     if(!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
     if(p.ativo===false) return false;
     if(!p.data_admissao) return false;
-    if(p.tipo_contrato==='pj') return false; // PJ não tem férias
-    if(isGestor && !isRH) return p.gestor_id === cu?.id;
+    if(p.tipo_contrato==='pj') return false;
+    // Gestor vê só os seus; RH/admin veem todos
+    if(!isRH && !(p.gestor_id&&p.gestor_id===cu?.id)) return false;
     return true;
   });
 
@@ -8044,7 +8053,7 @@ function rRHFerias(){
       const pf = new Date(periodoInicio);
       pf.setFullYear(pf.getFullYear()+1);
       const dl = new Date(pf);
-      dl.setMonth(dl.getMonth()+11);dl.setDate(dl.getDate()-1);
+      dl.setMonth(dl.getMonth()+12);dl.setDate(dl.getDate()-1);
       periodoFim = pf;
       dataLimite = dl;
       if(dl >= hoje) break;
@@ -8081,8 +8090,12 @@ function rRHFerias(){
       </td>
       <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${inicioPrevisto}</td>
       <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${diasPrevistos}</td>
-      <td style="padding:10px 12px;text-align:right">
-        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openFeriasModal('${p.id}')">Programar</button>
+      <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+        ${feriasPessoa[0]?.status==='aguardando_aprovacao'&&feriasPodeAprovar()?`
+          <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green-text);margin-right:4px" onclick="event.stopPropagation();aprovarFerias('${feriasPessoa[0]?.id||''}')">✓ Aprovar</button>
+          <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text);margin-right:4px" onclick="event.stopPropagation();rejeitarFerias('${feriasPessoa[0]?.id||''}')">✗ Rejeitar</button>
+        `:''}
+        ${feriasPodeProgramar(p.id)?`<button class="btn btn-sm" onclick="event.stopPropagation();openFeriasModal('${p.id}')">${feriasPessoa.length?'Editar':'Programar'}</button>`:''}
       </td>
     </tr>`;
   }).join('');
@@ -8193,6 +8206,7 @@ async function loadRHFerias(){
 }
 
 function openFeriasModal(pessoaId){
+  if(!feriasPodeProgramar(pessoaId)){ alert('Você não tem permissão para programar férias deste colaborador.'); return; }
   const p = pessoaId ? pessoas.find(x=>x.id===pessoaId) : null;
   const ferias = pessoaId ? rhFerias.filter(f=>f.pessoa_id===pessoaId&&f.status!=='cancelado'&&f.status!=='concluido') : [];
   const f = ferias[0] || null;
@@ -8205,7 +8219,7 @@ function openFeriasModal(pessoaId){
     let pi = new Date(adm);
     while(true){ const prox=new Date(pi); prox.setFullYear(prox.getFullYear()+1); if(prox>hoje)break; pi=prox; }
     const pf=new Date(pi); pf.setFullYear(pf.getFullYear()+1);
-    const dl=new Date(pf); dl.setMonth(dl.getMonth()+11); dl.setDate(dl.getDate()-1);
+    const dl=new Date(pf); dl.setMonth(dl.getMonth()+12); dl.setDate(dl.getDate()-1);
     diasRestantes=Math.floor((dl-hoje)/(1000*60*60*24));
     periodoInicioStr=pi.toLocaleDateString('pt-BR');
     periodoFimStr=pf.toLocaleDateString('pt-BR');
@@ -8228,6 +8242,14 @@ function openFeriasModal(pessoaId){
         <div><div style="color:var(--text3);margin-bottom:2px">Dias restantes</div><div style="font-weight:600;color:${diasRestantes<=30?'var(--red-text)':diasRestantes<=60?'var(--amber-text)':'var(--text)'}">${diasRestantes} dias</div></div>
       </div>`:''}
 
+      ${f?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="background:${(STATUS_FERIAS[f.status]||STATUS_FERIAS.pendente).cor};color:${(STATUS_FERIAS[f.status]||STATUS_FERIAS.pendente).txt};padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600">${(STATUS_FERIAS[f.status]||STATUS_FERIAS.pendente).label}</span>
+        ${f.motivo_rejeicao?`<span style="font-size:12px;color:var(--red-text)">Motivo: ${f.motivo_rejeicao}</span>`:''}
+        ${f.status==='aguardando_aprovacao'&&feriasPodeAprovar()?`
+          <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green-text)" onclick="aprovarFerias('${f.id}')">✓ Aprovar</button>
+          <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text)" onclick="rejeitarFerias('${f.id}')">✗ Rejeitar</button>
+        `:''}
+      </div>`:''}
       ${!p?`<div class="fg"><label class="fl">Colaborador</label>
         <select class="fi" id="ferias-pessoa-id">
           <option value="">Selecione...</option>
@@ -8271,6 +8293,7 @@ function openFeriasModal(pessoaId){
 
 async function salvarFerias(feriasId){
   const pessoaId=ge('ferias-pessoa-id')?.value;
+  if(pessoaId&&!feriasPodeProgramar(pessoaId)){alert('Sem permissão.');return;}
   const inicio=ge('ferias-inicio')?.value;
   const dias=parseInt(ge('ferias-dias')?.value||'0');
   const abono=parseInt(ge('ferias-abono')?.value||'0');
@@ -8290,7 +8313,8 @@ async function salvarFerias(feriasId){
   let pi=new Date(adm);
   while(true){const prox=new Date(pi);prox.setFullYear(prox.getFullYear()+1);if(prox>hoje)break;pi=prox;}
   const pf=new Date(pi);pf.setFullYear(pf.getFullYear()+1);
-  const dl=new Date(pf);dl.setMonth(dl.getMonth()+11);dl.setDate(dl.getDate()-1);
+  const dl=new Date(pf);dl.setMonth(dl.getMonth()+12);dl.setDate(dl.getDate()-1);
+  const statusFerias = feriasPodeAprovar() ? 'aprovado' : 'aguardando_aprovacao';
 
   const obj={
     company_id:company.id,
@@ -8304,7 +8328,7 @@ async function salvarFerias(feriasId){
     inicio_previsto:inicio,
     dias_previstos:dias,
     abono_pecuniario:abono,
-    status:'programado',
+    status:feriasId?(rhFerias.find(f=>f.id===feriasId)?.status||statusFerias):statusFerias,
     observacoes:obs,
     owner_id:cu.id,
   };
@@ -8322,6 +8346,29 @@ async function salvarFerias(feriasId){
   }catch(e){
     if(errEl){errEl.style.display='block';errEl.textContent='Erro ao salvar: '+e.message;}
   }
+}
+
+async function aprovarFerias(feriasId){
+  if(!feriasPodeAprovar()) return;
+  if(!confirm('Aprovar esta programação de férias?')) return;
+  try{
+    await dbUpdate('rh_ferias',feriasId,{status:'aprovado'});
+    rhFerias=rhFerias.map(f=>f.id===feriasId?{...f,status:'aprovado'}:f);
+    ge('modal-ferias')?.remove();
+    if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+async function rejeitarFerias(feriasId){
+  if(!feriasPodeAprovar()) return;
+  const motivo=prompt('Motivo da rejeição (opcional):');
+  if(motivo===null) return; // cancelou o prompt
+  try{
+    await dbUpdate('rh_ferias',feriasId,{status:'rejeitado',motivo_rejeicao:motivo||null});
+    rhFerias=rhFerias.map(f=>f.id===feriasId?{...f,status:'rejeitado',motivo_rejeicao:motivo||null}:f);
+    ge('modal-ferias')?.remove();
+    if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+  }catch(e){alert('Erro: '+e.message);}
 }
 
 async function cancelarFerias(feriasId){
