@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.224 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.226 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -795,6 +795,7 @@ let orgNos=[],orgAlocacoes=[];
 let orgTab='arvore';
 let epiCatalogo=[],epiFuncao=[],epiEntregas=[];
 let exameCatalogo=[],exameFuncao=[],exameRealizados=[];
+let rhDemissoes=[],rhAdvertencias=[];
 let portFrotaTab='mov',portPlacasTab='cadastro';
 let cadastrosTab='clientes',cadastroForm=null;
 
@@ -882,7 +883,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.224';
+const APP_VERSION='v1.0.226';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1328,6 +1329,7 @@ async function loadData(){
       await loadOrgData(cid).catch(console.warn);
       await loadEpiData(cid).catch(console.warn);
       await loadExameData(cid).catch(console.warn);
+      await loadDisciplinarData(cid).catch(console.warn);
       historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}&order=data.asc`);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
@@ -2049,12 +2051,7 @@ function buildCadastroForm(tipo, record, id=null){
       <div class="fg"><label class="fl">Observações</label>
         <textarea class="fi" id="cad-observacoes" rows="3" style="resize:vertical">${r.observacoes||''}</textarea>
       </div>
-      ${id&&tipoContrato!=='pj'?`
-      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-        <button id="cad-btn-dem-${id}" style="font-size:12px;padding:8px 16px;border:1px solid var(--red-text);border-radius:8px;background:var(--red-bg);color:var(--red-text);cursor:pointer;width:100%;font-weight:600">
-          🚪 Solicitar demissão deste colaborador
-        </button>
-      </div>`:''}
+      ${id?`<div id="cad-sit-extras" style="margin-top:8px">${rCadSituacaoExtras(id)}</div>`:''}
     </div>`;
   }
 
@@ -4911,6 +4908,7 @@ function rDashboardGeral(){
   // Seção RH
   if(podeVerRH){
     html += rDashRH(role);
+    html += rDashDemissoesPendentes();
   }
 
   // Seção Financeiro
@@ -16381,6 +16379,360 @@ async function exameSalvarRealizado(pessoaId,exameId,periodicidade){
   }catch(e){portErr('Erro: '+e.message);}
 }
 // ========================== FIM EXAMES ==========================
+
+// ==================== DEMISSÃO + ADVERTÊNCIAS ====================
+async function loadDisciplinarData(cid){
+  [rhDemissoes,rhAdvertencias]=await Promise.all([
+    dbSelect('rh_demissoes',`company_id=eq.${cid}`),
+    dbSelect('rh_advertencias',`company_id=eq.${cid}`),
+  ]);
+}
+
+const DEM_TIPO={pedido:'Pedido do colaborador',sem_causa:'Dispensa sem justa causa',justa_causa:'Dispensa por justa causa'};
+const DEM_STATUS={
+  solicitado:    {l:'Aguardando RH',     bg:'var(--amber-bg)',  c:'var(--amber-text)'},
+  aprovado_rh:   {l:'Aguardando Admin',  bg:'var(--blue-bg)',   c:'var(--blue-text)'},
+  aprovado_admin:{l:'Aprovado',          bg:'var(--green-bg)',  c:'var(--green-text)'},
+  concluido:     {l:'Concluído',         bg:'var(--bg2)',       c:'var(--text3)'},
+  rejeitado:     {l:'Rejeitado',         bg:'var(--red-bg)',    c:'var(--red-text)'},
+  cancelado:     {l:'Cancelado',         bg:'var(--bg2)',       c:'var(--text3)'},
+};
+const ADV_TIPO={verbal:'Advertência Verbal',escrita:'Advertência Escrita',suspensao:'Suspensão'};
+const ADV_COR={verbal:{bg:'var(--amber-bg)',c:'var(--amber-text)'},escrita:{bg:'var(--red-bg)',c:'var(--red-text)'},suspensao:{bg:'var(--red-bg)',c:'var(--red-text)'}};
+
+function demPodeRH(){return['admin','adm','rh'].includes(profile?.role||'');}
+function demPodeAdmin(){return['admin','adm'].includes(profile?.role||'');}
+function advPodeEditar(){return['admin','adm','rh'].includes(profile?.role||'');}
+
+// ── SEÇÃO SITUAÇÃO DO COLABORADOR (demissão + advertências) ──
+function rCadSituacaoExtras(pessoaId){
+  const p=pessoas.find(x=>x.id===pessoaId);if(!p)return'';
+  const demAtiva=rhDemissoes.find(d=>d.pessoa_id===pessoaId&&!['concluido','cancelado'].includes(d.status));
+  const advAtivas=rhAdvertencias.filter(a=>a.pessoa_id===pessoaId&&a.status==='ativa').sort((a,b)=>b.data_ocorrencia>a.data_ocorrencia?1:-1);
+
+  let html='';
+
+  // ── Status da demissão ──
+  if(demAtiva){
+    const st=DEM_STATUS[demAtiva.status]||DEM_STATUS.solicitado;
+    html+=`<div style="margin-top:12px;padding:12px 14px;background:${st.bg};border-radius:var(--radius);border:1px solid ${st.c}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:700;color:${st.c}">🚪 Processo de Demissão</div>
+        <span class="bdg" style="background:${st.bg};color:${st.c};border:1px solid ${st.c}">${st.l}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">${DEM_TIPO[demAtiva.tipo]||demAtiva.tipo} · ${demAtiva.com_reposicao?'Com reposição':'Sem reposição'}</div>
+      ${demAtiva.motivo?`<div style="font-size:11px;color:var(--text2)">${demAtiva.motivo}</div>`:''}
+      ${demAtiva.data_prevista?`<div style="font-size:11px;color:var(--text2)">Data prevista: ${new Date(demAtiva.data_prevista+'T00:00').toLocaleDateString('pt-BR')}</div>`:''}
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        ${demAtiva.status==='solicitado'&&demPodeRH()?`
+          <button class="btn btn-p btn-sm" onclick="demAprovarRH('${demAtiva.id}')">✓ Aprovar (RH)</button>
+          <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text)" onclick="demRejeitar('${demAtiva.id}')">✗ Rejeitar</button>`:''}
+        ${demAtiva.status==='aprovado_rh'&&demPodeAdmin()?`
+          <button class="btn btn-p btn-sm" onclick="demAprovarAdmin('${demAtiva.id}','${pessoaId}')">✓ Aprovar definitivo</button>
+          <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text)" onclick="demRejeitar('${demAtiva.id}')">✗ Rejeitar</button>`:''}
+        <button class="btn btn-sm" onclick="demCancelar('${demAtiva.id}')">Cancelar solicitação</button>
+      </div>
+    </div>`;
+  } else if(p.ativo!==false&&p.tipo_contrato!=='pj'){
+    html+=`<div style="margin-top:12px">
+      <button onclick="demSolicitar('${pessoaId}')" style="font-size:12px;padding:8px 16px;border:1px solid var(--red-text);border-radius:8px;background:var(--red-bg);color:var(--red-text);cursor:pointer;width:100%;font-weight:600">
+        🚪 Solicitar demissão deste colaborador
+      </button>
+    </div>`;
+  }
+
+  // ── Advertências ──
+  html+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600">Advertências e Suspensões (${advAtivas.length})</div>
+      ${advPodeEditar()?`<button class="btn btn-p btn-sm" onclick="advModal('${pessoaId}')">+ Registrar</button>`:''}
+    </div>
+    ${advAtivas.length?advAtivas.map(a=>{
+      const tp=ADV_COR[a.tipo]||ADV_COR.escrita;
+      return`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="bdg" style="background:${tp.bg};color:${tp.c}">${ADV_TIPO[a.tipo]||a.tipo}</span>
+            <span style="font-size:11px;color:var(--text2)">${new Date(a.data_ocorrencia+'T00:00').toLocaleDateString('pt-BR')}</span>
+            ${a.dias_suspensao?`<span style="font-size:11px;color:var(--red-text)">${a.dias_suspensao} dia(s)</span>`:''}
+          </div>
+          <div style="display:flex;gap:4px">
+            ${a.url_documento?`<a href="${a.url_documento}" target="_blank" class="bicon btn-sm" title="Ver documento" style="text-decoration:none">📎</a>`:''}
+            ${advPodeEditar()?`<button class="bicon btn-sm" title="Gerar PDF" onclick="advGerarPdf('${a.id}','${pessoaId}')">📄</button>
+            <button class="bicon btn-sm" title="Cancelar" onclick="advCancelar('${a.id}')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`:''}
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">${a.motivo}</div>
+      </div>`;
+    }).join(''):'<div class="lsub" style="color:var(--text3)">Nenhuma advertência registrada.</div>'}
+  </div>`;
+
+  return html;
+}
+
+// ── FLUXO DE DEMISSÃO ──
+function demSolicitar(pessoaId){
+  const p=pessoas.find(x=>x.id===pessoaId);if(!p)return;
+  // Verifica estabilidade
+  if(p.estabilidade&&p.estabilidade_fim){
+    const fim=new Date(p.estabilidade_fim+'T00:00:00');
+    if(fim>=new Date()){
+      const ok=confirm(`⚠️ ATENÇÃO: ${p.nome} possui estabilidade no emprego até ${fim.toLocaleDateString('pt-BR')} (${p.estabilidade_motivo||'motivo não informado'}).\n\nDeseja continuar mesmo assim?`);
+      if(!ok)return;
+    }
+  }
+  portModal(`Solicitar demissão — ${p.nome}`,
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="grid-column:1/-1"><label class="fl">Tipo de demissão *</label>
+        <select class="fi" id="dem-tipo">
+          <option value="sem_causa">Dispensa sem justa causa</option>
+          <option value="justa_causa">Dispensa por justa causa</option>
+          <option value="pedido">Pedido do colaborador</option>
+        </select></div>
+      <div><label class="fl">Data prevista</label>
+        <input class="fi" id="dem-data" type="date"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:11px 13px;background:var(--bg2);border-radius:var(--radius)">
+        <input type="checkbox" id="dem-reposicao" style="width:16px;height:16px;cursor:pointer;flex-shrink:0">
+        <label for="dem-reposicao" style="font-size:13px;font-weight:500;cursor:pointer;margin:0">Com reposição</label>
+      </div>
+      <div style="grid-column:1/-1"><label class="fl">Motivo *</label>
+        <textarea class="fi" id="dem-motivo" rows="3" placeholder="Descreva o motivo da demissão..."></textarea></div>
+    </div>`,`demSalvar('${pessoaId}')`,{saveLabel:'Enviar solicitação'});
+}
+
+async function demSalvar(pessoaId){
+  const motivo=ge('dem-motivo')?.value?.trim();
+  if(!motivo){portErr('Informe o motivo.');return;}
+  portSaving();
+  const dados={company_id:company?.id,pessoa_id:pessoaId,
+    tipo:ge('dem-tipo')?.value||'sem_causa',
+    com_reposicao:ge('dem-reposicao')?.checked||false,
+    data_prevista:ge('dem-data')?.value||null,
+    motivo,status:'solicitado',solicitado_por:cu?.id,owner_id:cu?.id};
+  try{const s=await dbInsert('rh_demissoes',dados);if(s)rhDemissoes=[s,...rhDemissoes];portClose();render();}
+  catch(e){portErr('Erro: '+e.message);}
+}
+
+async function demAprovarRH(id){
+  const obs=prompt('Observação do RH (opcional):');
+  if(obs===null)return;
+  try{
+    await dbUpdate('rh_demissoes',id,{status:'aprovado_rh',aprovado_rh_por:cu?.id,aprovado_rh_em:new Date().toISOString(),obs_rh:obs||null});
+    rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'aprovado_rh',aprovado_rh_por:cu?.id}:d);
+    render();
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+async function demAprovarAdmin(id,pessoaId){
+  const dataDesl=prompt('Data de desligamento (DD/MM/AAAA):');
+  if(dataDesl===null)return;
+  // Converte data BR para ISO
+  const parts=dataDesl.split('/');
+  const dataISO=parts.length===3?`${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`:null;
+  portSaving&&portSaving();
+  try{
+    // 1) Finaliza demissão
+    await dbUpdate('rh_demissoes',id,{status:'concluido',aprovado_admin_por:cu?.id,aprovado_admin_em:new Date().toISOString(),data_desligamento:dataISO});
+    rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'concluido'}:d);
+    // 2) Inativa colaborador
+    await dbUpdate('pessoas',pessoaId,{ativo:false,data_desligamento:dataISO});
+    pessoas=pessoas.map(p=>p.id===pessoaId?{...p,ativo:false}:p);
+    // 3) Remove alocações no organograma (mantém headcount — vaga fica aberta)
+    const alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId&&!a.is_gestor);
+    await Promise.all(alocacoesPessoa.map(a=>dbDelete('org_alocacoes',a.id)));
+    orgAlocacoes=orgAlocacoes.filter(a=>!(a.pessoa_id===pessoaId&&!a.is_gestor));
+    render();
+    showToast&&showToast('Colaborador desligado. Vaga aberta no organograma.','green');
+  }catch(e){alert('Erro: '+e.message);}
+}
+
+async function demRejeitar(id){
+  const obs=prompt('Motivo da rejeição:');if(obs===null)return;
+  try{await dbUpdate('rh_demissoes',id,{status:'rejeitado',obs_admin:obs||null});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'rejeitado'}:d);render();}
+  catch(e){alert('Erro: '+e.message);}
+}
+async function demCancelar(id){
+  if(!confirm('Cancelar esta solicitação de demissão?'))return;
+  try{await dbUpdate('rh_demissoes',id,{status:'cancelado'});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'cancelado'}:d);render();}
+  catch(e){alert('Erro: '+e.message);}
+}
+
+// ── ADVERTÊNCIAS ──
+function advModal(pessoaId){
+  if(!advPodeEditar())return;
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const hoje=new Date().toISOString().slice(0,10);
+  portModal(`Registrar advertência — ${p?.nome||''}`,
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label class="fl">Tipo *</label>
+        <select class="fi" id="adv-tipo" onchange="advToggleDias()">
+          <option value="verbal">Advertência Verbal</option>
+          <option value="escrita">Advertência Escrita</option>
+          <option value="suspensao">Suspensão</option>
+        </select></div>
+      <div><label class="fl">Data da ocorrência *</label>
+        <input class="fi" id="adv-data" type="date" value="${hoje}"></div>
+      <div id="adv-dias-wrap" style="display:none"><label class="fl">Dias de suspensão</label>
+        <input class="fi" id="adv-dias" type="number" min="1" max="30" value="1"></div>
+      <div style="grid-column:1/-1"><label class="fl">Motivo *</label>
+        <textarea class="fi" id="adv-motivo" rows="3" placeholder="Descreva o motivo detalhadamente..."></textarea></div>
+      <div style="grid-column:1/-1"><label class="fl">Documento (PDF)</label>
+        <input class="fi" id="adv-doc" type="file" accept=".pdf" style="padding:6px">
+        <div class="lsub" style="color:var(--text3);margin-top:4px">Upload opcional — ou gere o PDF após salvar</div>
+      </div>
+    </div>`,`advSalvar('${pessoaId}')`);
+}
+
+function advToggleDias(){
+  const tipo=ge('adv-tipo')?.value;
+  const wrap=ge('adv-dias-wrap');
+  if(wrap)wrap.style.display=tipo==='suspensao'?'':'none';
+}
+
+async function advSalvar(pessoaId){
+  const tipo=ge('adv-tipo')?.value;
+  const data=ge('adv-data')?.value;
+  const motivo=ge('adv-motivo')?.value?.trim();
+  if(!data||!motivo){portErr('Preencha data e motivo.');return;}
+  portSaving();
+  try{
+    let url_documento=null;
+    const file=ge('adv-doc')?.files?.[0];
+    if(file){
+      const path=`${company?.id}/${pessoaId}/adv_${Date.now()}.pdf`;
+      const r=await fetch(`${SB_URL}/storage/v1/object/rh-documentos/${path}`,{
+        method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/pdf'},body:file});
+      if(r.ok){
+        const pub=await fetch(`${SB_URL}/storage/v1/object/sign/rh-documentos/${path}`,{
+          method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
+          body:JSON.stringify({expiresIn:315360000})});
+        if(pub.ok){const d=await pub.json();url_documento=`${SB_URL}/storage/v1${d.signedURL}`;}
+      }
+    }
+    const dados={company_id:company?.id,pessoa_id:pessoaId,tipo,data_ocorrencia:data,motivo,
+      dias_suspensao:tipo==='suspensao'?Number(ge('adv-dias')?.value)||1:null,
+      url_documento,status:'ativa',registrado_por:cu?.id,owner_id:cu?.id};
+    const s=await dbInsert('rh_advertencias',dados);
+    if(s)rhAdvertencias=[s,...rhAdvertencias];
+    portClose();
+    // Atualiza seção no modal aberto
+    const panel=ge('cad-panel-situacao');
+    if(panel){
+      const extra=panel.querySelector('#cad-sit-extras');
+      if(extra)extra.innerHTML=rCadSituacaoExtras(pessoaId);
+    }
+  }catch(e){portErr('Erro: '+e.message);}
+}
+
+async function advCancelar(id){
+  if(!confirm('Cancelar esta advertência?'))return;
+  try{await dbUpdate('rh_advertencias',id,{status:'cancelada'});rhAdvertencias=rhAdvertencias.map(a=>a.id===id?{...a,status:'cancelada'}:a);render();}
+  catch(e){alert('Erro: '+e.message);}
+}
+
+function advGerarPdf(advId,pessoaId){
+  const a=rhAdvertencias.find(x=>x.id===advId);
+  const p=pessoas.find(x=>x.id===pessoaId);
+  if(!a||!p)return;
+  const tp=ADV_TIPO[a.tipo]||a.tipo;
+  const cor=a.tipo==='verbal'?'#d68910':a.tipo==='suspensao'?'#c0392b':'#c0392b';
+  const suspText=a.tipo==='suspensao'?`<p><strong>Período de suspensão:</strong> ${a.dias_suspensao} dia(s)</p>`:'';
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <style>body{font-family:Arial,sans-serif;max-width:700px;margin:40px auto;padding:30px;color:#000;line-height:1.6}
+  .header{text-align:center;border-bottom:3px solid ${cor};padding-bottom:16px;margin-bottom:24px}
+  h1{font-size:20px;color:${cor};margin:0}h2{font-size:14px;font-weight:normal;color:#555;margin:4px 0 0}
+  .info{background:#f9f9f9;padding:16px;border-radius:8px;margin-bottom:20px;font-size:13px}
+  .info table{width:100%;border-collapse:collapse}
+  .info td{padding:5px 0;vertical-align:top}.info td:first-child{font-weight:600;width:140px}
+  .motivo{border:1px solid #ddd;padding:14px;border-radius:8px;margin-bottom:20px;font-size:13px}
+  .ass{display:flex;justify-content:space-between;margin-top:50px}
+  .ass div{text-align:center;border-top:1px solid #000;padding-top:6px;min-width:200px;font-size:11px}
+  p{font-size:13px}
+  </style></head><body>
+  <div class="header"><h1>${tp.toUpperCase()}</h1><h2>${company?.name||''}</h2></div>
+  <div class="info"><table>
+    <tr><td>Colaborador:</td><td>${p.nome}</td></tr>
+    <tr><td>Cargo:</td><td>${p.cargo||'—'}</td></tr>
+    <tr><td>Departamento:</td><td>${p.departamento||'—'}</td></tr>
+    <tr><td>Data:</td><td>${new Date(a.data_ocorrencia+'T00:00').toLocaleDateString('pt-BR')}</td></tr>
+    <tr><td>Tipo:</td><td style="color:${cor};font-weight:600">${tp}</td></tr>
+  </table></div>
+  ${suspText}
+  <div class="motivo"><strong>Motivo:</strong><br>${a.motivo}</div>
+  <p>O colaborador acima foi comunicado ${a.tipo==='verbal'?'verbalmente':'formalmente por escrito'} sobre a presente ${tp.toLowerCase()}, conforme descrito acima.</p>
+  ${a.tipo==='suspensao'?`<p>Durante o período de suspensão, o colaborador não perceberá remuneração relativa aos dias suspensos, conforme previsto na CLT.</p>`:''}
+  <p>O colaborador declara ter ciência do ocorrido e das responsabilidades decorrentes.</p>
+  <div class="ass">
+    <div>Responsável RH / Gestor</div>
+    <div>${p.nome}<br>Colaborador</div>
+  </div>
+  </body></html>`;
+  const iframe=document.createElement('iframe');
+  iframe.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.write(html);iframe.contentDocument.close();
+  setTimeout(()=>{iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},500);
+}
+
+// ── TELA GLOBAL ADVERTÊNCIAS (RH submenu) ──
+function rRHAdvertencias(){
+  const pode=advPodeEditar();
+  const cid=company?.id;
+  const lista=rhAdvertencias.filter(a=>a.status==='ativa').sort((a,b)=>b.data_ocorrencia>a.data_ocorrencia?1:-1);
+
+  // Resumo por colaborador
+  const porPessoa={};
+  lista.forEach(a=>{
+    if(!porPessoa[a.pessoa_id])porPessoa[a.pessoa_id]=[];
+    porPessoa[a.pessoa_id].push(a);
+  });
+
+  const row=(pessoaId,advs)=>{
+    const p=pessoas.find(x=>x.id===pessoaId);
+    const temSusp=advs.some(a=>a.tipo==='suspensao');
+    return`<div class="li" style="cursor:default"><div class="av ${temSusp?'av4':'av2'}" style="font-size:10px;font-weight:700">${ini(p?.nome||'?')}</div>
+      <div class="linfo"><div class="lname">${p?.nome||'—'}</div>
+      <div class="lsub">${p?.cargo||'—'} · ${advs.length} ocorrência(s) — ${advs.map(a=>`<span style="color:${ADV_COR[a.tipo]?.c}">${ADV_TIPO[a.tipo]}</span>`).join(', ')}</div></div>
+      <div class="lright">${pode?`<button class="btn btn-p btn-sm" onclick="advModal('${pessoaId}')">+ Registrar</button>`:''}
+      </div></div>`;
+  };
+
+  return`<div class="sechdr"><span class="sectitle">Advertências Ativas (${lista.length})</span></div>
+    ${Object.keys(porPessoa).length
+      ?Object.entries(porPessoa).map(([pid,advs])=>row(pid,advs)).join('')
+      :'<div class="empty"><p>Nenhuma advertência ativa no momento.</p></div>'}`;
+}
+
+// ── CARDS NO DASHBOARD RH ──
+function rDashDemissoesPendentes(){
+  const pendRH=rhDemissoes.filter(d=>d.status==='solicitado');
+  const pendAdmin=rhDemissoes.filter(d=>d.status==='aprovado_rh');
+  if(!pendRH.length&&!pendAdmin.length)return'';
+  const role=profile?.role||'';
+  let html='';
+  if(demPodeRH()&&pendRH.length){
+    html+=`<div onclick="pg('rh-pessoas')" style="background:var(--bg);border:1.5px solid var(--amber-text);border-radius:14px;padding:16px;cursor:pointer;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:36px;height:36px;background:var(--amber-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">🚪</div>
+        <div><div style="font-size:13px;font-weight:700;color:var(--amber-text)">Demissões aguardando RH</div>
+        <div style="font-size:11px;color:var(--text3)">${pendRH.length} solicitação(ões) pendente(s)</div></div>
+      </div>
+      ${pendRH.slice(0,3).map(d=>{const p=pessoas.find(x=>x.id===d.pessoa_id);return`<div style="font-size:12px;padding:5px 8px;background:var(--amber-bg);border-radius:6px;margin-bottom:4px;color:var(--amber-text);font-weight:500">${p?.nome||'—'} · ${DEM_TIPO[d.tipo]||d.tipo}</div>`;}).join('')}
+    </div>`;
+  }
+  if(demPodeAdmin()&&pendAdmin.length){
+    html+=`<div onclick="pg('rh-pessoas')" style="background:var(--bg);border:1.5px solid var(--blue-text);border-radius:14px;padding:16px;cursor:pointer;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="width:36px;height:36px;background:var(--blue-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">✅</div>
+        <div><div style="font-size:13px;font-weight:700;color:var(--blue-text)">Demissões aguardando aprovação final</div>
+        <div style="font-size:11px;color:var(--text3)">${pendAdmin.length} pendente(s)</div></div>
+      </div>
+      ${pendAdmin.slice(0,3).map(d=>{const p=pessoas.find(x=>x.id===d.pessoa_id);return`<div style="font-size:12px;padding:5px 8px;background:var(--blue-bg);border-radius:6px;margin-bottom:4px;color:var(--blue-text);font-weight:500">${p?.nome||'—'} · ${DEM_TIPO[d.tipo]||d.tipo}</div>`;}).join('')}
+    </div>`;
+  }
+  return html;
+}
+// ===============================================================
 
 // Retorna o filtro de unit_id para usar nas queries
 // Uso: const uf=unitFilter(); → ex: '&unit_id=eq.UUID' ou '' (consolidado)
