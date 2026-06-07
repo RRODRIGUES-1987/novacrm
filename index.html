@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.230 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.231 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -889,7 +889,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.230';
+const APP_VERSION='v1.0.231';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -16833,7 +16833,7 @@ function rCapasProcesso(){
 function capaNovaModal(){
   if(!capaPodeEditar())return;
   const cid=company?.id;
-  const cliOpts=clientes.filter(c=>c.company_id===cid).map(c=>`<option value="${c.id}">${c.nome}</option>`).join('');
+  const cliOpts=clientes.filter(c=>c.company_id===cid).map(c=>`<option value="${c.id}">${c.nome}${c.cpf_cnpj?' · '+c.cpf_cnpj:''}</option>`).join('');
   portModal('Nova Capa de Processo',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label class="fl">Tipo *</label>
@@ -16842,7 +16842,10 @@ function capaNovaModal(){
           <option value="expedicao">Expedição (saída)</option>
         </select></div>
       <div><label class="fl">Cliente *</label>
-        <select class="fi" id="capa-cliente"><option value="">Selecione...</option>${cliOpts}</select></div>
+        <select class="fi" id="capa-cliente" onchange="capaCarregarContatos(this.value)"><option value="">Selecione...</option>${cliOpts}</select></div>
+      <div style="grid-column:1/-1"><label class="fl">Operação / Contato</label>
+        <select class="fi" id="capa-operacao"><option value="">Selecione o cliente primeiro...</option></select>
+        <div class="lsub" style="color:var(--text3);margin-top:4px">Define onde o lançamento será vinculado</div></div>
       <div><label class="fl">Data da operação *</label><input class="fi" id="capa-data" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
       <div><label class="fl">DOC</label><input class="fi" id="capa-doc"></div>
       <div><label class="fl">Motorista</label><input class="fi" id="capa-motorista"></div>
@@ -16859,6 +16862,16 @@ function capaNovaModal(){
     'capaSalvarNova()',{saveLabel:'Criar e gerar PDF'});
 }
 
+async function capaCarregarContatos(clienteId){
+  const sel=ge('capa-operacao');if(!sel)return;
+  if(!clienteId){sel.innerHTML='<option value="">Selecione o cliente primeiro...</option>';return;}
+  try{
+    const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=created_at.asc`);
+    if(!contatos.length){sel.innerHTML='<option value="">Nenhum contato/operação cadastrado</option>';return;}
+    sel.innerHTML='<option value="">Selecione...</option>'+contatos.map(c=>`<option value="${c.id}" data-tipo="${c.tipo_operacao||''}">${c.tipo_operacao?c.tipo_operacao+' — ':''}${c.nome}${c.cargo?' ('+c.cargo+')':''}</option>`).join('');
+  }catch(e){sel.innerHTML='<option value="">Erro ao carregar contatos</option>';}
+}
+
 async function capaSalvarNova(){
   const tipo=ge('capa-tipo')?.value;
   const clienteId=ge('capa-cliente')?.value;
@@ -16869,8 +16882,14 @@ async function capaSalvarNova(){
   // Busca tabela tarifária do cliente
   const tabela=tabelasTarifarias.find(t=>t.status!=='pendente'&&(t.cliente_id===clienteId||(cli&&t.cliente_nome&&t.cliente_nome.toLowerCase()===cli.nome?.toLowerCase())));
 
+  // Operação/contato selecionado
+  const opSel=ge('capa-operacao');
+  const responsavelId=opSel?.value||null;
+  const tipoOperacao=opSel?.selectedOptions?.[0]?.getAttribute('data-tipo')||null;
+
   const numero=capaProximoNumero(tipo);
   const dados={company_id:company?.id,numero,tipo,cliente_id:clienteId,cliente_nome:cli?.nome||null,
+    cliente_cnpj:cli?.cpf_cnpj||null,tipo_operacao:tipoOperacao,responsavel_id:responsavelId,
     tabela_id:tabela?.id||null,data_operacao:dataOp,status:'aberta',
     motorista:ge('capa-motorista')?.value||null,transportadora:ge('capa-transp')?.value||null,
     placa_cavalo:ge('capa-cavalo')?.value||null,placa_carreta:ge('capa-carreta')?.value||null,
@@ -17032,8 +17051,8 @@ async function capaGerarPdf(id){
     <div style="font-weight:800;font-size:15px">MODELO CAPA DE PROCESSO</div>
     <div class="id">IDENTIFICAÇÃO: MKFOR040<br>REVISÃO: 01<br>${c.numero}</div>
   </div>
-  <div class="titulo">${c.cliente_nome||''}</div>
-  <div class="subtitulo">${titulo}</div>
+  <div class="titulo">${c.cliente_nome||''}${c.cliente_cnpj?` <span style="font-size:12px;font-weight:400">(${c.cliente_cnpj})</span>`:''}</div>
+  <div class="subtitulo">${titulo}${c.tipo_operacao?` · ${c.tipo_operacao}`:''}</div>
 
   <div class="secao">DADOS DE REGISTRO</div>
   <div class="grid2">
