@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.231 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.232 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -889,7 +889,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.231';
+const APP_VERSION='v1.0.232';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1481,6 +1481,7 @@ function openModule(mod){
 
 function pg(p){
   if(!p)return;
+  if(p!=='fat-capas')capaViewId=null;
   // Guard: não navega para páginas sem permissão
   const _pgRole=profile?.role||'vendedor';
   if(_pgRole!=='admin'&&_pgRole!=='portaria'){
@@ -16791,6 +16792,7 @@ async function loadCapasData(cid){
 }
 
 let capaFiltroTipo='todos';
+let capaViewId=null; // null=lista | id=tela de digitação
 const CAPA_STATUS={
   aberta:  {l:'Aberta',   bg:'var(--amber-bg)', c:'var(--amber-text)'},
   digitada:{l:'Digitada', bg:'var(--blue-bg)',  c:'var(--blue-text)'},
@@ -16803,17 +16805,31 @@ function capaPodeEditar(){return['admin','adm','financeiro','gestor'].includes(p
 
 // ── NUMERAÇÃO AUTOMÁTICA ──
 function capaProximoNumero(tipo){
-  const ano=new Date().getFullYear();
+  const ano=String(new Date().getFullYear()).slice(-2);
   const prefixo=tipo==='expedicao'?'EXP':'REC';
-  const doAno=capasProcesso.filter(c=>c.numero?.startsWith(`${prefixo}-${ano}`));
-  const seq=doAno.length+1;
-  return `${prefixo}-${ano}-${String(seq).padStart(4,'0')}`;
+  const max=capasProcesso.filter(c=>c.tipo===tipo).reduce((m,c)=>{
+    const n=parseInt((c.numero||'').replace(/\D/g,'').slice(0,4));
+    return n>m?n:m;
+  },0);
+  return `${prefixo}${String(max+1).padStart(4,'0')}/${ano}`;
 }
 
 // ── TELA PRINCIPAL ──
 function rCapasProcesso(){
+  // Se está digitando uma capa, mostra a tela de digitação
+  if(capaViewId){return rCapaDigitacaoTela(capaViewId);}
+
   const pode=capaPodeEditar();
   const lista=capasProcesso.filter(c=>capaFiltroTipo==='todos'||c.tipo===capaFiltroTipo);
+
+  // Cards de gestão
+  const total=capasProcesso.length;
+  const abertas=capasProcesso.filter(c=>c.status==='aberta').length;
+  const digitadas=capasProcesso.filter(c=>c.status==='digitada').length;
+  const faturadas=capasProcesso.filter(c=>c.status==='faturada').length;
+  const card=(label,valor,cor)=>`<div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+    <div style="font-size:22px;font-weight:800;color:${cor}">${valor}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px">${label}</div></div>`;
 
   const row=c=>{
     const st=CAPA_STATUS[c.status]||CAPA_STATUS.aberta;
@@ -16826,7 +16842,13 @@ function rCapasProcesso(){
       <div class="lright"><span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span></div></div>`;
   };
 
-  return`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+  return`<div style="display:flex;gap:10px;margin-bottom:16px">
+    ${card('Total de capas',total,'var(--text)')}
+    ${card('Abertas',abertas,'var(--amber-text)')}
+    ${card('Digitadas',digitadas,'var(--blue-text)')}
+    ${card('Faturadas',faturadas,'var(--green-text)')}
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
     <div class="tabs" style="max-width:340px;margin:0">
       <button class="tab ${capaFiltroTipo==='todos'?'active':''}" onclick="capaFiltroTipo='todos';render()">Todas</button>
       <button class="tab ${capaFiltroTipo==='recebimento'?'active':''}" onclick="capaFiltroTipo='recebimento';render()">Recebimento</button>
@@ -16835,6 +16857,78 @@ function rCapasProcesso(){
     ${pode?'<button class="btn btn-p btn-sm" onclick="capaNovaModal()">+ Nova capa</button>':''}
   </div>
   ${lista.length?lista.map(row).join(''):'<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma capa registrada</p></div>'}`;
+}
+
+// ── TELA DE DIGITAÇÃO (separada, com cards) ──
+function rCapaDigitacaoTela(id){
+  const c=capasProcesso.find(x=>x.id===id);
+  if(!c){capaViewId=null;return rCapasProcesso();}
+  const st=CAPA_STATUS[c.status]||CAPA_STATUS.aberta;
+  // dispara carregamento dos serviços
+  setTimeout(()=>capaCarregarServicosDigitacao(id),50);
+  return`<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>
+      <div style="font-size:16px;font-weight:700">${c.numero} — ${c.cliente_nome||''}</div>
+      <span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;color:var(--text3)">Tipo</div>
+        <div style="font-size:15px;font-weight:700;color:${c.tipo==='expedicao'?'var(--red-text)':'var(--green-text)'}">${c.tipo==='expedicao'?'Expedição':'Recebimento'}</div>
+      </div>
+      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;color:var(--text3)">Data</div>
+        <div style="font-size:15px;font-weight:700">${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'—'}</div>
+      </div>
+      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;color:var(--text3)">Operação</div>
+        <div style="font-size:15px;font-weight:700">${c.tipo_operacao||'—'}</div>
+      </div>
+      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+        <div style="font-size:11px;color:var(--text3)">DOC</div>
+        <div style="font-size:15px;font-weight:700">${c.doc||'—'}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px">
+      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Dados da Carga</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+        <div><label class="fl">Local de descarga</label><input class="fi" id="capa-d-local" value="${c.local_descarga||''}"></div>
+        <div><label class="fl">Operador responsável</label><input class="fi" id="capa-d-oper" value="${c.operador_resp||''}"></div>
+        <div><label class="fl">Pallets ${c.tipo==='expedicao'?'expedidos':'descarregados'} *</label><input class="fi" id="capa-d-pallets" type="number" value="${c.pallets_movimentados||''}"></div>
+        <div><label class="fl">Pallets armazenados</label><input class="fi" id="capa-d-armaz" type="number" value="${c.pallets_pbr||''}"></div>
+      </div>
+      <div style="margin-bottom:8px"><label class="fl">Tipo de carga</label>
+        <div style="display:flex;gap:18px;padding:6px 0">
+          ${CAPA_CARGA.map(t=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="capa-d-carga" value="${t}" ${c.tipo_carga===t?'checked':''} style="width:16px;height:16px;cursor:pointer"> ${t}</label>`).join('')}
+        </div></div>
+      <div style="margin-bottom:18px"><label class="fl">Tipo de pallet utilizado</label>
+        <div style="display:flex;gap:18px;padding:6px 0">
+          ${['PBR','CHEP','Outros'].map(t=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="capa-d-pallet-${t}" ${(c.tipo_carga_pallet||'').includes(t)?'checked':''} style="width:16px;height:16px;cursor:pointer"> ${t}</label>`).join('')}
+        </div></div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Serviços Realizados</div>
+      <div id="capa-servicos-dig"><div class="lsub" style="color:var(--text3)">Carregando serviços...</div></div>
+      <div style="margin-top:14px"><label class="fl">Observações</label><textarea class="fi" id="capa-d-obs" rows="2">${c.observacoes||''}</textarea></div>
+      <div style="display:flex;gap:8px;margin-top:18px">
+        <button class="btn btn-p" onclick="capaSalvarDigitacao('${id}')">Salvar digitação</button>
+        <button class="btn" onclick="capaGerarPdf('${id}')">📄 Gerar PDF</button>
+      </div>
+    </div>`;
+}
+
+async function capaCarregarServicosDigitacao(id){
+  const el=ge('capa-servicos-dig');if(!el)return;
+  const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
+  _capaServicosCache=servicos;
+  if(!servicos.length){el.innerHTML='<div class="lsub" style="color:var(--text3)">Falta configurar serviços na tabela tarifária deste cliente.</div>';return;}
+  el.innerHTML=servicos.map((s,i)=>`
+    <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:13px">${s.servico} ${s.unidade_cobranca?`<span style="color:var(--text3)">(${s.unidade_cobranca})</span>`:''}</div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="capaserv-real-${i}" ${s.realizado?'checked':''} style="width:15px;height:15px"> Realizado</label>
+      <input class="fi" id="capaserv-qtd-${i}" type="number" step="0.01" value="${s.quantidade||''}" placeholder="Qtd" style="width:100px;padding:6px 8px">
+    </div>`).join('');
 }
 
 // ── MODAL NOVA CAPA (dados de registro) ──
@@ -16942,7 +17036,7 @@ function capaAbrir(id){
         <span style="font-size:12px;color:var(--text2)">${c.tipo==='expedicao'?'Expedição':'Recebimento'} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):''}</span>
       </div>
       <button class="btn" onclick="capaGerarPdf('${id}')" style="justify-content:flex-start">📄 Gerar PDF da capa (para impressão)</button>
-      ${pode?`<button class="btn btn-p" onclick="capaDigitarModal('${id}')" style="justify-content:flex-start">✏️ Digitar dados da carga e serviços</button>`:''}
+      ${pode?`<button class="btn btn-p" onclick="portClose();capaViewId='${id}';render()" style="justify-content:flex-start">✏️ Digitar dados da carga e serviços</button>`:''}
       ${pode&&c.status!=='faturada'?`<button class="btn" onclick="capaExcluir('${id}')" style="justify-content:flex-start;color:var(--red-text)">🗑️ Excluir capa</button>`:''}
     </div>`,
     null,{hideSave:true});
@@ -16990,28 +17084,27 @@ async function capaSalvarDigitacao(id){
   const pallets=ge('capa-d-pallets')?.value;
   if(!pallets){portErr('Informe a quantidade de pallets.');return;}
   portSaving();
+  const palletTipos=['PBR','CHEP','Outros'].filter(t=>ge('capa-d-pallet-'+t)?.checked).join(',');
   const dados={
     local_descarga:ge('capa-d-local')?.value||null,
     operador_resp:ge('capa-d-oper')?.value||null,
     pallets_movimentados:Number(pallets)||0,
+    pallets_pbr:Number(ge('capa-d-armaz')?.value)||null,
     tipo_carga:document.querySelector('input[name="capa-d-carga"]:checked')?.value||null,
-    pallets_pbr:Number(ge('capa-d-pbr')?.value)||null,
-    pallets_chep:Number(ge('capa-d-chep')?.value)||null,
-    pallets_outros:Number(ge('capa-d-outros')?.value)||null,
+    tipo_carga_pallet:palletTipos||null,
     observacoes:ge('capa-d-obs')?.value||null,
     status:'digitada',
   };
   try{
     await dbUpdate('processo_capas',id,dados);
     capasProcesso=capasProcesso.map(c=>c.id===id?{...c,...dados}:c);
-    // Atualiza serviços
     await Promise.all(_capaServicosCache.map((s,i)=>{
       const realizado=ge(`capaserv-real-${i}`)?.checked||false;
       const qtd=Number(ge(`capaserv-qtd-${i}`)?.value)||null;
       return dbUpdate('processo_capa_servicos',s.id,{realizado,quantidade:qtd});
     }));
-    portClose();render();
-  }catch(e){portErr('Erro: '+e.message);}
+    capaViewId=null;render();
+  }catch(e){alert('Erro: '+e.message);}
 }
 
 async function capaExcluir(id){
@@ -17034,33 +17127,33 @@ async function capaGerarPdf(id){
   const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
   const cabecalho=`${(c.cliente_nome||'').toUpperCase()} ${c.tipo==='expedicao'?'EXPEDIÇÃO':'RECEBIMENTO'}`;
   const palletLabel=c.tipo==='expedicao'?'Pallets Expedidos':'Pallets Descarregados';
-  const chk=v=>v?'☑':'☐';
-  const tc=c.tipo_carga||'';
+  // PDF é sempre em branco — para preencher à mão
+  const BX='☐';
 
   const servRows=servicos.map(s=>`
     <tr>
       <td style="padding:3px 8px;font-size:10px;border:1px solid #999">${s.servico}</td>
-      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${chk(s.realizado)}</td>
-      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${chk(!s.realizado)}</td>
-      <td style="padding:3px;border:1px solid #999;width:80px">${s.quantidade!=null?s.quantidade:''}</td>
+      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${BX}</td>
+      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${BX}</td>
+      <td style="padding:3px;border:1px solid #999;width:80px"></td>
     </tr>`).join('');
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${c.numero}</title>
   <style>
     @page{size:A4;margin:8mm}
-    *{box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#000;font-size:11px;margin:0}
+    *{box-sizing:border-box;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+    body{font-family:Arial,sans-serif;color:#000;font-size:11px;margin:0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
     .topbar{display:flex;justify-content:space-between;align-items:center;border:2px solid #000}
     .topbar>div{padding:4px 8px}
     .topbar .mid{font-weight:800;font-size:13px;text-align:center;border-left:2px solid #000;border-right:2px solid #000;flex:1}
     .topbar .id{font-size:9px;text-align:left;line-height:1.4;width:150px}
     .cliente{text-align:center;font-size:18px;font-weight:800;margin:8px 0 2px}
-    .secao{background:#1a1a1a;color:#fff;font-weight:700;text-align:center;padding:3px;font-size:12px;letter-spacing:2px;margin-top:8px}
+    .secao{background:#1a1a1a !important;color:#fff !important;font-weight:700;text-align:center;padding:4px;font-size:12px;letter-spacing:2px;margin-top:8px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;padding:8px 6px}
     .campo{display:flex;gap:6px;padding:3px 0;font-size:11px;border-bottom:1px dotted #aaa}
     .campo .lbl{font-weight:600;min-width:110px}
     .campo .val{flex:1}
-    .carga-tipo{display:flex;gap:18px;padding:6px;font-size:11px;align-items:center}
+    .carga-tipo{display:flex;gap:16px;padding:6px;font-size:11px;align-items:center;flex-wrap:wrap}
     .carga-tipo .opt{display:flex;align-items:center;gap:5px}
     table{width:100%;border-collapse:collapse;margin-top:4px}
     .ass{display:grid;grid-template-columns:1fr 1fr;gap:22px 50px;margin-top:22px}
@@ -17089,18 +17182,22 @@ async function capaGerarPdf(id){
 
   <div class="secao">DADOS DA CARGA</div>
   <div class="grid2">
-    <div class="campo"><span class="lbl">Local de Descarga:</span><span class="val">${c.local_descarga||''}</span></div>
-    <div class="campo"><span class="lbl">${palletLabel}:</span><span class="val">${c.pallets_movimentados!=null?c.pallets_movimentados:''}</span></div>
-    <div class="campo"><span class="lbl">Operador Respons.:</span><span class="val">${c.operador_resp||''}</span></div>
-    <div class="campo"><span class="lbl">PBR:</span><span class="val">${c.pallets_pbr!=null?c.pallets_pbr:''}</span></div>
-    <div class="campo"><span class="lbl">CHEP:</span><span class="val">${c.pallets_chep!=null?c.pallets_chep:''}</span></div>
-    <div class="campo"><span class="lbl">Outros:</span><span class="val">${c.pallets_outros!=null?c.pallets_outros:''}</span></div>
+    <div class="campo"><span class="lbl">Local de Descarga:</span><span class="val"></span></div>
+    <div class="campo"><span class="lbl">${palletLabel}:</span><span class="val"></span></div>
+    <div class="campo"><span class="lbl">Operador Respons.:</span><span class="val"></span></div>
+    <div class="campo"><span class="lbl">Pallets Armazenados:</span><span class="val"></span></div>
   </div>
   <div class="carga-tipo">
     <span style="font-weight:600">Tipo de Carga:</span>
-    <span class="opt">${chk(tc==='Paletizada')} Paletizada</span>
-    <span class="opt">${chk(tc==='Batida')} Batida</span>
-    <span class="opt">${chk(tc==='Paletizada/Batida')} Paletizada/Batida</span>
+    <span class="opt">${BX} Paletizada</span>
+    <span class="opt">${BX} Batida</span>
+    <span class="opt">${BX} Paletizada/Batida</span>
+  </div>
+  <div class="carga-tipo">
+    <span style="font-weight:600">Qtd por Tipo de Pallet:</span>
+    <span class="opt">${BX} PBR</span>
+    <span class="opt">${BX} CHEP</span>
+    <span class="opt">${BX} Outros</span>
   </div>
 
   <div class="secao">SERVIÇOS REALIZADOS</div>
