@@ -3373,6 +3373,8 @@ function renderTTQuadros(){
             <th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:600;width:30%">Unidade de Cobrança</th>
             <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;width:15%">Valor</th>
             <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;width:12%" title="Quantidade mínima cobrada">Qtde Mín</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Recebimento">Cap.Rec</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Expedição">Cap.Exp</th>
             <th style="width:5%"></th>
           </tr>
         </thead>
@@ -3401,6 +3403,12 @@ function renderTTRow(qi, ii, item){
     <td style="padding:5px 8px">
       <input value="${item.qtde_minima||''}" onchange="ttQuadros[${qi}].itens[${ii}].qtde_minima=this.value?Number(this.value):null"
         style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:var(--text);text-align:right" placeholder="—" type="number" step="1" min="0" title="Quantidade mínima">
+    </td>
+    <td style="padding:5px 4px;text-align:center">
+      <input type="checkbox" ${item.cap_recebimento?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].cap_recebimento=this.checked" style="width:15px;height:15px;cursor:pointer">
+    </td>
+    <td style="padding:5px 4px;text-align:center">
+      <input type="checkbox" ${item.cap_expedicao?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].cap_expedicao=this.checked" style="width:15px;height:15px;cursor:pointer">
     </td>
     <td style="padding:5px 4px;text-align:center">
       <button onclick="removeItemQuadro(${qi},${ii})" style="border:none;background:none;cursor:pointer;color:var(--text3);padding:2px">
@@ -3506,7 +3514,7 @@ async function saveTabelaTarifaria(){
     for(let ii=0;ii<q.itens.length;ii++){
       const item=q.itens[ii];
       if(!item.servico)continue;
-      await dbInsert('tabelas_itens',{quadro_id:qd.id,servico:item.servico,unidade_cobranca:item.unidade_cobranca||null,valor:item.valor?Number(item.valor):null,qtde_minima:item.qtde_minima?Number(item.qtde_minima):null,ordem:ii});
+      await dbInsert('tabelas_itens',{quadro_id:qd.id,servico:item.servico,unidade_cobranca:item.unidade_cobranca||null,valor:item.valor?Number(item.valor):null,qtde_minima:item.qtde_minima?Number(item.qtde_minima):null,cap_recebimento:item.cap_recebimento||false,cap_expedicao:item.cap_expedicao||false,ordem:ii});
     }
   }
   ttQuadros=[];
@@ -16904,9 +16912,12 @@ async function capaSalvarNova(){
       if(tabela){
         const quadros=await dbSelect('tabelas_quadros',`tabela_id=eq.${tabela.id}&order=ordem.asc`);
         let ordem=0;const servicos=[];
+        const campoCap=tipo==='expedicao'?'cap_expedicao':'cap_recebimento';
         for(const q of quadros){
           const itens=await dbSelect('tabelas_itens',`quadro_id=eq.${q.id}&order=ordem.asc`);
           for(const it of itens){
+            // Só inclui serviços marcados para este tipo de capa
+            if(!it[campoCap])continue;
             servicos.push({capa_id:salvo.id,servico:it.servico||'',unidade_cobranca:it.unidade_cobranca||null,realizado:false,quantidade:null,ordem:ordem++});
           }
         }
@@ -16957,8 +16968,12 @@ async function capaDigitarModal(id){
       <div><label class="fl">Local de descarga</label><input class="fi" id="capa-d-local" value="${c.local_descarga||''}"></div>
       <div><label class="fl">Operador responsável</label><input class="fi" id="capa-d-oper" value="${c.operador_resp||''}"></div>
       <div><label class="fl">Pallets ${c.tipo==='expedicao'?'expedidos':'descarregados'} *</label><input class="fi" id="capa-d-pallets" type="number" value="${c.pallets_movimentados||''}"></div>
-      <div><label class="fl">Tipo de carga</label>
-        <select class="fi" id="capa-d-carga"><option value="">—</option>${CAPA_CARGA.map(t=>`<option value="${t}" ${c.tipo_carga===t?'selected':''}>${t}</option>`).join('')}</select></div>
+      <div style="grid-column:1/-1"><label class="fl">Tipo de carga</label>
+        <div style="display:flex;gap:18px;padding:8px 0">
+          ${CAPA_CARGA.map((t,i)=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="capa-d-carga" value="${t}" ${c.tipo_carga===t?'checked':''} style="width:16px;height:16px;cursor:pointer"> ${t}
+          </label>`).join('')}
+        </div></div>
       <div><label class="fl">PBR</label><input class="fi" id="capa-d-pbr" type="number" value="${c.pallets_pbr||''}"></div>
       <div><label class="fl">CHEP</label><input class="fi" id="capa-d-chep" type="number" value="${c.pallets_chep||''}"></div>
       <div><label class="fl">Outros</label><input class="fi" id="capa-d-outros" type="number" value="${c.pallets_outros||''}"></div>
@@ -16979,7 +16994,7 @@ async function capaSalvarDigitacao(id){
     local_descarga:ge('capa-d-local')?.value||null,
     operador_resp:ge('capa-d-oper')?.value||null,
     pallets_movimentados:Number(pallets)||0,
-    tipo_carga:ge('capa-d-carga')?.value||null,
+    tipo_carga:document.querySelector('input[name="capa-d-carga"]:checked')?.value||null,
     pallets_pbr:Number(ge('capa-d-pbr')?.value)||null,
     pallets_chep:Number(ge('capa-d-chep')?.value)||null,
     pallets_outros:Number(ge('capa-d-outros')?.value)||null,
@@ -17017,42 +17032,46 @@ async function capaGerarPdf(id){
   const _lm=document.documentElement.innerHTML.match(/data:image\/png;base64,[A-Za-z0-9+\/=]{5000,}/);
   if(_lm)LOGO=_lm[0];
   const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
-  const titulo=c.tipo==='expedicao'?'CAPA DE EXPEDIÇÃO':'CAPA DE RECEBIMENTO';
+  const cabecalho=`${(c.cliente_nome||'').toUpperCase()} ${c.tipo==='expedicao'?'EXPEDIÇÃO':'RECEBIMENTO'}`;
   const palletLabel=c.tipo==='expedicao'?'Pallets Expedidos':'Pallets Descarregados';
   const chk=v=>v?'☑':'☐';
+  const tc=c.tipo_carga||'';
 
   const servRows=servicos.map(s=>`
     <tr>
-      <td style="padding:5px 8px;font-size:11px;border:1px solid #999">${s.servico}</td>
-      <td style="padding:5px;text-align:center;border:1px solid #999;width:40px">${chk(s.realizado)}</td>
-      <td style="padding:5px;text-align:center;border:1px solid #999;width:40px">${chk(!s.realizado)}</td>
-      <td style="padding:5px;border:1px solid #999;width:90px">${s.quantidade!=null?s.quantidade:''}</td>
+      <td style="padding:3px 8px;font-size:10px;border:1px solid #999">${s.servico}</td>
+      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${chk(s.realizado)}</td>
+      <td style="padding:3px;text-align:center;border:1px solid #999;width:36px">${chk(!s.realizado)}</td>
+      <td style="padding:3px;border:1px solid #999;width:80px">${s.quantidade!=null?s.quantidade:''}</td>
     </tr>`).join('');
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${c.numero}</title>
   <style>
-    @page{size:A4;margin:10mm}
-    body{font-family:Arial,sans-serif;color:#000;font-size:12px;margin:0}
-    .topbar{display:flex;justify-content:space-between;align-items:center;border:2px solid #000;padding:6px 10px}
-    .topbar .id{font-size:10px;text-align:right;line-height:1.4}
-    .titulo{text-align:center;font-size:20px;font-weight:800;margin:10px 0 2px}
-    .subtitulo{text-align:center;font-size:14px;font-weight:700;margin-bottom:10px}
-    .secao{background:#2b2b2b;color:#fff;font-weight:700;text-align:center;padding:4px;font-size:13px;letter-spacing:1px;margin-top:10px}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 30px;padding:10px 6px}
-    .campo{display:flex;gap:6px;padding:4px 0;font-size:12px;border-bottom:1px dotted #aaa}
-    .campo .lbl{font-weight:600;min-width:120px}
+    @page{size:A4;margin:8mm}
+    *{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;color:#000;font-size:11px;margin:0}
+    .topbar{display:flex;justify-content:space-between;align-items:center;border:2px solid #000}
+    .topbar>div{padding:4px 8px}
+    .topbar .mid{font-weight:800;font-size:13px;text-align:center;border-left:2px solid #000;border-right:2px solid #000;flex:1}
+    .topbar .id{font-size:9px;text-align:left;line-height:1.4;width:150px}
+    .cliente{text-align:center;font-size:18px;font-weight:800;margin:8px 0 2px}
+    .secao{background:#1a1a1a;color:#fff;font-weight:700;text-align:center;padding:3px;font-size:12px;letter-spacing:2px;margin-top:8px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;padding:8px 6px}
+    .campo{display:flex;gap:6px;padding:3px 0;font-size:11px;border-bottom:1px dotted #aaa}
+    .campo .lbl{font-weight:600;min-width:110px}
     .campo .val{flex:1}
-    table{width:100%;border-collapse:collapse;margin-top:6px}
-    .ass{display:grid;grid-template-columns:1fr 1fr;gap:30px 60px;margin-top:30px}
-    .ass div{border-top:1px solid #000;padding-top:4px;text-align:center;font-size:11px;font-weight:600}
+    .carga-tipo{display:flex;gap:18px;padding:6px;font-size:11px;align-items:center}
+    .carga-tipo .opt{display:flex;align-items:center;gap:5px}
+    table{width:100%;border-collapse:collapse;margin-top:4px}
+    .ass{display:grid;grid-template-columns:1fr 1fr;gap:22px 50px;margin-top:22px}
+    .ass div{border-top:1px solid #000;padding-top:3px;text-align:center;font-size:10px;font-weight:600}
   </style></head><body>
   <div class="topbar">
-    <div>${LOGO?`<img src="${LOGO}" style="height:40px">`:'<b style="font-size:18px">MK log</b>'}</div>
-    <div style="font-weight:800;font-size:15px">MODELO CAPA DE PROCESSO</div>
+    <div>${LOGO?`<img src="${LOGO}" style="height:34px">`:'<b style="font-size:16px">MK log</b>'}</div>
+    <div class="mid">${cabecalho}</div>
     <div class="id">IDENTIFICAÇÃO: MKFOR040<br>REVISÃO: 01<br>${c.numero}</div>
   </div>
-  <div class="titulo">${c.cliente_nome||''}${c.cliente_cnpj?` <span style="font-size:12px;font-weight:400">(${c.cliente_cnpj})</span>`:''}</div>
-  <div class="subtitulo">${titulo}${c.tipo_operacao?` · ${c.tipo_operacao}`:''}</div>
+  <div class="cliente">${c.cliente_nome||''}${c.cliente_cnpj?` <span style="font-size:11px;font-weight:400">(${c.cliente_cnpj})</span>`:''}${c.tipo_operacao?` <span style="font-size:11px;font-weight:400">· ${c.tipo_operacao}</span>`:''}</div>
 
   <div class="secao">DADOS DE REGISTRO</div>
   <div class="grid2">
@@ -17071,23 +17090,28 @@ async function capaGerarPdf(id){
   <div class="secao">DADOS DA CARGA</div>
   <div class="grid2">
     <div class="campo"><span class="lbl">Local de Descarga:</span><span class="val">${c.local_descarga||''}</span></div>
-    <div class="campo"><span class="lbl">Tipo de Carga:</span><span class="val">${c.tipo_carga||''}</span></div>
+    <div class="campo"><span class="lbl">${palletLabel}:</span><span class="val">${c.pallets_movimentados!=null?c.pallets_movimentados:''}</span></div>
     <div class="campo"><span class="lbl">Operador Respons.:</span><span class="val">${c.operador_resp||''}</span></div>
     <div class="campo"><span class="lbl">PBR:</span><span class="val">${c.pallets_pbr!=null?c.pallets_pbr:''}</span></div>
-    <div class="campo"><span class="lbl">${palletLabel}:</span><span class="val">${c.pallets_movimentados!=null?c.pallets_movimentados:''}</span></div>
     <div class="campo"><span class="lbl">CHEP:</span><span class="val">${c.pallets_chep!=null?c.pallets_chep:''}</span></div>
     <div class="campo"><span class="lbl">Outros:</span><span class="val">${c.pallets_outros!=null?c.pallets_outros:''}</span></div>
+  </div>
+  <div class="carga-tipo">
+    <span style="font-weight:600">Tipo de Carga:</span>
+    <span class="opt">${chk(tc==='Paletizada')} Paletizada</span>
+    <span class="opt">${chk(tc==='Batida')} Batida</span>
+    <span class="opt">${chk(tc==='Paletizada/Batida')} Paletizada/Batida</span>
   </div>
 
   <div class="secao">SERVIÇOS REALIZADOS</div>
   <table>
     <thead><tr style="background:#f0f0f0">
-      <th style="padding:5px 8px;border:1px solid #999;text-align:left;font-size:11px">Serviço</th>
-      <th style="padding:5px;border:1px solid #999;font-size:11px">SIM</th>
-      <th style="padding:5px;border:1px solid #999;font-size:11px">NÃO</th>
-      <th style="padding:5px;border:1px solid #999;font-size:11px">Quantidade</th>
+      <th style="padding:4px 8px;border:1px solid #999;text-align:left;font-size:10px">Serviço</th>
+      <th style="padding:4px;border:1px solid #999;font-size:10px">SIM</th>
+      <th style="padding:4px;border:1px solid #999;font-size:10px">NÃO</th>
+      <th style="padding:4px;border:1px solid #999;font-size:10px">Quantidade</th>
     </tr></thead>
-    <tbody>${servRows||'<tr><td colspan="4" style="padding:8px;text-align:center;color:#999;border:1px solid #999">Sem serviços cadastrados na tabela tarifária</td></tr>'}</tbody>
+    <tbody>${servRows||'<tr><td colspan="4" style="padding:6px;text-align:center;color:#999;border:1px solid #999;font-size:10px">Falta configurar serviços na tabela tarifária</td></tr>'}</tbody>
   </table>
 
   <div class="ass">
@@ -17096,8 +17120,7 @@ async function capaGerarPdf(id){
     <div>Conferente Recebimento</div>
     <div>Controle Operacional</div>
   </div>
-  <div style="text-align:center;margin-top:24px;border-top:1px solid #000;padding-top:4px;font-size:11px;font-weight:600;width:300px;margin-left:auto;margin-right:auto">Gerente da Operação</div>
-  <div style="position:fixed;bottom:4mm;left:10mm;right:10mm;text-align:center;font-size:8px;color:#999;border-top:1px solid #ddd;padding-top:3px">MK LOGÍSTICA LTDA · contato@mklogistica.com · www.mklogistica.com</div>
+  <div style="text-align:center;margin-top:16px;border-top:1px solid #000;padding-top:3px;font-size:10px;font-weight:600;width:260px;margin-left:auto;margin-right:auto">Gerente da Operação</div>
   </body></html>`;
 
   const iframe=document.createElement('iframe');
