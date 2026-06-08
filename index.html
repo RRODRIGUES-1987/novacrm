@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.237 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.239 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.237';
+const APP_VERSION='v1.0.239';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2570,8 +2570,82 @@ function renderHistoricoHorizontal(pessoaId){
   });
   html += '</div></div>';
 
+  // Lista de histórico de funções (período + salário)
+  const vinculos=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.tipo==='vinculo_funcao')
+    .sort((a,b)=>(b.data_inicio||'')<(a.data_inicio||'')?1:-1);
+  const pode=['admin','adm','rh'].includes(profile?.role||'');
+  let vh='<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">';
+  vh+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+  vh+='<div style="font-size:13px;font-weight:600;color:#0A2540">📋 Histórico de funções</div>';
+  if(pode)vh+='<button class="btn btn-p btn-sm" onclick="histVinculoModal(\''+pessoaId+'\')">+ Adicionar</button>';
+  vh+='</div>';
+  if(vinculos.length){
+    vh+=vinculos.map(function(v){
+      const fn=rhFuncoes.find(f=>f.id===v.funcao_id);
+      const ini=v.data_inicio?new Date(v.data_inicio+'T00:00').toLocaleDateString('pt-BR'):'—';
+      const fim=v.data_fim?new Date(v.data_fim+'T00:00').toLocaleDateString('pt-BR'):'atual';
+      const sal=v.salario?'R$ '+Number(v.salario).toLocaleString('pt-BR',{minimumFractionDigits:2}):'';
+      return'<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'+
+        '<div><div style="font-weight:600;font-size:13px">'+(fn?fn.funcao:(v.cargo_novo||'Função'))+'</div>'+
+        '<div style="font-size:11px;color:var(--text3)">'+ini+' → '+fim+(sal?' · '+sal:'')+(v.observacao?' · '+v.observacao:'')+'</div></div>'+
+        (pode?'<button onclick="histVinculoExcluir(\''+v.id+'\',\''+pessoaId+'\')" style="border:none;background:none;cursor:pointer;color:var(--red-text);font-size:14px">✕</button>':'')+
+      '</div>';
+    }).join('');
+  }else{
+    vh+='<div class="lsub" style="color:var(--text3)">Nenhuma função registrada no histórico. Use "Adicionar" para incluir funções anteriores com período e salário.</div>';
+  }
+  vh+='</div>';
+
   const panel = document.getElementById('cad-panel-historico');
-  if(panel){ panel.style.display=''; panel.innerHTML=html; }
+  if(panel){ panel.style.display=''; panel.innerHTML=html+vh; }
+}
+
+// ── MODAL VÍNCULO DE FUNÇÃO (histórico com período + salário) ──
+function histVinculoModal(pessoaId){
+  if(!['admin','adm','rh'].includes(profile?.role||''))return;
+  const cid=company?.id;
+  const funcoes=rhFuncoes.filter(f=>f.company_id===cid).sort((a,b)=>(a.funcao||'').localeCompare(b.funcao||''));
+  const opts=funcoes.map(f=>'<option value="'+f.id+'">'+f.funcao+'</option>').join('');
+  portModal('Adicionar função ao histórico',
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+      '<div style="grid-column:1/-1"><label class="fl">Função *</label><select class="fi" id="hv-funcao"><option value="">Selecione...</option>'+opts+'</select></div>'+
+      '<div><label class="fl">Data início *</label><input class="fi" id="hv-inicio" type="date"></div>'+
+      '<div><label class="fl">Data fim</label><input class="fi" id="hv-fim" type="date"></div>'+
+      '<div style="grid-column:1/-1"><label class="fl">Salário da época</label><input class="fi" id="hv-salario" type="number" step="0.01" placeholder="0,00"></div>'+
+      '<div style="grid-column:1/-1"><label class="fl">Observação</label><input class="fi" id="hv-obs" placeholder="Ex: promoção, transferência de unidade"></div>'+
+    '</div><div class="lsub" style="color:var(--text3);margin-top:8px">Deixe a data fim em branco se for a função atual.</div>',
+    'histVinculoSalvar(\''+pessoaId+'\')',{saveLabel:'Adicionar'});
+}
+
+async function histVinculoSalvar(pessoaId){
+  const funcaoId=ge('hv-funcao')?.value;
+  const inicio=ge('hv-inicio')?.value;
+  if(!funcaoId||!inicio){portErr('Informe a função e a data de início.');return;}
+  portSaving();
+  const fn=rhFuncoes.find(f=>f.id===funcaoId);
+  const obj={
+    company_id:company?.id,pessoa_id:pessoaId,tipo:'vinculo_funcao',
+    funcao_id:funcaoId,cargo_novo:fn?.funcao||null,
+    data:inicio,data_inicio:inicio,data_fim:ge('hv-fim')?.value||null,
+    salario:parseFloat(ge('hv-salario')?.value)||null,
+    observacao:ge('hv-obs')?.value||null,
+    alterado_por:cu?.id,alterado_por_nome:profile?.full_name||cu?.email||null,
+  };
+  try{
+    const res=await dbInsert('historico_profissional',obj);
+    if(res)historicoProfissional.push(res);
+    portClose();
+    renderHistoricoHorizontal(pessoaId);
+  }catch(e){portErr('Erro: '+e.message);}
+}
+
+async function histVinculoExcluir(id,pessoaId){
+  if(!confirm('Excluir este registro do histórico?'))return;
+  try{
+    await dbDelete('historico_profissional',id);
+    historicoProfissional=historicoProfissional.filter(h=>h.id!==id);
+    renderHistoricoHorizontal(pessoaId);
+  }catch(e){alert('Erro: '+e.message);}
 }
 
 function abrirAbaColaborador(aba, pessoaId){
@@ -2884,7 +2958,6 @@ async function saveCadastro(){
     delete obj.banco;delete obj.agencia;delete obj.conta;
     delete obj.tipo_conta;delete obj.pix;delete obj.titular_banco;
     delete obj.observacoes;delete obj.categoria;delete obj.tipo;
-    delete obj.tipo_contrato;
     delete obj.horario_entrada;delete obj.horario_saida;
     delete obj.horario_intervalo;delete obj.carga_horaria;
 
@@ -15897,20 +15970,46 @@ function rPendenciasRH(){
   const cor=d=>d==null?'var(--red-text)':d<0?'var(--red-text)':d<=30?'var(--amber-text)':'var(--text)';
   const bg=d=>d==null?'var(--red-bg)':d<0?'var(--red-bg)':d<=30?'var(--amber-bg)':'var(--bg2)';
 
-  const linhaEpi=x=>`<div class="li">
-    <div class="av" style="width:34px;height:34px;border-radius:8px;background:${bg(x.dias)};color:${cor(x.dias)};font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EPI</div>
-    <div class="linfo"><div class="lname">${x.nome}</div>
-    <div class="lsub">${x.item} · ${x.status}${x.proxima?' · troca '+new Date(x.proxima+'T00:00').toLocaleDateString('pt-BR'):''}${x.dias!=null&&x.dias>=0?' ('+x.dias+'d)':''}</div></div>
-    <div class="lright"><span class="bdg" style="background:${bg(x.dias)};color:${cor(x.dias)}">${x.status}</span></div></div>`;
+  // Agrupa um array de pendências por colaborador (nome uma vez, itens em sequência)
+  const agrupaPorPessoa=arr=>{
+    const map={};
+    arr.forEach(x=>{const k=x.pessoa.id;(map[k]=map[k]||{pessoa:x.pessoa,nome:x.nome,itens:[]}).itens.push(x);});
+    return Object.values(map).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  };
 
-  const linhaExame=x=>`<div class="li">
-    <div class="av" style="width:34px;height:34px;border-radius:8px;background:${bg(x.dias)};color:${cor(x.dias)};font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EXM</div>
-    <div class="linfo"><div class="lname">${x.nome}</div>
-    <div class="lsub">${x.item} · ${x.status}${x.venc?' · vence '+new Date(x.venc+'T00:00').toLocaleDateString('pt-BR'):''}${x.dias!=null&&x.dias>=0?' ('+x.dias+'d)':''}${x.agendado?' · 📅 agendado '+new Date(x.agendado.data_prevista+'T00:00').toLocaleDateString('pt-BR'):''}</div></div>
-    <div class="lright" style="display:flex;flex-direction:row;align-items:center;gap:6px">
+  const cardEpi=g=>{
+    const itens=g.itens.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-top:1px solid var(--border)">
+      <div style="font-size:12px"><span style="font-weight:600">${x.item}</span> <span style="color:var(--text3)">· ${x.status}${x.proxima?' · troca '+new Date(x.proxima+'T00:00').toLocaleDateString('pt-BR'):''}${x.dias!=null&&x.dias>=0?' ('+x.dias+'d)':''}</span></div>
       <span class="bdg" style="background:${bg(x.dias)};color:${cor(x.dias)}">${x.status}</span>
-      ${epiPodeEditar()&&!x.agendado?`<button class="btn btn-sm" onclick="exameAgendarModal('${x.pessoa.id}','${x.exameId}')">📅 Agendar</button>`:''}
-    </div></div>`;
+    </div>`).join('');
+    return`<div class="li" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="av" style="width:30px;height:30px;border-radius:8px;background:var(--bg2);color:var(--text2);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EPI</div>
+        <div class="lname">${g.nome} <span style="color:var(--text3);font-weight:400;font-size:11px">· ${g.itens.length} pendência(s)</span></div>
+      </div>
+      <div style="margin-left:40px;margin-top:4px">${itens}</div>
+    </div>`;
+  };
+
+  const cardExame=g=>{
+    const itens=g.itens.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-top:1px solid var(--border)">
+      <div style="font-size:12px"><span style="font-weight:600">${x.item}</span> <span style="color:var(--text3)">· ${x.status}${x.venc?' · vence '+new Date(x.venc+'T00:00').toLocaleDateString('pt-BR'):''}${x.dias!=null&&x.dias>=0?' ('+x.dias+'d)':''}${x.agendado?' · 📅 '+new Date(x.agendado.data_prevista+'T00:00').toLocaleDateString('pt-BR'):''}</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="bdg" style="background:${bg(x.dias)};color:${cor(x.dias)}">${x.status}</span>
+        ${epiPodeEditar()&&!x.agendado?`<button class="btn btn-sm" onclick="exameAgendarModal('${x.pessoa.id}','${x.exameId}')">📅</button>`:''}
+      </div>
+    </div>`).join('');
+    return`<div class="li" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="av" style="width:30px;height:30px;border-radius:8px;background:var(--bg2);color:var(--text2);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EXM</div>
+        <div class="lname">${g.nome} <span style="color:var(--text3);font-weight:400;font-size:11px">· ${g.itens.length} pendência(s)</span></div>
+      </div>
+      <div style="margin-left:40px;margin-top:4px">${itens}</div>
+    </div>`;
+  };
+
+  const gruposEpi=agrupaPorPessoa(pendEpi);
+  const gruposExame=agrupaPorPessoa(pendExame);
 
   const linhaAgend=a=>{
     const p=pessoas.find(x=>x.id===a.pessoa_id);
@@ -15935,18 +16034,18 @@ function rPendenciasRH(){
       ${card('Exames pendentes',totalExame,totalExame?'var(--red-text)':'var(--green-text)')}
       ${card('Exames agendados',totalAgend,'var(--blue-text)')}
     </div>
-    <div class="sechdr"><span class="sectitle">🦺 EPIs (${totalEpi})</span></div>
-    ${pendEpi.length?pendEpi.slice(0,5).map(linhaEpi).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência de EPI 🎉</div>'}
-    ${totalEpi>5?`<div style="text-align:center;margin:8px 0"><button class="btn btn-sm" onclick="pendTab='epi';render()">Ver todos (${totalEpi})</button></div>`:''}
-    <div class="sechdr" style="margin-top:18px"><span class="sectitle">🩺 Exames (${totalExame})</span></div>
-    ${pendExame.length?pendExame.slice(0,5).map(linhaExame).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência de exame 🎉</div>'}
-    ${totalExame>5?`<div style="text-align:center;margin:8px 0"><button class="btn btn-sm" onclick="pendTab='exame';render()">Ver todos (${totalExame})</button></div>`:''}`;
+    <div class="sechdr"><span class="sectitle">🦺 EPIs (${gruposEpi.length} colaborador(es))</span></div>
+    ${gruposEpi.length?gruposEpi.slice(0,5).map(cardEpi).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência de EPI 🎉</div>'}
+    ${gruposEpi.length>5?`<div style="text-align:center;margin:8px 0"><button class="btn btn-sm" onclick="pendTab='epi';render()">Ver todos (${gruposEpi.length})</button></div>`:''}
+    <div class="sechdr" style="margin-top:18px"><span class="sectitle">🩺 Exames (${gruposExame.length} colaborador(es))</span></div>
+    ${gruposExame.length?gruposExame.slice(0,5).map(cardExame).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência de exame 🎉</div>'}
+    ${gruposExame.length>5?`<div style="text-align:center;margin:8px 0"><button class="btn btn-sm" onclick="pendTab='exame';render()">Ver todos (${gruposExame.length})</button></div>`:''}`;
   }else if(pendTab==='epi'){
-    conteudo=`<div class="sechdr"><span class="sectitle">🦺 Todos os EPIs pendentes (${totalEpi})</span></div>
-    ${pendEpi.length?pendEpi.map(linhaEpi).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência 🎉</div>'}`;
+    conteudo=`<div class="sechdr"><span class="sectitle">🦺 EPIs pendentes — ${gruposEpi.length} colaborador(es), ${totalEpi} item(ns)</span></div>
+    ${gruposEpi.length?gruposEpi.map(cardEpi).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência 🎉</div>'}`;
   }else if(pendTab==='exame'){
-    conteudo=`<div class="sechdr"><span class="sectitle">🩺 Todos os exames pendentes (${totalExame})</span></div>
-    ${pendExame.length?pendExame.map(linhaExame).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência 🎉</div>'}`;
+    conteudo=`<div class="sechdr"><span class="sectitle">🩺 Exames pendentes — ${gruposExame.length} colaborador(es), ${totalExame} item(ns)</span></div>
+    ${gruposExame.length?gruposExame.map(cardExame).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhuma pendência 🎉</div>'}`;
   }else if(pendTab==='agendados'){
     conteudo=`<div class="sechdr"><span class="sectitle">📅 Exames agendados (${totalAgend})</span></div>
     ${agendFuturos.length?agendFuturos.map(linhaAgend).join(''):'<div class="lsub" style="color:var(--text3);padding:8px 0">Nenhum exame agendado</div>'}`;
@@ -16031,6 +16130,7 @@ function epiPodeEditar(){return['admin','adm','rh'].includes(profile?.role||'');
 // ── MODAL CONFIG EPIs + EXAMES POR FUNÇÃO ──
 function funcaoEpiExameModal(funcaoId){
   if(!epiPodeEditar()){return;}
+  portClose(); // remove modal anterior para não empilhar (IDs duplicados)
   const f=rhFuncoes.find(x=>x.id===funcaoId);if(!f)return;
   const epis=epiFuncao.filter(ef=>ef.funcao_id===funcaoId);
   const exames=exameFuncao.filter(ef=>ef.funcao_id===funcaoId);
