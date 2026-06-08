@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.247 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.249 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.247';
+const APP_VERSION='v1.0.249';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1741,7 +1741,7 @@ function buildCadastroForm(tipo, record, id=null){
         <!-- Infos -->
         <div style="flex:1;min-width:180px">
           <div style="font-size:17px;font-weight:700;letter-spacing:-0.3px;margin-bottom:2px">${r.nome||'Novo colaborador'}</div>
-          <div style="font-size:12px;color:var(--text2);margin-bottom:8px">${r.cargo||'—'}${r.departamento?' · '+r.departamento:''}</div>
+          <div id="cad-header-sub" style="font-size:12px;color:var(--text2);margin-bottom:8px">${r.cargo||'—'}${r.departamento?' · '+r.departamento:''}</div>
           <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">
             ${r.salario?`<span style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px;font-weight:600">R$ ${Number(r.salario).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`:''}
             <span style="font-size:11px;background:var(--blue-bg);color:var(--blue-text);padding:2px 8px;border-radius:99px">${tcLabel}</span>
@@ -2591,13 +2591,16 @@ function rHistPanelContent(pessoaId){
   if(!r)return'';
   const eventos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&!h.data_inicio&&h.data;});
   const vinculos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id;});
-  const marcos2=[{data:r.data_admissao,label:'Admissão',sub:r.cargo||'',icon:'🎯',cor:'#0A2540'}];
+  const vincOrd=vinculos.slice().sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?-1:1);
+  const cargoAdmissao=vincOrd.length?(rhFuncoes.find(f=>f.id===vincOrd[0].funcao_id)?.funcao||vincOrd[0].cargo_novo||r.cargo||''):(r.cargo||'');
+  const marcos2=[{data:r.data_admissao,label:'Admissão',sub:cargoAdmissao,icon:'🎯',cor:'#0A2540'}];
   const icons2={promocao:'⬆',transferencia:'↔',alteracao_salario:'💰',desligamento:'🚪'};
   const labels2={promocao:'Promoção',transferencia:'Transferência',alteracao_salario:'Reajuste',desligamento:'Desligamento'};
   eventos.forEach(function(h){
     marcos2.push({data:h.data,label:labels2[h.tipo]||h.tipo||'Evento',sub:h.cargo_novo||h.motivo||'',icon:icons2[h.tipo]||'📌',cor:'#1e5f82'});
   });
   vinculos.forEach(function(v){
+    if(v.data_inicio===r.data_admissao)return; // já representado pelo marco Admissão
     const fn=rhFuncoes.find(function(f){return f.id===v.funcao_id;});
     const sal=v.salario?' · R$ '+Number(v.salario).toLocaleString('pt-BR',{minimumFractionDigits:2}):'';
     marcos2.push({data:v.data_inicio,label:(fn?fn.funcao:(v.cargo_novo||'Função')),sub:(v.motivo||'')+sal,icon:'💼',cor:'#7c3aed'});
@@ -2667,21 +2670,40 @@ async function histVinculoSalvar(pessoaId){
 
     // Se é função VIGENTE (sem data fim) = promoção: atualiza o cadastro do colaborador
     if(!dataFim){
-      // Fecha a função vigente anterior (data fim = dia anterior ao início da nova)
+      const pAtual=pessoas.find(p=>p.id===pessoaId)||{};
+      const vinculosExist=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id&&h.id!==res?.id);
       const diaAnterior=new Date(inicio+'T00:00:00');diaAnterior.setDate(diaAnterior.getDate()-1);
       const fimAnterior=diaAnterior.toISOString().slice(0,10);
-      const anteriores=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id&&!h.data_fim&&h.id!==res?.id);
-      for(const ant of anteriores){
-        if((ant.data_inicio||'')<inicio){
+
+      // 1ª promoção: cria a linha do cargo original (admissão -> dia anterior à promoção)
+      if(!vinculosExist.length && pAtual.funcao_id && pAtual.data_admissao && pAtual.funcao_id!==funcaoId){
+        const fnOrig=rhFuncoes.find(f=>f.id===pAtual.funcao_id);
+        const linhaOrig={
+          company_id:company?.id,pessoa_id:pessoaId,
+          funcao_id:pAtual.funcao_id,cargo_novo:fnOrig?.funcao||pAtual.cargo||null,
+          data_inicio:pAtual.data_admissao,data_fim:fimAnterior,
+          data_vigencia:pAtual.data_admissao,
+          salario:pAtual.salario!=null?pAtual.salario:null,
+          motivo:'Cargo de admissão',
+          alterado_por:cu?.id,alterado_por_nome:profile?.full_name||cu?.email||null,
+        };
+        const r0=await dbInsert('historico_profissional',linhaOrig);
+        if(r0)historicoProfissional.push(r0);
+      }else{
+        // Fecha a função vigente anterior já registrada
+        for(const ant of vinculosExist.filter(v=>!v.data_fim&&(v.data_inicio||'')<inicio)){
           await dbUpdate('historico_profissional',ant.id,{data_fim:fimAnterior});
           historicoProfissional=historicoProfissional.map(h=>h.id===ant.id?{...h,data_fim:fimAnterior}:h);
         }
       }
+
       // Promove: atualiza função/cargo/salário do colaborador
       const upd={funcao_id:funcaoId,cargo:fn?.funcao||null};
       if(salario!=null)upd.salario=salario;
       await dbUpdate('pessoas',pessoaId,upd);
       pessoas=pessoas.map(p=>p.id===pessoaId?{...p,...upd}:p);
+      // Atualiza o cabeçalho do modal na hora
+      _atualizaCabecalhoPessoa(pessoaId);
     }
 
     portClose();
@@ -2689,11 +2711,43 @@ async function histVinculoSalvar(pessoaId){
   }catch(e){portErr('Erro: '+e.message);}
 }
 
+// Atualiza o subtítulo do cabeçalho do modal de pessoa (cargo · departamento)
+function _atualizaCabecalhoPessoa(pessoaId){
+  const p=pessoas.find(x=>x.id===pessoaId);if(!p)return;
+  const el=document.getElementById('cad-header-sub');
+  if(el)el.textContent=(p.cargo||'')+(p.departamento?' · '+p.departamento:'');
+}
+
 async function histVinculoExcluir(id,pessoaId){
-  if(!confirm('Excluir este registro do histórico?'))return;
+  const reg=historicoProfissional.find(h=>h.id===id);
+  const eraVigente=reg&&!reg.data_fim;
+  if(!confirm(eraVigente
+    ?'Excluir esta função vigente? O colaborador será revertido para a função anterior.'
+    :'Excluir este registro do histórico?'))return;
   try{
     await dbDelete('historico_profissional',id);
     historicoProfissional=historicoProfissional.filter(h=>h.id!==id);
+
+    // Se excluiu a função vigente, reverte para a anterior
+    if(eraVigente){
+      // anterior = vínculo de função mais recente que terminou antes do início da excluída
+      const anteriores=historicoProfissional
+        .filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id)
+        .sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?1:-1);
+      const anterior=anteriores[0];
+      if(anterior){
+        // reabre a anterior (remove data fim) → volta a ser vigente
+        await dbUpdate('historico_profissional',anterior.id,{data_fim:null});
+        historicoProfissional=historicoProfissional.map(h=>h.id===anterior.id?{...h,data_fim:null}:h);
+        // restaura cargo/função/salário do colaborador
+        const fnAnt=rhFuncoes.find(f=>f.id===anterior.funcao_id);
+        const upd={funcao_id:anterior.funcao_id,cargo:fnAnt?.funcao||anterior.cargo_novo||null};
+        if(anterior.salario!=null)upd.salario=anterior.salario;
+        await dbUpdate('pessoas',pessoaId,upd);
+        pessoas=pessoas.map(p=>p.id===pessoaId?{...p,...upd}:p);
+        _atualizaCabecalhoPessoa(pessoaId);
+      }
+    }
     _histPanelRefresh(pessoaId);
   }catch(e){alert('Erro: '+e.message);}
 }
