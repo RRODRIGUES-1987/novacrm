@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.234 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.235 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -889,7 +889,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.234';
+const APP_VERSION='v1.0.235';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -8023,6 +8023,19 @@ async function toggleUserUnit(userId, unitId, checked){
 // RH — FÉRIAS
 // ══════════════════════════════════════════════════════════════════════
 
+function feriasCalcPeriodo(admStr, hoje){
+  // Reproduz a lógica do relatório SQL: período aquisitivo atual + data limite (CLT)
+  const adm=new Date(admStr+'T00:00:00');
+  const h=hoje?new Date(hoje):new Date();
+  const ref=new Date(h); ref.setMonth(ref.getMonth()-12); // referência = hoje - 12 meses
+  let n=ref.getFullYear()-adm.getFullYear();
+  if(ref.getMonth()<adm.getMonth()||(ref.getMonth()===adm.getMonth()&&ref.getDate()<adm.getDate())) n--;
+  if(n<0)n=0;
+  const pi=new Date(adm); pi.setFullYear(pi.getFullYear()+n);            // período início
+  const pf=new Date(pi); pf.setFullYear(pf.getFullYear()+1); pf.setDate(pf.getDate()-1); // fim correto (+12m -1d)
+  const dl=new Date(pf); dl.setMonth(dl.getMonth()+11);                  // data limite (+11m)
+  return {periodoInicio:pi, periodoFim:pf, dataLimite:dl};
+}
 const STATUS_FERIAS = {
   pendente:              {label:'Pendente',          cor:'var(--amber-bg)',   txt:'var(--amber-text)'},
   aguardando_aprovacao:  {label:'Aguard. aprovação', cor:'var(--blue-bg)',    txt:'var(--blue-text)'},
@@ -8057,20 +8070,10 @@ function rRHFerias(){
   }).forEach(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
     // Calcular período aquisitivo atual
-    // Encontrar o período cujo limite (periodoFim + 11m) ainda não passou ou é o mais próximo
-    let periodoInicio = new Date(adm);
-    let dataLimite, periodoFim;
-    while(true){
-      const pf = new Date(periodoInicio);
-      pf.setFullYear(pf.getFullYear()+1);
-      const dl = new Date(pf);
-      dl.setMonth(dl.getMonth()+12);
-      dl.setDate(dl.getDate()-1);
-      periodoFim = pf;
-      dataLimite = dl;
-      if(dl >= hoje) break; // este período ainda tem limite válido
-      periodoInicio = pf;   // avança para o próximo período
-    }
+    const _per = feriasCalcPeriodo(p.data_admissao, hoje);
+    const periodoInicio = _per.periodoInicio;
+    const periodoFim = _per.periodoFim;
+    const dataLimite = _per.dataLimite;
     const diasParaLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
     // Verifica se já tem férias programadas neste período
     const feriasPeriodo = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
@@ -8095,19 +8098,10 @@ function rRHFerias(){
   });
 
   const rows = pessoasAtivas.map(p=>{
-    const adm = new Date(p.data_admissao+'T00:00:00');
-    let periodoInicio = new Date(adm);
-    let periodoFim, dataLimite;
-    while(true){
-      const pf = new Date(periodoInicio);
-      pf.setFullYear(pf.getFullYear()+1);
-      const dl = new Date(pf);
-      dl.setMonth(dl.getMonth()+12);dl.setDate(dl.getDate()-1);
-      periodoFim = pf;
-      dataLimite = dl;
-      if(dl >= hoje) break;
-      periodoInicio = pf;
-    }
+    const _per = feriasCalcPeriodo(p.data_admissao, hoje);
+    const periodoInicio = _per.periodoInicio;
+    const periodoFim = _per.periodoFim;
+    const dataLimite = _per.dataLimite;
     const diasLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
     const feriasPessoa = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
     const st = feriasPessoa[0]?.status||'pendente';
@@ -8263,12 +8257,9 @@ function openFeriasModal(pessoaId){
   // Calcular período aquisitivo
   let periodoInicioStr='', periodoFimStr='', dataLimiteStr='', diasRestantes=null;
   if(p?.data_admissao){
-    const adm = new Date(p.data_admissao+'T00:00:00');
     const hoje = new Date();
-    let pi = new Date(adm);
-    while(true){ const prox=new Date(pi); prox.setFullYear(prox.getFullYear()+1); if(prox>hoje)break; pi=prox; }
-    const pf=new Date(pi); pf.setFullYear(pf.getFullYear()+1);
-    const dl=new Date(pf); dl.setMonth(dl.getMonth()+12); dl.setDate(dl.getDate()-1);
+    const _per = feriasCalcPeriodo(p.data_admissao, hoje);
+    const pi=_per.periodoInicio, pf=_per.periodoFim, dl=_per.dataLimite;
     diasRestantes=Math.floor((dl-hoje)/(1000*60*60*24));
     periodoInicioStr=pi.toLocaleDateString('pt-BR');
     periodoFimStr=pf.toLocaleDateString('pt-BR');
@@ -8357,12 +8348,9 @@ async function salvarFerias(feriasId){
   if(errEl) errEl.style.display='none';
 
   const p=pessoas.find(x=>x.id===pessoaId);
-  const adm=new Date((p?.data_admissao||'')+'T00:00:00');
   const hoje=new Date();
-  let pi=new Date(adm);
-  while(true){const prox=new Date(pi);prox.setFullYear(prox.getFullYear()+1);if(prox>hoje)break;pi=prox;}
-  const pf=new Date(pi);pf.setFullYear(pf.getFullYear()+1);
-  const dl=new Date(pf);dl.setMonth(dl.getMonth()+12);dl.setDate(dl.getDate()-1);
+  const _per=feriasCalcPeriodo(p?.data_admissao||'', hoje);
+  const pi=_per.periodoInicio, pf=_per.periodoFim, dl=_per.dataLimite;
   const statusFerias = feriasPodeAprovar() ? 'aprovado' : 'aguardando_aprovacao';
 
   const obj={
