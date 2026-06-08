@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.239 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.241 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.239';
+const APP_VERSION='v1.0.241';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1964,7 +1964,7 @@ function buildCadastroForm(tipo, record, id=null){
           if(i<marcos2.length-1)tl+='<div style="flex:1;height:2px;background:var(--border);margin-top:22px;min-width:16px;flex-shrink:0"></div>';
         });
         tl+='</div>';
-        return'<div style="padding:8px 0"><div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">📅 Linha do tempo</div>'+tl+'</div>';
+        return'<div style="padding:8px 0"><div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">📅 Linha do tempo</div>'+tl+'</div>'+rHistVinculos(id);
       })():'<div style="padding:24px;text-align:center;color:var(--text3)">Sem data de admissão cadastrada.</div>'}
     </div>
 
@@ -2570,11 +2570,16 @@ function renderHistoricoHorizontal(pessoaId){
   });
   html += '</div></div>';
 
-  // Lista de histórico de funções (período + salário)
+  const panel = document.getElementById('cad-panel-historico');
+  if(panel){ panel.style.display=''; panel.innerHTML=html+rHistVinculos(pessoaId); }
+}
+
+// ── MODAL VÍNCULO DE FUNÇÃO (histórico com período + salário) ──
+function rHistVinculos(pessoaId){
   const vinculos=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.tipo==='vinculo_funcao')
     .sort((a,b)=>(b.data_inicio||'')<(a.data_inicio||'')?1:-1);
   const pode=['admin','adm','rh'].includes(profile?.role||'');
-  let vh='<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">';
+  let vh='<div id="hist-vinculos-sec" style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">';
   vh+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
   vh+='<div style="font-size:13px;font-weight:600;color:#0A2540">📋 Histórico de funções</div>';
   if(pode)vh+='<button class="btn btn-p btn-sm" onclick="histVinculoModal(\''+pessoaId+'\')">+ Adicionar</button>';
@@ -2592,15 +2597,17 @@ function renderHistoricoHorizontal(pessoaId){
       '</div>';
     }).join('');
   }else{
-    vh+='<div class="lsub" style="color:var(--text3)">Nenhuma função registrada no histórico. Use "Adicionar" para incluir funções anteriores com período e salário.</div>';
+    vh+='<div class="lsub" style="color:var(--text3)">Nenhuma função registrada. Use "Adicionar" para incluir funções anteriores com período e salário.</div>';
   }
   vh+='</div>';
-
-  const panel = document.getElementById('cad-panel-historico');
-  if(panel){ panel.style.display=''; panel.innerHTML=html+vh; }
+  return vh;
 }
 
-// ── MODAL VÍNCULO DE FUNÇÃO (histórico com período + salário) ──
+function _histPanelRefresh(pessoaId){
+  const sec=ge('hist-vinculos-sec');
+  if(sec)sec.outerHTML=rHistVinculos(pessoaId);
+}
+
 function histVinculoModal(pessoaId){
   if(!['admin','adm','rh'].includes(profile?.role||''))return;
   const cid=company?.id;
@@ -2635,7 +2642,7 @@ async function histVinculoSalvar(pessoaId){
     const res=await dbInsert('historico_profissional',obj);
     if(res)historicoProfissional.push(res);
     portClose();
-    renderHistoricoHorizontal(pessoaId);
+    _histPanelRefresh(pessoaId);
   }catch(e){portErr('Erro: '+e.message);}
 }
 
@@ -2644,7 +2651,7 @@ async function histVinculoExcluir(id,pessoaId){
   try{
     await dbDelete('historico_profissional',id);
     historicoProfissional=historicoProfissional.filter(h=>h.id!==id);
-    renderHistoricoHorizontal(pessoaId);
+    _histPanelRefresh(pessoaId);
   }catch(e){alert('Erro: '+e.message);}
 }
 
@@ -15929,10 +15936,10 @@ function coletarPendenciasEpi(){
       const entregas=epiEntregas.filter(e=>e.pessoa_id===p.id&&e.epi_id===ef.epi_id&&e.status==='ativo');
       const ultima=entregas.sort((a,b)=>b.data_entrega>a.data_entrega?1:-1)[0];
       if(!ultima){
-        out.push({pessoa:p,nome:p.nome,item:epiNome(ef.epi_id),dias:null,tipo:'epi',status:'Nunca entregue',proxima:null});
+        out.push({pessoa:p,nome:p.nome,item:epiNome(ef.epi_id),dias:null,tipo:'epi',status:'Nunca entregue',proxima:null,epiId:ef.epi_id,validade:ef.validade_meses});
       }else{
         const dias=epiDiasParaTroca(ultima.data_proxima_troca);
-        if(dias<=30)out.push({pessoa:p,nome:p.nome,item:epiNome(ef.epi_id),dias,tipo:'epi',status:dias<0?'Vencido':'Vencendo',proxima:ultima.data_proxima_troca});
+        if(dias<=30)out.push({pessoa:p,nome:p.nome,item:epiNome(ef.epi_id),dias,tipo:'epi',status:dias<0?'Vencido':'Vencendo',proxima:ultima.data_proxima_troca,epiId:ef.epi_id,validade:ef.validade_meses});
       }
     });
   });
@@ -15980,12 +15987,16 @@ function rPendenciasRH(){
   const cardEpi=g=>{
     const itens=g.itens.map(x=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-top:1px solid var(--border)">
       <div style="font-size:12px"><span style="font-weight:600">${x.item}</span> <span style="color:var(--text3)">· ${x.status}${x.proxima?' · troca '+new Date(x.proxima+'T00:00').toLocaleDateString('pt-BR'):''}${x.dias!=null&&x.dias>=0?' ('+x.dias+'d)':''}</span></div>
-      <span class="bdg" style="background:${bg(x.dias)};color:${cor(x.dias)}">${x.status}</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="bdg" style="background:${bg(x.dias)};color:${cor(x.dias)}">${x.status}</span>
+        ${epiPodeEditar()?`<button class="btn btn-sm" title="Registrar entrega" onclick="epiEntregaModal('${x.pessoa.id}','${x.epiId}','${x.validade}')">📦 Entregar</button>`:''}
+      </div>
     </div>`).join('');
     return`<div class="li" style="flex-direction:column;align-items:stretch">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="av" style="width:30px;height:30px;border-radius:8px;background:var(--bg2);color:var(--text2);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EPI</div>
         <div class="lname">${g.nome} <span style="color:var(--text3);font-weight:400;font-size:11px">· ${g.itens.length} pendência(s)</span></div>
+        <button class="btn btn-sm" title="Abrir ficha do colaborador" onclick="openCadastro('pessoas','${g.pessoa.id}')" style="margin-left:auto">👤 Ficha</button>
       </div>
       <div style="margin-left:40px;margin-top:4px">${itens}</div>
     </div>`;
@@ -16003,6 +16014,7 @@ function rPendenciasRH(){
       <div style="display:flex;align-items:center;gap:10px">
         <div class="av" style="width:30px;height:30px;border-radius:8px;background:var(--bg2);color:var(--text2);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">EXM</div>
         <div class="lname">${g.nome} <span style="color:var(--text3);font-weight:400;font-size:11px">· ${g.itens.length} pendência(s)</span></div>
+        <button class="btn btn-sm" title="Abrir ficha do colaborador" onclick="openCadastro('pessoas','${g.pessoa.id}')" style="margin-left:auto">👤 Ficha</button>
       </div>
       <div style="margin-left:40px;margin-top:4px">${itens}</div>
     </div>`;
@@ -16441,6 +16453,7 @@ async function epiSalvarEntrega(pessoaId,epiId,validadeMeses){
     // Re-renderiza aba EPIs do colaborador
     const panel=ge('cad-panel-epi');
     if(panel)panel.innerHTML=rCadEpiColaborador(pessoaId);
+    else if(curPage==='rh-pendencias')render(); // veio da Central de Pendências
   }catch(e){portErr('Erro: '+e.message);}
 }
 
@@ -16775,6 +16788,7 @@ async function exameSalvarRealizado(pessoaId,exameId,periodicidade){
     portClose();
     const panel=ge('cad-panel-exames');
     if(panel)panel.innerHTML=`<div style="padding-top:4px">${rCadExameColaborador(pessoaId)}</div>`;
+    else if(curPage==='rh-pendencias')render(); // veio da Central de Pendências
   }catch(e){portErr('Erro: '+e.message);}
 }
 // ========================== FIM EXAMES ==========================
