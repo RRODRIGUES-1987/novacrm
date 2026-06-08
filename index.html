@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.252 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.253 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.252';
+const APP_VERSION='v1.0.253';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2665,18 +2665,19 @@ async function histVinculoSalvar(pessoaId){
     alterado_por:cu?.id,alterado_por_nome:profile?.full_name||cu?.email||null,
   };
   try{
-    const res=await dbInsert('historico_profissional',obj);
-    if(res)historicoProfissional.push(res);
+    // Trabalha sempre com dados frescos do banco (evita duplicatas por array dessincronizado)
+    let atuais=[];
+    try{ atuais=await dbSelect('historico_profissional',`pessoa_id=eq.${pessoaId}`)||[]; }catch(e){ atuais=historicoProfissional.filter(h=>h.pessoa_id===pessoaId); }
+    const vincExist=atuais.filter(h=>h.data_inicio&&h.funcao_id);
+    const pAtual=pessoas.find(p=>p.id===pessoaId)||{};
+    const diaAnterior=new Date(inicio+'T00:00:00');diaAnterior.setDate(diaAnterior.getDate()-1);
+    const fimAnterior=diaAnterior.toISOString().slice(0,10);
 
-    // Se é função VIGENTE (sem data fim) = promoção: atualiza o cadastro do colaborador
+    // Se é VIGENTE (promoção) e ainda não existe a linha do cargo de admissão, cria-a
     if(!dataFim){
-      const pAtual=pessoas.find(p=>p.id===pessoaId)||{};
-      const vinculosExist=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id&&h.id!==res?.id);
-      const diaAnterior=new Date(inicio+'T00:00:00');diaAnterior.setDate(diaAnterior.getDate()-1);
-      const fimAnterior=diaAnterior.toISOString().slice(0,10);
-
-      // 1ª promoção: cria a linha do cargo original (admissão -> dia anterior à promoção)
-      if(!vinculosExist.length && pAtual.funcao_id && pAtual.data_admissao && pAtual.funcao_id!==funcaoId){
+      const temAdmissao=vincExist.some(v=>v.motivo==='Cargo de admissão')
+        || vincExist.some(v=>v.data_inicio===pAtual.data_admissao);
+      if(!vincExist.length && !temAdmissao && pAtual.funcao_id && pAtual.data_admissao && pAtual.funcao_id!==funcaoId){
         const fnOrig=rhFuncoes.find(f=>f.id===pAtual.funcao_id);
         const linhaOrig={
           company_id:company?.id,pessoa_id:pessoaId,
@@ -2689,24 +2690,30 @@ async function histVinculoSalvar(pessoaId){
         };
         const r0=await dbInsert('historico_profissional',linhaOrig);
         if(r0)historicoProfissional.push(r0);
-      }else{
-        // Fecha a função vigente anterior já registrada
-        for(const ant of vinculosExist.filter(v=>!v.data_fim&&(v.data_inicio||'')<inicio)){
-          await dbUpdate('historico_profissional',ant.id,{data_fim:fimAnterior});
-          historicoProfissional=historicoProfissional.map(h=>h.id===ant.id?{...h,data_fim:fimAnterior}:h);
-        }
       }
+      // Fecha TODAS as funções vigentes (sem data fim) que começaram antes da nova
+      for(const ant of vincExist.filter(v=>!v.data_fim&&(v.data_inicio||'')<inicio)){
+        await dbUpdate('historico_profissional',ant.id,{data_fim:fimAnterior});
+        historicoProfissional=historicoProfissional.map(h=>h.id===ant.id?{...h,data_fim:fimAnterior}:h);
+      }
+    }
 
-      // Promove: atualiza função/cargo/salário do colaborador
+    // Insere o novo vínculo
+    const res=await dbInsert('historico_profissional',obj);
+    if(res)historicoProfissional.push(res);
+
+    // Promoção: atualiza função/cargo/salário do colaborador
+    if(!dataFim){
       const upd={funcao_id:funcaoId,cargo:fn?.funcao||null};
       if(salario!=null)upd.salario=salario;
       await dbUpdate('pessoas',pessoaId,upd);
       pessoas=pessoas.map(p=>p.id===pessoaId?{...p,...upd}:p);
-      // Atualiza o cabeçalho do modal na hora
       _atualizaCabecalhoPessoa(pessoaId);
     }
 
     portClose();
+    // Recarrega do banco para garantir sincronização total
+    await loadHistoricoProfissional(pessoaId);
     _histPanelRefresh(pessoaId);
   }catch(e){portErr('Erro: '+e.message);}
 }
