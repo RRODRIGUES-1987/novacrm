@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.246 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.247 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.246';
+const APP_VERSION='v1.0.247';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2603,7 +2603,9 @@ function rHistPanelContent(pessoaId){
     marcos2.push({data:v.data_inicio,label:(fn?fn.funcao:(v.cargo_novo||'Função')),sub:(v.motivo||'')+sal,icon:'💼',cor:'#7c3aed'});
   });
   marcos2.sort(function(a,b){return a.data<b.data?-1:1;});
-  marcos2.push({data:new Date().toISOString().slice(0,10),label:'Hoje',sub:r.cargo||'',icon:'📍',cor:'#16a34a'});
+  const vigente=vinculos.filter(v=>!v.data_fim).sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?1:-1)[0];
+  const labelHoje=vigente?(rhFuncoes.find(f=>f.id===vigente.funcao_id)?.funcao||vigente.cargo_novo||r.cargo||''):(r.cargo||'');
+  marcos2.push({data:new Date().toISOString().slice(0,10),label:'Hoje',sub:labelHoje,icon:'📍',cor:'#16a34a'});
   let tl='<div style="display:flex;align-items:flex-start;overflow-x:auto;padding:8px 0 16px;gap:0">';
   marcos2.forEach(function(m,i){
     tl+='<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;min-width:90px;max-width:120px;text-align:center">';
@@ -2648,18 +2650,40 @@ async function histVinculoSalvar(pessoaId){
   if(!funcaoId||!inicio){portErr('Informe a função e a data de início.');return;}
   portSaving();
   const fn=rhFuncoes.find(f=>f.id===funcaoId);
+  const dataFim=ge('hv-fim')?.value||null;
+  const salario=parseFloat(ge('hv-salario')?.value)||null;
   const obj={
     company_id:company?.id,pessoa_id:pessoaId,
     funcao_id:funcaoId,cargo_novo:fn?.funcao||null,
-    data_inicio:inicio,data_fim:ge('hv-fim')?.value||null,
+    data_inicio:inicio,data_fim:dataFim,
     data_vigencia:inicio,
-    salario:parseFloat(ge('hv-salario')?.value)||null,
+    salario:salario,
     motivo:ge('hv-obs')?.value||null,
     alterado_por:cu?.id,alterado_por_nome:profile?.full_name||cu?.email||null,
   };
   try{
     const res=await dbInsert('historico_profissional',obj);
     if(res)historicoProfissional.push(res);
+
+    // Se é função VIGENTE (sem data fim) = promoção: atualiza o cadastro do colaborador
+    if(!dataFim){
+      // Fecha a função vigente anterior (data fim = dia anterior ao início da nova)
+      const diaAnterior=new Date(inicio+'T00:00:00');diaAnterior.setDate(diaAnterior.getDate()-1);
+      const fimAnterior=diaAnterior.toISOString().slice(0,10);
+      const anteriores=historicoProfissional.filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id&&!h.data_fim&&h.id!==res?.id);
+      for(const ant of anteriores){
+        if((ant.data_inicio||'')<inicio){
+          await dbUpdate('historico_profissional',ant.id,{data_fim:fimAnterior});
+          historicoProfissional=historicoProfissional.map(h=>h.id===ant.id?{...h,data_fim:fimAnterior}:h);
+        }
+      }
+      // Promove: atualiza função/cargo/salário do colaborador
+      const upd={funcao_id:funcaoId,cargo:fn?.funcao||null};
+      if(salario!=null)upd.salario=salario;
+      await dbUpdate('pessoas',pessoaId,upd);
+      pessoas=pessoas.map(p=>p.id===pessoaId?{...p,...upd}:p);
+    }
+
     portClose();
     _histPanelRefresh(pessoaId);
   }catch(e){portErr('Erro: '+e.message);}
