@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.255 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.256 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.255';
+const APP_VERSION='v1.0.256';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -12675,6 +12675,9 @@ function rUsuarios(){
           <button class="bicon btn-sm" title="Empresas com acesso" onclick="openEmpresasUsuario('${p.id}','${p.full_name||p.email}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </button>
+          <button class="bicon btn-sm" title="Unidades com acesso" onclick="openUnidadesUsuario('${p.id}','${(p.full_name||p.email||'').replace(/'/g,'')}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/></svg>
+          </button>
           <button class="bicon btn-sm" title="Copiar permissões de outro usuário" onclick="copiarPermissoes('${p.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
@@ -13320,6 +13323,68 @@ async function revogarEmpresaUsuario(userId, companyId, vinculoId){
   await dbDelete('user_companies',vinculoId);
   alert('Acesso revogado!');
   ge('modal-empresas-user')?.remove();
+}
+
+// ── UNIDADES COM ACESSO (por usuário) ──
+async function openUnidadesUsuario(userId, userName){
+  const old=ge('modal-unidades-user');if(old)old.remove();
+  const userProf=profiles.find(p=>p.id===userId);
+  const cidUser=userProf?.company_id||company?.id;
+  let unidades=[], vinculos=[];
+  try{
+    unidades=await dbSelect('units',`company_id=eq.${cidUser}&active=eq.true&order=is_main.desc,name.asc`)||[];
+    vinculos=await dbSelect('user_units',`user_id=eq.${userId}&company_id=eq.${cidUser}`)||[];
+  }catch(e){ alert('Erro ao carregar unidades: '+e.message); return; }
+
+  const ehAdminGestor=(userProf?.role==='admin'||userProf?.role==='gestor');
+
+  const modal=document.createElement('div');
+  modal.id='modal-unidades-user';
+  modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+
+  const lista=unidades.length?unidades.map(u=>{
+    const vinc=vinculos.find(v=>v.unit_id===u.id);
+    const temAcesso=!!vinc;
+    return`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;border:1.5px solid ${temAcesso?'var(--accent)':'var(--border)'};margin-bottom:8px">
+      <div>
+        <div style="font-size:13px;font-weight:600">${u.name}${u.is_main?' <span style="font-size:10px;color:var(--text3)">(matriz)</span>':''}</div>
+        <div style="font-size:11px;color:var(--text2)">${temAcesso?'✓ Acesso liberado':'Sem acesso'}</div>
+      </div>
+      ${temAcesso
+        ?`<button onclick="revogarUnidadeUsuario('${userId}','${u.id}','${vinc.id}','${userName.replace(/'/g,'')}')" style="padding:5px 10px;border:1px solid var(--red-text);border-radius:6px;background:transparent;color:var(--red-text);cursor:pointer;font-size:12px">Revogar</button>`
+        :`<button onclick="liberarUnidadeUsuario('${userId}','${u.id}','${cidUser}','${userName.replace(/'/g,'')}')" style="padding:5px 10px;border:none;border-radius:6px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:12px">Liberar acesso</button>`
+      }
+    </div>`;
+  }).join(''):'<div style="font-size:12px;color:var(--text3);padding:12px 0">Nenhuma unidade ativa cadastrada para esta empresa.</div>';
+
+  modal.innerHTML=`
+    <div style="background:var(--bg);border-radius:14px;padding:20px;width:420px;max-width:90vw;max-height:88vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <div style="font-size:15px;font-weight:600">Unidades com acesso</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">${userName}</div>
+        </div>
+        <button onclick="ge('modal-unidades-user').remove()" style="border:none;background:none;cursor:pointer;color:var(--text2);font-size:20px;line-height:1">×</button>
+      </div>
+      ${ehAdminGestor?'<div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:8px 10px;border-radius:8px;margin-bottom:12px">Este usuário é '+(userProf.role==='admin'?'admin':'gestor')+' e enxerga todas as unidades da empresa, independente dos vínculos abaixo.</div>':'<div style="font-size:11px;color:var(--text3);margin-bottom:12px">Marque as unidades que este usuário pode ver. Sem nenhuma marcada e sem ser admin/gestor, ele não verá colaboradores por unidade.</div>'}
+      ${lista}
+      <button class="btn" style="width:100%;margin-top:8px" onclick="ge('modal-unidades-user').remove()">Fechar</button>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function liberarUnidadeUsuario(userId, unitId, cidUser, userName){
+  try{
+    await dbInsert('user_units',{user_id:userId,unit_id:unitId,company_id:cidUser,role:'operador'});
+    openUnidadesUsuario(userId, userName); // recarrega o modal
+  }catch(e){ alert('Erro: '+e.message); }
+}
+
+async function revogarUnidadeUsuario(userId, unitId, vinculoId, userName){
+  try{
+    await dbDelete('user_units',vinculoId);
+    openUnidadesUsuario(userId, userName); // recarrega o modal
+  }catch(e){ alert('Erro: '+e.message); }
 }
 
 
