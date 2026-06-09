@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.256 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.257 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.256';
+const APP_VERSION='v1.0.257';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -12926,10 +12926,37 @@ function openModal(mode,id=null){
     ge('msave').style.display=''; // garantir que botão salvar está visível
     ge('msave').onclick=()=>savePermissoes(id);
     // Carrega permissões de forma assíncrona
-    loadUserPermissoes(id).then(userPerms=>{
+    loadUserPermissoes(id).then(async userPerms=>{
       const modulos=[...new Set(TELAS.map(t=>t.modulo))];
+      // Carrega unidades da empresa do usuário + vínculos atuais
+      const cidUser=prof.company_id||company?.id;
+      let unidades=[], vincUnits=[];
+      try{
+        unidades=await dbSelect('units',`company_id=eq.${cidUser}&active=eq.true&order=is_main.desc,name.asc`)||[];
+        vincUnits=await dbSelect('user_units',`user_id=eq.${id}&company_id=eq.${cidUser}`)||[];
+      }catch(e){ console.warn('perm units',e); }
+      const ehAdminGestor=(prof.role==='admin'||prof.role==='gestor');
+      const unidadesSec=`
+        <div style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">Unidades com acesso</div>
+          ${ehAdminGestor
+            ? `<div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:8px 10px;border-radius:8px">Este usuário é ${prof.role==='admin'?'admin':'gestor'} e enxerga todas as unidades, independente da seleção.</div>`
+            : (unidades.length
+              ? `<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Marque as unidades que este usuário pode ver. Sem nenhuma marcada, ele não verá colaboradores filtrados por unidade.</div>
+                 <div style="display:flex;flex-wrap:wrap;gap:6px">
+                   ${unidades.map(u=>{
+                     const tem=vincUnits.some(v=>v.unit_id===u.id);
+                     return`<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:${tem?'var(--accent)':'var(--bg2)'};color:${tem?'var(--accent-text)':'var(--text2)'}">
+                       <input type="checkbox" ${tem?'checked':''} style="display:none" onchange="togglePermUnidade(this,'${id}','${u.id}','${cidUser}')">
+                       ${u.name}${u.is_main?' (matriz)':''}
+                     </label>`;
+                   }).join('')}
+                 </div>`
+              : '<div style="font-size:12px;color:var(--text3)">Nenhuma unidade ativa cadastrada para esta empresa.</div>')}
+        </div>`;
       body.innerHTML=`
         <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">Configure o que este usuário pode fazer em cada tela.</div>
+        ${unidadesSec}
         ${modulos.map(mod=>`
           <div style="margin-bottom:16px">
             <div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">${mod}</div>
@@ -13387,6 +13414,32 @@ async function revogarUnidadeUsuario(userId, unitId, vinculoId, userName){
   }catch(e){ alert('Erro: '+e.message); }
 }
 
+
+async function togglePermUnidade(el, userId, unitId, cidUser){
+  const label=el.closest('label');
+  const marcado=el.checked;
+  // feedback visual imediato
+  if(label){
+    label.style.background=marcado?'var(--accent)':'var(--bg2)';
+    label.style.color=marcado?'var(--accent-text)':'var(--text2)';
+  }
+  try{
+    if(marcado){
+      await dbInsert('user_units',{user_id:userId,unit_id:unitId,company_id:cidUser,role:'operador'});
+    }else{
+      const vinc=await dbSelect('user_units',`user_id=eq.${userId}&unit_id=eq.${unitId}&company_id=eq.${cidUser}`);
+      if(vinc?.length) await dbDelete('user_units',vinc[0].id);
+    }
+  }catch(e){
+    alert('Erro ao atualizar acesso: '+e.message);
+    // reverte
+    el.checked=!marcado;
+    if(label){
+      label.style.background=el.checked?'var(--accent)':'var(--bg2)';
+      label.style.color=el.checked?'var(--accent-text)':'var(--text2)';
+    }
+  }
+}
 
 async function copiarPermissoes(paraUserId){
   // Escolhe de quem copiar
