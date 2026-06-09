@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.254 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.255 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.254';
+const APP_VERSION='v1.0.255';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1280,6 +1280,9 @@ async function loadData(){
   const uid=cu.id;
   const role=profile?.role||'vendedor';
   const cid=company?.id||null; // empresa selecionada na tela de seleção
+
+  // Carrega as unidades do usuário ANTES das queries, para o unitFilter() já restringir
+  if(cid){ await loadUserUnits().catch(e=>console.warn('loadUserUnits init:',e)); }
 
   if(role==='admin'){
     if(cid){
@@ -8250,10 +8253,91 @@ const STATUS_FERIAS = {
   aprovado:              {label:'Aprovado',          cor:'var(--green-bg)',   txt:'var(--green-text)'},
   rejeitado:             {label:'Rejeitado',         cor:'var(--red-bg)',     txt:'var(--red-text)'},
   gozando:               {label:'Gozando',           cor:'var(--accent)',     txt:'var(--accent-text)'},
+  gozado:                {label:'Gozado',            cor:'var(--green-bg)',   txt:'var(--green-text)'},
+  vencido:               {label:'Vencido',           cor:'var(--red-bg)',     txt:'var(--red-text)'},
   concluido:             {label:'Concluído',         cor:'var(--bg2)',        txt:'var(--text2)'},
   cancelado:             {label:'Cancelado',         cor:'var(--red-bg)',     txt:'var(--red-text)'},
 };
 function feriasPodeAprovar(){ return ['admin','adm','rh'].includes(profile?.role||''); }
+
+// Lista TODOS os períodos aquisitivos da admissão até hoje (1 objeto por período)
+function feriasListaPeriodos(admStr, hoje){
+  if(!admStr) return [];
+  const adm=new Date(admStr+'T00:00:00');
+  const h=hoje?new Date(hoje):new Date();
+  const periodos=[];
+  let n=0;
+  while(true){
+    const pi=new Date(adm); pi.setFullYear(pi.getFullYear()+n);
+    if(pi>h) break; // período ainda não começou
+    const pf=new Date(pi); pf.setFullYear(pf.getFullYear()+1); pf.setDate(pf.getDate()-1);
+    const dl=new Date(pf); dl.setMonth(dl.getMonth()+11);
+    periodos.push({
+      periodo_inicio:pi.toISOString().slice(0,10),
+      periodo_fim:pf.toISOString().slice(0,10),
+      data_limite:dl.toISOString().slice(0,10),
+    });
+    n++;
+    if(n>60) break; // trava de segurança
+  }
+  return periodos;
+}
+
+// Status de exibição: 'vencido' se passou da data limite e ainda não foi gozado
+function feriasStatusExibicao(f, hoje){
+  const h=hoje?new Date(hoje):new Date();
+  const st=f.status||'pendente';
+  if(st==='gozado'||st==='cancelado'||st==='concluido') return st;
+  if(f.data_limite && new Date(f.data_limite+'T23:59:59')<h) return 'vencido';
+  return st;
+}
+
+// Gera no banco as linhas de período que faltam para um colaborador
+async function feriasGerarPeriodos(pessoaId, silencioso){
+  const p=pessoas.find(x=>x.id===pessoaId);
+  if(!p||!p.data_admissao) return 0;
+  const periodos=feriasListaPeriodos(p.data_admissao, new Date());
+  const existentes=rhFerias.filter(f=>f.pessoa_id===pessoaId);
+  let criadas=0;
+  for(const per of periodos){
+    const jaTem=existentes.some(f=>f.periodo_inicio===per.periodo_inicio);
+    if(jaTem) continue;
+    const obj={
+      company_id:company?.id, unit_id:p.unit_id||null, pessoa_id:pessoaId,
+      periodo_inicio:per.periodo_inicio, periodo_fim:per.periodo_fim, data_limite:per.data_limite,
+      dias_direito:30, status:'pendente', owner_id:cu?.id,
+    };
+    try{ const nova=await dbInsert('rh_ferias',obj); if(nova){rhFerias.push(nova);criadas++;} }catch(e){ if(!silencioso)console.warn('gerarPeriodo',e); }
+  }
+  return criadas;
+}
+
+// Gera períodos para TODOS os colaboradores ativos
+async function feriasGerarTodos(){
+  if(!feriasPodeAprovar()){alert('Sem permissão.');return;}
+  const ativos=pessoas.filter(p=>['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false&&p.data_admissao&&p.tipo_contrato!=='pj');
+  if(!confirm(`Gerar/sincronizar os períodos aquisitivos de ${ativos.length} colaborador(es)?\n\nIsso cria uma linha por período (da admissão até hoje) para quem ainda não tem.`))return;
+  let total=0;
+  for(const p of ativos){ total+=await feriasGerarPeriodos(p.id, true); }
+  alert(`${total} período(s) criado(s).`);
+  if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+}
+
+// Marca um período como gozado (férias tiradas) — permitido mesmo se vencido
+async function feriasMarcarGozado(feriasId){
+  if(!feriasPodeAprovar()) return;
+  const f=rhFerias.find(x=>x.id===feriasId);
+  if(!f) return;
+  const ini=prompt('Data de início das férias gozadas (AAAA-MM-DD):', f.inicio_previsto||f.periodo_inicio||'');
+  if(ini===null) return;
+  const upd={status:'gozado', inicio_previsto:ini||f.inicio_previsto||null, gozado_em:new Date().toISOString()};
+  try{
+    await dbUpdate('rh_ferias',feriasId,upd);
+    rhFerias=rhFerias.map(x=>x.id===feriasId?{...x,...upd}:x);
+    ge('modal-ferias')?.remove();
+    if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
+  }catch(e){alert('Erro: '+e.message);}
+}
 function feriasPodeProgramar(pessoaId){
   const role=profile?.role||'';
   if(['admin','adm','rh'].includes(role)) return true;
@@ -8304,49 +8388,49 @@ function rRHFerias(){
   }).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
 
   const rows = pessoasAtivas.map(p=>{
-    const _per = feriasCalcPeriodo(p.data_admissao, hoje);
-    const periodoInicio = _per.periodoInicio;
-    const periodoFim = _per.periodoFim;
-    const dataLimite = _per.dataLimite;
-    const diasLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
-    const feriasPessoa = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
-    const st = feriasPessoa[0]?.status||'pendente';
-    const stInfo = STATUS_FERIAS[st]||STATUS_FERIAS.pendente;
-    const alertaCor = diasLimite<=10?'var(--red-text)':diasLimite<=30?'var(--amber-text)':diasLimite<=60?'var(--amber-text)':'var(--text3)';
-    const inicioPrevisto = feriasPessoa[0]?.inicio_previsto?new Date(feriasPessoa[0].inicio_previsto+'T00:00:00').toLocaleDateString('pt-BR'):'—';
-    const diasPrevistos = feriasPessoa[0]?.dias_previstos||'—';
-    const semPrograma = feriasPessoa.length===0;
-    const _pEsc = company?.prazo_ferias_escalona||75;
-    const _pAlt = company?.prazo_ferias_alerta||90;
-    const rowBg = semPrograma && diasLimite<_pEsc
-      ? 'background:rgba(234,88,12,0.10)'   // vermelho/laranja — escalonamento
-      : semPrograma && diasLimite<_pAlt
-      ? 'background:rgba(234,179,8,0.10)'   // amarelo — atenção
-      : '';
-    const dataFiltro = semPrograma && diasLimite<_pEsc ? 'escalona'
-      : semPrograma && diasLimite<_pAlt ? 'alerta'
-      : semPrograma ? 'pendente' : 'programado';
-    return `<tr style="border-top:1px solid var(--border);cursor:pointer;${rowBg}" data-filtro="${dataFiltro}" onclick="openFeriasModal('${p.id}')">
-      <td style="padding:10px 12px">
-        <div style="font-weight:600;font-size:13px">${p.nome}</div>
-        <div style="font-size:11px;color:var(--text3)">${p.departamento||'—'} · ${p.cargo||'—'}</div>
-      </td>
-      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${p.data_admissao?new Date(p.data_admissao+'T00:00:00').toLocaleDateString('pt-BR'):'—'}</td>
-      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${periodoInicio.toLocaleDateString('pt-BR')} → ${periodoFim.toLocaleDateString('pt-BR')}</td>
-      <td style="padding:10px 12px;font-size:12px;color:${alertaCor};font-weight:${diasLimite<=30?'600':'400'}">${dataLimite.toLocaleDateString('pt-BR')}${diasLimite<=30?` <span style="font-size:10px">(${diasLimite}d)</span>`:''}</td>
-      <td style="padding:10px 12px">
-        <span style="background:${stInfo.cor};color:${stInfo.txt};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">${stInfo.label}</span>
-      </td>
-      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${inicioPrevisto}</td>
-      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${diasPrevistos}</td>
-      <td style="padding:10px 12px;text-align:right;white-space:nowrap">
-        ${feriasPessoa[0]?.status==='aguardando_aprovacao'&&feriasPodeAprovar()?`
-          <button class="btn btn-sm" style="background:var(--green-bg);color:var(--green-text);margin-right:4px" onclick="event.stopPropagation();aprovarFerias('${feriasPessoa[0]?.id||''}')">✓ Aprovar</button>
-          <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text);margin-right:4px" onclick="event.stopPropagation();rejeitarFerias('${feriasPessoa[0]?.id||''}')">✗ Rejeitar</button>
-        `:''}
-        ${feriasPodeProgramar(p.id)?`<button class="btn btn-sm" onclick="event.stopPropagation();openFeriasModal('${p.id}')">${feriasPessoa.length?'Editar':'Programar'}</button>`:''}
-      </td>
-    </tr>`;
+    const admStr=p.data_admissao?new Date(p.data_admissao+'T00:00:00').toLocaleDateString('pt-BR'):'—';
+    const periodos = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado')
+      .sort((a,b)=>(a.periodo_inicio||'')<(b.periodo_inicio||'')?-1:1);
+
+    // Colaborador sem períodos materializados ainda
+    if(!periodos.length){
+      return `<tr style="border-top:1px solid var(--border);background:rgba(234,179,8,0.07)" data-filtro="pendente">
+        <td style="padding:10px 12px"><div style="font-weight:600;font-size:13px">${p.nome}</div><div style="font-size:11px;color:var(--text3)">${p.departamento||'—'} · ${p.cargo||'—'}</div></td>
+        <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${admStr}</td>
+        <td colspan="5" style="padding:10px 12px;font-size:12px;color:var(--text3)">Períodos não gerados — use o botão "Gerar períodos".</td>
+        <td style="padding:10px 12px;text-align:right;white-space:nowrap">${feriasPodeAprovar()?`<button class="btn btn-sm" onclick="event.stopPropagation();feriasGerarPeriodos('${p.id}').then(()=>{if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}})">Gerar</button>`:''}</td>
+      </tr>`;
+    }
+
+    return periodos.map((f,idx)=>{
+      const stExib=feriasStatusExibicao(f, hoje);
+      const stInfo=STATUS_FERIAS[stExib]||STATUS_FERIAS.pendente;
+      const dl=f.data_limite?new Date(f.data_limite+'T00:00:00'):null;
+      const diasLimite=dl?Math.floor((dl-hoje)/(1000*60*60*24)):null;
+      const pi=f.periodo_inicio?new Date(f.periodo_inicio+'T00:00:00').toLocaleDateString('pt-BR'):'—';
+      const pf=f.periodo_fim?new Date(f.periodo_fim+'T00:00:00').toLocaleDateString('pt-BR'):'—';
+      const alertaCor=stExib==='vencido'?'var(--red-text)':(diasLimite!=null&&diasLimite<=30)?'var(--amber-text)':'var(--text3)';
+      const iniPrev=f.inicio_previsto?new Date(f.inicio_previsto+'T00:00:00').toLocaleDateString('pt-BR'):'—';
+      const diasPrev=f.dias_previstos||'—';
+      const podeGozar=stExib!=='gozado'&&feriasPodeAprovar();
+      const filtro=stExib==='gozado'?'programado':(stExib==='vencido'?'escalona':(['programado','aprovado','aguardando_aprovacao'].includes(f.status)?'programado':'pendente'));
+      const nomeCell = idx===0
+        ? `<td style="padding:10px 12px" rowspan="${periodos.length}"><div style="font-weight:600;font-size:13px">${p.nome}</div><div style="font-size:11px;color:var(--text3)">${p.departamento||'—'} · ${p.cargo||'—'}</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Adm: ${admStr}</div></td>`
+        : '';
+      return `<tr style="border-top:1px solid var(--border);${stExib==='vencido'?'background:rgba(234,88,12,0.08)':''}" data-filtro="${filtro}">
+        ${nomeCell}
+        <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${pi} → ${pf}</td>
+        <td style="padding:10px 12px;font-size:12px;color:${alertaCor};font-weight:${(diasLimite!=null&&diasLimite<=30)||stExib==='vencido'?'600':'400'}">${dl?dl.toLocaleDateString('pt-BR'):'—'}${diasLimite!=null&&diasLimite<=30&&stExib!=='gozado'?` <span style="font-size:10px">(${diasLimite}d)</span>`:''}</td>
+        <td style="padding:10px 12px"><span style="background:${stInfo.cor};color:${stInfo.txt};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">${stInfo.label}</span></td>
+        <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${iniPrev}</td>
+        <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${diasPrev}</td>
+        <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+          ${f.status==='aguardando_aprovacao'&&feriasPodeAprovar()?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green-text);margin-right:4px" onclick="event.stopPropagation();aprovarFerias('${f.id}')">✓</button><button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text);margin-right:4px" onclick="event.stopPropagation();rejeitarFerias('${f.id}')">✗</button>`:''}
+          ${podeGozar?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green-text);margin-right:4px" title="Marcar como gozado" onclick="event.stopPropagation();feriasMarcarGozado('${f.id}')">✓ Gozado</button>`:''}
+          ${feriasPodeProgramar(p.id)&&stExib!=='gozado'?`<button class="btn btn-sm" onclick="event.stopPropagation();openFeriasPeriodo('${f.id}')">Programar</button>`:''}
+        </td>
+      </tr>`;
+    }).join('');
   }).join('');
 
   const temEscalona = alertas.some(a=>a.escalar);
@@ -8390,12 +8474,12 @@ function rRHFerias(){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:14px;font-weight:600">${pessoasAtivas.length} colaboradores</div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${feriasPodeAprovar()?`<button class="btn btn-sm btn-p" onclick="feriasGerarTodos()">↻ Gerar/sincronizar períodos</button>`:''}
         <select class="fi" id="ferias-filtro" onchange="filtrarFeriasGrid(this.value)" style="font-size:12px;padding:4px 10px;height:32px;width:auto">
-          <option value="todos">Todos os colaboradores</option>
-          <option value="escalona">🚨 Escalonamento (vermelho)</option>
-          <option value="alerta">⚠ Atenção (amarelo)</option>
+          <option value="todos">Todos os períodos</option>
+          <option value="escalona">🔴 Vencidos</option>
           <option value="pendente">Sem programação</option>
-          <option value="programado">Programados</option>
+          <option value="programado">Programados/Gozados</option>
         </select>
       </div>
     </div>
@@ -8454,15 +8538,29 @@ async function loadRHFerias(){
   }catch(e){ console.warn('loadRHFerias:',e); rhFerias=[]; }
 }
 
-function openFeriasModal(pessoaId){
+function openFeriasPeriodo(feriasId){
+  const f=rhFerias.find(x=>x.id===feriasId);
+  if(!f) return;
+  openFeriasModal(f.pessoa_id, feriasId);
+}
+function openFeriasModal(pessoaId, feriasId){
   if(!feriasPodeProgramar(pessoaId)){ alert('Você não tem permissão para programar férias deste colaborador.'); return; }
   const p = pessoaId ? pessoas.find(x=>x.id===pessoaId) : null;
   const ferias = pessoaId ? rhFerias.filter(f=>f.pessoa_id===pessoaId&&f.status!=='cancelado'&&f.status!=='concluido') : [];
-  const f = ferias[0] || null;
+  const f = feriasId ? (rhFerias.find(x=>x.id===feriasId)||null) : (ferias[0] || null);
 
-  // Calcular período aquisitivo
+  // Calcular período aquisitivo (do registro, se já existir; senão o atual)
   let periodoInicioStr='', periodoFimStr='', dataLimiteStr='', diasRestantes=null;
-  if(p?.data_admissao){
+  if(f&&f.periodo_inicio){
+    const hoje=new Date();
+    const pi=new Date(f.periodo_inicio+'T00:00:00');
+    const pf=f.periodo_fim?new Date(f.periodo_fim+'T00:00:00'):pi;
+    const dl=f.data_limite?new Date(f.data_limite+'T00:00:00'):pf;
+    diasRestantes=Math.floor((dl-hoje)/(1000*60*60*24));
+    periodoInicioStr=pi.toLocaleDateString('pt-BR');
+    periodoFimStr=pf.toLocaleDateString('pt-BR');
+    dataLimiteStr=dl.toLocaleDateString('pt-BR');
+  } else if(p?.data_admissao){
     const hoje = new Date();
     const _per = feriasCalcPeriodo(p.data_admissao, hoje);
     const pi=_per.periodoInicio, pf=_per.periodoFim, dl=_per.dataLimite;
@@ -8554,23 +8652,32 @@ async function salvarFerias(feriasId){
 
   const p=pessoas.find(x=>x.id===pessoaId);
   const hoje=new Date();
-  const _per=feriasCalcPeriodo(p?.data_admissao||'', hoje);
-  const pi=_per.periodoInicio, pf=_per.periodoFim, dl=_per.dataLimite;
+  const existente=feriasId?rhFerias.find(f=>f.id===feriasId):null;
+  let piISO, pfISO, dlISO;
+  if(existente&&existente.periodo_inicio){
+    // Edição de um período já materializado: preserva o período aquisitivo
+    piISO=existente.periodo_inicio; pfISO=existente.periodo_fim; dlISO=existente.data_limite;
+  }else{
+    const _per=feriasCalcPeriodo(p?.data_admissao||'', hoje);
+    piISO=_per.periodoInicio.toISOString().split('T')[0];
+    pfISO=_per.periodoFim.toISOString().split('T')[0];
+    dlISO=_per.dataLimite.toISOString().split('T')[0];
+  }
   const statusFerias = feriasPodeAprovar() ? 'aprovado' : 'aguardando_aprovacao';
 
   const obj={
     company_id:company.id,
     unit_id:p?.unit_id||null,
     pessoa_id:pessoaId,
-    periodo_inicio:pi.toISOString().split('T')[0],
-    periodo_fim:pf.toISOString().split('T')[0],
-    data_limite:dl.toISOString().split('T')[0],
+    periodo_inicio:piISO,
+    periodo_fim:pfISO,
+    data_limite:dlISO,
     dias_direito:30,
     parcela,
     inicio_previsto:inicio,
     dias_previstos:dias,
     abono_pecuniario:abono,
-    status:feriasId?(rhFerias.find(f=>f.id===feriasId)?.status||statusFerias):statusFerias,
+    status:feriasId?(rhFerias.find(f=>f.id===feriasId)?.status==='pendente'?statusFerias:(rhFerias.find(f=>f.id===feriasId)?.status||statusFerias)):statusFerias,
     observacoes:obs,
     owner_id:cu.id,
   };
@@ -17714,8 +17821,13 @@ async function capaGerarPdf(id){
 // Retorna o filtro de unit_id para usar nas queries
 // Uso: const uf=unitFilter(); → ex: '&unit_id=eq.UUID' ou '' (consolidado)
 function unitFilter(){
-  if(!activeUnit) return ''; // consolidado = sem filtro de unit
-  return `&unit_id=eq.${activeUnit}`;
+  if(activeUnit) return `&unit_id=eq.${activeUnit}`;
+  // Consolidado: admin/gestor vê tudo da empresa; usuário restrito vê só as unidades vinculadas
+  const isAdmin=(profile?.role==='admin'||profile?.role==='gestor');
+  if(!isAdmin && userUnits && userUnits.length){
+    return `&unit_id=in.(${userUnits.map(u=>u.id).join(',')})`;
+  }
+  return ''; // admin/gestor consolidado = sem filtro
 }
 
 // Retorna objeto para injetar no INSERT/UPDATE
