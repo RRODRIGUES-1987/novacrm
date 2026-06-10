@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.268 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.269 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -888,7 +888,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.268';
+const APP_VERSION='v1.0.269';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -8087,6 +8087,10 @@ function rEditorRelatorios(){
           <input type="checkbox" id="ce-zebrado" ${P.zebrado?'checked':''} onchange="capaEditorOnChange('zebrado',this.checked)" style="width:16px;height:16px">
           <label for="ce-zebrado" style="font-size:12px;font-weight:600;cursor:pointer">Zebrar linhas de serviço</label>
         </div>
+        <div style="margin:14px 0;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="ce-sem_quebra" ${P.sem_quebra?'checked':''} onchange="capaEditorOnChange('sem_quebra',this.checked)" style="width:16px;height:16px">
+          <label for="ce-sem_quebra" style="font-size:12px;font-weight:600;cursor:pointer">Não permitir quebra de página (força 1 folha)</label>
+        </div>
 
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-p btn-sm" style="flex:1;justify-content:center" onclick="capaEditorSalvar()">Salvar template</button>
@@ -8134,13 +8138,26 @@ function capaEditorRefresh(){
   const html=capaBuildHtml(exemplo, servicosEx.map(s=>({servico:s})), P);
   const doc=ifr.contentDocument||ifr.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
-  // Escala o iframe para caber na largura disponível
+  // Escala o iframe para caber na largura disponível + detecta quebra de página
   setTimeout(()=>{
     const wrap=ifr.parentElement; const avail=wrap.clientWidth-32;
     const mmPx=avail/210; const scale=Math.min(1, mmPx/ (96/25.4) );
     ifr.style.transform=`scale(${scale})`;
     ifr.style.marginBottom=`-${297*(96/25.4)*(1-scale)}px`;
     wrap.style.height=(297*(96/25.4)*scale+32)+'px';
+    // Detecta se o conteúdo passou de 1 página A4 (297mm de altura útil)
+    const pageEl=doc.querySelector('.page');
+    const aviso=ge('ce-pagina-aviso');
+    if(pageEl&&aviso){
+      const alturaA4px=297*(96/25.4); // altura de 1 folha A4 em px
+      const real=pageEl.scrollHeight;
+      const passou=real > alturaA4px+4;
+      if(passou){
+        aviso.innerHTML='<span style="background:var(--red-bg);color:var(--red-text);padding:2px 10px;border-radius:99px;font-weight:700">⚠ Conteúdo em 2 páginas</span>';
+      }else{
+        aviso.innerHTML='<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">✓ Cabe em 1 página</span>';
+      }
+    }
   },80);
 }
 
@@ -17996,6 +18013,7 @@ const CAPA_PARAMS_DEFAULT={
   espaco_acima_assinatura:28, // px — respiro acima de cada linha de assinatura
   altura_pagina:281,     // mm — altura útil da folha
   zebrado:true,          // linhas de serviço alternadas
+  sem_quebra:false,      // força tudo em 1 página (impede quebra na impressão)
   margem:7,              // mm — margem da página
 };
 function capaGetParams(){
@@ -18058,7 +18076,7 @@ function capaBuildHtml(c, servicos, P){
     table{width:100%;border-collapse:collapse;margin-top:5px}
     .ass{display:grid;grid-template-columns:1fr 1fr;gap:14px 50px;margin-top:14px}
     .ass div{border-top:1px solid #000;padding-top:4px;text-align:center;font-size:11px;font-weight:600}
-    .page{display:flex;flex-direction:column;min-height:${P.altura_pagina}mm}
+    .page{display:flex;flex-direction:column;${P.sem_quebra?`height:${P.altura_pagina}mm;max-height:${P.altura_pagina}mm;overflow:hidden;page-break-inside:avoid;page-break-after:avoid`:`min-height:${P.altura_pagina}mm`}
     .apont{flex:1;border:1px solid #999;border-radius:3px;margin-top:7px;padding:6px 8px;display:flex;flex-direction:column}
     .apont .apont-tit{font-weight:700;font-size:12px;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
     .apont .linhas{flex:1;background-image:repeating-linear-gradient(transparent,transparent 23px,#ccc 23px,#ccc 24px)}
