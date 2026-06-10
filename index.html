@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.263 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.264 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -884,7 +884,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.263';
+const APP_VERSION='v1.0.264';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -13248,15 +13248,26 @@ async function savePermissoes(userId){
   const btn=ge('msave');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>';}
   try{
     const cid=company?.id||null;
-    // Para cada tela, monta o objeto de permissão
+    // Carrega as permissões existentes deste usuário para decidir UPDATE x INSERT
+    const existentes=await sbFetch('GET',`/rest/v1/permissoes?user_id=eq.${userId}&select=id,tela`,null,tok);
+    const mapExist={};
+    if(existentes.ok&&Array.isArray(existentes.data)){
+      existentes.data.forEach(p=>{ mapExist[p.tela]=p.id; });
+    }
     const ops=TELAS.map(async t=>{
       const obj={user_id:userId,company_id:cid,tela:t.id};
       PERMS.forEach(pn=>{
         const el=ge(`perm-${t.id}-${pn}`);
         obj[pn]=el?el.checked:false;
       });
-      // Upsert — insere ou atualiza
-      const r=await sbFetch('POST',`/rest/v1/permissoes`,obj,tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+      let r;
+      if(mapExist[t.id]){
+        // Já existe → UPDATE (PATCH) pelo id
+        r=await sbFetch('PATCH',`/rest/v1/permissoes?id=eq.${mapExist[t.id]}`,obj,tok,{'Prefer':'return=representation'});
+      }else{
+        // Não existe → INSERT
+        r=await sbFetch('POST',`/rest/v1/permissoes`,obj,tok,{'Prefer':'return=representation'});
+      }
       if(!r.ok){
         const msg=r.data?.message||r.data?.hint||r.data?.details||JSON.stringify(r.data)||('HTTP '+r.status);
         throw new Error(`Falha ao salvar "${t.id}": ${msg}`);
@@ -18006,3 +18017,5 @@ function unitLabel(){
 </script>
 </body>
 </html>
+
+  
