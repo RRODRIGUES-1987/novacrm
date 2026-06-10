@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.266 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.267 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -650,6 +650,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           <span>E-mail / DNS</span>
         </button>
+        <button class="navitem sub" id="nav-admin-relatorios" onclick="pg('admin');setTimeout(()=>setAdminTab('relatorios'),50)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Editor de Relatórios</span>
+        </button>
         <button class="navitem sub" id="nav-admin-sessoes" onclick="pg('admin-sessoes')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
           <span>Sessões ativas</span>
@@ -884,7 +888,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.266';
+const APP_VERSION='v1.0.267';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1283,6 +1287,8 @@ async function loadData(){
 
   // Carrega as unidades do usuário ANTES das queries, para o unitFilter() já restringir
   if(cid){ await loadUserUnits().catch(e=>console.warn('loadUserUnits init:',e)); }
+  // Carrega templates de relatório da empresa (editor de relatórios)
+  if(cid){ try{ window._reportTemplates=await dbSelect('report_templates',`company_id=eq.${cid}`); }catch(e){ window._reportTemplates=[]; } }
 
   if(role==='admin'){
     if(cid){
@@ -8001,6 +8007,7 @@ function setAdminTab(tab){
     'workflow':   'nav-admin-workflow',
     'importacao': 'nav-admin-importacao',
     'email-dns':  'nav-admin-emaildns',
+    'relatorios': 'nav-admin-relatorios',
   };
   Object.entries(navItems).forEach(([t,id])=>{
     const el=ge(id);
@@ -8014,9 +8021,11 @@ function setAdminTab(tab){
     'workflow':'Administração — Workflow',
     'importacao':'Administração — Importação',
     'email-dns':'Administração — E-mail / DNS',
+    'relatorios':'Administração — Editor de Relatórios',
   };
   const dt=ge('dtitle');
   if(dt) dt.textContent=titles[tab]||'Administração';
+  if(tab==='relatorios') setTimeout(capaEditorRefresh,60);
 }
 
 function rAdmin(){
@@ -8026,13 +8035,136 @@ function rAdmin(){
     <div class="admin-tab-panel" data-tab="usuarios" style="display:none">${rUsuarios()}</div>
     <div class="admin-tab-panel" data-tab="workflow" style="display:none">${rWorkflow()}</div>
     <div class="admin-tab-panel" data-tab="importacao" style="display:none">${rImportacao()}</div>
-    <div class="admin-tab-panel" data-tab="email-dns" style="display:none">${rEmailDNS()}</div>`;
+    <div class="admin-tab-panel" data-tab="email-dns" style="display:none">${rEmailDNS()}</div>
+    <div class="admin-tab-panel" data-tab="relatorios" style="display:none">${rEditorRelatorios()}</div>`;
 }
 
 
 // ══════════════════════════════════════════════════════════════════════
 // ADMIN — GERENCIAMENTO DE UNIDADES (FILIAIS)
 // ══════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════
+// ADMIN — EDITOR DE RELATÓRIOS (Fase 1: parâmetros + preview ao vivo)
+// ══════════════════════════════════════════════════════════════════════
+
+// Estado de edição (parte dos params salvos ou defaults)
+let _capaEditParams=null;
+
+function rEditorRelatorios(){
+  const P=Object.assign({}, CAPA_PARAMS_DEFAULT, capaGetParams());
+  _capaEditParams=Object.assign({}, P);
+  const sl=(id,label,val,min,max,step,suf)=>`
+    <div style="margin-bottom:14px">
+      <label style="font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+        <span>${label}</span><span id="cev-${id}" style="color:var(--accent-text)">${val}${suf||''}</span>
+      </label>
+      <input type="range" id="ce-${id}" min="${min}" max="${max}" step="${step||1}" value="${val}"
+        oninput="capaEditorOnChange('${id}',this.value,'${suf||''}')" style="width:100%">
+    </div>`;
+  return `
+  <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+    <div style="flex:0 0 300px;max-width:300px">
+      <div class="card" style="padding:16px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">Capa de Processo (MKFOR040)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:16px">Ajuste e veja o resultado ao lado. Salve para aplicar ao PDF.</div>
+
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:10px">Fontes</div>
+        ${sl('fonte_corpo','Corpo',P.fonte_corpo,9,18,1,'px')}
+        ${sl('fonte_cabecalho','Cabeçalho (cliente)',P.fonte_cabecalho,12,28,1,'px')}
+        ${sl('fonte_id','Identificação (REC)',P.fonte_id,8,18,1,'px')}
+        ${sl('fonte_secao','Títulos de seção',P.fonte_secao,10,18,1,'px')}
+
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin:16px 0 10px">Assinaturas</div>
+        ${sl('altura_assinatura','Altura da caixa',P.altura_assinatura,30,80,1,'mm')}
+        ${sl('espaco_assinatura','Espaço acima das linhas',P.espaco_assinatura,10,80,2,'px')}
+
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin:16px 0 10px">Página</div>
+        ${sl('altura_pagina','Altura útil',P.altura_pagina,250,290,1,'mm')}
+        ${sl('margem','Margem',P.margem,4,15,1,'mm')}
+
+        <div style="margin:14px 0;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="ce-zebrado" ${P.zebrado?'checked':''} onchange="capaEditorOnChange('zebrado',this.checked)" style="width:16px;height:16px">
+          <label for="ce-zebrado" style="font-size:12px;font-weight:600;cursor:pointer">Zebrar linhas de serviço</label>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-p btn-sm" style="flex:1;justify-content:center" onclick="capaEditorSalvar()">Salvar template</button>
+          <button class="btn btn-sm" onclick="capaEditorReset()" title="Restaurar padrão">↺</button>
+        </div>
+        <div id="ce-status" style="font-size:11px;margin-top:8px;text-align:center"></div>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:380px">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;display:flex;justify-content:space-between">
+        <span>Pré-visualização (A4)</span>
+        <span id="ce-pagina-aviso"></span>
+      </div>
+      <div style="background:#888;padding:16px;border-radius:8px;overflow:auto;max-height:75vh">
+        <iframe id="ce-preview" style="width:210mm;height:297mm;border:none;background:#fff;transform-origin:top left;box-shadow:0 2px 12px rgba(0,0,0,.3)"></iframe>
+      </div>
+    </div>
+  </div>`;
+}
+
+function capaEditorOnChange(key,val,suf){
+  if(!_capaEditParams)_capaEditParams=Object.assign({},CAPA_PARAMS_DEFAULT);
+  if(key==='zebrado'){ _capaEditParams[key]=!!val; }
+  else { _capaEditParams[key]=Number(val); const lbl=ge('cev-'+key); if(lbl)lbl.textContent=val+(suf||''); }
+  capaEditorRefresh();
+}
+
+function capaEditorReset(){
+  _capaEditParams=Object.assign({},CAPA_PARAMS_DEFAULT);
+  setAdminTab('relatorios'); // re-renderiza os controles
+}
+
+// Gera o HTML da capa de exemplo com os params em edição e joga no iframe
+function capaEditorRefresh(){
+  const ifr=ge('ce-preview'); if(!ifr) return;
+  const P=Object.assign({}, CAPA_PARAMS_DEFAULT, _capaEditParams||{});
+  // Capa de exemplo (dados fictícios só para visualização)
+  const exemplo={
+    numero:'REC-2026-0001', cliente_nome:'Cliente Exemplo Ltda', cliente_cnpj:'00.000.000/0001-00',
+    tipo:'recebimento', tipo_operacao:'Recebimento', lacre:'', tipo_veiculo:'', responsavel_id:null,
+  };
+  const servicosEx=['Substituição de pallet','Paletização / Repaletização','Estufagem ou Desestufagem de CNTR',
+    'Fornecimento de pallet','Fornecimento de filme stretch','Carga/Descarga Manual'];
+  const html=capaBuildHtml(exemplo, servicosEx.map(s=>({servico:s})), P);
+  const doc=ifr.contentDocument||ifr.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  // Escala o iframe para caber na largura disponível
+  setTimeout(()=>{
+    const wrap=ifr.parentElement; const avail=wrap.clientWidth-32;
+    const mmPx=avail/210; const scale=Math.min(1, mmPx/ (96/25.4) );
+    ifr.style.transform=`scale(${scale})`;
+    ifr.style.marginBottom=`-${297*(96/25.4)*(1-scale)}px`;
+    wrap.style.height=(297*(96/25.4)*scale+32)+'px';
+  },80);
+}
+
+async function capaEditorSalvar(){
+  const st=ge('ce-status'); if(st){st.textContent='Salvando...';st.style.color='var(--text2)';}
+  try{
+    const cid=company?.id||profile?.company_id;
+    if(!cid)throw new Error('Empresa não identificada.');
+    const params=Object.assign({},CAPA_PARAMS_DEFAULT,_capaEditParams||{});
+    // Existe template para esta empresa+relatorio?
+    const ex=(window._reportTemplates||[]).find(t=>t.company_id===cid&&t.relatorio==='capa_mkfor040');
+    if(ex){
+      await dbUpdate('report_templates',ex.id,{params,updated_at:new Date().toISOString()});
+      ex.params=params;
+    }else{
+      const novo=await dbInsert('report_templates',{company_id:cid,relatorio:'capa_mkfor040',nome:'Capa MKFOR040',params,owner_id:cu.id});
+      if(!window._reportTemplates)window._reportTemplates=[];
+      window._reportTemplates.push(Array.isArray(novo)?novo[0]:novo);
+    }
+    if(st){st.textContent='✓ Template salvo';st.style.color='var(--green-text)';}
+  }catch(e){
+    if(st){st.textContent='Erro: '+e.message;st.style.color='var(--red-text)';}
+  }
+}
 
 function rUnidades(){
   const rows=userUnits.length
@@ -17854,22 +17986,53 @@ async function capaExcluir(id){
   }catch(e){alert('Erro: '+e.message);}
 }
 
+// ── PARÂMETROS DO LAYOUT DA CAPA (editáveis no Editor de Relatórios) ──
+const CAPA_PARAMS_DEFAULT={
+  fonte_corpo:13,        // px — fonte base
+  fonte_secao:13,        // px — títulos de seção
+  fonte_id:13,           // px — bloco de identificação (REC/MKFOR)
+  fonte_cabecalho:18,    // px — nome do cliente/operação no topo
+  altura_assinatura:50,  // mm — altura da caixa de assinaturas
+  espaco_assinatura:30,  // px — espaço acima das linhas Motorista/Líder
+  altura_pagina:281,     // mm — altura útil da folha
+  zebrado:true,          // linhas de serviço alternadas
+  margem:7,              // mm — margem da página
+};
+function capaGetParams(){
+  // Busca template salvo da empresa; senão usa defaults
+  const tpl=(window._reportTemplates||[]).find(t=>t.relatorio==='capa_mkfor040'&&t.ativo!==false);
+  return Object.assign({}, CAPA_PARAMS_DEFAULT, (tpl&&tpl.params)||{});
+}
+
 // ── GERAR PDF DA CAPA (layout MKFOR040) ──
 async function capaGerarPdf(id){
   const c=capasProcesso.find(x=>x.id===id);if(!c)return;
+  const P=capaGetParams();
+  const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
+  const html=capaBuildHtml(c, servicos, P);
+
+  const iframe=document.createElement('iframe');
+  iframe.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.write(html);iframe.contentDocument.close();
+  setTimeout(()=>{iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},500);
+}
+
+// Monta o HTML completo da capa (compartilhado entre PDF e preview do editor)
+function capaBuildHtml(c, servicos, P){
+  P=Object.assign({}, CAPA_PARAMS_DEFAULT, P||{});
   let LOGO='';
   const _lm=document.documentElement.innerHTML.match(/data:image\/png;base64,[A-Za-z0-9+\/=]{5000,}/);
   if(_lm)LOGO=_lm[0];
-  const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
   const cabecalho=`${(c.cliente_nome||'').toUpperCase()} ${c.tipo==='expedicao'?'EXPEDIÇÃO':'RECEBIMENTO'}`;
   const palletLabel=c.tipo==='expedicao'?'Pallets Expedidos':'Pallets Descarregados';
   const respNome=c.responsavel_id?(profiles.find(p=>p.id===c.responsavel_id)?.full_name||pessoas.find(p=>p.id===c.responsavel_id)?.nome||''):'';
   // PDF é sempre em branco — para preencher à mão
   const BX='☐';
 
-  const servRows=servicos.map((s,i)=>`
-    <tr style="background:${i%2===1?'#f0f0f0':'#fff'} !important">
-      <td style="padding:6px 8px;font-size:13px;border:1px solid #999">${s.servico}</td>
+  const servRows=(servicos||[]).map((s,i)=>`
+    <tr style="background:${(P.zebrado&&i%2===1)?'#f0f0f0':'#fff'} !important">
+      <td style="padding:6px 8px;font-size:${P.fonte_corpo}px;border:1px solid #999">${s.servico}</td>
       <td style="padding:6px;text-align:center;border:1px solid #999;width:44px;font-size:14px">${BX}</td>
       <td style="padding:6px;text-align:center;border:1px solid #999;width:44px;font-size:14px">${BX}</td>
       <td style="padding:6px;border:1px solid #999;width:90px"></td>
@@ -17877,30 +18040,30 @@ async function capaGerarPdf(id){
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${c.numero}</title>
   <style>
-    @page{size:A4;margin:7mm}
+    @page{size:A4;margin:${P.margem}mm}
     *{box-sizing:border-box;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
-    body{font-family:Arial,sans-serif;color:#000;font-size:13px;margin:0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+    body{font-family:Arial,sans-serif;color:#000;font-size:${P.fonte_corpo}px;margin:0;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
     .topbar{display:flex;justify-content:space-between;align-items:center;border:2px solid #000}
     .topbar>div{padding:6px 10px}
-    .topbar .mid{font-weight:800;font-size:18px;text-align:center;border-left:2px solid #000;border-right:2px solid #000;flex:1}
-    .topbar .id{font-size:10px;text-align:left;line-height:1.4;width:160px}
+    .topbar .mid{font-weight:800;font-size:${P.fonte_cabecalho}px;text-align:center;border-left:2px solid #000;border-right:2px solid #000;flex:1}
+    .topbar .id{font-size:${P.fonte_id}px;text-align:left;line-height:1.4;width:170px}
     .cliente{text-align:center;font-size:18px;font-weight:800;margin:5px 0 2px}
-    .secao{background:#1a1a1a !important;color:#fff !important;font-weight:700;text-align:center;padding:5px;font-size:13px;letter-spacing:2px;margin-top:8px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+    .secao{background:#1a1a1a !important;color:#fff !important;font-weight:700;text-align:center;padding:5px;font-size:${P.fonte_secao}px;letter-spacing:2px;margin-top:8px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;padding:7px 6px}
-    .campo{display:flex;gap:6px;padding:5px 0;font-size:13px;border-bottom:1px dotted #aaa}
+    .campo{display:flex;gap:6px;padding:5px 0;font-size:${P.fonte_corpo}px;border-bottom:1px dotted #aaa}
     .campo .lbl{font-weight:600;min-width:125px}
     .campo .val{flex:1}
-    .carga-tipo{display:flex;gap:18px;padding:6px 6px;font-size:13px;align-items:center;flex-wrap:wrap}
+    .carga-tipo{display:flex;gap:18px;padding:6px 6px;font-size:${P.fonte_corpo}px;align-items:center;flex-wrap:wrap}
     .carga-tipo .opt{display:flex;align-items:center;gap:6px}
     table{width:100%;border-collapse:collapse;margin-top:5px}
     .ass{display:grid;grid-template-columns:1fr 1fr;gap:14px 50px;margin-top:14px}
     .ass div{border-top:1px solid #000;padding-top:4px;text-align:center;font-size:11px;font-weight:600}
-    .page{display:flex;flex-direction:column;min-height:281mm}
+    .page{display:flex;flex-direction:column;min-height:${P.altura_pagina}mm}
     .apont{flex:1;border:1px solid #999;border-radius:3px;margin-top:7px;padding:6px 8px;display:flex;flex-direction:column}
     .apont .apont-tit{font-weight:700;font-size:12px;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
     .apont .linhas{flex:1;background-image:repeating-linear-gradient(transparent,transparent 23px,#ccc 23px,#ccc 24px)}
-    .ass-box{border:2px solid #000;border-radius:3px;margin-top:7px;padding:14px 16px 10px;height:50mm;display:flex;flex-direction:column;justify-content:space-between}
-    .ass-box .linha-ass{display:grid;grid-template-columns:1fr 1fr;gap:30px 50px}
+    .ass-box{border:2px solid #000;border-radius:3px;margin-top:7px;padding:14px 16px 10px;height:${P.altura_assinatura}mm;display:flex;flex-direction:column;justify-content:space-between}
+    .ass-box .linha-ass{display:grid;grid-template-columns:1fr 1fr;gap:${P.espaco_assinatura}px 50px}
     .ass-box .linha-ass.tres{grid-template-columns:1fr 1fr 1fr}
     .ass-box .campo-ass{border-top:1px solid #000;padding-top:4px;text-align:center;font-size:11px;font-weight:600}
   </style></head><body>
@@ -17979,11 +18142,7 @@ async function capaGerarPdf(id){
   </div>
   </body></html>`;
 
-  const iframe=document.createElement('iframe');
-  iframe.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.write(html);iframe.contentDocument.close();
-  setTimeout(()=>{iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},500);
+  return html;
 }
 // ===============================================================
 
