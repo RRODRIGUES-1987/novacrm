@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.271 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.272 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -888,7 +888,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.271';
+const APP_VERSION='v1.0.272';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -8063,8 +8063,8 @@ function rEditorRelatorios(){
         oninput="capaEditorOnChange('${id}',this.value,'${suf||''}')" style="width:100%">
     </div>`;
   return `
-  <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
-    <div style="flex:0 0 300px;max-width:300px">
+  <div style="display:flex;gap:18px;align-items:stretch;height:80vh">
+    <div style="flex:0 0 300px;max-width:300px;overflow-y:auto;overflow-x:hidden;padding-right:6px">
       <div class="card" style="padding:16px">
         <div style="font-size:13px;font-weight:700;margin-bottom:4px">Capa de Processo (MKFOR040)</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:16px">Ajuste e veja o resultado ao lado. Salve para aplicar ao PDF.</div>
@@ -8108,16 +8108,45 @@ function rEditorRelatorios(){
       </div>
     </div>
 
-    <div style="flex:1;min-width:380px">
-      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;display:flex;justify-content:space-between">
-        <span>Pré-visualização (A4)</span>
+    <div style="flex:1;min-width:380px;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:10px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="btn btn-sm" onclick="capaEditorZoom(-0.1)" title="Diminuir zoom">−</button>
+          <span id="ce-zoom-lbl" style="font-size:12px;font-weight:600;min-width:44px;text-align:center">100%</span>
+          <button class="btn btn-sm" onclick="capaEditorZoom(0.1)" title="Aumentar zoom">+</button>
+          <button class="btn btn-sm" onclick="capaEditorZoomFit()" title="Ajustar à página" style="margin-left:6px">Ajustar à página</button>
+        </div>
         <span id="ce-pagina-aviso"></span>
       </div>
-      <div style="background:#888;padding:16px;border-radius:8px;overflow:auto;max-height:75vh">
-        <iframe id="ce-preview" style="width:210mm;height:297mm;border:none;background:#fff;transform-origin:top left;box-shadow:0 2px 12px rgba(0,0,0,.3)"></iframe>
+      <div id="ce-pdf-scroll" style="flex:1;background:#888;border-radius:8px;overflow:auto;padding:16px;display:flex;justify-content:center;align-items:flex-start">
+        <iframe id="ce-preview" style="width:210mm;height:297mm;border:none;background:#fff;transform-origin:top center;box-shadow:0 2px 12px rgba(0,0,0,.3);flex:0 0 auto"></iframe>
       </div>
     </div>
   </div>`;
+}
+
+// Zoom do preview (controlado manualmente)
+let _capaZoom=null; // null = ajustar à página (auto)
+function capaEditorZoom(delta){
+  if(_capaZoom===null) _capaZoom=capaEditorFitScale();
+  _capaZoom=Math.max(0.2, Math.min(2.5, _capaZoom+delta));
+  capaEditorApplyZoom();
+}
+function capaEditorZoomFit(){ _capaZoom=null; capaEditorApplyZoom(); }
+function capaEditorFitScale(){
+  const wrap=ge('ce-pdf-scroll'); if(!wrap) return 1;
+  const avail=wrap.clientWidth-32;
+  return Math.min(1, avail/(210*(96/25.4)));
+}
+function capaEditorApplyZoom(){
+  const ifr=ge('ce-preview'); if(!ifr) return;
+  const scale = _capaZoom===null ? capaEditorFitScale() : _capaZoom;
+  ifr.style.transform=`scale(${scale})`;
+  // Reserva o espaço real ocupado (pra o scroll interno funcionar)
+  const wPx=210*(96/25.4)*scale, hPx=297*(96/25.4)*scale;
+  ifr.style.marginRight=`-${210*(96/25.4)-wPx}px`;
+  ifr.style.marginBottom=`-${297*(96/25.4)-hPx}px`;
+  const lbl=ge('ce-zoom-lbl'); if(lbl) lbl.textContent=Math.round(scale*100)+'%';
 }
 
 function capaEditorOnChange(key,val,suf){
@@ -8146,25 +8175,18 @@ function capaEditorRefresh(){
   const html=capaBuildHtml(exemplo, servicosEx.map(s=>({servico:s})), P);
   const doc=ifr.contentDocument||ifr.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
-  // Escala o iframe para caber na largura disponível + detecta quebra de página
   setTimeout(()=>{
-    const wrap=ifr.parentElement; const avail=wrap.clientWidth-32;
-    const mmPx=avail/210; const scale=Math.min(1, mmPx/ (96/25.4) );
-    ifr.style.transform=`scale(${scale})`;
-    ifr.style.marginBottom=`-${297*(96/25.4)*(1-scale)}px`;
-    wrap.style.height=(297*(96/25.4)*scale+32)+'px';
+    capaEditorApplyZoom();
     // Detecta se o conteúdo passou de 1 página A4 (297mm de altura útil)
     const pageEl=doc.querySelector('.page');
     const aviso=ge('ce-pagina-aviso');
     if(pageEl&&aviso){
-      const alturaA4px=297*(96/25.4); // altura de 1 folha A4 em px
+      const alturaA4px=297*(96/25.4);
       const real=pageEl.scrollHeight;
       const passou=real > alturaA4px+4;
-      if(passou){
-        aviso.innerHTML='<span style="background:var(--red-bg);color:var(--red-text);padding:2px 10px;border-radius:99px;font-weight:700">⚠ Conteúdo em 2 páginas</span>';
-      }else{
-        aviso.innerHTML='<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">✓ Cabe em 1 página</span>';
-      }
+      aviso.innerHTML=passou
+        ?'<span style="background:var(--red-bg);color:var(--red-text);padding:2px 10px;border-radius:99px;font-weight:700">⚠ Conteúdo em 2 páginas</span>'
+        :'<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">✓ Cabe em 1 página</span>';
     }
   },80);
 }
