@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.286 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.287 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -890,7 +890,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.286';
+const APP_VERSION='v1.0.287';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1384,14 +1384,37 @@ async function loadData(){
       dbSelect('propostas',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
       dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`),
     ]);
-    workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`);
-    await loadUserUnits();
-    contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`);
+    workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]);
+    await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
+    contasReceber=await dbSelect('contas_receber',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]);
     [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
-      dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
-      dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
-      dbSelect('compras_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`),
+      dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
+      dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
+      dbSelect('compras_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
     ]);
+    // Módulos de RH/SST (faltavam neste ramo → causavam "some tudo" para adm/gestor)
+    await loadRHFerias().catch(e=>console.warn('loadRHFerias:',e));
+    rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
+    qualDocumentos = await dbSelect('qualidade_documentos',`company_id=eq.${cid}&order=codigo.asc`).catch(()=>[]);
+    qualRevisoes   = await dbSelect('qualidade_revisoes',`company_id=eq.${cid}&order=numero_rev.desc`).catch(()=>[]);
+    rhCiclos = await dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).catch(()=>[]);
+    await verificarAbrirCiclo().catch(e=>console.warn('verificarAbrirCiclo:',e));
+    setTimeout(verificarAlertasFerias,2000);
+    rhAvaliacoes=await dbSelect('rh_avaliacoes',`company_id=eq.${cid}&order=data_avaliacao.desc`).catch(()=>[]);
+    [fatProgramacao, gruposClientes] = await Promise.all([
+      dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
+      dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]),
+    ]);
+    orcamentoReceitas=await dbSelect('orcamento_receitas',`company_id=eq.${cid}${unitFilter()}&order=ano.asc,mes.asc`).catch(()=>[]);
+    dresProjeto=await dbSelect('dre_projeto',`company_id=eq.${cid}${unitFilter()}`).catch(()=>[]);
+    dreAvulso=await dbSelect('dre_avulso',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
+    await loadOrgData(cid).catch(e=>console.warn('loadOrgData:',e));
+    await loadEpiData(cid).catch(e=>console.warn('loadEpiData:',e));
+    await loadExameData(cid).catch(e=>console.warn('loadExameData:',e));
+    await loadAgendamentosData(cid).catch(e=>console.warn('loadAgendamentosData:',e));
+    await loadDisciplinarData(cid).catch(e=>console.warn('loadDisciplinarData:',e));
+    await loadCapasData(cid).catch(e=>console.warn('loadCapasData:',e));
+    historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}`).catch(()=>[]);
   } else if(role==='portaria'&&cid){
     [profiles,pessoas,rhFuncoes]=await Promise.all([
       dbSelect('profiles',`company_id=eq.${cid}`),
