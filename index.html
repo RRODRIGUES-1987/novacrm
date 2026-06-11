@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.278 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.279 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -246,6 +246,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes rotate{to{transform:rotate(360deg)}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
 
@@ -888,7 +889,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.278';
+const APP_VERSION='v1.0.279';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -8110,16 +8111,11 @@ function rEditorRelatorios(){
 
     <div style="flex:1;min-width:380px;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:10px">
-        <div style="display:flex;align-items:center;gap:6px">
-          <button class="btn btn-sm" onclick="capaEditorZoom(-0.1)" title="Diminuir zoom">−</button>
-          <span id="ce-zoom-lbl" style="font-size:12px;font-weight:600;min-width:44px;text-align:center">100%</span>
-          <button class="btn btn-sm" onclick="capaEditorZoom(0.1)" title="Aumentar zoom">+</button>
-          <button class="btn btn-sm" onclick="capaEditorZoomFit()" title="Ajustar à página" style="margin-left:6px">Ajustar à página</button>
-        </div>
+        <div style="font-size:11px;color:var(--text3)">Use os controles do visualizador de PDF para zoom/navegação</div>
         <span id="ce-pagina-aviso"></span>
       </div>
       <div id="ce-pdf-scroll" style="flex:1;background:#888;border-radius:8px;overflow:auto;padding:16px;display:flex;justify-content:center;align-items:flex-start">
-        <iframe id="ce-preview" style="width:210mm;height:297mm;border:none;background:#fff;transform-origin:top center;box-shadow:0 2px 12px rgba(0,0,0,.3);flex:0 0 auto"></iframe>
+        <iframe id="ce-preview" style="width:100%;height:100%;min-height:70vh;border:none;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3)"></iframe>
       </div>
     </div>
   </div>`;
@@ -8162,10 +8158,17 @@ function capaEditorReset(){
 }
 
 // Gera o HTML da capa de exemplo com os params em edição e joga no iframe
+let _capaPreviewTimer=null;
+let _capaPreviewUrl=null;
 function capaEditorRefresh(){
+  // Debounce: gerar PDF é mais pesado que escrever HTML
+  if(_capaPreviewTimer) clearTimeout(_capaPreviewTimer);
+  _capaPreviewTimer=setTimeout(capaEditorRenderPdf, 350);
+}
+
+async function capaEditorRenderPdf(){
   const ifr=ge('ce-preview'); if(!ifr) return;
   const P=Object.assign({}, CAPA_PARAMS_DEFAULT, _capaEditParams||{});
-  // Capa de exemplo (dados fictícios só para visualização)
   const exemplo={
     numero:'REC-2026-0001', cliente_nome:'Cliente Exemplo Ltda', cliente_cnpj:'00.000.000/0001-00',
     tipo:'recebimento', tipo_operacao:'Recebimento', lacre:'', tipo_veiculo:'', responsavel_id:null,
@@ -8173,22 +8176,18 @@ function capaEditorRefresh(){
   const servicosEx=['Substituição de pallet','Paletização / Repaletização','Estufagem ou Desestufagem de CNTR',
     'Fornecimento de pallet','Fornecimento de filme stretch','Carga/Descarga Manual'];
   const html=capaBuildHtml(exemplo, servicosEx.map(s=>({servico:s})), P);
-  const doc=ifr.contentDocument||ifr.contentWindow.document;
-  doc.open(); doc.write(html); doc.close();
-  setTimeout(()=>{
-    capaEditorApplyZoom();
-    // Detecta se o conteúdo passou de 1 página A4 (297mm de altura útil)
-    const pageEl=doc.querySelector('.page');
-    const aviso=ge('ce-pagina-aviso');
-    if(pageEl&&aviso){
-      const alturaA4px=297*(96/25.4);
-      const real=pageEl.scrollHeight;
-      const passou=real > alturaA4px+4;
-      aviso.innerHTML=passou
-        ?'<span style="background:var(--red-bg);color:var(--red-text);padding:2px 10px;border-radius:99px;font-weight:700">⚠ Conteúdo em 2 páginas</span>'
-        :'<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">✓ Cabe em 1 página</span>';
-    }
-  },80);
+  const aviso=ge('ce-pagina-aviso');
+  if(aviso) aviso.innerHTML='<span style="color:var(--text3);font-size:11px">Gerando PDF…</span>';
+  try{
+    const url=await capaHtmlToPdf(html, 'preview.pdf', 'blob');
+    if(_capaPreviewUrl) URL.revokeObjectURL(_capaPreviewUrl);
+    _capaPreviewUrl=url;
+    // Mostra o PDF real no iframe (mesma renderização da impressão)
+    ifr.src=url+'#toolbar=0&navpanes=0&view=FitH';
+    if(aviso) aviso.innerHTML='<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">PDF real — idêntico à impressão</span>';
+  }catch(e){
+    if(aviso) aviso.innerHTML='<span style="color:var(--red-text);font-size:11px">Erro ao gerar preview</span>';
+  }
 }
 
 async function capaEditorSalvar(){
@@ -18060,18 +18059,54 @@ function capaGetParams(){
   return Object.assign({}, CAPA_PARAMS_DEFAULT, (tpl&&tpl.params)||{});
 }
 
-// ── GERAR PDF DA CAPA (layout MKFOR040) ──
+// ── GERAR PDF DA CAPA (layout MKFOR040) — PDF real via html2pdf ──
 async function capaGerarPdf(id){
   const c=capasProcesso.find(x=>x.id===id);if(!c)return;
   const P=capaGetParams();
   const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
   const html=capaBuildHtml(c, servicos, P);
+  await capaHtmlToPdf(html, `${c.numero||'capa'}.pdf`, 'print');
+}
 
-  const iframe=document.createElement('iframe');
-  iframe.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.write(html);iframe.contentDocument.close();
-  setTimeout(()=>{iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},500);
+// Converte o HTML da capa em PDF real (A4). modo: 'print' abre p/ imprimir, 'blob' retorna URL
+async function capaHtmlToPdf(html, filename, modo){
+  if(typeof html2pdf==='undefined'){ alert('Biblioteca de PDF ainda carregando, tente novamente em instantes.'); return; }
+  // Renderiza o HTML num container oculto em tamanho A4 real (px @96dpi)
+  const host=document.createElement('div');
+  host.style.cssText='position:fixed;left:-99999px;top:0;width:210mm;background:#fff';
+  // Extrai só o conteúdo do body do html montado
+  const mBody=html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const mStyle=html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+  host.innerHTML=(mStyle?`<style>${mStyle[1]}</style>`:'')+(mBody?mBody[1]:html);
+  document.body.appendChild(host);
+
+  const opt={
+    margin:0,
+    filename:filename||'documento.pdf',
+    image:{type:'jpeg',quality:0.98},
+    html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
+    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+    pagebreak:{mode:['avoid-all','css']},
+  };
+  try{
+    const worker=html2pdf().set(opt).from(host);
+    if(modo==='blob'){
+      const blob=await worker.outputPdf('blob');
+      host.remove();
+      return URL.createObjectURL(blob);
+    }else{
+      // Gera e abre numa nova aba já pronto pra imprimir
+      const blob=await worker.outputPdf('blob');
+      host.remove();
+      const url=URL.createObjectURL(blob);
+      const w=window.open(url,'_blank');
+      if(w){ w.addEventListener('load',()=>{ try{w.print();}catch(e){} }); }
+      return url;
+    }
+  }catch(e){
+    host.remove();
+    alert('Erro ao gerar PDF: '+e.message);
+  }
 }
 
 // Monta o HTML completo da capa (compartilhado entre PDF e preview do editor)
