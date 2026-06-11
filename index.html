@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.279 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.280 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -246,7 +246,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes rotate{to{transform:rotate(360deg)}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js"></script>
 </head>
 <body>
 
@@ -889,7 +890,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.279';
+const APP_VERSION='v1.0.280';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -8171,22 +8172,23 @@ async function capaEditorRenderPdf(){
   const P=Object.assign({}, CAPA_PARAMS_DEFAULT, _capaEditParams||{});
   const exemplo={
     numero:'REC-2026-0001', cliente_nome:'Cliente Exemplo Ltda', cliente_cnpj:'00.000.000/0001-00',
-    tipo:'recebimento', tipo_operacao:'Recebimento', lacre:'', tipo_veiculo:'', responsavel_id:null,
+    tipo:'recebimento', tipo_operacao:'Recebimento', data_operacao:'2026-06-07',
+    motorista:'', transportadora:'', placa_cavalo:'', placa_carreta:'', responsavel_id:null,
   };
   const servicosEx=['Substituição de pallet','Paletização / Repaletização','Estufagem ou Desestufagem de CNTR',
     'Fornecimento de pallet','Fornecimento de filme stretch','Carga/Descarga Manual'];
-  const html=capaBuildHtml(exemplo, servicosEx.map(s=>({servico:s})), P);
   const aviso=ge('ce-pagina-aviso');
   if(aviso) aviso.innerHTML='<span style="color:var(--text3);font-size:11px">Gerando PDF…</span>';
   try{
-    const url=await capaHtmlToPdf(html, 'preview.pdf', 'blob');
+    if(typeof pdfMake==='undefined'){ if(aviso)aviso.innerHTML='<span style="color:var(--text3);font-size:11px">Carregando biblioteca…</span>'; setTimeout(capaEditorRenderPdf,600); return; }
+    const def=capaBuildPdfDef(exemplo, servicosEx.map(s=>({servico:s})), P);
+    const url=await capaPdfBlobUrl(def);
     if(_capaPreviewUrl) URL.revokeObjectURL(_capaPreviewUrl);
     _capaPreviewUrl=url;
-    // Mostra o PDF real no iframe (mesma renderização da impressão)
-    ifr.src=url+'#toolbar=0&navpanes=0&view=FitH';
+    ifr.src=url+'#toolbar=1&navpanes=0&view=FitH';
     if(aviso) aviso.innerHTML='<span style="background:var(--green-bg);color:var(--green-text);padding:2px 10px;border-radius:99px;font-weight:600">PDF real — idêntico à impressão</span>';
   }catch(e){
-    if(aviso) aviso.innerHTML='<span style="color:var(--red-text);font-size:11px">Erro ao gerar preview</span>';
+    if(aviso) aviso.innerHTML='<span style="color:var(--red-text);font-size:11px">Erro: '+e.message+'</span>';
   }
 }
 
@@ -18059,54 +18061,152 @@ function capaGetParams(){
   return Object.assign({}, CAPA_PARAMS_DEFAULT, (tpl&&tpl.params)||{});
 }
 
-// ── GERAR PDF DA CAPA (layout MKFOR040) — PDF real via html2pdf ──
+// ── Definição do documento pdfmake da capa (motor vetorial, sem eval) ──
+function capaBuildPdfDef(c, servicos, P){
+  P=Object.assign({}, CAPA_PARAMS_DEFAULT, P||{});
+  const mm = v => v*2.83465; // mm -> pt (unidade do pdfmake)
+  const BX='☐';
+  const cab=`${(c.cliente_nome||'').toUpperCase()} ${c.tipo==='expedicao'?'EXPEDIÇÃO':'RECEBIMENTO'}`;
+  const palletLabel=c.tipo==='expedicao'?'Pallets Expedidos':'Pallets Descarregados';
+  const respNome=c.responsavel_id?(profiles.find(p=>p.id===c.responsavel_id)?.full_name||pessoas.find(p=>p.id===c.responsavel_id)?.nome||''):'';
+  const dataOp=c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'';
+
+  // Cabeçalho (topbar): logo | título central | identificação
+  const topbar={
+    table:{widths:[70,'*',150],body:[[
+      {text:'MK log',bold:true,fontSize:14,alignment:'center',margin:[0,8,0,0]},
+      {stack:[{text:cab,bold:true,fontSize:P.fonte_cabecalho,alignment:'center'},
+        c.cliente_cnpj?{text:c.cliente_cnpj,fontSize:9,alignment:'center'}:{text:''}],margin:[0,6,0,0]},
+      {text:[{text:'IDENTIFICAÇÃO: MKFOR040\n'},{text:'REVISÃO: 01\n'},{text:c.numero||''}],fontSize:P.fonte_id,margin:[0,4,0,0]},
+    ]]},
+    layout:{hLineWidth:()=>1.5,vLineWidth:()=>1.5,hLineColor:()=>'#000',vLineColor:()=>'#000'}
+  };
+
+  const secao=(txt,topMm)=>({
+    table:{widths:['*'],body:[[{text:txt,color:'#fff',bold:true,alignment:'center',fontSize:P.fonte_secao,characterSpacing:2,margin:[0,3,0,3]}]]},
+    layout:{fillColor:()=>'#1a1a1a',hLineWidth:()=>0,vLineWidth:()=>0},
+    margin:[0,mm(topMm),0,0]
+  });
+
+  const campo=(lbl,val)=>({columns:[
+    {text:lbl,bold:true,width:'auto',fontSize:P.fonte_corpo},
+    {text:val||'',width:'*',fontSize:P.fonte_corpo,margin:[4,0,0,0]}
+  ]});
+  const grid2=(pares)=>{
+    const rows=[];
+    for(let i=0;i<pares.length;i+=2){
+      rows.push([
+        {stack:[campo(pares[i][0],pares[i][1])],margin:[0,3,0,3]},
+        {stack:[pares[i+1]?campo(pares[i+1][0],pares[i+1][1]):{text:''}],margin:[0,3,0,3]},
+      ]);
+    }
+    return {table:{widths:['*','*'],body:rows},
+      layout:{hLineWidth:()=>0.5,vLineWidth:()=>0,hLineColor:()=>'#ccc',
+        paddingLeft:()=>6,paddingRight:()=>18,paddingTop:()=>0,paddingBottom:()=>0},
+      margin:[0,4,0,0]};
+  };
+
+  const servBody=[[
+    {text:'Serviço',bold:true,fontSize:13,fillColor:'#f0f0f0'},
+    {text:'SIM',bold:true,fontSize:13,alignment:'center',fillColor:'#f0f0f0'},
+    {text:'NÃO',bold:true,fontSize:13,alignment:'center',fillColor:'#f0f0f0'},
+    {text:'Quantidade',bold:true,fontSize:13,alignment:'center',fillColor:'#f0f0f0'},
+  ]];
+  (servicos||[]).forEach((s,i)=>{
+    const bg=(P.zebrado&&i%2===1)?'#f0f0f0':null;
+    servBody.push([
+      {text:s.servico,fontSize:P.fonte_corpo,fillColor:bg},
+      {text:BX,fontSize:14,alignment:'center',fillColor:bg},
+      {text:BX,fontSize:14,alignment:'center',fillColor:bg},
+      {text:'',fillColor:bg},
+    ]);
+  });
+  if((servicos||[]).length===0){
+    servBody.push([{text:'Falta configurar serviços na tabela tarifária',colSpan:4,alignment:'center',color:'#999',fontSize:10},{},{},{}]);
+  }
+  const tabelaServ={table:{headerRows:1,widths:['*',32,32,70],body:servBody},
+    layout:{hLineWidth:()=>0.5,vLineWidth:()=>0.5,hLineColor:()=>'#999',vLineColor:()=>'#999',
+      paddingLeft:()=>6,paddingRight:()=>6,paddingTop:()=>5,paddingBottom:()=>5},
+    margin:[0,5,0,0]};
+
+  const apontLinhas=[];
+  const nLinhas=Math.max(2,Math.floor(P.apont_min/8));
+  for(let i=0;i<nLinhas;i++) apontLinhas.push([{text:'',margin:[0,0,0,12],border:[false,false,false,true]}]);
+  const apont={
+    table:{widths:['*'],body:[
+      [{text:'OBSERVAÇÕES / APONTAMENTOS',bold:true,fontSize:12,characterSpacing:1,margin:[0,2,0,6],border:[false,false,false,false]}],
+      ...apontLinhas,
+    ]},
+    layout:{hLineWidth:(i,node)=>(i>1&&i<node.table.body.length)?0.5:0,vLineWidth:()=>0,hLineColor:()=>'#ccc',
+      paddingLeft:()=>8,paddingRight:()=>8},
+  };
+  const apontBox={table:{widths:['*'],body:[[apont]]},
+    layout:{hLineWidth:()=>1,vLineWidth:()=>1,hLineColor:()=>'#999',vLineColor:()=>'#999'},
+    margin:[0,mm(P.esp_apont),0,0]};
+
+  const assRow=(cols)=>({columns:cols.map(t=>({
+    stack:[{canvas:[{type:'line',x1:0,y1:0,x2:150,y2:0,lineWidth:1}]},{text:t,bold:true,fontSize:11,alignment:'center',margin:[0,3,0,0]}],
+    width:'*',margin:[10,0,10,0]
+  })),columnGap:30,margin:[0,P.espaco_acima_assinatura,0,0]});
+  const assBox={
+    table:{widths:['*'],body:[[{stack:[
+      assRow(['Motorista','Líder']),
+      assRow(['Conferente Recebimento','Controle Operacional','Gerente da Operação']),
+    ],margin:[6,8,6,8]}]]},
+    layout:{hLineWidth:()=>2,vLineWidth:()=>2,hLineColor:()=>'#000',vLineColor:()=>'#000'},
+    margin:[0,mm(P.esp_assinatura),0,0]
+  };
+
+  return {
+    pageSize:'A4',
+    pageMargins:[mm(P.margem),mm(P.margem),mm(P.margem),mm(P.margem)],
+    defaultStyle:{fontSize:P.fonte_corpo,color:'#000'},
+    content:[
+      topbar,
+      secao('DADOS DE REGISTRO',P.esp_registro),
+      grid2([
+        ['Data da Operação:',dataOp],['Transp.:',c.transportadora||''],
+        ['Motorista:',c.motorista||''],['Origem:',c.origem||''],
+        ['Placa Cavalo:',c.placa_cavalo||''],['RG:',c.rg||''],
+        ['Placa Carreta:',c.placa_carreta||''],['DOC:',c.doc||''],
+        ['Lacre:',c.lacre||''],['Tipo de Veículo:',c.tipo_veiculo||''],
+        ['Tipo de Operação:',c.tipo_operacao||''],['Responsável:',respNome],
+      ]),
+      secao('DADOS DA CARGA',P.esp_carga),
+      grid2([
+        ['Local de Descarga:',''],[palletLabel+':',''],
+        ['Operador Respons.:',''],['Pallets Armazenados:',''],
+        ['Início da Operação:',''],['Fim da Operação:',''],
+      ]),
+      {columns:[{text:'Tipo de Carga:',bold:true,width:'auto',fontSize:P.fonte_corpo},
+        {text:`${BX} Paletizada    ${BX} Batida    ${BX} Paletizada/Batida`,width:'*',fontSize:P.fonte_corpo,margin:[8,0,0,0]}],margin:[6,6,0,0]},
+      {columns:[{text:'Qtd por Tipo de Pallet:',bold:true,width:'auto',fontSize:P.fonte_corpo},
+        {text:'PBR: ______    CHEP: ______    Outros: ______',width:'*',fontSize:P.fonte_corpo,margin:[8,0,0,0]}],margin:[6,6,0,0]},
+      secao('SERVIÇOS REALIZADOS',P.esp_servicos),
+      tabelaServ,
+      apontBox,
+      assBox,
+    ],
+  };
+}
+
+// ── GERAR PDF DA CAPA — pdfmake ──
 async function capaGerarPdf(id){
   const c=capasProcesso.find(x=>x.id===id);if(!c)return;
   const P=capaGetParams();
   const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
-  const html=capaBuildHtml(c, servicos, P);
-  await capaHtmlToPdf(html, `${c.numero||'capa'}.pdf`, 'print');
+  if(typeof pdfMake==='undefined'){ alert('Biblioteca de PDF ainda carregando, tente novamente em instantes.'); return; }
+  const def=capaBuildPdfDef(c, servicos, P);
+  pdfMake.createPdf(def).open(); // abre em nova aba (pronto p/ imprimir)
 }
 
-// Converte o HTML da capa em PDF real (A4). modo: 'print' abre p/ imprimir, 'blob' retorna URL
-async function capaHtmlToPdf(html, filename, modo){
-  if(typeof html2pdf==='undefined'){ alert('Biblioteca de PDF ainda carregando, tente novamente em instantes.'); return; }
-  // Renderiza o HTML num container oculto em tamanho A4 real (px @96dpi)
-  const host=document.createElement('div');
-  host.style.cssText='position:fixed;left:-99999px;top:0;width:210mm;background:#fff';
-  // Extrai só o conteúdo do body do html montado
-  const mBody=html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  const mStyle=html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-  host.innerHTML=(mStyle?`<style>${mStyle[1]}</style>`:'')+(mBody?mBody[1]:html);
-  document.body.appendChild(host);
-
-  const opt={
-    margin:0,
-    filename:filename||'documento.pdf',
-    image:{type:'jpeg',quality:0.98},
-    html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
-    pagebreak:{mode:['avoid-all','css']},
-  };
-  try{
-    const worker=html2pdf().set(opt).from(host);
-    if(modo==='blob'){
-      const blob=await worker.outputPdf('blob');
-      host.remove();
-      return URL.createObjectURL(blob);
-    }else{
-      // Gera e abre numa nova aba já pronto pra imprimir
-      const blob=await worker.outputPdf('blob');
-      host.remove();
-      const url=URL.createObjectURL(blob);
-      const w=window.open(url,'_blank');
-      if(w){ w.addEventListener('load',()=>{ try{w.print();}catch(e){} }); }
-      return url;
-    }
-  }catch(e){
-    host.remove();
-    alert('Erro ao gerar PDF: '+e.message);
-  }
+// Gera o PDF da capa como blob URL (usado pelo preview do editor)
+function capaPdfBlobUrl(def){
+  return new Promise((resolve,reject)=>{
+    try{
+      pdfMake.createPdf(def).getBlob(blob=>{ resolve(URL.createObjectURL(blob)); });
+    }catch(e){ reject(e); }
+  });
 }
 
 // Monta o HTML completo da capa (compartilhado entre PDF e preview do editor)
