@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.287 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.288 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -890,7 +890,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.287';
+const APP_VERSION='v1.0.288';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1959,6 +1959,11 @@ function buildCadastroForm(tipo, record, id=null){
           <input class="fi" id="cad-pix" value="${r.pix||''}" placeholder="CPF, e-mail ou telefone">
         </div>
       </div>
+      ${id?`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <button class="btn btn-p btn-sm" onclick="gerarFichaAdmissaoPdf('${id}')" style="justify-content:center">
+          📄 Ficha de Admissão (PDF)
+        </button>
+      </div>`:''}
     </div>
 
     <!-- ABA PERFORMANCE -->
@@ -8070,7 +8075,136 @@ function rAdmin(){
 // ══════════════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════════════
-// ADMIN — EDITOR DE RELATÓRIOS (Fase 1: parâmetros + preview ao vivo)
+// FICHA DE ADMISSÃO (PDF via pdfmake) — dados pessoal + profissional
+// ══════════════════════════════════════════════════════════════════════
+async function gerarFichaAdmissaoPdf(pessoaId){
+  if(typeof pdfMake==='undefined'){ alert('Biblioteca de PDF ainda carregando, tente novamente em instantes.'); return; }
+  const p=pessoas.find(x=>x.id===pessoaId);
+  if(!p){ alert('Colaborador não encontrado.'); return; }
+  let deps=[];
+  try{ deps=await dbSelect('rh_dependentes',`pessoa_id=eq.${pessoaId}&order=created_at.asc`)||[]; }catch(e){ deps=[]; }
+
+  const fmtData=v=>v?new Date(v+'T00:00:00').toLocaleDateString('pt-BR'):'';
+  const fmtMoeda=v=>v!=null&&v!==''?'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+  const funcaoNome=p.funcao_id?(rhFuncoes.find(f=>f.id===p.funcao_id)?.funcao||p.cargo||''):(p.cargo||'');
+  const unidade=p.unit_id?(userUnits.find(u=>u.id===p.unit_id)?.name||''):'';
+  const cboFunc=p.funcao_id?(rhFuncoes.find(f=>f.id===p.funcao_id)?.cbo||''):'';
+  const horarioNome=p.turno||'';
+  const LOGO=(typeof window!=='undefined'&&window._mkLogoBase64)?window._mkLogoBase64:null;
+  const BORDA='#000';
+
+  // Linha de campo "Rótulo: valor"
+  const campo=(lbl,val)=>({columns:[
+    {text:lbl,bold:true,width:140,fontSize:10},
+    {text:val||'—',width:'*',fontSize:10}
+  ],margin:[0,2,0,2]});
+
+  const secao=(txt)=>({
+    table:{widths:['*'],body:[[{text:txt,color:'#fff',bold:true,fontSize:11,characterSpacing:1,margin:[6,3,0,3]}]]},
+    layout:{fillColor:()=>'#1a1a1a',hLineWidth:()=>0,vLineWidth:()=>0},
+    margin:[0,12,0,6]
+  });
+
+  // Cabeçalho: logo + nome da filial
+  const filial=(company?.name||'MK LOGÍSTICA')+(unidade?(' — '+unidade):'');
+  const topbar={
+    columns:[
+      LOGO?{image:LOGO,width:90,margin:[0,0,0,0]}:{text:'MK log',bold:true,fontSize:16,margin:[0,8,0,0]},
+      {stack:[
+        {text:filial.toUpperCase(),bold:true,fontSize:14,alignment:'right'},
+        {text:'FICHA DE ADMISSÃO',fontSize:11,alignment:'right',margin:[0,2,0,0]},
+      ],margin:[0,6,0,0]},
+    ],
+    margin:[0,0,0,4]
+  };
+
+  // Dependentes (tabela só se houver)
+  let depBlock=[];
+  if(deps.length){
+    const body=[[
+      {text:'Nome',bold:true,fontSize:10,fillColor:'#f0f0f0'},
+      {text:'CPF',bold:true,fontSize:10,fillColor:'#f0f0f0'},
+      {text:'Nascimento',bold:true,fontSize:10,fillColor:'#f0f0f0'},
+      {text:'Parentesco',bold:true,fontSize:10,fillColor:'#f0f0f0'},
+    ]];
+    deps.forEach(d=>body.push([
+      {text:d.nome||'—',fontSize:10},
+      {text:d.cpf||'—',fontSize:10},
+      {text:fmtData(d.data_nascimento),fontSize:10},
+      {text:d.grau_parentesco||'—',fontSize:10},
+    ]));
+    depBlock=[secao('DEPENDENTES'),{
+      table:{headerRows:1,widths:['*','auto','auto','auto'],body},
+      layout:{hLineWidth:()=>0.5,vLineWidth:()=>0.5,hLineColor:()=>'#999',vLineColor:()=>'#999',
+        paddingLeft:()=>6,paddingRight:()=>6,paddingTop:()=>3,paddingBottom:()=>3}
+    }];
+  }
+
+  const def={
+    pageSize:'A4',
+    pageMargins:[40,36,40,40],
+    defaultStyle:{fontSize:10,color:'#000'},
+    content:[
+      topbar,
+      {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:BORDA}],margin:[0,2,0,0]},
+      {text:p.nome||'',bold:true,fontSize:16,margin:[0,10,0,0]},
+
+      secao('DADOS PESSOAIS'),
+      {columns:[
+        {width:'*',stack:[
+          campo('CPF:',p.cpf||p.cpf_cnpj),
+          campo('RG:',p.rg),
+          campo('PIS:',p.pis),
+          campo('Data de Nascimento:',fmtData(p.data_nascimento)),
+          campo('Naturalidade:',p.local_nascimento),
+          campo('Nacionalidade:',p.nacionalidade),
+          campo('Sexo:',p.sexo==='M'?'Masculino':p.sexo==='F'?'Feminino':''),
+        ]},
+        {width:'*',stack:[
+          campo('Estado Civil:',p.estado_civil),
+          campo('Cor/Etnia:',p.cor),
+          campo('Escolaridade:',p.escolaridade),
+          campo('Telefone:',p.telefone),
+          campo('Celular:',p.celular),
+          campo('E-mail:',p.email),
+        ]},
+      ]},
+      campo('Nome da Mãe:',p.nome_mae),
+      campo('Nome do Pai:',p.nome_pai),
+
+      secao('DADOS PROFISSIONAIS'),
+      {columns:[
+        {width:'*',stack:[
+          campo('Admissão:',fmtData(p.data_admissao)),
+          campo('Função:',funcaoNome),
+          campo('CBO:',cboFunc),
+          campo('Departamento:',p.departamento),
+        ]},
+        {width:'*',stack:[
+          campo('Cargo:',p.cargo),
+          campo('Salário:',fmtMoeda(p.salario)),
+          campo('Horário/Turno:',horarioNome),
+          campo('Unidade:',unidade),
+        ]},
+      ]},
+
+      ...depBlock,
+
+      {text:'',margin:[0,30,0,0]},
+      {columns:[
+        {stack:[{canvas:[{type:'line',x1:0,y1:0,x2:200,y2:0,lineWidth:1,lineColor:BORDA}]},
+          {text:'Assinatura do Colaborador',fontSize:9,alignment:'center',margin:[0,3,0,0]}],width:'*'},
+        {stack:[{canvas:[{type:'line',x1:0,y1:0,x2:200,y2:0,lineWidth:1,lineColor:BORDA}]},
+          {text:'Responsável RH',fontSize:9,alignment:'center',margin:[0,3,0,0]}],width:'*'},
+      ],columnGap:30},
+
+      {text:'Documento gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
+        fontSize:8,color:'#888',alignment:'center',margin:[0,20,0,0]},
+    ],
+  };
+  pdfMake.createPdf(def).open();
+}
+
 // ══════════════════════════════════════════════════════════════════════
 
 // Estado de edição (parte dos params salvos ou defaults)
@@ -16943,7 +17077,10 @@ function rCadEpiColaborador(pessoaId){
   return`<div style="padding:4px 0">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div style="font-size:12px;color:var(--text3)">${episFuncao.length} EPI(s) obrigatório(s) para ${p?.cargo||'esta função'}</div>
-      ${pode?`<button class="btn btn-sm" onclick="epiGerarFicha('${pessoaId}')">📄 Gerar ficha PDF</button>`:''}
+      <div style="display:flex;gap:8px">
+        ${pode?`<button class="btn btn-sm" onclick="epiLoteModal('${pessoaId}')">✓ Registrar todas entregas</button>`:''}
+        ${pode?`<button class="btn btn-sm" onclick="epiGerarFicha('${pessoaId}')">📄 Gerar ficha PDF</button>`:''}
+      </div>
     </div>
     ${rows.join('')}
   </div>`;
@@ -17017,6 +17154,52 @@ async function epiSalvarEntrega(pessoaId,epiId,validadeMeses){
     else if(curPage==='rh-pendencias')render(); // veio da Central de Pendências
   }catch(e){portErr('Erro: '+e.message);}
 }
+
+// ── REGISTRAR TODAS AS ENTREGAS DE EPI EM LOTE ──
+function epiLoteModal(pessoaId){
+  if(!epiPodeEditar())return;
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const episFuncao=p?.funcao_id?epiFuncao.filter(ef=>ef.funcao_id===p.funcao_id):[];
+  if(!episFuncao.length){alert('Nenhum EPI para esta função.');return;}
+  const hoje=epiHoje();
+  const lista=episFuncao.map(ef=>{const e=epiCatalogo.find(x=>x.id===ef.epi_id);return `<div style="font-size:12px;padding:3px 0;color:var(--text2)">• ${e?.nome||'—'} <span style="color:var(--text3)">(${ef.validade_meses} meses)</span></div>`;}).join('');
+  portModal(`Registrar entrega de ${episFuncao.length} EPIs`,
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Todos os EPIs obrigatórios da função serão registrados como entregues na mesma data:</div>
+     <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:12px;max-height:140px;overflow:auto">${lista}</div>
+     <div style="display:grid;grid-template-columns:1fr;gap:12px">
+      <div><label class="fl">Data da entrega *</label><input class="fi" id="epi-l-data" type="date" value="${hoje}"></div>
+      <div><label class="fl">Observações</label><input class="fi" id="epi-l-obs" placeholder="Opcional"></div>
+     </div>
+     <div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:8px 10px;border-radius:6px;margin-top:10px">As datas de próxima troca serão calculadas individualmente conforme a validade de cada EPI.</div>`,
+    `epiLoteSalvar('${pessoaId}')`);
+}
+
+async function epiLoteSalvar(pessoaId){
+  const dataEntrega=ge('epi-l-data')?.value;
+  if(!dataEntrega){portErr('Informe a data da entrega.');return;}
+  const obs=ge('epi-l-obs')?.value||null;
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const episFuncao=p?.funcao_id?epiFuncao.filter(ef=>ef.funcao_id===p.funcao_id):[];
+  portSaving();
+  try{
+    for(const ef of episFuncao){
+      const dataProxima=epiAddMeses(dataEntrega,Number(ef.validade_meses));
+      const anteriores=epiEntregas.filter(e=>e.pessoa_id===pessoaId&&e.epi_id===ef.epi_id&&e.status==='ativo');
+      await Promise.all(anteriores.map(e=>dbUpdate('epi_entregas',e.id,{status:'substituido'})));
+      epiEntregas=epiEntregas.map(e=>anteriores.find(a=>a.id===e.id)?{...e,status:'substituido'}:e);
+      const dados={company_id:company?.id,pessoa_id:pessoaId,epi_id:ef.epi_id,
+        funcao_id:p?.funcao_id||null,data_entrega:dataEntrega,data_proxima_troca:dataProxima,
+        status:'ativo',url_termo:null,observacoes:obs,registrado_por:cu?.id,owner_id:cu?.id};
+      const salvo=await dbInsert('epi_entregas',dados);
+      if(salvo)epiEntregas=[salvo,...epiEntregas];
+    }
+    portClose();
+    const panel=ge('cad-panel-epi');
+    if(panel)panel.innerHTML=rCadEpiColaborador(pessoaId);
+    else if(curPage==='rh-pendencias')render();
+  }catch(e){portErr('Erro: '+e.message);}
+}
+// ── FIM LOTE EPI ──
 
 // ── GERAR FICHA EPI (PDF) ──
 function epiGerarFicha(pessoaId){
@@ -17269,7 +17452,10 @@ function rCadExameColaborador(pessoaId){
   return`<div style="padding:4px 0">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div style="font-size:12px;color:var(--text3)">${examesDaFuncao.length} exame(s) obrigatório(s) para ${p?.cargo||'esta função'}</div>
-      ${pode?`<button class="btn btn-sm" onclick="exameAgendarModal('${pessoaId}','')">📅 Agendar exame</button>`:''}
+      <div style="display:flex;gap:8px">
+        ${pode?`<button class="btn btn-sm" onclick="exameLoteModal('${pessoaId}')">✓ Marcar todos realizados</button>`:''}
+        ${pode?`<button class="btn btn-sm" onclick="exameAgendarModal('${pessoaId}','')">📅 Agendar exame</button>`:''}
+      </div>
     </div>
     ${rows.join('')}
   </div>`;
@@ -17352,6 +17538,65 @@ async function exameSalvarRealizado(pessoaId,exameId,periodicidade){
     else if(curPage==='rh-pendencias')render(); // veio da Central de Pendências
   }catch(e){portErr('Erro: '+e.message);}
 }
+// ── MARCAR TODOS OS EXAMES EM LOTE ──
+function exameLoteModal(pessoaId){
+  if(!examePodeEditar())return;
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const examesDaFuncao=p?.funcao_id?exameFuncao.filter(ef=>ef.funcao_id===p.funcao_id):[];
+  if(!examesDaFuncao.length){alert('Nenhum exame para esta função.');return;}
+  const hoje=new Date().toISOString().slice(0,10);
+  const tipoOpts=Object.entries(EXAME_TIPOS).map(([k,v])=>`<option value="${k}" ${k==='periodico'?'selected':''}>${v}</option>`).join('');
+  const resOpts=Object.entries(EXAME_RESULTADOS).map(([k,v])=>`<option value="${k}" ${k==='apto'?'selected':''}>${v.l}</option>`).join('');
+  const lista=examesDaFuncao.map(ef=>{const ex=exameCatalogo.find(x=>x.id===ef.exame_id);return `<div style="font-size:12px;padding:3px 0;color:var(--text2)">• ${ex?.nome||'—'} <span style="color:var(--text3)">(${ef.periodicidade} meses)</span></div>`;}).join('');
+  portModal(`Marcar ${examesDaFuncao.length} exames como realizados`,
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Todos os exames obrigatórios da função serão registrados com a mesma data e resultado:</div>
+     <div style="background:var(--bg2);border-radius:8px;padding:10px 12px;margin-bottom:12px;max-height:140px;overflow:auto">${lista}</div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label class="fl">Tipo *</label><select class="fi" id="ex-l-tipo">${tipoOpts}</select></div>
+      <div><label class="fl">Resultado *</label><select class="fi" id="ex-l-res">${resOpts}</select></div>
+      <div><label class="fl">Data de realização *</label><input class="fi" id="ex-l-data" type="date" value="${hoje}"></div>
+      <div><label class="fl">Médico / Clínica</label><input class="fi" id="ex-l-med" placeholder="Opcional"></div>
+     </div>
+     <div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:8px 10px;border-radius:6px;margin-top:10px">As datas de vencimento serão calculadas individualmente conforme a periodicidade de cada exame.</div>`,
+    `exameLoteSalvar('${pessoaId}')`);
+}
+
+async function exameLoteSalvar(pessoaId){
+  const dataReal=ge('ex-l-data')?.value;
+  if(!dataReal){portErr('Informe a data de realização.');return;}
+  const tipo=ge('ex-l-tipo')?.value||'periodico';
+  const resultado=ge('ex-l-res')?.value||'apto';
+  const medico=ge('ex-l-med')?.value||null;
+  const p=pessoas.find(x=>x.id===pessoaId);
+  const examesDaFuncao=p?.funcao_id?exameFuncao.filter(ef=>ef.funcao_id===p.funcao_id):[];
+  portSaving();
+  try{
+    for(const ef of examesDaFuncao){
+      const dataVenc=exameAddMeses(dataReal,Number(ef.periodicidade));
+      // Substitui ativos anteriores deste exame
+      const anteriores=exameRealizados.filter(e=>e.pessoa_id===pessoaId&&e.exame_id===ef.exame_id&&e.status==='ativo');
+      await Promise.all(anteriores.map(e=>dbUpdate('exame_realizados',e.id,{status:'substituido'})));
+      exameRealizados=exameRealizados.map(e=>anteriores.find(a=>a.id===e.id)?{...e,status:'substituido'}:e);
+      const dados={company_id:company?.id,pessoa_id:pessoaId,exame_id:ef.exame_id,
+        funcao_id:p?.funcao_id||null,tipo,data_realizacao:dataReal,data_vencimento:dataVenc,
+        resultado,medico_clinica:medico,url_aso:null,observacoes:null,
+        status:'ativo',registrado_por:cu?.id,owner_id:cu?.id};
+      const salvo=await dbInsert('exame_realizados',dados);
+      if(salvo)exameRealizados=[salvo,...exameRealizados];
+      // Marca agendamentos pendentes como realizados
+      const agendPend=exameAgendamentos.filter(a=>a.pessoa_id===pessoaId&&a.exame_id===ef.exame_id&&a.status==='agendado');
+      if(agendPend.length){
+        await Promise.all(agendPend.map(a=>dbUpdate('exame_agendamentos',a.id,{status:'realizado',realizado_id:salvo?.id||null})));
+        exameAgendamentos=exameAgendamentos.map(a=>agendPend.find(x=>x.id===a.id)?{...a,status:'realizado'}:a);
+      }
+    }
+    portClose();
+    const panel=ge('cad-panel-exames');
+    if(panel)panel.innerHTML=`<div style="padding-top:4px">${rCadExameColaborador(pessoaId)}</div>`;
+    else if(curPage==='rh-pendencias')render();
+  }catch(e){portErr('Erro: '+e.message);}
+}
+// ── FIM LOTE EXAMES ──
 // ========================== FIM EXAMES ==========================
 
 // ==================== DEMISSÃO + ADVERTÊNCIAS ====================
