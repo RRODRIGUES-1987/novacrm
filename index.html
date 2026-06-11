@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.289 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.290 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -424,7 +424,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       <button class="nav-module-header" id="mod-wms" onclick="toggleModule('wms')">
         <div style="display:flex;align-items:center;gap:9px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          <span>WMS / Expedição</span>
+          <span>WMS</span>
         </div>
         <svg class="mod-arrow" id="arrow-wms" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
@@ -844,6 +844,9 @@ let epiCatalogo=[],epiFuncao=[],epiEntregas=[];
 let exameCatalogo=[],exameFuncao=[],exameRealizados=[];
 let rhDemissoes=[],rhAdvertencias=[];
 let capasProcesso=[];
+let wmsProdutos=[];
+let wmsPedidos=[];
+let wmsPedidoItens=[];
 let portFrotaTab='mov',portPlacasTab='cadastro';
 let cadastrosTab='clientes',cadastroForm=null;
 
@@ -931,7 +934,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.289';
+const APP_VERSION='v1.0.290';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1386,6 +1389,7 @@ async function loadData(){
       await loadAgendamentosData(cid).catch(console.warn);
       await loadDisciplinarData(cid).catch(console.warn);
       await loadCapasData(cid).catch(console.warn);
+      await loadWmsData(cid).catch(console.warn);
       historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}`).catch(()=>[]);
     } else {
       [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
@@ -1456,6 +1460,7 @@ async function loadData(){
     await loadAgendamentosData(cid).catch(e=>console.warn('loadAgendamentosData:',e));
     await loadDisciplinarData(cid).catch(e=>console.warn('loadDisciplinarData:',e));
     await loadCapasData(cid).catch(e=>console.warn('loadCapasData:',e));
+    await loadWmsData(cid).catch(e=>console.warn('loadWmsData:',e));
     historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}`).catch(()=>[]);
   } else if(role==='portaria'&&cid){
     [profiles,pessoas,rhFuncoes]=await Promise.all([
@@ -1660,7 +1665,7 @@ function render(){
   else if(curPage==='admin-sessoes'){c.innerHTML=rAdminSessoes();}
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='fat-capas')c.innerHTML=rCapasProcesso();
-  else if(curPage==='wms-clientes')c.innerHTML=rWmsEmConstrucao('Parâmetros / Clientes','Configuração de clientes (depositantes) por unidade: produtos, regras de conferência, armazenagem e separação.');
+  else if(curPage==='wms-clientes')c.innerHTML=rWmsClientes();
   else if(curPage==='wms-produtos')c.innerHTML=rWmsEmConstrucao('Produtos','Importação e cadastro de produtos do cliente, com perfis e dados (SKU, descrição, dimensões, peso, curva).');
   else if(curPage==='wms-pedidos')c.innerHTML=rWmsEmConstrucao('Pedidos','Importação de pedidos a processar no WMS.');
   else if(curPage==='wms-separacao')c.innerHTML=rWmsEmConstrucao('Separação','Geração de etiquetas de separação e processo de picking.');
@@ -18037,6 +18042,72 @@ function capaProximoNumero(tipo){
 }
 
 // ── TELA PRINCIPAL ──
+async function loadWmsData(cid){
+  [wmsProdutos,wmsPedidos,wmsPedidoItens]=await Promise.all([
+    dbSelect('wms_produtos',`company_id=eq.${cid}${unitFilter()}&order=sku.asc`).catch(()=>[]),
+    dbSelect('wms_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
+    dbSelect('wms_pedido_itens',`company_id=eq.${cid}`).catch(()=>[]),
+  ]);
+}
+
+// ── WMS · PARÂMETROS / CLIENTES (depositantes) ──
+function rWmsClientes(){
+  const cid=company?.id;
+  const lista=clientes.filter(c=>c.company_id===cid);
+  if(!lista.length){
+    return rWmsEmConstrucao('Parâmetros / Clientes','Nenhum cliente cadastrado ainda. Cadastre clientes no menu Cadastros para que apareçam aqui como depositantes.');
+  }
+  const linhas=lista.map(c=>{
+    const nProd=wmsProdutos.filter(p=>p.cliente_id===c.id).length;
+    const nPed=wmsPedidos.filter(p=>p.cliente_id===c.id).length;
+    return `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:10px 12px;font-weight:600;font-size:13px">${c.nome||c.razao_social||'—'}</td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${c.cnpj||c.cpf_cnpj||'—'}</td>
+      <td style="padding:10px 12px;text-align:center;font-size:12px">${nProd}</td>
+      <td style="padding:10px 12px;text-align:center;font-size:12px">${nPed}</td>
+      <td style="padding:10px 12px;text-align:right">
+        <button class="btn btn-sm" onclick="wmsAbrirCliente('${c.id}')">Configurar</button>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div style="padding:4px 0">
+    <div style="font-size:12px;color:var(--text3);margin-bottom:14px">${lista.length} cliente(s) depositante(s) — configure produtos e regras por cliente.</div>
+    <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--bg2)">
+          <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:var(--text2)">Cliente (Depositante)</th>
+          <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:var(--text2)">CNPJ/CPF</th>
+          <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:var(--text2)">Produtos</th>
+          <th style="padding:9px 12px;text-align:center;font-size:11px;font-weight:600;color:var(--text2)">Pedidos</th>
+          <th style="padding:9px 12px"></th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function wmsAbrirCliente(clienteId){
+  const c=clientes.find(x=>x.id===clienteId);
+  if(!c)return;
+  const nProd=wmsProdutos.filter(p=>p.cliente_id===clienteId).length;
+  portModal(`Configurar — ${c.nome||c.razao_social||'Cliente'}`,
+    `<div style="font-size:13px;color:var(--text2);line-height:1.7">
+      <div style="margin-bottom:14px">Configurações específicas deste depositante:</div>
+      <div style="display:grid;gap:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg2);border-radius:8px">
+          <div><div style="font-weight:600;font-size:13px;color:var(--text)">Produtos</div><div style="font-size:11px;color:var(--text3)">${nProd} produto(s) cadastrado(s)</div></div>
+          <button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ver produtos</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg2);border-radius:8px;opacity:.6">
+          <div><div style="font-weight:600;font-size:13px;color:var(--text)">Regras de Conferência / Armazenagem / Separação</div><div style="font-size:11px;color:var(--text3)">Em construção</div></div>
+          <span style="font-size:11px;color:var(--amber-text)">🚧 em breve</span>
+        </div>
+      </div>
+    </div>`,
+    'portClose()',{saveLabel:'Fechar'});
+}
+
 function rWmsEmConstrucao(titulo, descricao){
   return `<div style="max-width:560px;margin:60px auto;text-align:center">
     <div style="width:64px;height:64px;border-radius:16px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin:0 auto 20px">
