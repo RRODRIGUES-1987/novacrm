@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.308 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.309 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -952,7 +952,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.308';
+const APP_VERSION='v1.0.309';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -16586,77 +16586,119 @@ function rOrgArvore(){
 }
 
 // ── MOTOR DE DESENHO: layout em faixas por nível ──
+function orgAbrevia(t){
+  // abreviações comuns de cargos para caber na caixa
+  return (t||'')
+    .replace(/Operador de Empilhadeira/gi,'Op. Empilhadeira')
+    .replace(/Auxiliar de Controle Logístico/gi,'Aux. Ctrl. Logístico')
+    .replace(/Líder de Controle Logístico/gi,'Líder Ctrl. Logístico')
+    .replace(/Supervisor Operações/gi,'Sup. Operações')
+    .replace(/Supervisor de Operações/gi,'Sup. Operações')
+    .replace(/Gerente de Operações/gi,'Ger. Operações')
+    .replace(/Gerente Financeira/gi,'Ger. Financeira')
+    .replace(/\bLider\b/gi,'Líder');
+}
+
 function orgRenderSVG(visiveis,visIds){
-  // Agrupa nós por nível presente (ordenado)
+  const NIVEL_OPERACIONAL=6;
   const niveisPresentes=[...new Set(visiveis.map(n=>+n.nivel||6))].sort((a,b)=>a-b);
-  // Dimensões
-  const CARD_W=170, CARD_H=58, GAP_X=24, FAIXA_H=130, LABEL_W=130, PAD=24;
-  // Posição X de cada card: distribui por nível, lado a lado
-  const posY={}; niveisPresentes.forEach((nv,i)=>posY[nv]=PAD+i*FAIXA_H);
-  // ordena nós dentro do nível por departamento+título pra estabilidade
+  const CARD_W=158, CARD_H=46, GAP_X=22, GAP_Y=8, PAD=24;
+
+  // separa: níveis não-operacionais (linha horizontal) e operacional (empilhado sob o pai)
   const porNivel={}; niveisPresentes.forEach(nv=>porNivel[nv]=[]);
   visiveis.slice().sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''))
     .forEach(n=>porNivel[+n.nivel||6].push(n));
-  // calcula X de cada nó e a largura total
-  const cardX={}; let maxLinhaW=0;
-  niveisPresentes.forEach(nv=>{
-    const arr=porNivel[nv];
-    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
-    maxLinhaW=Math.max(maxLinhaW,linhaW);
-  });
-  const totalW=LABEL_W+maxLinhaW+PAD*2;
-  niveisPresentes.forEach(nv=>{
-    const arr=porNivel[nv];
-    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
-    const startX=LABEL_W+PAD+(maxLinhaW-linhaW)/2; // centraliza a faixa
-    arr.forEach((n,i)=>{cardX[n.id]=startX+i*(CARD_W+GAP_X);});
-  });
-  const totalH=PAD*2+niveisPresentes.length*FAIXA_H;
 
-  // Centro X/Y de cada card
+  const niveisTopo=niveisPresentes.filter(nv=>nv!==NIVEL_OPERACIONAL);
+  const temOperacional=porNivel[NIVEL_OPERACIONAL] && porNivel[NIVEL_OPERACIONAL].length>0;
+
+  // Y de cada faixa não-operacional
+  const FAIXA_H=104;
+  const posY={}; niveisTopo.forEach((nv,i)=>posY[nv]=PAD+i*FAIXA_H);
+  const yOperacionalBase=PAD+niveisTopo.length*FAIXA_H;
+
+  // X dos cards das faixas de topo (centralizadas)
+  const cardX={}, cardY={};
+  let maxLinhaW=0;
+  niveisTopo.forEach(nv=>{const arr=porNivel[nv];maxLinhaW=Math.max(maxLinhaW,arr.length*CARD_W+(arr.length-1)*GAP_X);});
+
+  // Operacional empilhado: agrupa por pai (líder). Cada coluna fica sob o X do pai.
+  // Para largura, considera também a distribuição operacional.
+  const totalWtopo=PAD*2+Math.max(maxLinhaW,CARD_W);
+  niveisTopo.forEach(nv=>{
+    const arr=porNivel[nv];
+    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
+    const startX=PAD+(Math.max(maxLinhaW,linhaW)-linhaW)/2;
+    arr.forEach((n,i)=>{cardX[n.id]=startX+i*(CARD_W+GAP_X);cardY[n.id]=posY[nv];});
+  });
+
+  // posiciona operacional: pilha sob cada pai visível; pais sem coluna ainda recebem X
+  let maxOperacionalH=0;
+  if(temOperacional){
+    const grupos={}; // parentId -> [nós]
+    porNivel[NIVEL_OPERACIONAL].forEach(n=>{const k=n.parent_id&&visIds.has(n.parent_id)?n.parent_id:'__sempai__';(grupos[k]=grupos[k]||[]).push(n);});
+    Object.keys(grupos).forEach(pid=>{
+      const arr=grupos[pid];
+      const baseX=cardX[pid]!=null?cardX[pid]:(PAD);
+      arr.forEach((n,i)=>{
+        cardX[n.id]=baseX;
+        cardY[n.id]=yOperacionalBase+i*(CARD_H+GAP_Y);
+      });
+      maxOperacionalH=Math.max(maxOperacionalH,arr.length*(CARD_H+GAP_Y));
+    });
+  }
+
+  const totalW=Math.max(totalWtopo,PAD*2+maxLinhaW);
+  const totalH=yOperacionalBase+(temOperacional?maxOperacionalH:0)+PAD;
+
   const cx=id=>cardX[id]+CARD_W/2;
-  const cyTop=n=>posY[+n.nivel||6];
-  const cyCard=n=>posY[+n.nivel||6]+CARD_H/2;
 
-  // Conectores: do pai (borda inferior) ao filho (borda superior), em L
+  // Conectores pai→filho (em L), só para níveis de topo; operacional liga ao pai pela coluna
   let linhas='';
   visiveis.forEach(n=>{
     if(!n.parent_id||!visIds.has(n.parent_id))return;
-    const pai=visiveis.find(x=>x.id===n.parent_id);if(!pai)return;
-    const x1=cx(pai.id), y1=cyTop(pai)+CARD_H, x2=cx(n.id), y2=cyTop(n);
-    const ym=y1+(y2-y1)/2;
-    linhas+=`<path d="M${x1} ${y1} L${x1} ${ym} L${x2} ${ym} L${x2} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.5"/>`;
+    if(cardX[n.id]==null||cardX[n.parent_id]==null)return;
+    const ehOper=(+n.nivel||6)===NIVEL_OPERACIONAL;
+    if(ehOper){
+      // liga do pai à primeira caixa empilhada (linha vertical pela coluna)
+      const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, x2=cardX[n.id]+12, y2=cardY[n.id]+CARD_H/2;
+      linhas+=`<path d="M${x1} ${y1} L${x1} ${y2} L${cardX[n.id]} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
+    }else{
+      const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, x2=cx(n.id), y2=cardY[n.id];
+      const ym=y1+(y2-y1)/2;
+      linhas+=`<path d="M${x1} ${y1} L${x1} ${ym} L${x2} ${ym} L${x2} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
+    }
   });
 
-  // Faixas (labels de nível à esquerda + linha divisória)
-  let faixas='';
-  niveisPresentes.forEach(nv=>{
-    const info=orgNivelInfo(nv), y=posY[nv];
-    faixas+=`<line x1="${LABEL_W}" y1="${y-14}" x2="${totalW-PAD}" y2="${y-14}" stroke="var(--border,#e2e8f0)" stroke-width="1" stroke-dasharray="3 4"/>`;
-    faixas+=`<text x="16" y="${y+CARD_H/2}" font-size="11" font-weight="700" fill="${info.cor}" dominant-baseline="middle">${nv}. ${info.label}</text>`;
-  });
-
-  // Cards
+  // Cards (box preenchido com a cor do nível)
+  function corClara(hex){
+    // converte para um tom claro de fundo (mistura com branco)
+    const h=hex.replace('#','');const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
+    const mix=(c)=>Math.round(c+(255-c)*0.82);
+    return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+  }
   let cards='';
   visiveis.forEach(n=>{
+    if(cardX[n.id]==null)return;
     const info=orgNivelInfo(n.nivel);
-    const x=cardX[n.id], y=cyTop(n);
+    const x=cardX[n.id], y=cardY[n.id];
     const alocs=orgAlocadosNo(n.id);
     const vagas=Math.max(0,n.headcount-alocs.length);
-    const nomes=alocs.slice(0,1).map(a=>{const p=pessoas.find(x=>x.id===a.pessoa_id);return p?p.nome:'';}).filter(Boolean)[0]||'';
+    const nome=alocs.slice(0,1).map(a=>{const p=pessoas.find(x=>x.id===a.pessoa_id);return p?p.nome:'';}).filter(Boolean)[0]||'';
     const extra=alocs.length>1?` +${alocs.length-1}`:'';
-    const sub=nomes?(nomes.length>20?nomes.slice(0,19)+'…':nomes)+extra:(n.departamento||'');
+    const titulo=orgAbrevia(n.title);
+    const tituloFit=titulo.length>22?titulo.slice(0,21)+'…':titulo;
+    const sub=nome?(nome.length>20?nome.slice(0,19)+'…':nome)+extra:`${alocs.length}/${n.headcount}${vagas>0?` · ${vagas} vaga${vagas>1?'s':''}`:''}`;
     cards+=`<g class="org-svg-card" style="cursor:pointer" onclick="orgNoModal('${n.id}')">
-      <rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="8" fill="var(--bg,#fff)" stroke="${info.cor}" stroke-width="1.5"/>
+      <rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="8" fill="${corClara(info.cor)}" stroke="${info.cor}" stroke-width="1.25"/>
       <rect x="${x}" y="${y}" width="4" height="${CARD_H}" rx="2" fill="${info.cor}"/>
-      <text x="${x+14}" y="${y+22}" font-size="12" font-weight="700" fill="var(--text,#1e293b)">${(n.title||'').length>22?(n.title||'').slice(0,21)+'…':(n.title||'')}</text>
-      <text x="${x+14}" y="${y+38}" font-size="10" fill="var(--text3,#94a3b8)">${sub}</text>
-      <text x="${x+14}" y="${y+51}" font-size="9" fill="var(--text3,#94a3b8)">${alocs.length}/${n.headcount}${vagas>0?` · ${vagas} vaga${vagas>1?'s':''}`:''}</text>
+      <text x="${x+13}" y="${y+19}" font-size="12" font-weight="700" fill="${info.cor}">${tituloFit}</text>
+      <text x="${x+13}" y="${y+34}" font-size="9.5" fill="${info.cor}" opacity="0.85">${sub}</text>
     </g>`;
   });
 
   return `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" style="display:block;min-width:100%">
-    ${faixas}${linhas}${cards}
+    ${linhas}${cards}
   </svg>`;
 }
 
