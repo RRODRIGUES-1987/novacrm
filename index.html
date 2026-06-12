@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.298 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.299 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -851,6 +851,9 @@ let capasProcesso=[];
 let wmsProdutos=[];
 let wmsPedidos=[];
 let wmsPedidoItens=[];
+let wmsListasSeparacao=[];
+let wmsListaPedidos=[];
+let wmsTarefasSeparacao=[];
 let portFrotaTab='mov',portPlacasTab='cadastro';
 let cadastrosTab='clientes',cadastroForm=null;
 
@@ -938,7 +941,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.298';
+const APP_VERSION='v1.0.299';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1673,7 +1676,7 @@ function render(){
   else if(curPage==='wms-produtos'){c.innerHTML=rWmsProdutos();filterWmsProdutos('');}
   else if(curPage==='wms-pedidos'){c.innerHTML=rWmsPedidos();filterWmsPedidos('');}
   else if(curPage==='wms-importar-pedidos')c.innerHTML=rWmsImportarPedidos();
-  else if(curPage==='wms-separacao')c.innerHTML=rWmsEmConstrucao('Separação','Geração de etiquetas de separação e processo de picking.');
+  else if(curPage==='wms-separacao')c.innerHTML=rWmsSeparacao();
   else if(curPage==='wms-conferencia')c.innerHTML=rWmsEmConstrucao('Conferência','Conferência dos pedidos separados.');
   else if(curPage==='wms-romaneio')c.innerHTML=rWmsEmConstrucao('Romaneio de Carga','Montagem do romaneio de carga.');
   else if(curPage==='wms-expedicao')c.innerHTML=rWmsEmConstrucao('Expedição / Embarque','Etiqueta de embarque e conferência de carga no embarque.');
@@ -18099,11 +18102,235 @@ function capaProximoNumero(tipo){
 
 // ── TELA PRINCIPAL ──
 async function loadWmsData(cid){
-  [wmsProdutos,wmsPedidos,wmsPedidoItens]=await Promise.all([
+  [wmsProdutos,wmsPedidos,wmsPedidoItens,wmsListasSeparacao,wmsListaPedidos,wmsTarefasSeparacao]=await Promise.all([
     dbSelect('wms_produtos',`company_id=eq.${cid}${unitFilter()}&order=sku.asc`).catch(()=>[]),
     dbSelect('wms_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
     dbSelect('wms_pedido_itens',`company_id=eq.${cid}`).catch(()=>[]),
+    dbSelect('wms_listas_separacao',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
+    dbSelect('wms_lista_pedidos',`company_id=eq.${cid}`).catch(()=>[]),
+    dbSelect('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
+}
+
+// ── WMS · SEPARAÇÃO (listas geradas) ──
+const WMS_LISTA_STATUS={
+  gerada:{l:'Gerada',c:'#3b82f6',bg:'rgba(59,130,246,.12)'},
+  em_execucao:{l:'Em Execução',c:'#f59e0b',bg:'rgba(245,158,11,.12)'},
+  concluida:{l:'Concluída',c:'#22c55e',bg:'rgba(34,197,94,.12)'},
+  cancelada:{l:'Cancelada',c:'#ef4444',bg:'rgba(239,68,68,.12)'},
+};
+const WMS_LISTA_TIPO={pedido_a_pedido:'Pedido a pedido',consolidada:'Consolidada',por_veiculo:'Por veículo'};
+
+function rWmsSeparacao(){
+  const cid=company?.id;
+  const listas=wmsListasSeparacao.filter(l=>l.company_id===cid);
+  if(!listas.length){
+    return rWmsEmConstrucao('Separação','Nenhuma lista de separação gerada ainda. Vá em Pedidos, selecione os pedidos e clique em "Gerar listas de separação".');
+  }
+  const rows=listas.map(l=>{
+    const cli=clientes.find(c=>c.id===l.cliente_id);
+    const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888',bg:'rgba(136,136,136,.12)'};
+    const tar=wmsTarefasSeparacao.filter(t=>t.lista_id===l.id);
+    const feitas=tar.filter(t=>t.status==='separada').length;
+    const data=l.created_at?new Date(l.created_at).toLocaleDateString('pt-BR'):'';
+    return `<div class="li" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
+      <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Lista</div>
+        <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${l.numero_lista||'—'}</div>
+      </div>
+      <div class="linfo" style="justify-content:center">
+        <div class="lname">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'}</div>
+        <div class="lsub">${l.qtd_pedidos} pedido(s) · ${l.qtd_tarefas} tarefa(s) · ${feitas}/${tar.length} separadas · ${data}</div>
+      </div>
+      <div class="lright" style="align-items:center"><span style="background:${st.bg};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${st.l}</span></div>
+    </div>`;
+  }).join('');
+  return `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${listas.length} lista(s) de separação</div>${rows}`;
+}
+
+function wmsListaDetalhe(id){
+  const l=wmsListasSeparacao.find(x=>x.id===id);if(!l)return;
+  const cli=clientes.find(c=>c.id===l.cliente_id);
+  const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===id).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
+  const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888'};
+  const linhas=tarefas.map(t=>{
+    const vol=t.tipo_volume==='pallet'?'<span style="background:rgba(139,92,246,.15);color:#8b5cf6;font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px">PALLET</span>':'<span style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px">FRAÇÃO</span>';
+    return `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:7px 10px;font-size:11px;color:var(--text3)">${t.ordem}</td>
+      <td style="padding:7px 10px;font-weight:700;font-size:12px">${t.sku}</td>
+      <td style="padding:7px 10px;font-size:12px;color:var(--text2)">${t.descricao||'—'}</td>
+      <td style="padding:7px 10px">${vol}</td>
+      <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600">${(+t.quantidade).toLocaleString('pt-BR')}</td>
+    </tr>`;
+  }).join('');
+  portModal(`Lista ${l.numero_lista}`,
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div><div style="font-size:13px;font-weight:600">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'}</div>
+        <div style="font-size:11px;color:var(--text3)">${l.qtd_pedidos} pedido(s) · ${tarefas.length} tarefa(s)</div></div>
+      <span style="background:${st.bg||'rgba(136,136,136,.12)'};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px">${st.l}</span>
+    </div>
+    <div style="max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--bg2);position:sticky;top:0">
+          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">#</th>
+          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">SKU</th>
+          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">Descrição</th>
+          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">Volume</th>
+          <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--text2);font-weight:600">Qtd</th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>`,
+    'portClose()',{saveLabel:'Fechar',width:'720px'});
+}
+
+// ── WMS · GERAÇÃO DE LISTAS DE SEPARAÇÃO ──
+let wmsPedSelecionados=new Set();  // ids de pedidos marcados
+
+// Calcula tarefas de um item: pallets cheios + fração (cada um = 1 tarefa)
+function wmsCalcTarefas(qtd, multiplo){
+  const q=+qtd||0;
+  const m=+multiplo||0;
+  const tarefas=[];
+  if(m>0){
+    const cheios=Math.floor(q/m);
+    const resto=+(q-cheios*m).toFixed(3);
+    for(let i=0;i<cheios;i++) tarefas.push({tipo_volume:'pallet',quantidade:m});
+    if(resto>0) tarefas.push({tipo_volume:'fracao',quantidade:resto});
+  }else{
+    // sem múltiplo: cada unidade vira tarefa
+    const n=Math.max(0,Math.round(q));
+    for(let i=0;i<n;i++) tarefas.push({tipo_volume:'fracao',quantidade:1});
+  }
+  return tarefas;
+}
+
+function wmsMultiploDe(produtoId,sku,clienteId){
+  let p=produtoId?wmsProdutos.find(x=>x.id===produtoId):null;
+  if(!p&&sku)p=wmsProdutos.find(x=>x.cliente_id===clienteId&&String(x.sku).trim()===String(sku).trim());
+  return p?(+p.qtd_por_pallet||0):0;
+}
+
+function wmsGerarListasModal(){
+  const ids=[...wmsPedSelecionados];
+  if(!ids.length){alert('Selecione ao menos um pedido.');return;}
+  // valida: todos do mesmo depositante? (consolidada exige)
+  const peds=wmsPedidos.filter(p=>ids.includes(p.id));
+  const clientesSel=[...new Set(peds.map(p=>p.cliente_id))];
+  const multiCliente=clientesSel.length>1;
+  // total de tarefas estimado
+  let totTarefas=0;
+  peds.forEach(p=>{
+    wmsPedidoItens.filter(it=>it.pedido_id===p.id).forEach(it=>{
+      totTarefas+=wmsCalcTarefas(it.quantidade,wmsMultiploDe(it.produto_id,it.sku,p.cliente_id)).length;
+    });
+  });
+  portModal(`Gerar listas de separação — ${ids.length} pedido(s)`,
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:14px">${ids.length} pedido(s) selecionado(s) · ~${totTarefas} tarefa(s) estimada(s). Escolha o tipo de separação:</div>
+     <div style="display:flex;flex-direction:column;gap:10px">
+       <button class="wms-tipo-opt" onclick="wmsGerarListas('pedido_a_pedido')" style="text-align:left;background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:14px;cursor:pointer">
+         <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">📋 Pedido a pedido</div>
+         <div style="font-size:12px;color:var(--text2)">Uma lista para cada pedido. O separador atende um pedido por vez.</div>
+       </button>
+       <button class="wms-tipo-opt" ${multiCliente?'disabled':'onclick="wmsGerarListas(\'consolidada\')"'} style="text-align:left;background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:14px;cursor:${multiCliente?'not-allowed':'pointer'};opacity:${multiCliente?'.5':'1'}">
+         <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">🔀 Consolidada (picking unificado)</div>
+         <div style="font-size:12px;color:var(--text2)">Soma os mesmos SKUs de todos os pedidos numa lista única. Desconsolida na conferência.${multiCliente?'<br><b style="color:var(--amber-text)">Indisponível: pedidos de depositantes diferentes.</b>':''}</div>
+       </button>
+       <button class="wms-tipo-opt" disabled style="text-align:left;background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:14px;cursor:not-allowed;opacity:.5">
+         <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">🚚 Consolidado por veículo</div>
+         <div style="font-size:12px;color:var(--text2)">Agrupa por veículo. <span style="color:var(--amber-text)">🚧 em breve</span></div>
+       </button>
+     </div>`,
+    null,{saveLabel:'',width:'520px'});
+  // esconde o botão salvar (só opções)
+  setTimeout(()=>{const b=ge('port-modal-save');if(b)b.style.display='none';},10);
+}
+
+async function wmsGerarListas(tipo){
+  const ids=[...wmsPedSelecionados];
+  const peds=wmsPedidos.filter(p=>ids.includes(p.id));
+  if(!peds.length){portClose();return;}
+  const cid=company?.id;
+  portSaving();
+  try{
+    const seq=()=>'L'+Date.now().toString().slice(-7)+Math.floor(Math.random()*90+10);
+    if(tipo==='pedido_a_pedido'){
+      for(const p of peds){
+        const itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
+        // monta tarefas
+        const tarefas=[];
+        itens.forEach(it=>{
+          const m=wmsMultiploDe(it.produto_id,it.sku,p.cliente_id);
+          wmsCalcTarefas(it.quantidade,m).forEach((t,idx)=>tarefas.push({...t,it,ordem:tarefas.length+1}));
+        });
+        const lista=await dbInsert('wms_listas_separacao',{
+          company_id:cid,unit_id:p.unit_id||null,cliente_id:p.cliente_id,
+          numero_lista:seq(),tipo,status:'gerada',qtd_pedidos:1,qtd_tarefas:tarefas.length,owner_id:cu?.id,
+        });
+        const listaObj=Array.isArray(lista)?lista[0]:lista;
+        if(!listaObj)continue;
+        wmsListasSeparacao=[listaObj,...wmsListasSeparacao];
+        // vínculo pedido
+        const vinc=await dbInsert('wms_lista_pedidos',{company_id:cid,lista_id:listaObj.id,pedido_id:p.id});
+        if(vinc)wmsListaPedidos=[Array.isArray(vinc)?vinc[0]:vinc,...wmsListaPedidos];
+        // tarefas
+        for(const t of tarefas){
+          const tar=await dbInsert('wms_tarefas_separacao',{
+            company_id:cid,lista_id:listaObj.id,pedido_id:p.id,pedido_item_id:t.it.id,
+            produto_id:t.it.produto_id||null,sku:t.it.sku,descricao:t.it.descricao,
+            tipo_volume:t.tipo_volume,quantidade:t.quantidade,ordem:t.ordem,status:'pendente',
+          });
+          if(tar)wmsTarefasSeparacao=[Array.isArray(tar)?tar[0]:tar,...wmsTarefasSeparacao];
+        }
+        // pedido → em_separacao
+        await dbUpdate('wms_pedidos',p.id,{status:'em_separacao'});
+        wmsPedidos=wmsPedidos.map(x=>x.id===p.id?{...x,status:'em_separacao'}:x);
+      }
+    }else if(tipo==='consolidada'){
+      const cliId=peds[0].cliente_id;
+      // soma por SKU
+      const porSku={};
+      peds.forEach(p=>{
+        wmsPedidoItens.filter(it=>it.pedido_id===p.id).forEach(it=>{
+          const k=String(it.sku).trim();
+          if(!porSku[k])porSku[k]={sku:it.sku,descricao:it.descricao,produto_id:it.produto_id,qtd:0};
+          porSku[k].qtd+=(+it.quantidade||0);
+        });
+      });
+      // monta tarefas a partir das somas
+      const tarefas=[];
+      Object.values(porSku).forEach(s=>{
+        const m=wmsMultiploDe(s.produto_id,s.sku,cliId);
+        wmsCalcTarefas(s.qtd,m).forEach(t=>tarefas.push({...t,s,ordem:tarefas.length+1}));
+      });
+      const lista=await dbInsert('wms_listas_separacao',{
+        company_id:cid,unit_id:peds[0].unit_id||null,cliente_id:cliId,
+        numero_lista:seq(),tipo,status:'gerada',qtd_pedidos:peds.length,qtd_tarefas:tarefas.length,owner_id:cu?.id,
+      });
+      const listaObj=Array.isArray(lista)?lista[0]:lista;
+      if(listaObj){
+        wmsListasSeparacao=[listaObj,...wmsListasSeparacao];
+        for(const p of peds){
+          const vinc=await dbInsert('wms_lista_pedidos',{company_id:cid,lista_id:listaObj.id,pedido_id:p.id});
+          if(vinc)wmsListaPedidos=[Array.isArray(vinc)?vinc[0]:vinc,...wmsListaPedidos];
+          await dbUpdate('wms_pedidos',p.id,{status:'em_separacao'});
+          wmsPedidos=wmsPedidos.map(x=>x.id===p.id?{...x,status:'em_separacao'}:x);
+        }
+        for(const t of tarefas){
+          // consolidada: pedido_id null (desconsolida na conferência)
+          const tar=await dbInsert('wms_tarefas_separacao',{
+            company_id:cid,lista_id:listaObj.id,pedido_id:null,pedido_item_id:null,
+            produto_id:t.s.produto_id||null,sku:t.s.sku,descricao:t.s.descricao,
+            tipo_volume:t.tipo_volume,quantidade:t.quantidade,ordem:t.ordem,status:'pendente',
+          });
+          if(tar)wmsTarefasSeparacao=[Array.isArray(tar)?tar[0]:tar,...wmsTarefasSeparacao];
+        }
+      }
+    }
+    wmsPedSelecionados.clear();
+    portClose();
+    pg('wms-separacao');
+  }catch(e){portErr('Erro: '+e.message);}
 }
 
 // ── WMS · PEDIDOS (lista por status + detalhe) ──
@@ -18142,10 +18369,37 @@ function rWmsPedidos(){
       <option value="">Todos os depositantes</option>${optCli}
     </select>
     <div class="swrap" style="flex:1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input placeholder="Buscar nº do pedido..." oninput="filterWmsPedidos(this.value)">
+      <input id="wms-ped-busca" placeholder="Buscar nº do pedido..." oninput="filterWmsPedidos(this.value)">
+    </div>
+  </div>
+  <div id="wms-ped-selbar" style="display:none;align-items:center;justify-content:space-between;background:var(--accent-bg);border-radius:8px;padding:8px 14px;margin-bottom:10px">
+    <span id="wms-ped-selcount" style="font-size:12px;font-weight:600;color:var(--accent-text)"></span>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="wmsPedSelecionados.clear();filterWmsPedidos(ge('wms-ped-busca')?.value||'')">Limpar</button>
+      <button class="btn btn-p btn-sm" onclick="wmsGerarListasModal()">⚙ Gerar listas de separação</button>
     </div>
   </div>
   <div id="wms-ped-list"></div>`;
+}
+
+function wmsPedToggleSel(id,ev){
+  if(ev)ev.stopPropagation();
+  if(wmsPedSelecionados.has(id))wmsPedSelecionados.delete(id);
+  else wmsPedSelecionados.add(id);
+  wmsPedAtualizaSelbar();
+}
+
+function wmsPedAtualizaSelbar(){
+  const bar=ge('wms-ped-selbar');const cnt=ge('wms-ped-selcount');
+  if(!bar)return;
+  const n=wmsPedSelecionados.size;
+  bar.style.display=n?'flex':'none';
+  if(cnt)cnt.textContent=`${n} pedido(s) selecionado(s)`;
+  // atualiza visual dos checkboxes
+  document.querySelectorAll('[data-wms-ped-chk]').forEach(el=>{
+    const id=el.getAttribute('data-wms-ped-chk');
+    el.checked=wmsPedSelecionados.has(id);
+  });
 }
 
 function wmsPedLinha(p){
@@ -18154,7 +18408,11 @@ function wmsPedLinha(p){
   const totQtd=itens.reduce((s,it)=>s+(+it.quantidade||0),0);
   const semProd=itens.filter(it=>it.status==='produto_nao_encontrado').length;
   const data=p.created_at?new Date(p.created_at).toLocaleDateString('pt-BR'):'';
+  // só pedidos 'importado' podem ser selecionados para gerar listas
+  const selecionavel=p.status==='importado';
+  const chk=selecionavel?`<input type="checkbox" data-wms-ped-chk="${p.id}" ${wmsPedSelecionados.has(p.id)?'checked':''} onclick="wmsPedToggleSel('${p.id}',event)" style="width:17px;height:17px;cursor:pointer;margin-right:12px;flex-shrink:0">`:'<span style="width:17px;margin-right:12px;flex-shrink:0"></span>';
   return `<div class="li" style="cursor:pointer;align-items:stretch" onclick="wmsPedidoDetalhe('${p.id}')">
+    <div style="display:flex;align-items:center" onclick="event.stopPropagation()">${chk}</div>
     <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
       <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Pedido</div>
       <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${p.numero_pedido}</div>
@@ -18176,6 +18434,7 @@ function filterWmsPedidos(q){
   const el=ge('wms-ped-list');if(!el)return;
   if(!lista.length){el.innerHTML='<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11H3v10h6zM21 3h-6v18h6zM15 7H9v14h6z"/></svg><p>Nenhum pedido — importe em WMS → Importar Pedidos</p></div>';return;}
   el.innerHTML=lista.slice(0,300).map(wmsPedLinha).join('')+(lista.length>300?`<div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">Mostrando 300 de ${lista.length} — refine a busca</div>`:'');
+  wmsPedAtualizaSelbar();
 }
 
 function wmsPedidoDetalhe(id){
