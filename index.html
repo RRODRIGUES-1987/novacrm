@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.294 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.295 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -934,7 +934,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.294';
+const APP_VERSION='v1.0.295';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1666,7 +1666,7 @@ function render(){
   else if(curPage==='faturamento')c.innerHTML=rFaturamento();
   else if(curPage==='fat-capas')c.innerHTML=rCapasProcesso();
   else if(curPage==='wms-clientes')c.innerHTML=rWmsClientes();
-  else if(curPage==='wms-produtos')c.innerHTML=rWmsEmConstrucao('Produtos','Importação e cadastro de produtos do cliente, com perfis e dados (SKU, descrição, dimensões, peso, curva).');
+  else if(curPage==='wms-produtos'){c.innerHTML=rWmsProdutos();filterWmsProdutos('');}
   else if(curPage==='wms-pedidos')c.innerHTML=rWmsEmConstrucao('Pedidos','Importação de pedidos a processar no WMS.');
   else if(curPage==='wms-separacao')c.innerHTML=rWmsEmConstrucao('Separação','Geração de etiquetas de separação e processo de picking.');
   else if(curPage==='wms-conferencia')c.innerHTML=rWmsEmConstrucao('Conferência','Conferência dos pedidos separados.');
@@ -18099,6 +18099,96 @@ async function loadWmsData(cid){
     dbSelect('wms_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
     dbSelect('wms_pedido_itens',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
+}
+
+// ── WMS · PRODUTOS ──
+let wmsProdCliente='';  // filtro de cliente atual
+function rWmsProdutos(){
+  const cid=company?.id;
+  const clientesComProd=clientes.filter(c=>c.company_id===cid&&wmsProdutos.some(p=>p.cliente_id===c.id));
+  const opcoes=clientes.filter(c=>c.company_id===cid).map(c=>{
+    const n=wmsProdutos.filter(p=>p.cliente_id===c.id).length;
+    return `<option value="${c.id}" ${wmsProdCliente===c.id?'selected':''}>${c.nome}${n?` (${n})`:''}</option>`;
+  }).join('');
+  return `<div class="sechdr" style="gap:10px">
+    <select class="fi" id="wms-prod-cliente" onchange="wmsProdCliente=this.value;render()" style="height:36px;width:auto;min-width:220px">
+      <option value="">Todos os depositantes</option>
+      ${opcoes}
+    </select>
+    <div class="swrap" style="flex:1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input placeholder="Buscar por SKU ou descrição..." oninput="filterWmsProdutos(this.value)">
+    </div>
+  </div>
+  <div id="wms-prod-count" style="font-size:12px;color:var(--text3);margin-bottom:10px"></div>
+  <div id="wms-prod-list"></div>`;
+}
+
+function wmsProdLinha(p){
+  const cli=clientes.find(c=>c.id===p.cliente_id);
+  const dim=[p.altura_cm,p.largura_cm,p.comprimento_cm].filter(x=>x!=null).join('×');
+  const meta=[p.unidade_medida,p.peso_kg!=null?`${p.peso_kg}kg`:'',dim?`${dim}cm`:'',p.tipo_embalagem].filter(Boolean).join(' · ');
+  return `<div class="li" style="cursor:pointer" onclick="wmsProdutoModal('${p.id}')">
+    <div class="av av${(p.sku||'').charCodeAt(0)%5}" style="font-size:10px;font-weight:700">${(p.sku||'?').slice(0,3)}</div>
+    <div class="linfo">
+      <div class="lname">${p.descricao||'(sem descrição)'} <span style="color:var(--text3);font-weight:400">· ${p.sku}</span></div>
+      <div class="lsub">${cli?.nome||''}${meta?' — '+meta:''}</div>
+    </div>
+    <div class="lright"><div style="display:flex;gap:4px" onclick="event.stopPropagation()">
+      <button class="btn btn-sm" onclick="wmsProdutoModal('${p.id}')">Editar</button>
+    </div></div>
+  </div>`;
+}
+
+function filterWmsProdutos(q){
+  const cid=company?.id;
+  let lista=wmsProdutos.filter(p=>p.company_id===cid);
+  if(wmsProdCliente) lista=lista.filter(p=>p.cliente_id===wmsProdCliente);
+  if(q){const ql=q.toLowerCase();lista=lista.filter(p=>(p.sku||'').toLowerCase().includes(ql)||(p.descricao||'').toLowerCase().includes(ql));}
+  const el=ge('wms-prod-list');if(!el)return;
+  const cnt=ge('wms-prod-count');
+  if(cnt)cnt.textContent=`${lista.length} produto(s)`;
+  if(!lista.length){el.innerHTML='<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg><p>Nenhum produto — importe em Admin → Importação → Produtos (WMS)</p></div>';return;}
+  // Limita render a 300 por vez para performance
+  el.innerHTML=lista.slice(0,300).map(wmsProdLinha).join('')+(lista.length>300?`<div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">Mostrando 300 de ${lista.length} — refine a busca</div>`:'');
+}
+
+function wmsProdutoModal(id){
+  const p=wmsProdutos.find(x=>x.id===id);if(!p)return;
+  const cli=clientes.find(c=>c.id===p.cliente_id);
+  portModal(`Produto — ${p.sku}`,
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Depositante: <b style="color:var(--text)">${cli?.nome||'—'}</b></div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label class="fl">SKU *</label><input class="fi" id="wp-sku" value="${p.sku||''}"></div>
+      <div><label class="fl">Un. Medida</label><input class="fi" id="wp-um" value="${p.unidade_medida||''}"></div>
+      <div style="grid-column:1/3"><label class="fl">Descrição</label><input class="fi" id="wp-desc" value="${(p.descricao||'').replace(/"/g,'&quot;')}"></div>
+      <div><label class="fl">Peso Líquido (kg)</label><input class="fi" id="wp-pliq" type="number" step="0.001" value="${p.peso_liquido_kg??''}"></div>
+      <div><label class="fl">Peso Bruto (kg)</label><input class="fi" id="wp-pbruto" type="number" step="0.001" value="${p.peso_kg??''}"></div>
+      <div><label class="fl">Caixas/Pallet</label><input class="fi" id="wp-cxpallet" type="number" value="${p.qtd_por_pallet??''}"></div>
+      <div><label class="fl">Peso/Pallet</label><input class="fi" id="wp-pesopallet" type="number" step="0.001" value="${p.peso_por_pallet??''}"></div>
+      <div><label class="fl">Altura (cm)</label><input class="fi" id="wp-alt" type="number" step="0.1" value="${p.altura_cm??''}"></div>
+      <div><label class="fl">Largura (cm)</label><input class="fi" id="wp-larg" type="number" step="0.1" value="${p.largura_cm??''}"></div>
+      <div><label class="fl">Profundidade (cm)</label><input class="fi" id="wp-prof" type="number" step="0.1" value="${p.comprimento_cm??''}"></div>
+      <div><label class="fl">Tipo Embalagem</label><input class="fi" id="wp-emb" value="${(p.tipo_embalagem||'').replace(/"/g,'&quot;')}"></div>
+     </div>`,
+    `wmsProdutoSalvar('${id}')`);
+}
+
+async function wmsProdutoSalvar(id){
+  const g=x=>ge(x)?.value;
+  const n=x=>{const v=ge(x)?.value;return v===''||v==null?null:parseFloat(v);};
+  const sku=g('wp-sku')?.trim();
+  if(!sku){portErr('SKU é obrigatório.');return;}
+  portSaving();
+  try{
+    const obj={sku,descricao:g('wp-desc')?.trim()||null,unidade_medida:g('wp-um')?.trim()||'UN',
+      peso_liquido_kg:n('wp-pliq'),peso_kg:n('wp-pbruto'),qtd_por_pallet:n('wp-cxpallet'),
+      peso_por_pallet:n('wp-pesopallet'),altura_cm:n('wp-alt'),largura_cm:n('wp-larg'),
+      comprimento_cm:n('wp-prof'),tipo_embalagem:g('wp-emb')?.trim()||null};
+    await dbUpdate('wms_produtos',id,obj);
+    wmsProdutos=wmsProdutos.map(p=>p.id===id?{...p,...obj}:p);
+    portClose();
+    if(curPage==='wms-produtos')render();
+  }catch(e){portErr('Erro: '+e.message);}
 }
 
 // ── WMS · PARÂMETROS / CLIENTES (depositantes) ──
