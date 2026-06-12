@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.303 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.304 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -844,7 +844,6 @@ let comprasSolicitacoes=[],comprasCotacoes=[],comprasPedidos=[];
 let portariaAcessos=[],portariaVeiculos=[],portariaFrotaMov=[],portariaAutorizacoes=[],portariaPlacas=[];
 let orgNos=[],orgAlocacoes=[];
 let orgTab='arvore';
-let orgUnidadeSel='__todas__'; // '__todas__' | '__corp__' | unit_id
 let epiCatalogo=[],epiFuncao=[],epiEntregas=[];
 let exameCatalogo=[],exameFuncao=[],exameRealizados=[];
 let rhDemissoes=[],rhAdvertencias=[];
@@ -942,7 +941,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.303';
+const APP_VERSION='v1.0.304';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -16456,13 +16455,13 @@ const ORG_CSS=`
 `;
 
 // helpers
-// Visibilidade do nó conforme a unidade selecionada no organograma.
-// Corporativo (unit_id nulo) aparece em todas as visões.
+// Visibilidade do nó conforme o FILTRO DE UNIDADE GLOBAL (activeUnit).
+// Consolidado (activeUnit nulo) = mostra tudo.
+// Unidade selecionada = corporativos (sem unidade) + os daquela unidade.
 function orgNoVisivel(n){
   if(n.company_id!==company?.id) return false;
-  if(orgUnidadeSel==='__todas__') return true;
-  if(orgUnidadeSel==='__corp__') return !n.unit_id;        // só corporativos
-  return !n.unit_id || n.unit_id===orgUnidadeSel;          // corporativo + da unidade
+  if(!activeUnit) return true;                       // consolidado: tudo
+  return !n.unit_id || n.unit_id===activeUnit;       // corporativo + da unidade ativa
 }
 function orgFilhos(parentId){return orgNos.filter(n=>n.parent_id===parentId&&orgNoVisivel(n));}
 function orgAlocadosNo(noId){return orgAlocacoes.filter(a=>a.org_no_id===noId);}
@@ -16516,15 +16515,12 @@ function rRHOrganograma(){
 
 // ── ABA ÁRVORE ──
 function orgSeletorUnidade(){
-  const us=(userUnits||[]).filter(u=>u.company_id===company?.id||!u.company_id);
-  const opt=(v,l)=>`<option value="${v}" ${orgUnidadeSel===v?'selected':''}>${l}</option>`;
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-    <span style="font-size:12px;color:var(--text2);font-weight:500">Unidade:</span>
-    <select class="fi" style="height:34px;width:auto;min-width:180px" onchange="orgUnidadeSel=this.value;render()">
-      ${opt('__todas__','Todas (corporativo + unidades)')}
-      ${opt('__corp__','🏛️ Corporativo')}
-      ${us.map(u=>opt(u.id,(u.name||u.nome||'Unidade'))).join('')}
-    </select>
+  // Usa o filtro de unidade GLOBAL (activeUnit). Aqui só mostramos a visão atual.
+  const lbl=activeUnit?(userUnits.find(u=>u.id===activeUnit)?.name||'Unidade'):'Consolidado (todas as unidades)';
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text2)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    <span>Visão: <b style="color:var(--text)">${lbl}</b></span>
+    <span style="color:var(--text3)">— use o filtro de unidade no topo para alternar. Nós corporativos aparecem em todas as visões.</span>
   </div>`;
 }
 
@@ -16546,7 +16542,7 @@ function rOrgArvore(){
       <div style="font-size:20px;font-weight:700;color:var(--green-text)">${fmtV(totalCusto)}</div><div style="font-size:11px;color:var(--text2)">Custo total</div></div>
   </div>`;
 
-  if(!raizes.length) return orgSeletorUnidade()+resumo+`<div class="empty"><p>Nenhuma estrutura montada${orgUnidadeSel!=='__todas__'?' para esta visão':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
+  if(!raizes.length) return orgSeletorUnidade()+resumo+`<div class="empty"><p>Nenhuma estrutura montada${activeUnit?' para esta unidade':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
 
   const tree=`<style>${ORG_CSS}</style>
   <div style="position:relative">
@@ -16718,8 +16714,8 @@ function orgNoModal(id,parentIdDefault){
   const corBtns=cores.map(c=>`<button type="button" onclick="document.getElementById('org-no-cor').value='${c}';this.parentNode.querySelectorAll('button').forEach(b=>b.style.outline='none');this.style.outline='2px solid var(--accent)'" style="width:22px;height:22px;border-radius:50%;background:${c};border:none;cursor:pointer;outline:${(n?.cor||cores[0])===c?'2px solid var(--accent)':'none'}"></button>`).join('');
 
   // Seletor de unidade do nó: corporativo (nulo) ou unidade específica.
-  // Default ao criar: se há uma unidade selecionada na visão, já vem ela.
-  const unidadeDefault = n ? (n.unit_id||'') : (orgUnidadeSel!=='__todas__'&&orgUnidadeSel!=='__corp__'?orgUnidadeSel:'');
+  // Default ao criar: se há uma unidade ativa no filtro global, já vem ela.
+  const unidadeDefault = n ? (n.unit_id||'') : (activeUnit||'');
   const us=(userUnits||[]).filter(u=>u.company_id===company?.id||!u.company_id);
   const unidOpts=`<option value="" ${!unidadeDefault?'selected':''}>🏛️ Corporativo (todas as unidades)</option>`
     +us.map(u=>`<option value="${u.id}" ${unidadeDefault===u.id?'selected':''}>${u.name||u.nome||'Unidade'}</option>`).join('');
