@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.307 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.308 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -845,6 +845,16 @@ let portariaAcessos=[],portariaVeiculos=[],portariaFrotaMov=[],portariaAutorizac
 let orgNos=[],orgAlocacoes=[];
 let orgTab='arvore';
 let _orgZoomLevel=1;
+let orgRecorteNo=''; // '' = árvore inteira | id do nó = recorte a partir dele
+const ORG_NIVEIS=[
+  {n:1,label:'Presidência',cor:'#7c3aed'},
+  {n:2,label:'Diretoria',cor:'#2563eb'},
+  {n:3,label:'Gerência',cor:'#0891b2'},
+  {n:4,label:'Supervisão',cor:'#1D9E75'},
+  {n:5,label:'Liderança',cor:'#d68910'},
+  {n:6,label:'Operacional',cor:'#64748b'},
+];
+function orgNivelInfo(n){return ORG_NIVEIS.find(x=>x.n===(+n||6))||ORG_NIVEIS[5];}
 let epiCatalogo=[],epiFuncao=[],epiEntregas=[];
 let exameCatalogo=[],exameFuncao=[],exameRealizados=[];
 let rhDemissoes=[],rhAdvertencias=[];
@@ -942,7 +952,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.307';
+const APP_VERSION='v1.0.308';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -16522,11 +16532,16 @@ function orgSeletorUnidade(){
 
 function rOrgArvore(){
   const cid=company?.id;
-  // Raiz efetiva: nó visível que não tem pai OU cujo pai não está visível na visão atual
-  // (evita nós órfãos quando o pai é filtrado por unidade).
-  const visiveis=orgNos.filter(orgNoVisivel);
+  // Base visível considerando filtro de unidade + recorte por nó
+  let visiveis=orgNos.filter(orgNoVisivel);
+  // Recorte: se um nó foi escolhido, mostra só ele + descendentes
+  if(orgRecorteNo){
+    const manter=new Set([orgRecorteNo]);
+    let mudou=true;
+    while(mudou){mudou=false;visiveis.forEach(n=>{if(n.parent_id&&manter.has(n.parent_id)&&!manter.has(n.id)){manter.add(n.id);mudou=true;}});}
+    visiveis=visiveis.filter(n=>manter.has(n.id));
+  }
   const visIds=new Set(visiveis.map(n=>n.id));
-  const raizes=visiveis.filter(n=>!n.parent_id||!visIds.has(n.parent_id));
   const totalColabs=orgAlocacoes.filter(a=>visIds.has(a.org_no_id)).length;
   const totalVagas=visiveis.reduce((s,n)=>s+n.headcount,0);
   const totalCusto=visiveis.reduce((s,n)=>s+orgCustoNo(n.id),0);
@@ -16542,23 +16557,107 @@ function rOrgArvore(){
       <div style="font-size:20px;font-weight:700;color:var(--green-text)">${fmtV(totalCusto)}</div><div style="font-size:11px;color:var(--text2)">Custo total</div></div>
   </div>`;
 
-  if(!raizes.length) return orgSeletorUnidade()+resumo+`<div class="empty"><p>Nenhuma estrutura montada${activeUnit?' para esta unidade':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
+  // Seletor de recorte (ver a partir de um nó)
+  const opcoesRecorte=orgNos.filter(n=>n.company_id===cid).sort((a,b)=>(a.nivel||6)-(b.nivel||6)||(a.title||'').localeCompare(b.title||''))
+    .map(n=>`<option value="${n.id}" ${orgRecorteNo===n.id?'selected':''}>${n.title} (${orgNivelInfo(n.nivel).label})</option>`).join('');
+  const barraRecorte=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <span style="font-size:12px;color:var(--text2)">Ver a partir de:</span>
+    <select class="fi" style="height:32px;width:auto;min-width:200px" onchange="orgRecorteNo=this.value;render()">
+      <option value="">Organograma completo</option>${opcoesRecorte}
+    </select>
+    ${orgRecorteNo?`<button class="btn btn-sm" onclick="orgRecorteNo='';render()">✕ Limpar recorte</button>`:''}
+  </div>`;
 
-  const tree=`<style>${ORG_CSS}</style>
-  <div style="position:relative">
+  if(!visiveis.length) return barraRecorte+resumo+`<div class="empty"><p>Nenhuma estrutura montada${activeUnit?' para esta unidade':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
+
+  const svg=orgRenderSVG(visiveis,visIds);
+  const tree=`<div style="position:relative">
     <div style="position:absolute;top:8px;right:8px;z-index:5;display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)">
       <button onclick="orgZoom(-0.1)" title="Diminuir" style="width:28px;height:28px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:16px;font-weight:700;color:var(--text2)">−</button>
       <button onclick="orgZoomReset()" title="Resetar zoom" style="height:28px;padding:0 8px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2)">100%</button>
       <button onclick="orgZoom(0.1)" title="Aumentar" style="width:28px;height:28px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:16px;font-weight:700;color:var(--text2)">+</button>
     </div>
-    <div class="org-wrap" id="org-wrap" style="cursor:grab">
-      <div class="org-chart" id="org-chart" style="transform-origin:top center;transition:transform .12s;transform:scale(${_orgZoomLevel})">
-        <ul>${raizes.map(r=>`<li>${orgRenderNo(r)}</li>`).join('')}</ul>
-      </div>
+    <div class="org-wrap" id="org-wrap" style="cursor:grab;overflow:auto;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);min-height:340px">
+      <div id="org-chart" style="transform-origin:top left;transition:transform .12s;transform:scale(${_orgZoomLevel})">${svg}</div>
     </div>
   </div>`;
 
-  return orgSeletorUnidade()+resumo+tree;
+  return barraRecorte+resumo+tree;
+}
+
+// ── MOTOR DE DESENHO: layout em faixas por nível ──
+function orgRenderSVG(visiveis,visIds){
+  // Agrupa nós por nível presente (ordenado)
+  const niveisPresentes=[...new Set(visiveis.map(n=>+n.nivel||6))].sort((a,b)=>a-b);
+  // Dimensões
+  const CARD_W=170, CARD_H=58, GAP_X=24, FAIXA_H=130, LABEL_W=130, PAD=24;
+  // Posição X de cada card: distribui por nível, lado a lado
+  const posY={}; niveisPresentes.forEach((nv,i)=>posY[nv]=PAD+i*FAIXA_H);
+  // ordena nós dentro do nível por departamento+título pra estabilidade
+  const porNivel={}; niveisPresentes.forEach(nv=>porNivel[nv]=[]);
+  visiveis.slice().sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''))
+    .forEach(n=>porNivel[+n.nivel||6].push(n));
+  // calcula X de cada nó e a largura total
+  const cardX={}; let maxLinhaW=0;
+  niveisPresentes.forEach(nv=>{
+    const arr=porNivel[nv];
+    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
+    maxLinhaW=Math.max(maxLinhaW,linhaW);
+  });
+  const totalW=LABEL_W+maxLinhaW+PAD*2;
+  niveisPresentes.forEach(nv=>{
+    const arr=porNivel[nv];
+    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
+    const startX=LABEL_W+PAD+(maxLinhaW-linhaW)/2; // centraliza a faixa
+    arr.forEach((n,i)=>{cardX[n.id]=startX+i*(CARD_W+GAP_X);});
+  });
+  const totalH=PAD*2+niveisPresentes.length*FAIXA_H;
+
+  // Centro X/Y de cada card
+  const cx=id=>cardX[id]+CARD_W/2;
+  const cyTop=n=>posY[+n.nivel||6];
+  const cyCard=n=>posY[+n.nivel||6]+CARD_H/2;
+
+  // Conectores: do pai (borda inferior) ao filho (borda superior), em L
+  let linhas='';
+  visiveis.forEach(n=>{
+    if(!n.parent_id||!visIds.has(n.parent_id))return;
+    const pai=visiveis.find(x=>x.id===n.parent_id);if(!pai)return;
+    const x1=cx(pai.id), y1=cyTop(pai)+CARD_H, x2=cx(n.id), y2=cyTop(n);
+    const ym=y1+(y2-y1)/2;
+    linhas+=`<path d="M${x1} ${y1} L${x1} ${ym} L${x2} ${ym} L${x2} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.5"/>`;
+  });
+
+  // Faixas (labels de nível à esquerda + linha divisória)
+  let faixas='';
+  niveisPresentes.forEach(nv=>{
+    const info=orgNivelInfo(nv), y=posY[nv];
+    faixas+=`<line x1="${LABEL_W}" y1="${y-14}" x2="${totalW-PAD}" y2="${y-14}" stroke="var(--border,#e2e8f0)" stroke-width="1" stroke-dasharray="3 4"/>`;
+    faixas+=`<text x="16" y="${y+CARD_H/2}" font-size="11" font-weight="700" fill="${info.cor}" dominant-baseline="middle">${nv}. ${info.label}</text>`;
+  });
+
+  // Cards
+  let cards='';
+  visiveis.forEach(n=>{
+    const info=orgNivelInfo(n.nivel);
+    const x=cardX[n.id], y=cyTop(n);
+    const alocs=orgAlocadosNo(n.id);
+    const vagas=Math.max(0,n.headcount-alocs.length);
+    const nomes=alocs.slice(0,1).map(a=>{const p=pessoas.find(x=>x.id===a.pessoa_id);return p?p.nome:'';}).filter(Boolean)[0]||'';
+    const extra=alocs.length>1?` +${alocs.length-1}`:'';
+    const sub=nomes?(nomes.length>20?nomes.slice(0,19)+'…':nomes)+extra:(n.departamento||'');
+    cards+=`<g class="org-svg-card" style="cursor:pointer" onclick="orgNoModal('${n.id}')">
+      <rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="8" fill="var(--bg,#fff)" stroke="${info.cor}" stroke-width="1.5"/>
+      <rect x="${x}" y="${y}" width="4" height="${CARD_H}" rx="2" fill="${info.cor}"/>
+      <text x="${x+14}" y="${y+22}" font-size="12" font-weight="700" fill="var(--text,#1e293b)">${(n.title||'').length>22?(n.title||'').slice(0,21)+'…':(n.title||'')}</text>
+      <text x="${x+14}" y="${y+38}" font-size="10" fill="var(--text3,#94a3b8)">${sub}</text>
+      <text x="${x+14}" y="${y+51}" font-size="9" fill="var(--text3,#94a3b8)">${alocs.length}/${n.headcount}${vagas>0?` · ${vagas} vaga${vagas>1?'s':''}`:''}</text>
+    </g>`;
+  });
+
+  return `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" style="display:block;min-width:100%">
+    ${faixas}${linhas}${cards}
+  </svg>`;
 }
 
 // ── ZOOM / PAN do organograma ──
@@ -16574,13 +16673,10 @@ function orgZoomReset(){
 }
 function orgInitPan(){
   const wrap=ge('org-wrap');if(!wrap)return;
-  // Centraliza horizontalmente (a raiz fica no meio) e começa no topo
-  wrap.scrollTop=0;
-  const ch=ge('org-chart');
-  if(ch){const extra=ch.scrollWidth-wrap.clientWidth;wrap.scrollLeft=extra>0?extra/2:0;}
+  wrap.scrollTop=0;wrap.scrollLeft=0;
   let down=false,sx=0,sy=0,sl=0,st=0;
   wrap.onmousedown=function(e){
-    if(e.target.closest('.org-card'))return; // não arrasta ao clicar no card
+    if(e.target.closest('.org-svg-card'))return;
     down=true;sx=e.clientX;sy=e.clientY;sl=wrap.scrollLeft;st=wrap.scrollTop;wrap.style.cursor='grabbing';e.preventDefault();
   };
   wrap.onmousemove=function(e){
@@ -16724,10 +16820,13 @@ function orgNoModal(id,parentIdDefault){
   const unidOpts=`<option value="" ${!unidadeDefault?'selected':''}>🏛️ Corporativo (todas as unidades)</option>`
     +us.map(u=>`<option value="${u.id}" ${unidadeDefault===u.id?'selected':''}>${u.name||u.nome||'Unidade'}</option>`).join('');
 
+  const nivelOpts=ORG_NIVEIS.map(nv=>`<option value="${nv.n}" ${(+(n?.nivel||6))===nv.n?'selected':''}>${nv.n}. ${nv.label}</option>`).join('');
   portModal(n?`Editar — ${n.title}`:'Novo nó',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div style="grid-column:1/-1"><label class="fl">Cargo / Posição *</label><input class="fi" id="org-no-title" value="${n?.title||''}"></div>
-      <div style="grid-column:1/-1"><label class="fl">Unidade</label>
+      <div><label class="fl">Nível hierárquico *</label>
+        <select class="fi" id="org-no-nivel">${nivelOpts}</select></div>
+      <div><label class="fl">Unidade</label>
         <select class="fi" id="org-no-unit">${unidOpts}</select></div>
       <div><label class="fl">Departamento</label><input class="fi" id="org-no-dept" value="${n?.departamento||''}"></div>
       <div><label class="fl">Headcount planejado</label><input class="fi" id="org-no-hc" type="number" min="1" value="${n?.headcount||1}"></div>
@@ -16745,7 +16844,7 @@ async function orgSalvarNo(id){
   if(!title){portErr('Informe o cargo/posição.');return;}
   portSaving();
   const unitSel=ge('org-no-unit')?.value||null; // '' => corporativo (nulo)
-  const dados={title,departamento:ge('org-no-dept')?.value||null,headcount:Number(ge('org-no-hc')?.value)||1,parent_id:ge('org-no-parent')?.value||null,cor:ge('org-no-cor')?.value||null,company_id:company?.id,unit_id:unitSel,owner_id:cu?.id};
+  const dados={title,departamento:ge('org-no-dept')?.value||null,headcount:Number(ge('org-no-hc')?.value)||1,parent_id:ge('org-no-parent')?.value||null,cor:ge('org-no-cor')?.value||null,company_id:company?.id,unit_id:unitSel,nivel:Number(ge('org-no-nivel')?.value)||6,owner_id:cu?.id};
   try{
     if(id){await dbUpdate('org_nos',id,dados);orgNos=orgNos.map(x=>x.id===id?{...x,...dados}:x);}
     else{const salvo=await dbInsert('org_nos',dados);if(salvo)orgNos=[...orgNos,salvo];}
