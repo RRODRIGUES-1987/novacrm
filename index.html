@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.301 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.302 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -942,7 +942,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.301';
+const APP_VERSION='v1.0.302';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2696,9 +2696,9 @@ function _histPanelRefresh(pessoaId){
 function rHistPanelContent(pessoaId){
   const r=pessoas.find(x=>x.id===pessoaId);
   if(!r)return'';
-  // Eventos: precisam de data (sem data_inicio). Vínculos: precisam de data_inicio E funcao_id.
-  // Registros sem data_inicio E sem data E sem funcao_id são "fantasma" e ficam de fora.
-  const eventos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&!h.data_inicio&&h.data;});
+  // Eventos = logs de alteração (têm data_vigencia mas NÃO são vínculo de função:
+  // não têm funcao_id+data_inicio). Vínculos = data_inicio E funcao_id.
+  const eventos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&!h.data_inicio&&!h.funcao_id&&h.data_vigencia;});
   const vinculos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id;});
   const vincOrd=vinculos.slice().sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?-1:1);
   const cargoAdmissao=vincOrd.length?(rhFuncoes.find(f=>f.id===vincOrd[0].funcao_id)?.funcao||vincOrd[0].cargo_novo||r.cargo||''):(r.cargo||'');
@@ -2706,7 +2706,11 @@ function rHistPanelContent(pessoaId){
   const icons2={promocao:'⬆',transferencia:'↔',alteracao_salario:'💰',desligamento:'🚪'};
   const labels2={promocao:'Promoção',transferencia:'Transferência',alteracao_salario:'Reajuste',desligamento:'Desligamento'};
   eventos.forEach(function(h){
-    marcos2.push({data:h.data,label:labels2[h.tipo]||h.tipo||'Evento',sub:h.cargo_novo||h.motivo||'',icon:icons2[h.tipo]||'📌',cor:'#1e5f82'});
+    // monta o rótulo do evento a partir do que mudou (cargo, salário, etc.)
+    let lbl='Alteração', sub=h.motivo||'';
+    if(h.cargo_anterior&&h.cargo_novo&&h.cargo_anterior!==h.cargo_novo){ lbl='Mudança de cargo'; sub=h.cargo_novo+(h.motivo?' · '+h.motivo:''); }
+    else if(h.salario_anterior!=null&&h.salario_novo!=null&&String(h.salario_anterior)!==String(h.salario_novo)){ lbl='Reajuste'; sub='R$ '+Number(h.salario_novo).toLocaleString('pt-BR',{minimumFractionDigits:2})+(h.motivo?' · '+h.motivo:''); }
+    marcos2.push({data:h.data_vigencia,label:lbl,sub:sub,icon:'📌',cor:'#1e5f82'});
   });
   vinculos.forEach(function(v){
     if(v.data_inicio===r.data_admissao)return; // já representado pelo marco Admissão
@@ -3215,7 +3219,6 @@ async function saveCadastro(){
             alterado_por_nome:profile?.full_name||cu.email,
             motivo:getV('cad-motivo')||null,
             data_vigencia:dataVig,
-            data:dataVig,
           };
           camposProf.forEach(k=>{hist[k+'_anterior']=anterior[k]||null;hist[k+'_novo']=obj[k]||null;});
           await dbInsert('historico_profissional',hist);
