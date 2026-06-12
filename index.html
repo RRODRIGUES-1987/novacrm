@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.291 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.292 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -934,7 +934,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.291';
+const APP_VERSION='v1.0.292';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -12810,9 +12810,19 @@ const IMPORT_CONFIGS={
     ],
     customImport: true,
   },
+  wms_produtos:{
+    label:'Produtos (WMS)',
+    icon:'<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
+    colunas:['depositante','sku','descricao','unidade_medida','peso_liquido','peso_bruto','qtd_por_pallet','peso_por_pallet','altura','largura','profundidade','tipo_embalagem'],
+    labels:['Depositante (cliente)*','Cód. Produto*','Descrição*','Un. Medida','Peso Líquido','Peso Bruto','Caixas/Pallet','Peso/Pallet','Altura','Largura','Profundidade','Tipo Embalagem (Desc. UA)'],
+    obrigatorio:['depositante','sku'],
+    exemplo:[
+      ['USIQUIMICA DO BRASIL LTDA','6361','KEP 0530 (35 SSI)','KG','1','1','1000','1000','115','120','100','CONTAINER'],
+      ['USIBLEND INDUSTRIA E SERVICOS LTDA','L01296','LUCAS MOTO 4T OIL 10W-30','CX','10.296','11.441','60','686.46','125','120','120','CAIXA'],
+    ],
+    customImport: true,
+  },
 };
-
-let importTela=null,importDados=[],importErros=[];
 
 function rImportacao(){
   return`
@@ -12949,8 +12959,48 @@ async function confirmarImport(){
   const cid=company?.id||profile?.company_id||null;
   let ok=0,erros=0;
 
-  // Handler especial para linhas de cobrança das tabelas tarifárias
-  if(importTela==='contatos_clientes'){
+  // Handler especial para produtos WMS
+  if(importTela==='wms_produtos'){
+    const tr=v=>(v==null?'':String(v).trim());
+    const num=v=>{const s=tr(v).replace(/\./g,'').replace(',','.');const n=parseFloat(s);return isNaN(n)?null:n;};
+    const numDot=v=>{const n=parseFloat(tr(v).replace(',','.'));return isNaN(n)?null:n;};
+    // Resolve cliente por nome do depositante, dedup por (cliente_id, sku)
+    const vistos=new Set();
+    for(const row of importDados){
+      try{
+        const depNome=tr(row.depositante).toLowerCase();
+        const cliente=clientes.find(c=>(c.nome||'').trim().toLowerCase()===depNome);
+        if(!cliente){erros++;continue;}
+        const sku=tr(row.sku);
+        if(!sku){erros++;continue;}
+        const chave=cliente.id+'|'+sku;
+        if(vistos.has(chave))continue; // dedup: 1ª ocorrência
+        vistos.add(chave);
+        const obj={
+          company_id:cid, unit_id:cliente.unit_id||null, cliente_id:cliente.id,
+          sku, descricao:tr(row.descricao)||null,
+          unidade_medida:tr(row.unidade_medida)||'UN',
+          peso_liquido_kg:numDot(row.peso_liquido),
+          peso_kg:numDot(row.peso_bruto),
+          qtd_por_pallet:numDot(row.qtd_por_pallet),
+          peso_por_pallet:numDot(row.peso_por_pallet),
+          altura_cm:numDot(row.altura), largura_cm:numDot(row.largura), comprimento_cm:numDot(row.profundidade),
+          tipo_embalagem:tr(row.tipo_embalagem)||null,
+          ativo:true, owner_id:cu?.id,
+        };
+        // upsert: se já existe (cliente_id,sku) no banco, atualiza; senão insere
+        const existente=wmsProdutos.find(p=>p.cliente_id===cliente.id&&p.sku===sku);
+        if(existente){
+          await dbUpdate('wms_produtos',existente.id,obj);
+          wmsProdutos=wmsProdutos.map(p=>p.id===existente.id?{...p,...obj}:p);
+        }else{
+          const salvo=await dbInsert('wms_produtos',obj);
+          if(salvo)wmsProdutos=[...wmsProdutos,Array.isArray(salvo)?salvo[0]:salvo];
+        }
+        ok++;
+      }catch(e){erros++;}
+    }
+  } else if(importTela==='contatos_clientes'){
     for(const row of importDados){
       try{
         const nomeCliente=(row.cliente_nome||'').trim().toLowerCase();
