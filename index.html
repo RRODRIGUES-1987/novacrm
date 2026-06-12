@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.309 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.310 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -952,7 +952,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.309';
+const APP_VERSION='v1.0.310';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -16603,64 +16603,69 @@ function orgRenderSVG(visiveis,visIds){
   const NIVEL_OPERACIONAL=6;
   const niveisPresentes=[...new Set(visiveis.map(n=>+n.nivel||6))].sort((a,b)=>a-b);
   const CARD_W=158, CARD_H=46, GAP_X=22, GAP_Y=8, PAD=24;
+  const COL=CARD_W+GAP_X; // passo horizontal entre folhas
 
-  // separa: níveis não-operacionais (linha horizontal) e operacional (empilhado sob o pai)
-  const porNivel={}; niveisPresentes.forEach(nv=>porNivel[nv]=[]);
-  visiveis.slice().sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''))
-    .forEach(n=>porNivel[+n.nivel||6].push(n));
+  const nivelDe=n=>+n.nivel||6;
+  const filhosVis=id=>visiveis.filter(n=>n.parent_id===id&&visIds.has(n.parent_id));
+  // raízes efetivas (sem pai visível)
+  const raizes=visiveis.filter(n=>!n.parent_id||!visIds.has(n.parent_id))
+    .sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''));
 
+  // Y por nível (faixa) — níveis de topo viram faixas; operacional empilha sob o pai
   const niveisTopo=niveisPresentes.filter(nv=>nv!==NIVEL_OPERACIONAL);
-  const temOperacional=porNivel[NIVEL_OPERACIONAL] && porNivel[NIVEL_OPERACIONAL].length>0;
-
-  // Y de cada faixa não-operacional
   const FAIXA_H=104;
   const posY={}; niveisTopo.forEach((nv,i)=>posY[nv]=PAD+i*FAIXA_H);
   const yOperacionalBase=PAD+niveisTopo.length*FAIXA_H;
 
-  // X dos cards das faixas de topo (centralizadas)
   const cardX={}, cardY={};
-  let maxLinhaW=0;
-  niveisTopo.forEach(nv=>{const arr=porNivel[nv];maxLinhaW=Math.max(maxLinhaW,arr.length*CARD_W+(arr.length-1)*GAP_X);});
+  let cursorX=PAD; // posição da próxima folha
 
-  // Operacional empilhado: agrupa por pai (líder). Cada coluna fica sob o X do pai.
-  // Para largura, considera também a distribuição operacional.
-  const totalWtopo=PAD*2+Math.max(maxLinhaW,CARD_W);
-  niveisTopo.forEach(nv=>{
-    const arr=porNivel[nv];
-    const linhaW=arr.length*CARD_W+(arr.length-1)*GAP_X;
-    const startX=PAD+(Math.max(maxLinhaW,linhaW)-linhaW)/2;
-    arr.forEach((n,i)=>{cardX[n.id]=startX+i*(CARD_W+GAP_X);cardY[n.id]=posY[nv];});
+  // DFS: posiciona folhas em sequência; pai = centro dos filhos.
+  // Operacional (nível 6) NÃO entra na varredura horizontal — empilha vertical sob o pai.
+  function layout(n){
+    cardY[n.id]=posY[nivelDe(n)]!=null?posY[nivelDe(n)]:yOperacionalBase;
+    const filhos=filhosVis(n.id).filter(f=>nivelDe(f)!==NIVEL_OPERACIONAL)
+      .sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''));
+    if(!filhos.length){
+      cardX[n.id]=cursorX; cursorX+=COL;
+    }else{
+      filhos.forEach(layout);
+      // centro sobre os filhos
+      const xs=filhos.map(f=>cardX[f.id]);
+      cardX[n.id]=(Math.min(...xs)+Math.max(...xs))/2;
+    }
+  }
+  raizes.filter(r=>nivelDe(r)!==NIVEL_OPERACIONAL).forEach(layout);
+  // raízes que são operacionais (raro) — posiciona em sequência
+  raizes.filter(r=>nivelDe(r)===NIVEL_OPERACIONAL).forEach(r=>{cardX[r.id]=cursorX;cursorX+=COL;cardY[r.id]=yOperacionalBase;});
+
+  // Operacional empilhado: pilha vertical sob o pai (X do pai)
+  let maxOperacionalH=0;
+  const opGrupos={};
+  visiveis.filter(n=>nivelDe(n)===NIVEL_OPERACIONAL).forEach(n=>{
+    const k=n.parent_id&&visIds.has(n.parent_id)?n.parent_id:'__sempai__';
+    (opGrupos[k]=opGrupos[k]||[]).push(n);
+  });
+  Object.keys(opGrupos).forEach(pid=>{
+    const arr=opGrupos[pid].sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+    const baseX=cardX[pid]!=null?cardX[pid]:cursorX;
+    if(cardX[pid]==null)cursorX+=COL;
+    arr.forEach((n,i)=>{cardX[n.id]=baseX;cardY[n.id]=yOperacionalBase+i*(CARD_H+GAP_Y);});
+    maxOperacionalH=Math.max(maxOperacionalH,arr.length*(CARD_H+GAP_Y));
   });
 
-  // posiciona operacional: pilha sob cada pai visível; pais sem coluna ainda recebem X
-  let maxOperacionalH=0;
-  if(temOperacional){
-    const grupos={}; // parentId -> [nós]
-    porNivel[NIVEL_OPERACIONAL].forEach(n=>{const k=n.parent_id&&visIds.has(n.parent_id)?n.parent_id:'__sempai__';(grupos[k]=grupos[k]||[]).push(n);});
-    Object.keys(grupos).forEach(pid=>{
-      const arr=grupos[pid];
-      const baseX=cardX[pid]!=null?cardX[pid]:(PAD);
-      arr.forEach((n,i)=>{
-        cardX[n.id]=baseX;
-        cardY[n.id]=yOperacionalBase+i*(CARD_H+GAP_Y);
-      });
-      maxOperacionalH=Math.max(maxOperacionalH,arr.length*(CARD_H+GAP_Y));
-    });
-  }
-
-  const totalW=Math.max(totalWtopo,PAD*2+maxLinhaW);
-  const totalH=yOperacionalBase+(temOperacional?maxOperacionalH:0)+PAD;
+  const allX=Object.values(cardX);
+  const totalW=Math.max(...allX,PAD)+CARD_W+PAD;
+  const totalH=yOperacionalBase+maxOperacionalH+PAD;
 
   const cx=id=>cardX[id]+CARD_W/2;
 
-  // Conectores pai→filho (em L), só para níveis de topo; operacional liga ao pai pela coluna
+  // Conectores
   let linhas='';
   visiveis.forEach(n=>{
     if(!n.parent_id||!visIds.has(n.parent_id))return;
     if(cardX[n.id]==null||cardX[n.parent_id]==null)return;
-    const ehOper=(+n.nivel||6)===NIVEL_OPERACIONAL;
-    if(ehOper){
-      // liga do pai à primeira caixa empilhada (linha vertical pela coluna)
+    if(nivelDe(n)===NIVEL_OPERACIONAL){
       const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, x2=cardX[n.id]+12, y2=cardY[n.id]+CARD_H/2;
       linhas+=`<path d="M${x1} ${y1} L${x1} ${y2} L${cardX[n.id]} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
     }else{
