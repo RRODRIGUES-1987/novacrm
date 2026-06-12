@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.311 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.312 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -952,7 +952,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.311';
+const APP_VERSION='v1.0.312';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1974,7 +1974,7 @@ function buildCadastroForm(tipo, record, id=null){
         <div class="fg"><label class="fl">Data de admissão</label>
           <input class="fi" id="cad-data_admissao" type="date" value="${r.data_admissao||''}">
         </div>
-        <div class="fg"><label class="fl">Gestor responsável</label>
+        <div class="fg" style="display:none"><label class="fl">Gestor responsável</label>
           <select class="fi" id="cad-gestor_id">
             <option value="">Sem gestor</option>
             ${profiles.filter(function(p){return['gestor','rh','adm','admin'].includes(p.role)&&(p.company_id===company?.id||p.company_id===profile?.company_id);}).map(function(p){return'<option value="'+p.id+'" '+(r.gestor_id===p.id?'selected':'')+'>'+( p.full_name||p.email)+'</option>';}).join('')}
@@ -8830,12 +8830,23 @@ async function feriasMarcarGozado(feriasId){
     if(curPage==='rh-ferias'){const c=ge('content');if(c)c.innerHTML=rRHFerias();}
   }catch(e){alert('Erro: '+e.message);}
 }
+// Verifica se o usuário logado é o gestor (na hierarquia) do colaborador.
+// Usa a ponte profile.pessoa_id (qual colaborador é o usuário logado) + responde_para.
+// Mantém compatibilidade com o gestor_id antigo (usuário) durante a transição.
+function souGestorDe(p){
+  if(!p) return false;
+  const minhaPessoa=profile?.pessoa_id||null;
+  if(minhaPessoa && p.responde_para && p.responde_para===minhaPessoa) return true;
+  // fallback legado: gestor_id apontando para o usuário logado
+  if(p.gestor_id && p.gestor_id===cu?.id) return true;
+  return false;
+}
 function feriasPodeProgramar(pessoaId){
   const role=profile?.role||'';
   if(['admin','adm','rh'].includes(role)) return true;
   // Gestor do colaborador pode programar
   const p=pessoas.find(x=>x.id===pessoaId);
-  return !!(p&&p.gestor_id&&p.gestor_id===cu?.id);
+  return souGestorDe(p);
 }
 
 function rRHFerias(){
@@ -8848,7 +8859,7 @@ function rRHFerias(){
   const _isRH = ['admin','adm','rh'].includes(profile?.role||'');
   pessoas.filter(p=>{
     if(!p.data_admissao||!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
-    if(!_isRH && !(p.gestor_id&&p.gestor_id===cu?.id)) return false;
+    if(!_isRH && !souGestorDe(p)) return false;
     return true;
   }).forEach(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
@@ -8875,7 +8886,7 @@ function rRHFerias(){
     if(p.ativo===false) return false;
     if(!p.data_admissao) return false;
     if(p.tipo_contrato==='pj') return false;
-    if(!isRH && !(p.gestor_id&&p.gestor_id===cu?.id)) return false;
+    if(!isRH && !souGestorDe(p)) return false;
     return true;
   }).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
 
@@ -9320,7 +9331,7 @@ function rRHExperiencia(){
     const stInfo = STATUS_EXP[st]||STATUS_EXP.pendente;
 
     // Filtro por gestor
-    if(isGestor && !isRH && p.gestor_id !== cu?.id) return;
+    if(isGestor && !isRH && !souGestorDe(p)) return;
 
     linhas.push({p, parcela, dataFim, diasUteis, urgente, avaliacao, st, stInfo});
   });
@@ -13549,6 +13560,13 @@ function openModal(mode,id=null){
           <option value="">Sem empresa</option>${compOpts}
         </select>
       </div>
+      <div class="fg"><label class="fl">Funcionário vinculado</label>
+        <select class="fi" id="fupessoa">
+          <option value="">— Nenhum —</option>
+          ${pessoas.filter(function(pe){return pe.ativo!==false&&(pe.company_id===(p?.company_id||company?.id));}).sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');}).map(function(pe){return'<option value="'+pe.id+'" '+(p&&p.pessoa_id===pe.id?'selected':'')+'>'+pe.nome+(pe.cargo?' — '+pe.cargo:'')+'</option>';}).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Liga este usuário ao cadastro de colaborador (controla férias, equipe e hierarquia).</div>
+      </div>
       <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
           <input type="checkbox" id="fu-aprovacao" ${p?.realiza_aprovacao?'checked':''} style="width:16px;height:16px;accent-color:#0A2540" onchange="toggleAssinaturaUpload(this.checked)">
@@ -14303,7 +14321,7 @@ async function saveModal(){
       const role=ge('furole').value;
       const comp=ge('fucomp').value;
       const realizaAprovacao=ge('fu-aprovacao')?.checked||false;
-      const obj={full_name:name,role,company_id:comp||null,realiza_aprovacao:realizaAprovacao};
+      const obj={full_name:name,role,company_id:comp||null,realiza_aprovacao:realizaAprovacao,pessoa_id:ge('fupessoa')?.value||null};
       if(email)obj.email=email;
 
       // Processa upload de assinatura se houver
