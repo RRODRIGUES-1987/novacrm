@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.302 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.303 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -942,7 +942,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.302';
+const APP_VERSION='v1.0.303';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1666,7 +1666,7 @@ function render(){
     }
   }
   else if(curPage==='rh-performance'){c.innerHTML=rRHPerformance();}
-  else if(curPage==='rh-organograma'){c.innerHTML=rRHOrganograma();}
+  else if(curPage==='rh-organograma'){c.innerHTML=rRHOrganograma();setTimeout(orgInitPan,30);}
   else if(curPage==='rh-pendencias'){c.innerHTML=rPendenciasRH();}
   else if(curPage==='financeiro-dashboard')c.innerHTML=rFinanceiroDashboard();
   else if(curPage==='fat-programacao'){c.innerHTML=rFatProgramacao();}
@@ -1845,7 +1845,7 @@ function buildCadastroForm(tipo, record, id=null){
           <div style="font-size:17px;font-weight:700;letter-spacing:-0.3px;margin-bottom:2px">${r.nome||'Novo colaborador'}</div>
           <div id="cad-header-sub" style="font-size:12px;color:var(--text2);margin-bottom:8px">${r.cargo||'—'}${r.departamento?' · '+r.departamento:''}</div>
           <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">
-            ${r.salario?`<span id="cad-header-sal" style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px;font-weight:600">R$ ${Number(r.salario).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`:'<span id="cad-header-sal" style="display:none"></span>'}
+            ${(()=>{const _sal=salarioEfetivo(id,r.salario);return _sal!=null?`<span id="cad-header-sal" style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px;font-weight:600">R$ ${Number(_sal).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`:'<span id="cad-header-sal" style="display:none"></span>';})()}
             <span style="font-size:11px;background:var(--blue-bg);color:var(--blue-text);padding:2px 8px;border-radius:99px">${tcLabel}</span>
             ${tempoEmpresa?`<span style="font-size:11px;background:var(--bg2);color:var(--text2);padding:2px 8px;border-radius:99px">${tempoEmpresa} de empresa</span>`:''}
             ${r.ativo===false?'<span style="font-size:11px;background:var(--red-bg);color:var(--red-text);padding:2px 8px;border-radius:99px;font-weight:600">Inativo</span>':''}
@@ -2834,6 +2834,13 @@ async function histVinculoSalvar(pessoaId){
 }
 
 // Atualiza o cabeçalho do modal de pessoa (cargo · departamento + badge de salário)
+// Salário efetivo: o campo direto da pessoa ou, se nulo, o do vínculo vigente (histórico)
+function salarioEfetivo(pessoaId, salarioDireto){
+  if(salarioDireto!=null && salarioDireto!=='') return Number(salarioDireto);
+  const vig=historicoProfissional.find(h=>h.pessoa_id===pessoaId&&!h.data_fim&&h.funcao_id&&h.salario!=null);
+  return vig?Number(vig.salario):null;
+}
+
 async function _atualizaCabecalhoPessoa(pessoaId){
   // recarrega o colaborador do banco para refletir a promoção
   try{
@@ -2845,9 +2852,10 @@ async function _atualizaCabecalhoPessoa(pessoaId){
   if(sub)sub.textContent=(p.cargo||'')+(p.departamento?' · '+p.departamento:'');
   const sal=document.getElementById('cad-header-sal');
   if(sal){
-    if(p.salario!=null){
+    const _sal=salarioEfetivo(pessoaId,p.salario);
+    if(_sal!=null){
       sal.style.display='';
-      sal.textContent='R$ '+Number(p.salario).toLocaleString('pt-BR',{minimumFractionDigits:2});
+      sal.textContent='R$ '+Number(_sal).toLocaleString('pt-BR',{minimumFractionDigits:2});
     }else{sal.style.display='none';}
   }
 }
@@ -16541,13 +16549,47 @@ function rOrgArvore(){
   if(!raizes.length) return orgSeletorUnidade()+resumo+`<div class="empty"><p>Nenhuma estrutura montada${orgUnidadeSel!=='__todas__'?' para esta visão':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
 
   const tree=`<style>${ORG_CSS}</style>
-  <div class="org-wrap">
-    <div class="org-chart">
-      <ul>${raizes.map(r=>`<li>${orgRenderNo(r)}</li>`).join('')}</ul>
+  <div style="position:relative">
+    <div style="position:absolute;top:8px;right:8px;z-index:5;display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)">
+      <button onclick="orgZoom(-0.1)" title="Diminuir" style="width:28px;height:28px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:16px;font-weight:700;color:var(--text2)">−</button>
+      <button onclick="orgZoomReset()" title="Resetar zoom" style="height:28px;padding:0 8px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2)">100%</button>
+      <button onclick="orgZoom(0.1)" title="Aumentar" style="width:28px;height:28px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:16px;font-weight:700;color:var(--text2)">+</button>
+    </div>
+    <div class="org-wrap" id="org-wrap" style="cursor:grab">
+      <div class="org-chart" id="org-chart" style="transform-origin:top center;transition:transform .12s">
+        <ul>${raizes.map(r=>`<li>${orgRenderNo(r)}</li>`).join('')}</ul>
+      </div>
     </div>
   </div>`;
 
   return orgSeletorUnidade()+resumo+tree;
+}
+
+// ── ZOOM / PAN do organograma ──
+let _orgZoomLevel=1;
+function orgZoom(delta){
+  _orgZoomLevel=Math.min(2,Math.max(0.4,_orgZoomLevel+delta));
+  const ch=ge('org-chart');if(ch)ch.style.transform='scale('+_orgZoomLevel+')';
+  const btn=document.querySelector('[onclick="orgZoomReset()"]');if(btn)btn.textContent=Math.round(_orgZoomLevel*100)+'%';
+}
+function orgZoomReset(){
+  _orgZoomLevel=1;
+  const ch=ge('org-chart');if(ch)ch.style.transform='scale(1)';
+  const btn=document.querySelector('[onclick="orgZoomReset()"]');if(btn)btn.textContent='100%';
+}
+function orgInitPan(){
+  const wrap=ge('org-wrap');if(!wrap||wrap._panInit)return;
+  wrap._panInit=true;
+  let down=false,sx=0,sy=0,sl=0,st=0;
+  wrap.addEventListener('mousedown',e=>{
+    if(e.target.closest('.org-card'))return; // não arrasta ao clicar no card
+    down=true;sx=e.clientX;sy=e.clientY;sl=wrap.scrollLeft;st=wrap.scrollTop;wrap.style.cursor='grabbing';e.preventDefault();
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!down)return;
+    wrap.scrollLeft=sl-(e.clientX-sx);wrap.scrollTop=st-(e.clientY-sy);
+  });
+  window.addEventListener('mouseup',()=>{down=false;if(wrap)wrap.style.cursor='grab';});
 }
 
 // ── ABA ESTRUTURA ──
