@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.300 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.301 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -844,6 +844,7 @@ let comprasSolicitacoes=[],comprasCotacoes=[],comprasPedidos=[];
 let portariaAcessos=[],portariaVeiculos=[],portariaFrotaMov=[],portariaAutorizacoes=[],portariaPlacas=[];
 let orgNos=[],orgAlocacoes=[];
 let orgTab='arvore';
+let orgUnidadeSel='__todas__'; // '__todas__' | '__corp__' | unit_id
 let epiCatalogo=[],epiFuncao=[],epiEntregas=[];
 let exameCatalogo=[],exameFuncao=[],exameRealizados=[];
 let rhDemissoes=[],rhAdvertencias=[];
@@ -941,7 +942,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.300';
+const APP_VERSION='v1.0.301';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2695,6 +2696,8 @@ function _histPanelRefresh(pessoaId){
 function rHistPanelContent(pessoaId){
   const r=pessoas.find(x=>x.id===pessoaId);
   if(!r)return'';
+  // Eventos: precisam de data (sem data_inicio). Vínculos: precisam de data_inicio E funcao_id.
+  // Registros sem data_inicio E sem data E sem funcao_id são "fantasma" e ficam de fora.
   const eventos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&!h.data_inicio&&h.data;});
   const vinculos=historicoProfissional.filter(function(h){return h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id;});
   const vincOrd=vinculos.slice().sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?-1:1);
@@ -2711,10 +2714,12 @@ function rHistPanelContent(pessoaId){
     const sal=v.salario?' · R$ '+Number(v.salario).toLocaleString('pt-BR',{minimumFractionDigits:2}):'';
     marcos2.push({data:v.data_inicio,label:(fn?fn.funcao:(v.cargo_novo||'Função')),sub:(v.motivo||'')+sal,icon:'💼',cor:'#7c3aed'});
   });
-  marcos2.sort(function(a,b){return a.data<b.data?-1:1;});
+  // Ordena por data, ignorando marcos sem data (evita NaN/ordenação errada)
+  const marcosValidos=marcos2.filter(function(m){return m.data;});
+  marcosValidos.sort(function(a,b){return a.data<b.data?-1:1;});
   // Marco 'Hoje' removido — a última função (vigente) já representa o presente
   let tl='<div style="display:flex;align-items:flex-start;overflow-x:auto;padding:8px 0 16px;gap:0">';
-  marcos2.forEach(function(m,i){
+  marcosValidos.forEach(function(m,i){
     tl+='<div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;min-width:90px;max-width:120px;text-align:center">';
     tl+='<div style="font-size:18px;margin-bottom:4px">'+m.icon+'</div>';
     tl+='<div style="width:10px;height:10px;border-radius:50%;background:'+m.cor+'"></div>';
@@ -2722,7 +2727,7 @@ function rHistPanelContent(pessoaId){
     if(m.sub)tl+='<div style="font-size:9px;color:var(--text3);margin-top:2px;line-height:1.3">'+m.sub+'</div>';
     tl+='<div style="font-size:9px;color:var(--text3);margin-top:2px">'+new Date(m.data+'T00:00').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})+'</div>';
     tl+='</div>';
-    if(i<marcos2.length-1)tl+='<div style="flex:1;height:2px;background:var(--border);margin-top:22px;min-width:16px;flex-shrink:0"></div>';
+    if(i<marcosValidos.length-1)tl+='<div style="flex:1;height:2px;background:var(--border);margin-top:22px;min-width:16px;flex-shrink:0"></div>';
   });
   tl+='</div>';
   return'<div style="padding:8px 0"><div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#0A2540">📅 Linha do tempo</div>'+tl+'</div>'+rHistVinculos(pessoaId);
@@ -3200,15 +3205,21 @@ async function saveCadastro(){
       const camposProf=['cargo','departamento','lider','unidade','cbo','salario','turno','horario'];
       const mudou=camposProf.some(k=>String(anterior[k]||'')!==String(obj[k]||''));
       if(mudou){
-        const hist={
-          pessoa_id:mid,company_id:cid,
-          alterado_por:cu.id,
-          alterado_por_nome:profile?.full_name||cu.email,
-          motivo:getV('cad-motivo')||null,
-          data_vigencia:getV('cad-vigencia')||null,
-        };
-        camposProf.forEach(k=>{hist[k+'_anterior']=anterior[k]||null;hist[k+'_novo']=obj[k]||null;});
-        await dbInsert('historico_profissional',hist);
+        const dataVig=getV('cad-vigencia')||null;
+        // Proteção: só grava o log de alteração se houver data de vigência.
+        // Sem data, o registro fica "fantasma" (sem data_inicio/data) e poluía a linha do tempo.
+        if(dataVig){
+          const hist={
+            pessoa_id:mid,company_id:cid,
+            alterado_por:cu.id,
+            alterado_por_nome:profile?.full_name||cu.email,
+            motivo:getV('cad-motivo')||null,
+            data_vigencia:dataVig,
+            data:dataVig,
+          };
+          camposProf.forEach(k=>{hist[k+'_anterior']=anterior[k]||null;hist[k+'_novo']=obj[k]||null;});
+          await dbInsert('historico_profissional',hist);
+        }
       }
     }
   }
@@ -16434,7 +16445,15 @@ const ORG_CSS=`
 `;
 
 // helpers
-function orgFilhos(parentId){return orgNos.filter(n=>n.parent_id===parentId&&n.company_id===company?.id);}
+// Visibilidade do nó conforme a unidade selecionada no organograma.
+// Corporativo (unit_id nulo) aparece em todas as visões.
+function orgNoVisivel(n){
+  if(n.company_id!==company?.id) return false;
+  if(orgUnidadeSel==='__todas__') return true;
+  if(orgUnidadeSel==='__corp__') return !n.unit_id;        // só corporativos
+  return !n.unit_id || n.unit_id===orgUnidadeSel;          // corporativo + da unidade
+}
+function orgFilhos(parentId){return orgNos.filter(n=>n.parent_id===parentId&&orgNoVisivel(n));}
 function orgAlocadosNo(noId){return orgAlocacoes.filter(a=>a.org_no_id===noId);}
 function orgCustoNo(noId){return orgAlocadosNo(noId).reduce((s,a)=>{const p=pessoas.find(x=>x.id===a.pessoa_id);return s+(p?.salario||0);},0);}
 function orgPessoaNome(id){const p=pessoas.find(x=>x.id===id);return p?p.nome:'—';}
@@ -16485,12 +16504,25 @@ function rRHOrganograma(){
 }
 
 // ── ABA ÁRVORE ──
+function orgSeletorUnidade(){
+  const us=(userUnits||[]).filter(u=>u.company_id===company?.id||!u.company_id);
+  const opt=(v,l)=>`<option value="${v}" ${orgUnidadeSel===v?'selected':''}>${l}</option>`;
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <span style="font-size:12px;color:var(--text2);font-weight:500">Unidade:</span>
+    <select class="fi" style="height:34px;width:auto;min-width:180px" onchange="orgUnidadeSel=this.value;render()">
+      ${opt('__todas__','Todas (corporativo + unidades)')}
+      ${opt('__corp__','🏛️ Corporativo')}
+      ${us.map(u=>opt(u.id,(u.name||u.nome||'Unidade'))).join('')}
+    </select>
+  </div>`;
+}
+
 function rOrgArvore(){
   const cid=company?.id;
-  const raizes=orgNos.filter(n=>!n.parent_id&&n.company_id===cid);
-  const totalColabs=orgAlocacoes.filter(a=>orgNos.find(n=>n.id===a.org_no_id&&n.company_id===cid)).length;
-  const totalVagas=orgNos.filter(n=>n.company_id===cid).reduce((s,n)=>s+n.headcount,0);
-  const totalCusto=orgNos.filter(n=>n.company_id===cid).reduce((s,n)=>s+orgCustoNo(n.id),0);
+  const raizes=orgNos.filter(n=>!n.parent_id&&orgNoVisivel(n));
+  const totalColabs=orgAlocacoes.filter(a=>orgNos.find(n=>n.id===a.org_no_id&&orgNoVisivel(n))).length;
+  const totalVagas=orgNos.filter(n=>orgNoVisivel(n)).reduce((s,n)=>s+n.headcount,0);
+  const totalCusto=orgNos.filter(n=>orgNoVisivel(n)).reduce((s,n)=>s+orgCustoNo(n.id),0);
 
   const resumo=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">
     <div style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px">
@@ -16503,7 +16535,7 @@ function rOrgArvore(){
       <div style="font-size:20px;font-weight:700;color:var(--green-text)">${fmtV(totalCusto)}</div><div style="font-size:11px;color:var(--text2)">Custo total</div></div>
   </div>`;
 
-  if(!raizes.length) return resumo+`<div class="empty"><p>Nenhuma estrutura montada.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
+  if(!raizes.length) return orgSeletorUnidade()+resumo+`<div class="empty"><p>Nenhuma estrutura montada${orgUnidadeSel!=='__todas__'?' para esta visão':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
 
   const tree=`<style>${ORG_CSS}</style>
   <div class="org-wrap">
@@ -16512,14 +16544,14 @@ function rOrgArvore(){
     </div>
   </div>`;
 
-  return resumo+tree;
+  return orgSeletorUnidade()+resumo+tree;
 }
 
 // ── ABA ESTRUTURA ──
 function rOrgEstrutura(){
   const pode=orgPodeCriar();
   const cid=company?.id;
-  const nos=orgNos.filter(n=>n.company_id===cid);
+  const nos=orgNos.filter(n=>orgNoVisivel(n));
 
   // exibe em lista plana com indentação por nível
   function nivel(id,depth=0){
@@ -16640,9 +16672,18 @@ function orgNoModal(id,parentIdDefault){
   const cores=['#1D9E75','#2563eb','#d68910','#7c3aed','#c0392b','#0891b2','#475569'];
   const corBtns=cores.map(c=>`<button type="button" onclick="document.getElementById('org-no-cor').value='${c}';this.parentNode.querySelectorAll('button').forEach(b=>b.style.outline='none');this.style.outline='2px solid var(--accent)'" style="width:22px;height:22px;border-radius:50%;background:${c};border:none;cursor:pointer;outline:${(n?.cor||cores[0])===c?'2px solid var(--accent)':'none'}"></button>`).join('');
 
+  // Seletor de unidade do nó: corporativo (nulo) ou unidade específica.
+  // Default ao criar: se há uma unidade selecionada na visão, já vem ela.
+  const unidadeDefault = n ? (n.unit_id||'') : (orgUnidadeSel!=='__todas__'&&orgUnidadeSel!=='__corp__'?orgUnidadeSel:'');
+  const us=(userUnits||[]).filter(u=>u.company_id===company?.id||!u.company_id);
+  const unidOpts=`<option value="" ${!unidadeDefault?'selected':''}>🏛️ Corporativo (todas as unidades)</option>`
+    +us.map(u=>`<option value="${u.id}" ${unidadeDefault===u.id?'selected':''}>${u.name||u.nome||'Unidade'}</option>`).join('');
+
   portModal(n?`Editar — ${n.title}`:'Novo nó',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div style="grid-column:1/-1"><label class="fl">Cargo / Posição *</label><input class="fi" id="org-no-title" value="${n?.title||''}"></div>
+      <div style="grid-column:1/-1"><label class="fl">Unidade</label>
+        <select class="fi" id="org-no-unit">${unidOpts}</select></div>
       <div><label class="fl">Departamento</label><input class="fi" id="org-no-dept" value="${n?.departamento||''}"></div>
       <div><label class="fl">Headcount planejado</label><input class="fi" id="org-no-hc" type="number" min="1" value="${n?.headcount||1}"></div>
       <div style="grid-column:1/-1"><label class="fl">Reporta para (nó pai)</label>
@@ -16658,7 +16699,8 @@ async function orgSalvarNo(id){
   const title=ge('org-no-title')?.value?.trim();
   if(!title){portErr('Informe o cargo/posição.');return;}
   portSaving();
-  const dados={title,departamento:ge('org-no-dept')?.value||null,headcount:Number(ge('org-no-hc')?.value)||1,parent_id:ge('org-no-parent')?.value||null,cor:ge('org-no-cor')?.value||null,company_id:company?.id,...unitPayload(),owner_id:cu?.id};
+  const unitSel=ge('org-no-unit')?.value||null; // '' => corporativo (nulo)
+  const dados={title,departamento:ge('org-no-dept')?.value||null,headcount:Number(ge('org-no-hc')?.value)||1,parent_id:ge('org-no-parent')?.value||null,cor:ge('org-no-cor')?.value||null,company_id:company?.id,unit_id:unitSel,owner_id:cu?.id};
   try{
     if(id){await dbUpdate('org_nos',id,dados);orgNos=orgNos.map(x=>x.id===id?{...x,...dados}:x);}
     else{const salvo=await dbInsert('org_nos',dados);if(salvo)orgNos=[...orgNos,salvo];}
