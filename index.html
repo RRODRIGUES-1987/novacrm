@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.313 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.314 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -952,7 +952,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.313';
+const APP_VERSION='v1.0.314';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18598,6 +18598,9 @@ function wmsZplDaLista(listaId){
 // Modal: preview (Labelary) + download do ZPL
 function wmsEtiquetasModal(listaId){
   const l=wmsListasSeparacao.find(x=>x.id===listaId); if(!l) return;
+  const cliObj=clientes.find(c=>c.id===l.cliente_id);
+  const modo=cliObj?.wms_modo_separacao||'manual';
+  const avisoManual=modo==='manual'?`<div style="background:var(--amber-bg);color:var(--amber-text);font-size:11px;padding:8px 11px;border-radius:8px;margin-bottom:12px;line-height:1.5">⚠ Este depositante está no modo <b>Manual</b> (sem etiqueta). As etiquetas abaixo são geradas mesmo assim, mas o processo padrão dele não usa etiquetagem. Para gerar etiquetas no fluxo, use <b>Manual com bipagem</b> ou um modo de bipagem.</div>`:'';
   const zpl=wmsZplDaLista(listaId);
   const nTar=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId).length;
   if(!zpl){portModal('Etiquetas','<div class="empty"><p>Esta lista não tem tarefas para etiquetar.</p></div>','portClose()',{saveLabel:'Fechar'});return;}
@@ -18605,7 +18608,7 @@ function wmsEtiquetasModal(listaId){
   const primeira=zpl.split('^XZ')[0]+'^XZ';
   const previewUrl='https://api.labelary.com/v1/printers/8dpmm/labels/2x2/0/'+encodeURIComponent(primeira);
   portModal(`Etiquetas de separação — ${l.numero_lista||''}`,
-    `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${nTar} etiqueta(s) · formato ZPL 5×5cm (Zebra). Pré-visualização da 1ª etiqueta:</div>
+    `${avisoManual}<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${nTar} etiqueta(s) · formato ZPL 5×5cm (Zebra). Pré-visualização da 1ª etiqueta:</div>
      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
        <div style="border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff">
          <img src="${previewUrl}" alt="preview" style="width:200px;height:200px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
@@ -19262,45 +19265,68 @@ function filterWmsClientes(q){
 function wmsAbrirCliente(clienteId){
   const c=clientes.find(x=>x.id===clienteId);
   if(!c)return;
-  const nProd=wmsProdutos.filter(p=>p.cliente_id===clienteId).length;
+  wmsCliAtual=clienteId;
+  wmsCliTab='geral';
+  portModal(`Configurar — ${c.nome||c.razao_social||'Cliente'}`,
+    wmsCliConteudo(clienteId),
+    `wmsSalvarParamCliente('${clienteId}')`,{saveLabel:'Salvar parâmetros',width:'600px'});
+}
+let wmsCliAtual=null, wmsCliTab='geral';
+const WMS_CLI_TABS=[['geral','Geral'],['produtos','Produtos'],['entrada','Entrada'],['saida','Saída'],['fiscal','Fiscal']];
+function wmsCliTabIr(t){wmsCliTab=t;const box=ge('wms-cli-tab-content');if(box)box.innerHTML=wmsCliTabBody(wmsCliAtual);
+  document.querySelectorAll('.wms-cli-tab').forEach(b=>{const at=b.dataset.tab;b.style.borderBottomColor=at===t?'var(--blue-text)':'transparent';b.style.color=at===t?'var(--text)':'var(--text2)';});
+}
+function wmsCliConteudo(clienteId){
+  const tabs=WMS_CLI_TABS.map(([k,l])=>`<button class="wms-cli-tab" data-tab="${k}" onclick="wmsCliTabIr('${k}')" style="padding:8px 14px;font-size:12px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:2px solid ${k===wmsCliTab?'var(--blue-text)':'transparent'};color:${k===wmsCliTab?'var(--text)':'var(--text2)'}">${l}</button>`).join('');
+  return `<div style="border-bottom:1px solid var(--border);display:flex;gap:2px;margin-bottom:14px;flex-wrap:wrap">${tabs}</div>
+    <div id="wms-cli-tab-content">${wmsCliTabBody(clienteId)}</div>`;
+}
+function wmsCliTabBody(clienteId){
+  const c=clientes.find(x=>x.id===clienteId);if(!c)return'';
+  if(wmsCliTab==='saida') return wmsCliTabSaida(c);
+  if(wmsCliTab==='produtos'){
+    const nProd=wmsProdutos.filter(p=>p.cliente_id===clienteId).length;
+    return `<div style="padding:14px;background:var(--bg2);border-radius:9px;display:flex;align-items:center;justify-content:space-between">
+      <div><div style="font-weight:600;font-size:13px">Produtos do depositante</div><div style="font-size:11px;color:var(--text3)">${nProd} produto(s) cadastrado(s)</div></div>
+      <button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ver produtos</button></div>`;
+  }
+  const titulos={geral:'Geral',entrada:'Entrada (recebimento)',fiscal:'Fiscal'};
+  return `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
+    <div style="font-size:13px;font-weight:600;margin-bottom:6px">${titulos[wmsCliTab]||wmsCliTab}</div>
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--amber-text);background:var(--amber-bg);padding:5px 12px;border-radius:99px">🚧 Em breve</span>
+  </div>`;
+}
+function wmsCliTabSaida(c){
   const modo=c.wms_modo_separacao||'manual';
   const usaEtiq=c.wms_usa_etiqueta_cliente===true;
   const modoOpt=(v,lbl,desc)=>`<label style="display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:1.5px solid ${modo===v?'var(--blue-text)':'var(--border)'};border-radius:9px;cursor:pointer;background:${modo===v?'var(--blue-bg)':'var(--bg2)'}">
     <input type="radio" name="wms-modo-sep" value="${v}" ${modo===v?'checked':''} style="margin-top:2px" onchange="wmsToggleEtiqVis()">
     <div><div style="font-weight:600;font-size:13px;color:var(--text)">${lbl}</div><div style="font-size:11px;color:var(--text3);margin-top:1px">${desc}</div></div>
   </label>`;
-  portModal(`Configurar — ${c.nome||c.razao_social||'Cliente'}`,
-    `<div style="font-size:13px;color:var(--text2);line-height:1.6">
-      <div style="display:grid;gap:10px">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg2);border-radius:8px">
-          <div><div style="font-weight:600;font-size:13px;color:var(--text)">Produtos</div><div style="font-size:11px;color:var(--text3)">${nProd} produto(s) cadastrado(s)</div></div>
-          <button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ver produtos</button>
-        </div>
-
-        <div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px">
-          <div style="font-weight:700;font-size:13px;color:var(--text);margin-bottom:4px">Modo de separação</div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Define como o separador trabalha as listas deste depositante.</div>
-          <div style="display:grid;gap:8px">
-            ${modoOpt('manual','Manual','Gera a lista; o separador confirma na tela, sem coletor nem etiqueta.')}
-            ${modoOpt('bipagem_simples','Bipagem simples','Coletor bipa 1 etiqueta e informa a quantidade.')}
-            ${modoOpt('bipagem_completa','Bipagem completa','Coletor bipa todas as etiquetas: fração = N etiquetas, pallet fechado = 1 etiqueta.')}
-          </div>
-          <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:${modo==='manual'?'none':'flex'};align-items:center;justify-content:space-between;gap:10px">
-            <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utiliza etiqueta do cliente</div>
-            <div style="font-size:11px;color:var(--text3)">Se sim, bipa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
-          </div>
-        </div>
-      </div>
-    </div>`,
-    `wmsSalvarParamCliente('${clienteId}')`,{saveLabel:'Salvar parâmetros',width:'560px'});
+  const semEtiq=modo==='manual'; // 'manual' puro não usa etiqueta; demais sim
+  return `<div style="font-weight:700;font-size:13px;margin-bottom:4px">Separação</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Define como o separador trabalha as listas deste depositante.</div>
+    <div style="display:grid;gap:8px">
+      ${modoOpt('manual','Manual','Gera a lista; confirmação na tela administrativa, sem etiqueta nem bipe.')}
+      ${modoOpt('manual_bipagem','Manual com bipagem','Gera etiquetas para colar (familiarização), mas a baixa ainda é manual — tudo menos o bipe.')}
+      ${modoOpt('bipagem_simples','Bipagem simples','Coletor bipa 1 etiqueta e informa a quantidade.')}
+      ${modoOpt('bipagem_completa','Bipagem completa','Coletor bipa todas as etiquetas: fração = N etiquetas, pallet fechado = 1 etiqueta.')}
+    </div>
+    <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:${semEtiq?'none':'flex'};align-items:center;justify-content:space-between;gap:10px">
+      <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utiliza etiqueta do cliente</div>
+      <div style="font-size:11px;color:var(--text3)">Se sim, usa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
+    </div>`;
 }
 function wmsToggleEtiqVis(){
   const modo=document.querySelector('input[name="wms-modo-sep"]:checked')?.value||'manual';
   const box=ge('wms-etiq-cliente-box');if(box)box.style.display=modo==='manual'?'none':'flex';
 }
 async function wmsSalvarParamCliente(clienteId){
-  const modo=document.querySelector('input[name="wms-modo-sep"]:checked')?.value||'manual';
+  // só salva os parâmetros de separação se a aba Saída foi carregada (radio presente)
+  const radio=document.querySelector('input[name="wms-modo-sep"]:checked');
+  if(!radio){portClose();return;} // nenhuma alteração de separação aberta
+  const modo=radio.value;
   const usaEtiq=modo!=='manual' && (ge('wms-usa-etiq')?.checked||false);
   portSaving();
   try{
