@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.316 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.318 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -953,7 +953,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.316';
+const APP_VERSION='v1.0.318';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18532,68 +18532,44 @@ function zplEsc(s){return String(s||'').replace(/[\^~\\]/g,' ').replace(/[À-ÿ]
 
 // Gera o ZPL de UMA etiqueta (5x5cm @ 203dpi = 400x400 dots)
 function zplEtiquetaSeparacao(o){
-  // o: {pedido, sku, descricao, tipoVolume, qtdVolume, volNum, volTotal, qrData, cliente}
+  // o: {pedido, lista, sku, descricao, tipoVolume, qtdVolume, volNum, volTotal, qrData}
   const tipoTxt=o.tipoVolume==='pallet'?'PALLET CHEIO':'FRACAO';
-  const volTxt=o.tipoVolume==='pallet'?`${o.volNum}/${o.volTotal}`:`${o.volNum}/${o.volTotal}`;
-  const desc=zplEsc(o.descricao).slice(0,28);
+  const volTxt=`${o.volNum}/${o.volTotal}`;
   return [
     '^XA',
     '^CI28',                         // UTF-8
     '^PW400','^LL400',               // 5x5cm @203dpi
-    // Cabeçalho: pedido
-    '^FO20,18^A0N,26,26^FD'+zplEsc(o.pedido)+'^FS',
-    '^FO20,48^GB360,2,2^FS',         // linha
+    // Cabeçalho: pedido (ou CONSOLIDADO)
+    '^FO20,16^A0N,26,26^FD'+zplEsc(o.pedido)+'^FS',
+    // Número da lista (menor)
+    '^FO20,46^A0N,18,18^FDLista '+zplEsc(o.lista||'')+'^FS',
+    '^FO20,68^GB360,2,2^FS',         // linha
     // Tipo de volume (destaque)
-    '^FO20,62^A0N,34,34^FD'+tipoTxt+'^FS',
-    // Volume X/Y + quantidade
-    '^FO20,104^A0N,24,24^FD'+('Vol '+volTxt+'   '+(+o.qtdVolume).toLocaleString('pt-BR')+' un')+'^FS',
+    '^FO20,80^A0N,32,32^FD'+tipoTxt+'^FS',
+    // Volume X/Y
+    '^FO20,118^A0N,22,22^FDVol '+volTxt+'^FS',
     // SKU
-    '^FO20,138^A0N,26,26^FD'+zplEsc(o.sku)+'^FS',
-    // Descrição
-    '^FO20,168^A0N,18,18^FD'+desc+'^FS',
-    // QR Code (canto inferior)
-    '^FO250,210^BQN,2,5^FDLA,'+zplEsc(o.qrData)+'^FS',
-    // Cliente (rodapé)
-    '^FO20,360^A0N,18,18^FD'+zplEsc(o.cliente).slice(0,32)+'^FS',
+    '^FO20,148^A0N,26,26^FD'+zplEsc(o.sku)+'^FS',
+    // Quantidade esperada
+    '^FO20,178^A0N,22,22^FDQtd: '+(+o.qtdVolume).toLocaleString('pt-BR')+' un^FS',
+    // QR Code (canto inferior) — maior
+    '^FO235,205^BQN,2,7^FDLA,'+zplEsc(o.qrData)+'^FS',
+    // Descrição (rodapé)
+    '^FO20,365^A0N,16,16^FD'+zplEsc(o.descricao).slice(0,30)+'^FS',
     '^XZ'
   ].join('\n');
 }
 
-// Monta todas as etiquetas de uma lista (com numeração de volume por SKU)
+// Monta todas as etiquetas de uma lista (ZPL) — usa a mesma base do PDF
 function wmsZplDaLista(listaId){
-  const l=wmsListasSeparacao.find(x=>x.id===listaId); if(!l) return '';
-  const cli=clientes.find(c=>c.id===l.cliente_id);
-  const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
-  // agrupa por SKU para numerar volumes (pallets numerados; fração 1/1)
-  const porSku={};
-  tarefas.forEach(t=>{(porSku[t.sku]=porSku[t.sku]||[]).push(t);});
-  let zpl='';
-  Object.keys(porSku).forEach(sku=>{
-    const arr=porSku[sku];
-    const pallets=arr.filter(t=>t.tipo_volume==='pallet');
-    const fracoes=arr.filter(t=>t.tipo_volume==='fracao');
-    pallets.forEach((t,i)=>{
-      zpl+=zplEtiquetaSeparacao({
-        pedido:l.numero_lista||l.numero||'LISTA',
-        sku:t.sku, descricao:t.descricao,
-        tipoVolume:'pallet', qtdVolume:t.quantidade,
-        volNum:i+1, volTotal:pallets.length,
-        qrData:`${listaId}|${t.id}|P${i+1}`,
-        cliente:cli?.nome||''
-      })+'\n';
-    });
-    fracoes.forEach((t,i)=>{
-      zpl+=zplEtiquetaSeparacao({
-        pedido:l.numero_lista||l.numero||'LISTA',
-        sku:t.sku, descricao:t.descricao,
-        tipoVolume:'fracao', qtdVolume:t.quantidade,
-        volNum:i+1, volTotal:fracoes.length,
-        qrData:`${listaId}|${t.id}|F${i+1}`,
-        cliente:cli?.nome||''
-      })+'\n';
-    });
-  });
-  return zpl;
+  const vols=wmsVolumesDaLista(listaId);
+  if(!vols.length) return '';
+  return vols.map(v=>zplEtiquetaSeparacao({
+    pedido:v.pedido, lista:v.lista, sku:v.sku, descricao:v.descricao,
+    tipoVolume:v.tipo, qtdVolume:v.qtd,
+    volNum:v.volNum, volTotal:v.volTotal,
+    qrData:v.qr
+  })).join('\n');
 }
 
 // Modal: preview (Labelary) + download do ZPL
@@ -18661,15 +18637,33 @@ function wmsQrDataUrl(texto){
 function wmsVolumesDaLista(listaId){
   const l=wmsListasSeparacao.find(x=>x.id===listaId);if(!l)return[];
   const cli=clientes.find(c=>c.id===l.cliente_id);
+  const ehConsolidada=l.tipo==='consolidada';
+  const numLista=l.numero_lista||'';
   const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
+  // Cabeçalho do pedido: na consolidada => "CONSOLIDADO"; senão => numero_pedido real
+  const pedidoDe=t=>{
+    if(ehConsolidada)return'CONSOLIDADO';
+    const p=t.pedido_id?wmsPedidos.find(x=>x.id===t.pedido_id):null;
+    return p?.numero_pedido||numLista||'PEDIDO';
+  };
   const porSku={};tarefas.forEach(t=>{(porSku[t.sku]=porSku[t.sku]||[]).push(t);});
   const vols=[];
   Object.keys(porSku).forEach(sku=>{
     const arr=porSku[sku];
     const pallets=arr.filter(t=>t.tipo_volume==='pallet');
     const fracoes=arr.filter(t=>t.tipo_volume==='fracao');
-    pallets.forEach((t,i)=>vols.push({pedido:l.numero_lista||'LISTA',sku:t.sku,descricao:t.descricao,tipo:'pallet',qtd:t.quantidade,volNum:i+1,volTotal:pallets.length,qr:`${listaId}|${t.id}|P${i+1}`,cliente:cli?.nome||''}));
-    fracoes.forEach((t,i)=>vols.push({pedido:l.numero_lista||'LISTA',sku:t.sku,descricao:t.descricao,tipo:'fracao',qtd:t.quantidade,volNum:i+1,volTotal:fracoes.length,qr:`${listaId}|${t.id}|F${i+1}`,cliente:cli?.nome||''}));
+    // PALLETS: 1 etiqueta por pallet cheio
+    pallets.forEach((t,i)=>vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'pallet',qtd:t.quantidade,volNum:i+1,volTotal:pallets.length,qr:`${listaId}|${t.id}|P${i+1}`,cliente:cli?.nome||''}));
+    // FRAÇÕES: 1 etiqueta por UNIDADE fracionada
+    const totalFrac=fracoes.reduce((s,t)=>s+Math.round(+t.quantidade||0),0);
+    let n=0;
+    fracoes.forEach(t=>{
+      const un=Math.round(+t.quantidade||0);
+      for(let u=0;u<un;u++){
+        n++;
+        vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'fracao',qtd:1,volNum:n,volTotal:totalFrac,qr:`${listaId}|${t.id}|F${n}`,cliente:cli?.nome||''});
+      }
+    });
   });
   return vols;
 }
@@ -18680,6 +18674,7 @@ async function wmsEtiquetasPdf(listaId){
   if(typeof QRCode==='undefined'){alert('Biblioteca de QR ainda carregando, tente novamente.');return;}
   const vols=wmsVolumesDaLista(listaId);
   if(!vols.length){alert('Lista sem volumes para etiquetar.');return;}
+  if(vols.length>500 && !confirm(vols.length+' etiquetas serão geradas (frações geram 1 por unidade). Pode demorar. Continuar?'))return;
   if(typeof showToast==='function')showToast('Gerando etiquetas…','green');
   // gera QRs (em paralelo)
   const qrs=await Promise.all(vols.map(v=>wmsQrDataUrl(v.qr)));
@@ -18689,21 +18684,22 @@ async function wmsEtiquetasPdf(listaId){
     const tipoTxt=v.tipo==='pallet'?'PALLET CHEIO':'FRAÇÃO';
     const tipoCor=v.tipo==='pallet'?'#8b5cf6':'#d68910';
     return {
-      table:{widths:['*'],heights:[128],body:[[{
+      table:{widths:['*'],heights:[140],body:[[{
         stack:[
-          {text:v.pedido,fontSize:9,bold:true,margin:[0,0,0,2]},
-          {text:tipoTxt+'  ·  Vol '+v.volNum+'/'+v.volTotal,fontSize:11,bold:true,color:tipoCor,margin:[0,0,0,2]},
-          {text:(+v.qtd).toLocaleString('pt-BR')+' un',fontSize:10,margin:[0,0,0,3]},
+          {text:v.pedido,fontSize:9,bold:true,margin:[0,0,0,1]},
+          {text:'Lista '+(v.lista||'—'),fontSize:7,color:'#888',margin:[0,0,0,3]},
           {columns:[
             {width:'*',stack:[
+              {text:tipoTxt,fontSize:11,bold:true,color:tipoCor},
+              {text:'Vol '+v.volNum+'/'+v.volTotal,fontSize:9,margin:[0,1,0,2]},
               {text:v.sku,fontSize:10,bold:true},
-              {text:(v.descricao||'').slice(0,32),fontSize:7,color:'#555',margin:[0,1,0,0]},
-              {text:(v.cliente||'').slice(0,28),fontSize:7,color:'#888',margin:[0,4,0,0]}
+              {text:'Qtd: '+(+v.qtd).toLocaleString('pt-BR')+' un',fontSize:9,bold:true,margin:[0,1,0,0]},
+              {text:(v.descricao||'').slice(0,28),fontSize:7,color:'#555',margin:[0,1,0,0]}
             ]},
-            qr?{width:58,image:qr,fit:[54,54]}:{width:58,text:''}
+            qr?{width:84,image:qr,fit:[80,80],alignment:'center'}:{width:84,text:''}
           ]}
         ],
-        margin:[6,6,6,6]
+        margin:[6,7,6,7]
       }]]},
       layout:{hLineWidth:()=>0.8,vLineWidth:()=>0.8,hLineColor:()=>'#999',vLineColor:()=>'#999'},
       margin:[0,0,0,6]
@@ -20110,3 +20106,5 @@ function unitLabel(){
 </script>
 </body>
 </html>
+
+  
