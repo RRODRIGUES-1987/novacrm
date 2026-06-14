@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.314 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.315 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -248,6 +248,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -952,7 +953,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.314';
+const APP_VERSION='v1.0.315';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18618,8 +18619,9 @@ function wmsEtiquetasModal(listaId){
          <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:12px">
            Cada etiqueta traz: nº do pedido/lista, tipo (pallet cheio / fração), volume X/Y, quantidade, SKU, descrição e <b>QR Code</b> com código único do volume.
          </div>
-         <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="wmsBaixarZpl('${listaId}')">⬇ Baixar arquivo .zpl</button>
-         <div style="font-size:11px;color:var(--text3)">Envie o arquivo para a impressora Zebra.</div>
+         <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="wmsEtiquetasPdf('${listaId}')">🖨 Visualizar / Imprimir PDF</button>
+         <button class="btn" style="width:100%;margin-bottom:8px" onclick="wmsBaixarZpl('${listaId}')">⬇ Baixar arquivo .zpl (Zebra)</button>
+         <div style="font-size:11px;color:var(--text3)">PDF para testar/imprimir em qualquer impressora · ZPL para produção na Zebra.</div>
        </div>
      </div>`,
     'portClose()',{saveLabel:'Fechar',width:'560px'});
@@ -18633,6 +18635,93 @@ function wmsBaixarZpl(listaId){
   a.href=URL.createObjectURL(blob);
   a.download='etiquetas_'+(l?.numero_lista||listaId.slice(0,8))+'.zpl';
   document.body.appendChild(a);a.click();a.remove();
+}
+
+// Gera o dataURL de um QR Code usando qrcodejs (renderiza num div temporário)
+function wmsQrDataUrl(texto){
+  return new Promise(resolve=>{
+    try{
+      const div=document.createElement('div');
+      div.style.position='fixed';div.style.left='-9999px';
+      document.body.appendChild(div);
+      new QRCode(div,{text:texto,width:160,height:160,correctLevel:QRCode.CorrectLevel.M});
+      setTimeout(()=>{
+        const img=div.querySelector('img'),canvas=div.querySelector('canvas');
+        let url='';
+        if(img&&img.src)url=img.src;
+        else if(canvas)url=canvas.toDataURL('image/png');
+        div.remove();
+        resolve(url);
+      },60);
+    }catch(e){resolve('');}
+  });
+}
+
+// Monta a lista de "volumes" (etiquetas) de uma lista de separação
+function wmsVolumesDaLista(listaId){
+  const l=wmsListasSeparacao.find(x=>x.id===listaId);if(!l)return[];
+  const cli=clientes.find(c=>c.id===l.cliente_id);
+  const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
+  const porSku={};tarefas.forEach(t=>{(porSku[t.sku]=porSku[t.sku]||[]).push(t);});
+  const vols=[];
+  Object.keys(porSku).forEach(sku=>{
+    const arr=porSku[sku];
+    const pallets=arr.filter(t=>t.tipo_volume==='pallet');
+    const fracoes=arr.filter(t=>t.tipo_volume==='fracao');
+    pallets.forEach((t,i)=>vols.push({pedido:l.numero_lista||'LISTA',sku:t.sku,descricao:t.descricao,tipo:'pallet',qtd:t.quantidade,volNum:i+1,volTotal:pallets.length,qr:`${listaId}|${t.id}|P${i+1}`,cliente:cli?.nome||''}));
+    fracoes.forEach((t,i)=>vols.push({pedido:l.numero_lista||'LISTA',sku:t.sku,descricao:t.descricao,tipo:'fracao',qtd:t.quantidade,volNum:i+1,volTotal:fracoes.length,qr:`${listaId}|${t.id}|F${i+1}`,cliente:cli?.nome||''}));
+  });
+  return vols;
+}
+
+// Gera o PDF (A4, várias etiquetas por folha) — abre em nova aba
+async function wmsEtiquetasPdf(listaId){
+  if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
+  if(typeof QRCode==='undefined'){alert('Biblioteca de QR ainda carregando, tente novamente.');return;}
+  const vols=wmsVolumesDaLista(listaId);
+  if(!vols.length){alert('Lista sem volumes para etiquetar.');return;}
+  if(typeof showToast==='function')showToast('Gerando etiquetas…','blue');
+  // gera QRs (em paralelo)
+  const qrs=await Promise.all(vols.map(v=>wmsQrDataUrl(v.qr)));
+  // monta etiquetas 5x5cm em grade 3 colunas
+  const COLS=3;
+  const cell=(v,qr)=>{
+    const tipoTxt=v.tipo==='pallet'?'PALLET CHEIO':'FRAÇÃO';
+    const tipoCor=v.tipo==='pallet'?'#8b5cf6':'#d68910';
+    return {
+      table:{widths:['*'],heights:[128],body:[[{
+        stack:[
+          {text:v.pedido,fontSize:9,bold:true,margin:[0,0,0,2]},
+          {text:tipoTxt+'  ·  Vol '+v.volNum+'/'+v.volTotal,fontSize:11,bold:true,color:tipoCor,margin:[0,0,0,2]},
+          {text:(+v.qtd).toLocaleString('pt-BR')+' un',fontSize:10,margin:[0,0,0,3]},
+          {columns:[
+            {width:'*',stack:[
+              {text:v.sku,fontSize:10,bold:true},
+              {text:(v.descricao||'').slice(0,32),fontSize:7,color:'#555',margin:[0,1,0,0]},
+              {text:(v.cliente||'').slice(0,28),fontSize:7,color:'#888',margin:[0,4,0,0]}
+            ]},
+            qr?{width:58,image:qr,fit:[54,54]}:{width:58,text:''}
+          ]}
+        ],
+        margin:[6,6,6,6]
+      }]]},
+      layout:{hLineWidth:()=>0.8,vLineWidth:()=>0.8,hLineColor:()=>'#999',vLineColor:()=>'#999'},
+      margin:[0,0,0,6]
+    };
+  };
+  // organiza em linhas de COLS colunas
+  const linhas=[];
+  for(let i=0;i<vols.length;i+=COLS){
+    const grupo=vols.slice(i,i+COLS).map((v,j)=>cell(v,qrs[i+j]));
+    while(grupo.length<COLS)grupo.push({text:''});
+    linhas.push({columns:grupo,columnGap:6});
+  }
+  const def={
+    pageSize:'A4',pageMargins:[18,18,18,18],
+    content:linhas,
+    defaultStyle:{font:'Roboto'}
+  };
+  pdfMake.createPdf(def).open();
 }
 
 // ── WMS · CONFIRMAÇÃO MANUAL DE SEPARAÇÃO (Modo 1) ──
