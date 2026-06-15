@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.326 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.327 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -954,7 +954,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.326';
+const APP_VERSION='v1.0.327';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18422,6 +18422,26 @@ async function loadWmsData(cid){
     dbSelect('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
   wmsRomaneios=await dbSelect('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
+  // Backfill: recalcula totais de pedidos importados que ainda não têm (uma vez)
+  wmsBackfillTotais(cid);
+}
+
+// Recalcula e grava totais para pedidos que ainda não têm (tot_litragem null/0 e sem flag)
+async function wmsBackfillTotais(cid){
+  try{
+    const pendentes=wmsPedidos.filter(p=>p.company_id===cid && (p.tot_calc==null) && (p.tot_litragem==null||p.tot_litragem===0) && (p.tot_peso==null||p.tot_peso===0));
+    if(!pendentes.length)return;
+    // limita a 200 por carga para não pesar
+    for(const p of pendentes.slice(0,200)){
+      const tot=wmsCalcTotaisPedido(p.id,p.cliente_id);
+      // só grava se houver algo a registrar
+      if(tot.tot_litragem>0||tot.tot_peso>0||tot.tot_pallets>0||tot.tot_un_fracao>0){
+        await dbUpdate('wms_pedidos',p.id,tot);
+        Object.assign(p,tot);
+      }
+      p.tot_calc=true;
+    }
+  }catch(e){/* silencioso */}
 }
 
 // ── WMS · SEPARAÇÃO (listas geradas) ──
@@ -18749,6 +18769,60 @@ function wmsMultiploDe(produtoId,sku,clienteId){
   let p=produtoId?wmsProdutos.find(x=>x.id===produtoId):null;
   if(!p&&sku)p=wmsProdutos.find(x=>x.cliente_id===clienteId&&String(x.sku).trim()===String(sku).trim());
   return p?(+p.qtd_por_pallet||0):0;
+}
+
+// Busca o produto de um item (por id ou sku+cliente)
+function wmsProdutoDe(produtoId,sku,clienteId){
+  let p=produtoId?wmsProdutos.find(x=>x.id===produtoId):null;
+  if(!p&&sku)p=wmsProdutos.find(x=>x.cliente_id===clienteId&&String(x.sku).trim()===String(sku).trim());
+  return p||null;
+}
+
+// Calcula os totais físicos de um pedido a partir dos seus itens
+function wmsCalcTotaisPedido(pedidoId,clienteId){
+  const itens=wmsPedidoItens.filter(it=>it.pedido_id===pedidoId);
+  let totLitragem=0,totPeso=0,totPallets=0,totLitrosPallet=0,totUnFracao=0,totLitrosFracao=0;
+  itens.forEach(it=>{
+    const prod=wmsProdutoDe(it.produto_id,it.sku,clienteId);
+    const qtd=+it.quantidade||0;
+    const litr=prod?(+prod.litragem||0):0;       // litros por unidade (0 se não-líquido)
+    const pesoBruto=prod?(+prod.peso_kg||0):0;    // peso bruto por unidade
+    const mult=prod?(+prod.qtd_por_pallet||0):0;
+    // litragem e peso totais
+    totLitragem+=qtd*litr;
+    totPeso+=qtd*pesoBruto;
+    // split pallet cheio vs fração
+    if(mult>0){
+      const cheios=Math.floor(qtd/mult);
+      const unPallet=cheios*mult;
+      const unFrac=+(qtd-unPallet).toFixed(3);
+      totPallets+=cheios;
+      totLitrosPallet+=unPallet*litr;
+      if(unFrac>0){totUnFracao+=Math.round(unFrac);totLitrosFracao+=unFrac*litr;}
+    }else{
+      // sem múltiplo: tudo fração
+      totUnFracao+=Math.round(qtd);
+      totLitrosFracao+=qtd*litr;
+    }
+  });
+  return {
+    tot_litragem:+totLitragem.toFixed(3),
+    tot_peso:+totPeso.toFixed(3),
+    tot_pallets:totPallets,
+    tot_litros_pallet:+totLitrosPallet.toFixed(3),
+    tot_un_fracao:totUnFracao,
+    tot_litros_fracao:+totLitrosFracao.toFixed(3),
+  };
+}
+
+// Registra uma entrada no histórico do pedido
+async function wmsPedidoHist(pedidoId,acao,descricao){
+  try{
+    await dbInsert('wms_pedido_historico',{
+      company_id:company?.id,pedido_id:pedidoId,acao,descricao:descricao||null,
+      usuario_id:cu?.id||null,usuario_nome:profile?.full_name||cu?.email||null
+    });
+  }catch(e){/* histórico não bloqueia o fluxo */}
 }
 
 // ══════════════════════════════════════════════════════════
@@ -19184,7 +19258,7 @@ function rWmsPedidos(){
   const chips=['',...Object.keys(WMS_PED_STATUS).filter(s=>s!=='em_romaneio')].map(st=>{
     const lbl=st===''?`Todos (${todos.length})`:`${WMS_PED_STATUS[st].l} (${cont[st]||0})`;
     const ativo=wmsPedFiltroStatus===st;
-    return `<button onclick="wmsPedFiltroStatus='${st}';render()" style="border:1.5px solid ${ativo?'var(--accent)':'var(--border)'};background:${ativo?'var(--accent-bg)':'transparent'};color:${ativo?'var(--accent-text)':'var(--text2)'};font-size:11px;font-weight:600;padding:5px 12px;border-radius:99px;cursor:pointer;white-space:nowrap">${lbl}</button>`;
+    return `<button onclick="wmsPedFiltroStatus='${st}';render()" style="border:1.5px solid ${ativo?'var(--text)':'var(--border)'};background:${ativo?'var(--text)':'transparent'};color:${ativo?'#fff':'var(--text2)'};font-size:11px;font-weight:600;padding:5px 12px;border-radius:99px;cursor:pointer;white-space:nowrap">${lbl}</button>`;
   }).join('');
 
   return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
@@ -19196,7 +19270,7 @@ function rWmsPedidos(){
       <input id="wms-ped-busca" placeholder="Buscar nº do pedido..." oninput="filterWmsPedidos(this.value)">
     </div>
   </div>
-  <div id="wms-ped-selbar" style="display:none;align-items:center;justify-content:space-between;background:var(--accent-bg);border-radius:8px;padding:8px 14px;margin-bottom:10px">
+  <div id="wms-ped-selbar" style="display:none;align-items:center;justify-content:space-between;background:var(--accent-bg);border-radius:8px;padding:8px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">
     <span id="wms-ped-selcount" style="font-size:12px;font-weight:600;color:var(--accent-text)"></span>
     <div style="display:flex;gap:8px">
       <button class="btn btn-sm" onclick="wmsPedSelecionados.clear();filterWmsPedidos(ge('wms-ped-busca')?.value||'')">Limpar</button>
@@ -19251,6 +19325,26 @@ function wmsPedAtualizaSelbar(){
   });
 }
 
+// Resumo dos totais físicos para a linha do pedido (peso · litros · % plt/frac)
+function wmsResumoTotaisLinha(p){
+  const litTotal=+p.tot_litragem||0;
+  const peso=+p.tot_peso||0;
+  const litPallet=+p.tot_litros_pallet||0;
+  const litFrac=+p.tot_litros_fracao||0;
+  if(litTotal<=0&&peso<=0)return'';
+  const fmt=n=>n.toLocaleString('pt-BR',{maximumFractionDigits:1});
+  const partes=[];
+  if(peso>0)partes.push(fmt(peso)+' kg');
+  if(litTotal>0)partes.push(fmt(litTotal)+' L');
+  // percentual por litros
+  if(litTotal>0){
+    const pPlt=Math.round(litPallet/litTotal*100);
+    const pFrac=100-pPlt;
+    partes.push(`<span style="color:#8b5cf6;font-weight:600">${pPlt}% plt</span> / <span style="color:#d68910;font-weight:600">${pFrac}% frac</span>`);
+  }
+  return `<div class="lsub" style="margin-top:1px">${partes.join(' · ')}</div>`;
+}
+
 function wmsPedLinha(p){
   const cli=clientes.find(c=>c.id===p.cliente_id);
   const itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
@@ -19269,6 +19363,7 @@ function wmsPedLinha(p){
     <div class="linfo" style="justify-content:center">
       <div class="lname">${cli?.nome||'—'}</div>
       <div class="lsub">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} un. ${semProd?`· <span style="color:var(--amber-text)">${semProd} s/ produto</span>`:''} · ${data}</div>
+      ${wmsResumoTotaisLinha(p)}
     </div>
     <div class="lright" style="align-items:center;gap:10px">
       ${p.romaneio_id?(function(){const rom=wmsRomaneios.find(r=>r.id===p.romaneio_id);return `<span title="Romaneio ${rom?rom.numero:''}" style="display:inline-flex;color:var(--text3)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>`;})():''}
@@ -19445,6 +19540,13 @@ async function wmsImpSalvar(){
         });
         if(item){wmsPedidoItens=[Array.isArray(item)?item[0]:item,...wmsPedidoItens];okItens++;}
       }
+      // calcula e grava os totais físicos do pedido
+      try{
+        const tot=wmsCalcTotaisPedido(pedObj.id,wmsImpCliente);
+        await dbUpdate('wms_pedidos',pedObj.id,tot);
+        Object.assign(pedObj,tot);
+        await wmsPedidoHist(pedObj.id,'importado','Pedido importado com '+itens.length+' item(ns).');
+      }catch(e){/* não bloqueia importação */}
     }catch(e){erros++;}
   }
   const prev=ge('wms-imp-preview');
