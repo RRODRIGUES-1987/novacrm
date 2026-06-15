@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.318 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.319 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -953,7 +953,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.318';
+const APP_VERSION='v1.0.319';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18527,6 +18527,12 @@ function wmsMultiploDe(produtoId,sku,clienteId){
 // ══════════════════════════════════════════════════════════
 //  WMS · ETIQUETAS DE SEPARAÇÃO (ZPL / Zebra ~5x5cm)
 // ══════════════════════════════════════════════════════════
+// Extrai os últimos N dígitos do número do pedido, completando com zero à esquerda.
+function wmsNumeroCurto(numeroPedido,n){
+  const dig=String(numeroPedido||'').replace(/\D/g,'');
+  const nn=n||5;
+  return dig.slice(-nn).padStart(nn,'0');
+}
 // Escapa caracteres especiais do ZPL (^ ~ \)
 function zplEsc(s){return String(s||'').replace(/[\^~\\]/g,' ').replace(/[À-ÿ]/g,c=>({'á':'a','à':'a','ã':'a','â':'a','é':'e','ê':'e','í':'i','ó':'o','ô':'o','õ':'o','ú':'u','ç':'c','Á':'A','À':'A','Ã':'A','Â':'A','É':'E','Ê':'E','Í':'I','Ó':'O','Ô':'O','Õ':'O','Ú':'U','Ç':'C'}[c]||c));}
 
@@ -18644,7 +18650,7 @@ function wmsVolumesDaLista(listaId){
   const pedidoDe=t=>{
     if(ehConsolidada)return'CONSOLIDADO';
     const p=t.pedido_id?wmsPedidos.find(x=>x.id===t.pedido_id):null;
-    return p?.numero_pedido||numLista||'PEDIDO';
+    return p?.numero_curto||p?.numero_pedido||numLista||'PEDIDO';
   };
   const porSku={};tarefas.forEach(t=>{(porSku[t.sku]=porSku[t.sku]||[]).push(t);});
   const vols=[];
@@ -19002,7 +19008,8 @@ function wmsPedLinha(p){
     <div style="display:flex;align-items:center" onclick="event.stopPropagation()">${chk}</div>
     <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
       <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Pedido</div>
-      <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${p.numero_pedido}</div>
+      <div style="font-size:16px;font-weight:800;color:var(--text);line-height:1.1">${p.numero_curto||p.numero_pedido}</div>
+      ${p.numero_curto&&p.numero_curto!==p.numero_pedido?`<div style="font-size:8px;color:var(--text3);line-height:1.1">${p.numero_pedido}</div>`:''}
     </div>
     <div class="linfo" style="justify-content:center">
       <div class="lname">${cli?.nome||'—'}</div>
@@ -19017,7 +19024,7 @@ function filterWmsPedidos(q){
   let lista=wmsPedidos.filter(p=>p.company_id===cid);
   if(wmsPedFiltroStatus)lista=lista.filter(p=>p.status===wmsPedFiltroStatus);
   if(wmsPedFiltroCliente)lista=lista.filter(p=>p.cliente_id===wmsPedFiltroCliente);
-  if(q){const ql=q.toLowerCase();lista=lista.filter(p=>(p.numero_pedido||'').toLowerCase().includes(ql));}
+  if(q){const ql=q.toLowerCase();lista=lista.filter(p=>(p.numero_pedido||'').toLowerCase().includes(ql)||(p.numero_curto||'').toLowerCase().includes(ql));}
   const el=ge('wms-ped-list');if(!el)return;
   if(!lista.length){el.innerHTML='<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11H3v10h6zM21 3h-6v18h6zM15 7H9v14h6z"/></svg><p>Nenhum pedido — importe em WMS → Importar Pedidos</p></div>';return;}
   el.innerHTML=lista.slice(0,300).map(wmsPedLinha).join('')+(lista.length>300?`<div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">Mostrando 300 de ${lista.length} — refine a busca</div>`:'');
@@ -19161,9 +19168,11 @@ async function wmsImpSalvar(){
     try{
       // ignora se já existe
       if(wmsPedidos.some(p=>p.cliente_id===wmsImpCliente&&p.numero_pedido===doc)){ignorados++;continue;}
+      const nDig=cli?.wms_digitos_pedido||5;
+      const numCurto=wmsNumeroCurto(doc,nDig);
       const ped=await dbInsert('wms_pedidos',{
         company_id:cid, unit_id:cli?.unit_id||null, cliente_id:wmsImpCliente,
-        numero_pedido:doc, tipo:'saida', status:'importado', owner_id:cu?.id,
+        numero_pedido:doc, numero_curto:numCurto, tipo:'saida', status:'importado', owner_id:cu?.id,
       });
       const pedObj=Array.isArray(ped)?ped[0]:ped;
       if(pedObj){wmsPedidos=[pedObj,...wmsPedidos];okPed++;}
@@ -19376,6 +19385,19 @@ function wmsCliTabBody(clienteId){
       <button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ver produtos</button></div>`;
   }
   const titulos={geral:'Geral',entrada:'Entrada (recebimento)',fiscal:'Fiscal'};
+  if(wmsCliTab==='geral'){
+    const nd=c.wms_digitos_pedido||5;
+    return `<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Número do pedido</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Quantos dígitos finais do número do pedido usar como identificação curta (etiquetas, telas). Ex: 5 → <b>...0036320</b> vira <b>36320</b>.</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:12px;color:var(--text2)">Últimos</label>
+        <input type="number" id="wms-digitos-pedido" min="1" max="20" value="${nd}" style="width:70px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;text-align:center;font-size:14px;font-weight:700">
+        <label style="font-size:12px;color:var(--text2)">dígitos</label>
+      </div>
+      <div style="font-size:11px;color:var(--amber-text);margin-top:10px">⚠ Vale para novas importações. Para reprocessar os pedidos já importados, rode o SQL de correção.</div>
+    </div>`;
+  }
   return `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
     <div style="font-size:13px;font-weight:600;margin-bottom:6px">${titulos[wmsCliTab]||wmsCliTab}</div>
     <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--amber-text);background:var(--amber-bg);padding:5px 12px;border-radius:99px">🚧 Em breve</span>
@@ -19408,16 +19430,22 @@ function wmsToggleEtiqVis(){
   const box=ge('wms-etiq-cliente-box');if(box)box.style.display=modo==='manual'?'none':'flex';
 }
 async function wmsSalvarParamCliente(clienteId){
-  // só salva os parâmetros de separação se a aba Saída foi carregada (radio presente)
+  const dados={};
+  // aba Geral: dígitos do número do pedido
+  const digInput=ge('wms-digitos-pedido');
+  if(digInput){const n=Math.max(1,Math.min(20,parseInt(digInput.value)||5));dados.wms_digitos_pedido=n;}
+  // aba Saída: modo de separação
   const radio=document.querySelector('input[name="wms-modo-sep"]:checked');
-  if(!radio){portClose();return;} // nenhuma alteração de separação aberta
-  const modo=radio.value;
-  const usaEtiq=modo!=='manual' && (ge('wms-usa-etiq')?.checked||false);
+  if(radio){
+    dados.wms_modo_separacao=radio.value;
+    dados.wms_usa_etiqueta_cliente=radio.value!=='manual' && (ge('wms-usa-etiq')?.checked||false);
+  }
+  if(!Object.keys(dados).length){portClose();return;}
   portSaving();
   try{
-    await dbUpdate('clientes',clienteId,{wms_modo_separacao:modo,wms_usa_etiqueta_cliente:usaEtiq});
+    await dbUpdate('clientes',clienteId,dados);
     const c=clientes.find(x=>x.id===clienteId);
-    if(c){c.wms_modo_separacao=modo;c.wms_usa_etiqueta_cliente=usaEtiq;}
+    if(c)Object.assign(c,dados);
     portClose();
     if(typeof showToast==='function')showToast('Parâmetros salvos.','green');
   }catch(e){portErr(e.message||'Erro ao salvar.');}
@@ -20106,5 +20134,3 @@ function unitLabel(){
 </script>
 </body>
 </html>
-
-  
