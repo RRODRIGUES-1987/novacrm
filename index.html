@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.327 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.328 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -954,7 +954,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.327';
+const APP_VERSION='v1.0.328';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18463,6 +18463,28 @@ const WMS_ROM_STATUS={
 };
 let wmsRomSelecionados=new Set(); // pedidos selecionados p/ montar romaneio
 
+// Recalcula e grava os totais do romaneio (soma dos pedidos vinculados)
+async function wmsRecalcRomaneio(romId){
+  const peds=wmsPedidos.filter(p=>p.romaneio_id===romId);
+  const tot={
+    tot_litragem:+peds.reduce((s,p)=>s+(+p.tot_litragem||0),0).toFixed(3),
+    tot_peso:+peds.reduce((s,p)=>s+(+p.tot_peso||0),0).toFixed(3),
+    tot_pedidos:peds.length,
+  };
+  try{
+    await dbUpdate('wms_romaneios',romId,tot);
+    const r=wmsRomaneios.find(x=>x.id===romId);if(r)Object.assign(r,tot);
+  }catch(e){/* não bloqueia */}
+  return tot;
+}
+
+// Formata o resumo de totais do romaneio
+function wmsRomResumo(r){
+  const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
+  const n=r.tot_pedidos!=null?r.tot_pedidos:wmsPedidos.filter(p=>p.romaneio_id===r.id).length;
+  return n+' pedido(s) · '+fmt(r.tot_litragem)+' L · '+fmt(r.tot_peso)+' kg';
+}
+
 // Pedidos que ainda NÃO estão em nenhum romaneio (elegíveis)
 function wmsPedidosSemRomaneio(){
   return wmsPedidos.filter(p=>!p.romaneio_id);
@@ -18524,6 +18546,7 @@ async function wmsCriarRomaneio(){
       const p=wmsPedidos.find(x=>x.id===id);if(p)p.romaneio_id=rom.id;
     }
     wmsRomaneios=[rom,...wmsRomaneios];
+    await wmsRecalcRomaneio(rom.id);
     wmsRomSelecionados=new Set();
     if(typeof portClose==='function')portClose();
     if(typeof showToast==='function')showToast('Romaneio '+numero+' criado.','green');
@@ -18553,7 +18576,7 @@ function rWmsRomaneios(){
       </div>
       <div class="linfo" style="justify-content:center">
         <div class="lname">${cli?.nome||'—'}</div>
-        <div class="lsub">${peds.length} pedido(s) · ${data}</div>
+        <div class="lsub">${wmsRomResumo(r)} · ${data}</div>
       </div>
       <div class="lright" style="align-items:center">
         <span style="background:${st.bg};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${st.l}</span>
@@ -18605,7 +18628,7 @@ function wmsRomaneioDetalhe(id){
   portModal(`Romaneio ${r.numero}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
-      <div style="font-size:11px;color:var(--text3)">${peds.length} pedido(s) · ${data}</div></div>
+      <div style="font-size:11px;color:var(--text3)">${wmsRomResumo(r)} · ${data}</div></div>
       <span style="background:${st.bg||'rgba(136,136,136,.12)'};color:${st.c};font-size:11px;font-weight:700;padding:4px 11px;border-radius:99px">${st.l}</span>
     </div>
     ${btnStatus?`<div style="margin-bottom:12px">${btnStatus}</div>`:''}
@@ -18630,6 +18653,7 @@ async function wmsRomRemoverPedido(romId,pedId){
   try{
     await dbUpdate('wms_pedidos',pedId,{romaneio_id:null});
     const p=wmsPedidos.find(x=>x.id===pedId);if(p)p.romaneio_id=null;
+    await wmsRecalcRomaneio(romId);
     if(typeof showToast==='function')showToast('Pedido removido do romaneio.','green');
     wmsRomaneioDetalhe(romId);
   }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
@@ -18655,6 +18679,7 @@ async function wmsRomAddPedido(romId,pedId){
   try{
     await dbUpdate('wms_pedidos',pedId,{romaneio_id:romId});
     const p=wmsPedidos.find(x=>x.id===pedId);if(p)p.romaneio_id=romId;
+    await wmsRecalcRomaneio(romId);
     if(typeof showToast==='function')showToast('Pedido adicionado.','green');
     wmsRomaneioDetalhe(romId);
   }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
@@ -19299,6 +19324,7 @@ async function wmsMontarRomaneioDaSelecao(){
       const p=wmsPedidos.find(x=>x.id===id);if(p)p.romaneio_id=rom.id;
     }
     wmsRomaneios=[rom,...wmsRomaneios];
+    await wmsRecalcRomaneio(rom.id);
     wmsPedSelecionados.clear();
     if(typeof showToast==='function')showToast('Romaneio '+numero+' criado.','green');
     pg('wms-romaneio');
