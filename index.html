@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.320 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.321 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -953,7 +953,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.320';
+const APP_VERSION='v1.0.321';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18545,10 +18545,10 @@ function zplEtiquetaSeparacao(o){
     '^XA',
     '^CI28',                         // UTF-8
     '^PW400','^LL400',               // 5x5cm @203dpi
-    // Cabeçalho: pedido (ou CONSOLIDADO)
-    '^FO20,16^A0N,26,26^FD'+zplEsc(o.pedido)+'^FS',
-    // Número da lista (menor)
-    '^FO20,46^A0N,18,18^FDLista '+zplEsc(o.lista||'')+'^FS',
+    // Cabeçalho: PEDIDO (ou CONSOLIDADO)
+    '^FO20,16^A0N,24,24^FDPEDIDO: '+zplEsc(o.pedido)+'^FS',
+    // Número da lista
+    '^FO20,44^A0N,20,20^FDLISTA: '+zplEsc(o.lista||'')+'^FS',
     '^FO20,68^GB360,2,2^FS',         // linha
     // Tipo de volume (destaque)
     '^FO20,80^A0N,32,32^FD'+tipoTxt+'^FS',
@@ -18659,18 +18659,18 @@ function wmsVolumesDaLista(listaId){
     const pallets=arr.filter(t=>t.tipo_volume==='pallet');
     const fracoes=arr.filter(t=>t.tipo_volume==='fracao');
     // PALLETS: 1 etiqueta por pallet cheio
-    pallets.forEach((t,i)=>vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'pallet',qtd:t.quantidade,volNum:i+1,volTotal:pallets.length,qr:`${listaId}|${t.id}|P${i+1}`,cliente:cli?.nome||''}));
+    pallets.forEach(t=>vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'pallet',qtd:t.quantidade,qr:`${listaId}|${t.id}|P`,cliente:cli?.nome||''}));
     // FRAÇÕES: 1 etiqueta por UNIDADE fracionada
-    const totalFrac=fracoes.reduce((s,t)=>s+Math.round(+t.quantidade||0),0);
-    let n=0;
     fracoes.forEach(t=>{
       const un=Math.round(+t.quantidade||0);
       for(let u=0;u<un;u++){
-        n++;
-        vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'fracao',qtd:1,volNum:n,volTotal:totalFrac,qr:`${listaId}|${t.id}|F${n}`,cliente:cli?.nome||''});
+        vols.push({pedido:pedidoDe(t),lista:numLista,sku:t.sku,descricao:t.descricao,tipo:'fracao',qtd:1,qr:`${listaId}|${t.id}|F${u+1}`,cliente:cli?.nome||''});
       }
     });
   });
+  // Numeração CONTÍNUA e GLOBAL na lista inteira (pallets + frações, todos os SKUs)
+  const total=vols.length;
+  vols.forEach((v,i)=>{v.volNum=i+1;v.volTotal=total;v.qr=v.qr+'|'+(i+1);});
   return vols;
 }
 
@@ -18684,42 +18684,43 @@ async function wmsEtiquetasPdf(listaId){
   if(typeof showToast==='function')showToast('Gerando etiquetas…','green');
   // gera QRs (em paralelo)
   const qrs=await Promise.all(vols.map(v=>wmsQrDataUrl(v.qr)));
-  // monta etiquetas 5x5cm em grade 3 colunas
+  // Etiqueta 5x5cm exata: 5cm = 141.73 pt
+  const CM=28.3465, LADO=5*CM; // 141.73pt
   const COLS=3;
   const cell=(v,qr)=>{
     const tipoTxt=v.tipo==='pallet'?'PALLET CHEIO':'FRAÇÃO';
     const tipoCor=v.tipo==='pallet'?'#8b5cf6':'#d68910';
     return {
-      table:{widths:['*'],heights:[140],body:[[{
+      table:{widths:[LADO-2],heights:[LADO-2],body:[[{
         stack:[
-          {text:v.pedido,fontSize:9,bold:true,margin:[0,0,0,1]},
-          {text:'Lista '+(v.lista||'—'),fontSize:7,color:'#888',margin:[0,0,0,3]},
+          {text:[{text:'PEDIDO: ',fontSize:8,color:'#666'},{text:v.pedido,fontSize:9,bold:true}],margin:[0,0,0,1]},
+          {text:[{text:'LISTA: ',fontSize:7,color:'#888'},{text:(v.lista||'—'),fontSize:8,bold:true,color:'#555'}],margin:[0,0,0,3]},
           {columns:[
             {width:'*',stack:[
               {text:tipoTxt,fontSize:11,bold:true,color:tipoCor},
               {text:'Vol '+v.volNum+'/'+v.volTotal,fontSize:9,margin:[0,1,0,2]},
               {text:v.sku,fontSize:10,bold:true},
               {text:'Qtd: '+(+v.qtd).toLocaleString('pt-BR')+' un',fontSize:9,bold:true,margin:[0,1,0,0]},
-              {text:(v.descricao||'').slice(0,28),fontSize:7,color:'#555',margin:[0,1,0,0]}
+              {text:(v.descricao||'').slice(0,26),fontSize:6.5,color:'#555',margin:[0,1,0,0]}
             ]},
-            qr?{width:84,image:qr,fit:[80,80],alignment:'center'}:{width:84,text:''}
+            qr?{width:78,image:qr,fit:[74,74],alignment:'center'}:{width:78,text:''}
           ]}
         ],
-        margin:[6,7,6,7]
+        margin:[6,6,6,6]
       }]]},
       layout:{hLineWidth:()=>0.8,vLineWidth:()=>0.8,hLineColor:()=>'#999',vLineColor:()=>'#999'},
-      margin:[0,0,0,6]
+      margin:[0,0,4,4]
     };
   };
   // organiza em linhas de COLS colunas
   const linhas=[];
   for(let i=0;i<vols.length;i+=COLS){
     const grupo=vols.slice(i,i+COLS).map((v,j)=>cell(v,qrs[i+j]));
-    while(grupo.length<COLS)grupo.push({text:''});
-    linhas.push({columns:grupo,columnGap:6});
+    while(grupo.length<COLS)grupo.push({text:'',width:LADO});
+    linhas.push({columns:grupo,columnGap:0});
   }
   const def={
-    pageSize:'A4',pageMargins:[18,18,18,18],
+    pageSize:'A4',pageMargins:[16,16,16,16],
     content:linhas,
     defaultStyle:{font:'Roboto'}
   };
