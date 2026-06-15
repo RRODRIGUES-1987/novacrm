@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.330 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.331 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -964,7 +964,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.330';
+const APP_VERSION='v1.0.331';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -19702,6 +19702,11 @@ function wmsProdutoModal(id){
            <label class="fl">Litragem (litros)</label><input class="fi" id="wp-litragem" type="number" step="0.001" value="${p.litragem??''}" style="max-width:200px">
          </div>
        </div>
+     </div>
+     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+       <div style="font-weight:700;font-size:13px;margin-bottom:4px">Etiqueta do cliente</div>
+       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Código/valor da etiqueta que o cliente já aplica no produto. Quando o depositante usa etiqueta própria, bipamos a dele — sem gerar a nossa.</div>
+       <input class="fi" id="wp-etiqcli" value="${(p.etiqueta_cliente||'').replace(/"/g,'&quot;')}" placeholder="código da etiqueta do cliente">
      </div>`,
     `wmsProdutoSalvar('${id}')`);
 }
@@ -19720,7 +19725,8 @@ async function wmsProdutoSalvar(id){
       curva:g('wp-curva')||null,tipo_baixa:g('wp-tipobaixa')||null,
       validade_dias:(()=>{const v=ge('wp-validade')?.value;return v===''||v==null?null:parseInt(v);})(),
       e_liquido:ge('wp-liquido')?.checked||false,
-      litragem:ge('wp-liquido')?.checked?n('wp-litragem'):null};
+      litragem:ge('wp-liquido')?.checked?n('wp-litragem'):null,
+      etiqueta_cliente:g('wp-etiqcli')?.trim()||null};
     await dbUpdate('wms_produtos',id,obj);
     wmsProdutos=wmsProdutos.map(p=>p.id===id?{...p,...obj}:p);
     portClose();
@@ -19856,8 +19862,26 @@ function wmsCliTabSaida(c){
     <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:${semEtiq?'none':'flex'};align-items:center;justify-content:space-between;gap:10px">
       <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utiliza etiqueta do cliente</div>
       <div style="font-size:11px;color:var(--text3)">Se sim, usa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
-    </div>`;
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} onchange="wmsCheckEtiqFaltando('${c.id}',this.checked)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
+    </div>
+    <div id="wms-etiq-faltando" style="margin-top:10px">${usaEtiq?wmsEtiqFaltandoHtml(c.id):''}</div>`;
+}
+// Lista produtos do cliente sem etiqueta_cliente cadastrada
+function wmsEtiqFaltandoHtml(clienteId){
+  const prods=wmsProdutos.filter(p=>p.cliente_id===clienteId);
+  const faltando=prods.filter(p=>!p.etiqueta_cliente||String(p.etiqueta_cliente).trim()==='');
+  if(!prods.length)return'';
+  if(!faltando.length)return`<div style="font-size:11px;color:var(--green-text);background:var(--green-bg);padding:8px 11px;border-radius:8px">✓ Todos os ${prods.length} produtos têm a etiqueta do cliente cadastrada.</div>`;
+  const amostra=faltando.slice(0,8).map(p=>`<span style="display:inline-block;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:2px">${p.sku}</span>`).join('');
+  return `<div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:9px 11px;border-radius:8px">
+    ⚠ <b>${faltando.length}</b> de ${prods.length} produto(s) sem a etiqueta do cliente cadastrada.
+    <div style="margin-top:5px">${amostra}${faltando.length>8?`<span style="font-size:10px;color:var(--text3)"> +${faltando.length-8} mais</span>`:''}</div>
+    <div style="margin-top:6px"><button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ir para Produtos →</button></div>
+  </div>`;
+}
+function wmsCheckEtiqFaltando(clienteId,ligado){
+  const box=ge('wms-etiq-faltando');if(!box)return;
+  box.innerHTML=ligado?wmsEtiqFaltandoHtml(clienteId):'';
 }
 function wmsToggleEtiqVis(){
   const modo=document.querySelector('input[name="wms-modo-sep"]:checked')?.value||'manual';
