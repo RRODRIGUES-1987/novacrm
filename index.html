@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.322 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.323 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -862,6 +862,7 @@ let rhDemissoes=[],rhAdvertencias=[];
 let capasProcesso=[];
 let wmsProdutos=[];
 let wmsPedidos=[];
+let wmsRomaneios=[];
 let wmsPedidoItens=[];
 let wmsListasSeparacao=[];
 let wmsListaPedidos=[];
@@ -953,7 +954,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.322';
+const APP_VERSION='v1.0.323';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -999,6 +1000,11 @@ async function dbUpdate(table,id,body){
   }
 }
 async function dbDelete(table,id){await sbFetch('DELETE',`/rest/v1/${table}?id=eq.${id}`,null,tok);}
+async function dbRpc(func,args){
+  const r=await sbFetch('POST',`/rest/v1/rpc/${func}`,args||{},tok);
+  if(!r.ok){const msg=r.data?.message||r.data?.msg||JSON.stringify(r.data)||'Erro RPC';throw new Error(`[rpc ${func}] ${msg}`);}
+  return r.data;
+}
 
 // ── AUTH UI ──
 function sv(id){
@@ -1690,7 +1696,7 @@ function render(){
   else if(curPage==='wms-importar-pedidos')c.innerHTML=rWmsImportarPedidos();
   else if(curPage==='wms-separacao')c.innerHTML=rWmsSeparacao();
   else if(curPage==='wms-conferencia')c.innerHTML=rWmsEmConstrucao('Conferência','Conferência dos pedidos separados.');
-  else if(curPage==='wms-romaneio')c.innerHTML=rWmsEmConstrucao('Romaneio de Carga','Montagem do romaneio de carga.');
+  else if(curPage==='wms-romaneio')c.innerHTML=rWmsRomaneios();
   else if(curPage==='wms-expedicao')c.innerHTML=rWmsEmConstrucao('Expedição / Embarque','Etiqueta de embarque e conferência de carga no embarque.');
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
@@ -18415,6 +18421,7 @@ async function loadWmsData(cid){
     dbSelect('wms_lista_pedidos',`company_id=eq.${cid}`).catch(()=>[]),
     dbSelect('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
+  wmsRomaneios=await dbSelect('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
 }
 
 // ── WMS · SEPARAÇÃO (listas geradas) ──
@@ -18425,6 +18432,213 @@ const WMS_LISTA_STATUS={
   cancelada:{l:'Cancelada',c:'#ef4444',bg:'rgba(239,68,68,.12)'},
 };
 const WMS_LISTA_TIPO={pedido_a_pedido:'Pedido a pedido',consolidada:'Consolidada',por_veiculo:'Por veículo'};
+
+// ══════════════════════════════════════════════════════════════════
+//  WMS · ROMANEIOS (montagem de carga)
+// ══════════════════════════════════════════════════════════════════
+const WMS_ROM_STATUS={
+  pendente:{l:'Pendente',c:'#3b82f6',bg:'rgba(59,130,246,.12)'},
+  em_carregamento:{l:'Em Carregamento',c:'#f59e0b',bg:'rgba(245,158,11,.12)'},
+  carregado:{l:'Carregado',c:'#22c55e',bg:'rgba(34,197,94,.12)'},
+};
+let wmsRomSelecionados=new Set(); // pedidos selecionados p/ montar romaneio
+
+// Pedidos que ainda NÃO estão em nenhum romaneio (elegíveis)
+function wmsPedidosSemRomaneio(){
+  return wmsPedidos.filter(p=>!p.romaneio_id);
+}
+
+function wmsRomToggleSel(id){
+  if(wmsRomSelecionados.has(id))wmsRomSelecionados.delete(id);else wmsRomSelecionados.add(id);
+  const btn=ge('port-modal-save');if(btn){btn.disabled=wmsRomSelecionados.size===0;btn.textContent='Montar romaneio ('+wmsRomSelecionados.size+')';}
+}
+
+// Cria romaneio a partir da seleção da tela de Pedidos
+function wmsMontarRomaneioDaSelecao(){
+  const ids=[...wmsPedSelecionados];
+  if(!ids.length){if(typeof showToast==='function')showToast('Selecione ao menos um pedido.','amber');return;}
+  // filtra os que já estão em romaneio
+  const elegiveis=ids.filter(id=>{const p=wmsPedidos.find(x=>x.id===id);return p&&!p.romaneio_id;});
+  const jaVinc=ids.length-elegiveis.length;
+  if(!elegiveis.length){if(typeof showToast==='function')showToast('Todos os selecionados já estão em romaneio.','amber');return;}
+  // valida cliente único (por ora 1 cliente por romaneio)
+  const clientesSel=[...new Set(elegiveis.map(id=>{const p=wmsPedidos.find(x=>x.id===id);return p?.cliente_id;}))];
+  const aviso=jaVinc>0?`<div style="background:var(--amber-bg);color:var(--amber-text);font-size:11px;padding:8px 11px;border-radius:8px;margin-bottom:10px">${jaVinc} pedido(s) já em romaneio serão ignorados.</div>`:'';
+  const avisoCli=clientesSel.length>1?`<div style="background:var(--red-bg);color:var(--red-text);font-size:11px;padding:8px 11px;border-radius:8px;margin-bottom:10px">⚠ Pedidos de ${clientesSel.length} clientes diferentes. Por ora o romaneio é de 1 cliente — selecione pedidos do mesmo depositante.</div>`:'';
+  const podeContinuar=clientesSel.length<=1;
+  const linhas=elegiveis.map(id=>{
+    const p=wmsPedidos.find(x=>x.id===id);const cli=clientes.find(c=>c.id===p.cliente_id);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 11px;border-bottom:1px solid var(--border)">
+      <span style="font-weight:700;font-size:13px">${p.numero_curto||p.numero_pedido}</span>
+      <span style="font-size:11px;color:var(--text3)">${cli?.nome||'—'}</span></div>`;
+  }).join('');
+  portModal('Montar romaneio',
+    `${aviso}${avisoCli}
+     <div style="font-size:12px;color:var(--text3);margin-bottom:8px">${elegiveis.length} pedido(s) entrarão no romaneio:</div>
+     <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px">${linhas}</div>`,
+    podeContinuar?`wmsConfirmarRomaneioSelecao()`:`portClose()`,
+    {saveLabel:podeContinuar?'Criar romaneio':'Fechar',width:'520px'});
+  // guarda os elegíveis para a confirmação
+  wmsRomSelecionados=new Set(elegiveis);
+}
+async function wmsConfirmarRomaneioSelecao(){
+  await wmsCriarRomaneio();
+  wmsPedSelecionados.clear();
+}
+
+// Cria romaneio a partir dos pedidos selecionados
+async function wmsCriarRomaneio(){
+  const ids=[...wmsRomSelecionados];
+  if(!ids.length){if(typeof showToast==='function')showToast('Selecione ao menos um pedido.','amber');return;}
+  const cid=company?.id;
+  // valida: nenhum já em romaneio
+  const jaVinc=ids.filter(id=>{const p=wmsPedidos.find(x=>x.id===id);return p&&p.romaneio_id;});
+  if(jaVinc.length){if(typeof showToast==='function')showToast('Alguns pedidos já estão em romaneio.','amber');return;}
+  try{
+    const numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'ROM'});
+    const cliId=(()=>{const p=wmsPedidos.find(x=>x.id===ids[0]);return p?.cliente_id||null;})();
+    const rom=await dbInsert('wms_romaneios',{company_id:cid,...((typeof unitPayload==='function')?unitPayload():{}),cliente_id:cliId,numero,data:new Date().toISOString().slice(0,10),status:'pendente',owner_id:cu?.id});
+    // vincula os pedidos
+    for(const id of ids){
+      await dbUpdate('wms_pedidos',id,{romaneio_id:rom.id});
+      const p=wmsPedidos.find(x=>x.id===id);if(p)p.romaneio_id=rom.id;
+    }
+    wmsRomaneios=[rom,...wmsRomaneios];
+    wmsRomSelecionados=new Set();
+    if(typeof portClose==='function')portClose();
+    if(typeof showToast==='function')showToast('Romaneio '+numero+' criado.','green');
+    pg('wms-romaneio');
+  }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro ao criar romaneio.','red');}
+}
+
+// Tela: lista de romaneios
+function rWmsRomaneios(){
+  const cid=company?.id;
+  const roms=wmsRomaneios.filter(r=>r.company_id===cid);
+  const semRom=wmsPedidosSemRomaneio();
+  const btnMontar=`<button class="btn btn-p btn-sm" onclick="wmsMontarRomaneioModal()">+ Montar romaneio</button>`;
+  if(!roms.length){
+    return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text3)">Nenhum romaneio criado. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
+  }
+  const rows=roms.map(r=>{
+    const cli=clientes.find(c=>c.id===r.cliente_id);
+    const st=WMS_ROM_STATUS[r.status]||{l:r.status,c:'#888',bg:'rgba(136,136,136,.12)'};
+    const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
+    const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
+    return `<div class="li" style="cursor:pointer" onclick="wmsRomaneioDetalhe('${r.id}')">
+      <div style="display:flex;flex-direction:column;justify-content:center;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
+        <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Romaneio</div>
+        <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${r.numero}</div>
+      </div>
+      <div class="linfo" style="justify-content:center">
+        <div class="lname">${cli?.nome||'—'}</div>
+        <div class="lsub">${peds.length} pedido(s) · ${data}</div>
+      </div>
+      <div class="lright" style="align-items:center">
+        <span style="background:${st.bg};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${st.l}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div style="font-size:12px;color:var(--text3)">${roms.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div>${btnMontar}</div>${rows}`;
+}
+
+// Modal: seleção de pedidos para montar romaneio
+function wmsMontarRomaneioModal(){
+  wmsRomSelecionados=new Set();
+  const semRom=wmsPedidosSemRomaneio();
+  if(!semRom.length){portModal('Montar romaneio','<div class="empty"><p>Não há pedidos disponíveis (todos já estão em algum romaneio).</p></div>','portClose()',{saveLabel:'Fechar'});return;}
+  const linhas=semRom.map(p=>{
+    const cli=clientes.find(c=>c.id===p.cliente_id);
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid var(--border);cursor:pointer">
+      <input type="checkbox" onchange="wmsRomToggleSel('${p.id}')" style="width:16px;height:16px">
+      <div style="flex:1"><div style="font-weight:700;font-size:13px">${p.numero_curto||p.numero_pedido}</div>
+      <div style="font-size:11px;color:var(--text3)">${cli?.nome||'—'}</div></div>
+    </label>`;
+  }).join('');
+  portModal('Montar romaneio',
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Selecione os pedidos para esta carga (${semRom.length} disponível(is)):</div>
+     <div style="max-height:400px;overflow:auto;border:1px solid var(--border);border-radius:8px">${linhas}</div>`,
+    'wmsCriarRomaneio()',{saveLabel:'Montar romaneio (0)',width:'520px'});
+}
+
+// Detalhe do romaneio: pedidos + status + add/remover
+function wmsRomaneioDetalhe(id){
+  const r=wmsRomaneios.find(x=>x.id===id);if(!r)return;
+  const cli=clientes.find(c=>c.id===r.cliente_id);
+  const st=WMS_ROM_STATUS[r.status]||{l:r.status,c:'#888'};
+  const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
+  const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
+  // botões de avanço de status
+  let btnStatus='';
+  if(r.status==='pendente')btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomStatus('${id}','em_carregamento')">▶ Iniciar carregamento</button>`;
+  else if(r.status==='em_carregamento')btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomStatus('${id}','carregado')">✓ Finalizar (carregado)</button>`;
+  const linhasPed=peds.map(p=>{
+    const podeRemover=r.status==='pendente';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--border)">
+      <div style="flex:1"><span style="font-weight:700;font-size:13px">${p.numero_curto||p.numero_pedido}</span></div>
+      ${podeRemover?`<button class="btn btn-sm" onclick="wmsRomRemoverPedido('${id}','${p.id}')" style="color:var(--red-text)">Remover</button>`:''}
+    </div>`;
+  }).join('')||'<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Sem pedidos.</div>';
+  const podeAdd=r.status==='pendente';
+  portModal(`Romaneio ${r.numero}`,
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
+      <div style="font-size:11px;color:var(--text3)">${peds.length} pedido(s) · ${data}</div></div>
+      <span style="background:${st.bg||'rgba(136,136,136,.12)'};color:${st.c};font-size:11px;font-weight:700;padding:4px 11px;border-radius:99px">${st.l}</span>
+    </div>
+    ${btnStatus?`<div style="margin-bottom:12px">${btnStatus}</div>`:''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-size:12px;font-weight:600;color:var(--text2)">Pedidos da carga</div>
+      ${podeAdd?`<button class="btn btn-sm" onclick="wmsRomAddPedidoModal('${id}')">+ Adicionar pedido</button>`:''}
+    </div>
+    <div style="border:1px solid var(--border);border-radius:8px;max-height:300px;overflow:auto">${linhasPed}</div>`,
+    'portClose()',{saveLabel:'Fechar',width:'560px'});
+}
+
+async function wmsRomStatus(id,novo){
+  try{
+    await dbUpdate('wms_romaneios',id,{status:novo});
+    const r=wmsRomaneios.find(x=>x.id===id);if(r)r.status=novo;
+    if(typeof showToast==='function')showToast('Status atualizado.','green');
+    wmsRomaneioDetalhe(id);
+  }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
+}
+
+async function wmsRomRemoverPedido(romId,pedId){
+  try{
+    await dbUpdate('wms_pedidos',pedId,{romaneio_id:null});
+    const p=wmsPedidos.find(x=>x.id===pedId);if(p)p.romaneio_id=null;
+    if(typeof showToast==='function')showToast('Pedido removido do romaneio.','green');
+    wmsRomaneioDetalhe(romId);
+  }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
+}
+
+function wmsRomAddPedidoModal(romId){
+  const semRom=wmsPedidosSemRomaneio();
+  if(!semRom.length){if(typeof showToast==='function')showToast('Sem pedidos disponíveis.','amber');return;}
+  const linhas=semRom.map(p=>{
+    const cli=clientes.find(c=>c.id===p.cliente_id);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--border)">
+      <div style="flex:1"><div style="font-weight:700;font-size:13px">${p.numero_curto||p.numero_pedido}</div>
+      <div style="font-size:11px;color:var(--text3)">${cli?.nome||'—'}</div></div>
+      <button class="btn btn-sm" onclick="wmsRomAddPedido('${romId}','${p.id}')">Adicionar</button>
+    </div>`;
+  }).join('');
+  portModal('Adicionar pedido ao romaneio',
+    `<div style="max-height:400px;overflow:auto;border:1px solid var(--border);border-radius:8px">${linhas}</div>`,
+    'portClose()',{saveLabel:'Fechar',width:'500px'});
+}
+
+async function wmsRomAddPedido(romId,pedId){
+  try{
+    await dbUpdate('wms_pedidos',pedId,{romaneio_id:romId});
+    const p=wmsPedidos.find(x=>x.id===pedId);if(p)p.romaneio_id=romId;
+    if(typeof showToast==='function')showToast('Pedido adicionado.','green');
+    wmsRomaneioDetalhe(romId);
+  }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
+}
 
 // Referência do(s) pedido(s) de uma lista para exibição
 function wmsRefPedidoLista(l){
@@ -18983,10 +19197,35 @@ function rWmsPedidos(){
     <span id="wms-ped-selcount" style="font-size:12px;font-weight:600;color:var(--accent-text)"></span>
     <div style="display:flex;gap:8px">
       <button class="btn btn-sm" onclick="wmsPedSelecionados.clear();filterWmsPedidos(ge('wms-ped-busca')?.value||'')">Limpar</button>
+      <button class="btn btn-sm" onclick="wmsMontarRomaneioDaSelecao()">🚚 Montar romaneio</button>
       <button class="btn btn-p btn-sm" onclick="wmsGerarListasModal()">⚙ Gerar listas de separação</button>
     </div>
   </div>
   <div id="wms-ped-list"></div>`;
+}
+
+// Monta romaneio a partir da seleção da tela de Pedidos (wmsPedSelecionados)
+async function wmsMontarRomaneioDaSelecao(){
+  const ids=[...wmsPedSelecionados];
+  if(!ids.length){if(typeof showToast==='function')showToast('Selecione ao menos um pedido.','amber');return;}
+  // valida: nenhum já em romaneio
+  const jaVinc=ids.filter(id=>{const p=wmsPedidos.find(x=>x.id===id);return p&&p.romaneio_id;});
+  if(jaVinc.length){if(typeof showToast==='function')showToast(jaVinc.length+' pedido(s) já estão em romaneio. Remova da seleção.','amber');return;}
+  // confirma
+  const cid=company?.id;
+  try{
+    const numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'ROM'});
+    const cliId=(()=>{const p=wmsPedidos.find(x=>x.id===ids[0]);return p?.cliente_id||null;})();
+    const rom=await dbInsert('wms_romaneios',{company_id:cid,...((typeof unitPayload==='function')?unitPayload():{}),cliente_id:cliId,numero,data:new Date().toISOString().slice(0,10),status:'pendente',owner_id:cu?.id});
+    for(const id of ids){
+      await dbUpdate('wms_pedidos',id,{romaneio_id:rom.id});
+      const p=wmsPedidos.find(x=>x.id===id);if(p)p.romaneio_id=rom.id;
+    }
+    wmsRomaneios=[rom,...wmsRomaneios];
+    wmsPedSelecionados.clear();
+    if(typeof showToast==='function')showToast('Romaneio '+numero+' criado.','green');
+    pg('wms-romaneio');
+  }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro ao criar romaneio.','red');}
 }
 
 function wmsPedToggleSel(id,ev){
