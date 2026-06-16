@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.331 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.332 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -964,7 +964,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.331';
+const APP_VERSION='v1.0.332';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -4030,6 +4030,25 @@ function filterFaturamento(q){
 
 // Editor de fatura em overlay
 let faturaEditando=null;
+// Converte o valor de uma tarifa em número.
+// - Percentual: vírgula/ponto é SEMPRE decimal, nunca milhar (ex: "0.1290%%" -> 0.129; "0,0445%" -> 0.0445)
+// - Valor normal: formato brasileiro (ponto=milhar, vírgula=decimal) ex "1.200,00" -> 1200
+function parseValorTarifa(valor,isPerc){
+  if(valor==null)return 0;
+  if(typeof valor==='number')return valor;
+  let s=String(valor).replace(/%/g,'').trim(); // remove qualquer % (inclusive %% duplo)
+  if(s==='')return 0;
+  if(isPerc){
+    // percentual: o último separador (. ou ,) é decimal; remove os demais
+    s=s.replace(/,/g,'.');
+    const parts=s.split('.');
+    if(parts.length>1){const dec=parts.pop();s=parts.join('')+'.'+dec;}
+    return parseFloat(s)||0;
+  }
+  // valor normal BR: ponto=milhar, vírgula=decimal
+  return parseFloat(s.replace(/\./g,'').replace(',','.'))||0;
+}
+
 let fatLinhas=[];
 
 async function openFaturaEditor(id=null){
@@ -4773,8 +4792,7 @@ function calcLinhaFatura(idx){
   const l=fatLinhas[idx];
   if(!l)return;
   const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
-  const precoStr=String(l.preco_unitario).replace('%','').trim();
-  const preco=parseFloat(precoStr.replace(/[.]/g,'').replace(',','.'))||0;
+  const preco=parseValorTarifa(l.preco_unitario,isPerc);
   let qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
 
   // Aplica quantidade mínima se configurada — só quando a tabela NÃO usa fat. mínimo de grupo
@@ -11010,7 +11028,7 @@ function rDREProjeto(dealId){
   // Calcula faturamento bruto da proposta
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
     const isPerc=String(it.valor||'').includes('%');
-    const preco=parseFloat(String(it.valor||'0').replace('%','').replace(/\./g,'').replace(',','.'))||0;
+    const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
   })).reduce((a,b)=>a+b,0);
@@ -11130,7 +11148,7 @@ function atualizarDRE(dealId){
   if(proposta?.tarifas){try{tarifas=Array.isArray(proposta.tarifas)?proposta.tarifas:JSON.parse(proposta.tarifas||'[]');}catch(e){}}
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
     const isPerc=String(it.valor||'').includes('%');
-    const preco=parseFloat(String(it.valor||'0').replace('%','').replace(/\./g,'').replace(',','.'))||0;
+    const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
   })).reduce((a,b)=>a+b,0);
@@ -11206,7 +11224,7 @@ function imprimirDRE(dealId){
 
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
     const isPerc=String(it.valor||'').includes('%');
-    const preco=parseFloat(String(it.valor||'0').replace('%','').replace(/\./g,'').replace(',','.'))||0;
+    const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
   })).reduce((a,b)=>a+b,0);
