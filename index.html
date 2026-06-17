@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.343 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.344 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.343';
+const APP_VERSION='v1.0.344';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -19423,6 +19423,50 @@ function wmsConfManualModal(listaId){
       }).join('')}
     </div>`;
   portModal(`Confirmação manual — ${l.numero_lista||''}`,inner,`wmsConfConfirmar('${listaId}')`,{saveLabel:'Confirmar separadas',width:'640px'});
+  // adiciona botão "Desfazer separadas" ao lado do Confirmar (só se há tarefa concluída)
+  const temFeita=tarefas.some(t=>t.status==='concluida');
+  if(temFeita){
+    const saveBtn=document.getElementById('port-modal-save');
+    if(saveBtn && !document.getElementById('port-modal-undo')){
+      const undo=document.createElement('button');
+      undo.className='btn';
+      undo.id='port-modal-undo';
+      undo.style.color='var(--red-text)';
+      undo.textContent='↺ Desfazer separadas';
+      undo.onclick=function(){wmsDesfazerTudoLista(listaId);};
+      saveBtn.parentNode.insertBefore(undo,saveBtn);
+    }
+  }
+}
+// Desfaz TODAS as tarefas concluídas de uma lista (mesmo bloqueio: nenhum pedido em conferência)
+async function wmsDesfazerTudoLista(listaId){
+  const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId && t.status==='concluida');
+  if(!tarefas.length){showToast('Nenhuma tarefa confirmada para desfazer.','blue');return;}
+  // bloqueia se algum pedido da lista já está em conferência
+  const pedIds=[...new Set(tarefas.map(t=>t.pedido_id).filter(Boolean))];
+  const vincPedIds=wmsListaPedidos.filter(lp=>lp.lista_id===listaId).map(lp=>lp.pedido_id);
+  const todosPedidos=[...new Set([...pedIds,...vincPedIds])];
+  if(todosPedidos.some(pid=>wmsPedidoTemConferencia(pid))){
+    showToast('Há pedido(s) já em conferência. Estorne a conferência antes de desfazer a separação.','amber');
+    return;
+  }
+  if(!confirm('Desfazer a separação de TODAS as '+tarefas.length+' tarefa(s) confirmadas desta lista?'))return;
+  try{
+    for(const t of tarefas){
+      await dbUpdate('wms_tarefas_separacao',t.id,{status:'pendente',qtd_separada:null,separador_id:null,separador_nome:null,concluido_em:null});
+      Object.assign(t,{status:'pendente',qtd_separada:null,concluido_em:null});
+    }
+    await wmsReverterStatusLista(listaId);
+    for(const pid of todosPedidos){
+      const p=wmsPedidos.find(x=>x.id===pid);
+      if(p && p.status!=='importado'){
+        await dbUpdate('wms_pedidos',pid,{status:'em_separacao'});
+        p.status='em_separacao';
+      }
+    }
+    showToast('Separação da lista desfeita.','green');
+    wmsConfManualModal(listaId);
+  }catch(e){showToast('Erro ao desfazer: '+e.message,'red');}
 }
 function wmsConfToggle(id,ch){if(ch)wmsConfSel.add(id);else wmsConfSel.delete(id);}
 function wmsConfMarcarOrdem(listaId,pid,ch){
