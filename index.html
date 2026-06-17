@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.338 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.339 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -965,7 +965,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.338';
+const APP_VERSION='v1.0.339';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -20604,14 +20604,18 @@ function wmsExpPrismasBody(){
           <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:99px;background:${pr.status==='livre'?'var(--green-bg)':'var(--amber-bg)'};color:${pr.status==='livre'?'var(--green-text)':'var(--amber-text)'}">${pr.status==='livre'?'LIVRE':'OCUPADO'}</span></div>
         ${pr.status==='ocupado'?`<div class="lsub">${r?r.numero:''}${pr.placa?' · '+pr.placa:''}${pr.motorista?' · '+pr.motorista:''}</div>`:''}
       </div>
-      <div class="lright">
+      <div class="lright" style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="wmsPrismasEtiquetasModal(['${pr.id}'])" title="Imprimir etiqueta">🖨</button>
         ${pr.status==='ocupado'?`<button class="btn btn-sm" onclick="wmsZerarPrisma('${pr.id}')">Zerar</button>`:`<button class="btn btn-sm" onclick="wmsRemoverPrisma('${pr.id}')" style="color:var(--red-text)">Remover</button>`}
       </div>
     </div>`;
   }).join('');
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:12px;color:var(--text2)">${prismas.length} prisma(s) · <span style="color:var(--green-text)">${livres} livre(s)</span> · <span style="color:var(--amber-text)">${ocupados} ocupado(s)</span></div>
-      <button class="btn btn-sm btn-primary" onclick="wmsCriarPrismasModal()">+ Criar prismas</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="wmsPrismasEtiquetasModal(null)">🖨 Etiquetas</button>
+        <button class="btn btn-sm btn-primary" onclick="wmsCriarPrismasModal()">+ Criar prismas</button>
+      </div>
     </div>
     ${rows||`<div class="empty"><p>Nenhum prisma cadastrado nesta unidade.</p></div>`}`;
 }
@@ -20697,6 +20701,132 @@ async function wmsRemoverPrisma(prismaId){
     showToast('Prisma removido.','green');
     if(curPage==='wms-expedicao')render();
   }catch(e){showToast('Erro: '+e.message,'red');}
+}
+
+
+
+// ── ETIQUETA DO PRISMA (10x10cm) — ZPL + PDF, código + QR + código de barras ──
+// ZPL de uma etiqueta de prisma: 10x10cm @203dpi = 800x800 dots
+function zplEtiquetaPrisma(o){
+  // o: {codigo, unidade}
+  return [
+    '^XA',
+    '^CI28',
+    '^PW800','^LL800',
+    // Título
+    '^FO40,40^A0N,40,40^FDPRISMA DE CAMINHAO^FS',
+    '^FO40,90^GB720,3,3^FS',
+    // Código grande (centralizado-ish)
+    '^FO40,150^A0N,120,120^FD'+zplEsc(o.codigo)+'^FS',
+    // Unidade
+    '^FO40,300^A0N,30,30^FD'+zplEsc(o.unidade||'')+'^FS',
+    // Código de barras Code128 (horizontal)
+    '^FO40,360^BY3^BCN,120,Y,N,N^FD'+zplEsc(o.codigo)+'^FS',
+    // QR Code (grande, canto inferior direito)
+    '^FO500,540^BQN,2,8^FDLA,'+zplEsc(o.codigo)+'^FS',
+    // Rodapé
+    '^FO40,740^A0N,24,24^FDMK LOGISTICA^FS',
+    '^XZ'
+  ].join('\n');
+}
+
+function wmsPrismaZplLista(prismaIds){
+  const lista=prismaIds.map(id=>wmsPrismas.find(p=>p.id===id)).filter(Boolean);
+  const unNome=(activeUnit?(userUnits.find(u=>u.id===activeUnit)?.name||''):'');
+  return lista.map(p=>zplEtiquetaPrisma({codigo:p.codigo,unidade:unNome||(p.unit_id?'':'Consolidado')})).join('\n');
+}
+
+// Modal de etiquetas dos prismas (todos ou selecionados)
+function wmsPrismasEtiquetasModal(prismaIds){
+  let ids=prismaIds;
+  if(!ids||!ids.length){
+    const cid=company?.id;
+    ids=wmsPrismas.filter(p=>p.company_id===cid).map(p=>p.id);
+  }
+  if(!ids.length){showToast('Nenhum prisma para etiquetar.','amber');return;}
+  const zpl=wmsPrismaZplLista(ids);
+  const primeira=zpl.split('^XZ')[0]+'^XZ';
+  const previewUrl='https://api.labelary.com/v1/printers/8dpmm/labels/4x4/0/'+encodeURIComponent(primeira);
+  window._wmsPrismaEtiqIds=ids;
+  portModal('Etiquetas de prisma',
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${ids.length} etiqueta(s) · formato 10×10cm (Zebra). Pré-visualização da 1ª:</div>
+     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+       <div style="border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff">
+         <img src="${previewUrl}" alt="preview" style="width:200px;height:200px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+         <div style="display:none;font-size:11px;color:var(--text3);width:200px;text-align:center;padding:40px 0">Preview indisponível (offline). O ZPL/PDF gera normalmente.</div>
+       </div>
+       <div style="flex:1;min-width:200px">
+         <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:12px">
+           Cada etiqueta traz o <b>código do prisma</b> em destaque, <b>código de barras</b> (Code128) e <b>QR Code</b> para bipagem no embarque.
+         </div>
+         <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="wmsPrismasEtiquetasPdf()">🖨 Visualizar / Imprimir PDF</button>
+         <button class="btn" style="width:100%;margin-bottom:8px" onclick="wmsPrismasBaixarZpl()">⬇ Baixar arquivo .zpl (Zebra)</button>
+         <div style="font-size:11px;color:var(--text3)">PDF para qualquer impressora · ZPL para produção na Zebra.</div>
+       </div>
+     </div>`,
+    'portClose()',{saveLabel:'Fechar',width:'560px'});
+}
+
+function wmsPrismasBaixarZpl(){
+  const ids=window._wmsPrismaEtiqIds||[];
+  const zpl=wmsPrismaZplLista(ids);
+  const blob=new Blob([zpl],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='etiquetas_prismas.zpl';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+// PDF das etiquetas de prisma (10x10, uma por página) com QR via qrcodejs
+function wmsPrismasEtiquetasPdf(){
+  const ids=window._wmsPrismaEtiqIds||[];
+  const lista=ids.map(id=>wmsPrismas.find(p=>p.id===id)).filter(Boolean);
+  if(!lista.length)return;
+  const unNome=(activeUnit?(userUnits.find(u=>u.id===activeUnit)?.name||''):'');
+  // gera QR de cada um
+  const qrMap={};
+  let pend=lista.length;
+  lista.forEach(p=>{
+    const tmp=document.createElement('div');
+    new QRCode(tmp,{text:p.codigo,width:200,height:200,correctLevel:QRCode.CorrectLevel.M});
+    setTimeout(()=>{
+      const img=tmp.querySelector('img')||tmp.querySelector('canvas');
+      try{ qrMap[p.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png'); }catch(e){ qrMap[p.id]=''; }
+      pend--;
+      if(pend<=0)wmsPrismasPdfRender(lista,qrMap,unNome);
+    },200);
+  });
+}
+function wmsPrismasPdfRender(lista,qrMap,unNome){
+  const paginas=lista.map((p,idx)=>{
+    const qr=qrMap[p.id]||'';
+    return '<div class="et" style="'+(idx>0?'page-break-before:always;':'')+'">'+
+      '<div class="tt">PRISMA DE CAMINHÃO</div>'+
+      '<div class="cod">'+p.codigo+'</div>'+
+      '<div class="un">'+(unNome||'')+'</div>'+
+      (qr?'<div class="qr"><img src="'+qr+'" width="180" height="180"></div>':'')+
+      '<div class="bc">'+p.codigo+'</div>'+
+      '<div class="ft">MK LOGÍSTICA</div>'+
+    '</div>';
+  }).join('');
+  const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas de prisma</title>'+
+  '<style>@page{size:100mm 100mm;margin:0}*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+  '.et{width:100mm;height:100mm;padding:8mm;border:2px solid #000;display:flex;flex-direction:column;align-items:center;text-align:center}'+
+  '.tt{font-size:18px;font-weight:800;letter-spacing:1px}'+
+  '.cod{font-size:64px;font-weight:900;margin:6px 0;letter-spacing:2px}'+
+  '.un{font-size:14px;color:#444;margin-bottom:6px}'+
+  '.qr{margin:4px 0}'+
+  '.bc{font-family:"Libre Barcode 128",monospace;font-size:14px;letter-spacing:1px;margin-top:6px;font-weight:700}'+
+  '.ft{margin-top:auto;font-size:12px;color:#666}</style></head><body>'+paginas+'</body></html>';
+  const old=ge('prisma-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='prisma-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},700);
 }
 
 
