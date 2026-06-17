@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.333 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.334 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -964,7 +964,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.333';
+const APP_VERSION='v1.0.334';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -3761,6 +3761,7 @@ function renderTTQuadros(){
             <th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:600;width:12%" title="Quantidade mínima cobrada">Qtde Mín</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Recebimento">Cap.Rec</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Expedição">Cap.Exp</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Esta linha vai para a Nota de Débito (valor fixo, sem imposto)">ND</th>
             <th style="width:5%"></th>
           </tr>
         </thead>
@@ -3795,6 +3796,9 @@ function renderTTRow(qi, ii, item){
     </td>
     <td style="padding:5px 4px;text-align:center">
       <input type="checkbox" ${item.cap_expedicao?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].cap_expedicao=this.checked" style="width:15px;height:15px;cursor:pointer">
+    </td>
+    <td style="padding:5px 4px;text-align:center">
+      <input type="checkbox" ${item.nota_debito?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].nota_debito=this.checked" style="width:15px;height:15px;cursor:pointer" title="Vai para a Nota de Débito">
     </td>
     <td style="padding:5px 4px;text-align:center">
       <button onclick="removeItemQuadro(${qi},${ii})" style="border:none;background:none;cursor:pointer;color:var(--text3);padding:2px">
@@ -4188,6 +4192,17 @@ async function openFaturaEditor(id=null){
             <a id="fat-nfse-pdf-link" href="${f?.nfse_pdf_url||'#'}" target="_blank" style="font-size:12px;color:var(--accent);${f?.nfse_pdf_url?'':'display:none'}">📄 Ver PDF</a>
           </div>
         </div>
+        <div class="fg" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:10px;margin-top:4px">
+          <label class="fl" style="display:flex;align-items:center;gap:6px">Nota de Débito
+            <span style="font-size:10px;color:var(--text3);font-weight:400">(valor fixo, sem imposto — gerada ao aprovar)</span>
+          </label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input class="fi" id="fat-nd-num" value="${f?.nd_numero||''}" placeholder="ND-0000/2026" disabled style="max-width:160px;opacity:${f?.nd_numero?'1':'.6'}">
+            <input class="fi" id="fat-nd-data" type="date" value="${f?.nd_em||''}" disabled style="max-width:160px;opacity:${f?.nd_em?'1':'.6'}">
+            <span style="font-size:12px;color:var(--text2)">${f?.nd_valor?('Valor: '+fmtV(f.nd_valor)):''}</span>
+            <button type="button" class="btn btn-sm" onclick="gerarPdfNotaDebito('${f?.id||''}')" ${f?.nd_numero?'':'disabled'} style="${f?.nd_numero?'':'opacity:.5;cursor:not-allowed'}">📄 PDF Nota de Débito</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -4422,6 +4437,76 @@ function _imprimirFatura(f,contatoResp){
 }
 
 
+
+// PDF da Nota de Débito (layout simples, valor fixo, sem imposto)
+function gerarPdfNotaDebito(id){
+  const f=id?faturamento.find(x=>x.id===id):faturaEditando;
+  if(!f){alert('Salve a fatura antes de gerar a Nota de Débito.');return;}
+  if(!f.nd_numero){alert('A Nota de Débito ainda não foi gerada. Aprove a fatura primeiro.');return;}
+  const cli=clientes.find(c=>c.id===f.cliente_id);
+  let linhas=[];try{linhas=JSON.parse(f.linhas||'[]');}catch(e){linhas=[];}
+  const ndLinhas=linhas.filter(l=>l.nota_debito);
+  const totalND=ndLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const fmtBRL=v=>'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtDt=d=>d?new Date(d+'T00:00:00').toLocaleDateString('pt-BR'):'';
+  const linhasHTML=ndLinhas.map(l=>'<tr>'+
+    '<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px">'+(l.servico||'')+'</td>'+
+    '<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">'+(l.unidade||'')+'</td>'+
+    '<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">'+(l.quantidade||'')+'</td>'+
+    '<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">'+fmtBRL(l.subtotal)+'</td>'+
+  '</tr>').join('');
+  const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Débito '+f.nd_numero+'</title>'+
+  '<style>'+
+    '*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+    'body{padding:40px;color:#222}'+
+    '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:16px;margin-bottom:20px}'+
+    '.doc-title{font-size:22px;font-weight:800;letter-spacing:1px;color:#1a1a1a}'+
+    '.doc-num{font-size:14px;color:#666;margin-top:4px}'+
+    '.empresa{text-align:right;font-size:12px;color:#444;line-height:1.5}'+
+    '.section{margin-bottom:18px}'+
+    '.info-label{color:#888;font-size:11px}'+
+    '.info-val{font-size:13px;font-weight:600}'+
+    'table{width:100%;border-collapse:collapse;margin-top:8px}'+
+    'thead tr{background:#1a1a1a;color:#fff}'+
+    'th{padding:8px 10px;font-size:11px;text-align:left}'+
+    '.totals{margin-top:16px;display:flex;flex-direction:column;align-items:flex-end;gap:6px}'+
+    '.total-final{font-size:18px;font-weight:800;border-top:2px solid #1a1a1a;padding-top:8px;color:#1a1a1a}'+
+    '.aviso{margin-top:14px;font-size:11px;color:#888;font-style:italic}'+
+    '.footer{margin-top:40px;padding-top:14px;border-top:1px solid #ddd;text-align:center;font-size:11px;color:#999}'+
+  '</style></head><body>'+
+  '<div class="head">'+
+    '<div><div class="doc-title">NOTA DE DÉBITO</div><div class="doc-num">'+f.nd_numero+'</div></div>'+
+    '<div class="empresa"><b>MK LOGÍSTICA LTDA</b><br>contato@mklogistica.com<br>www.mklogistica.com</div>'+
+  '</div>'+
+  '<div class="section"><div class="info-label">Cliente</div><div class="info-val">'+(cli?.nome||f.cliente_nome||'—')+'</div></div>'+
+  '<div class="section" style="display:flex;gap:40px">'+
+    '<div><div class="info-label">Data de emissão</div><div class="info-val">'+fmtDt(f.nd_em)+'</div></div>'+
+    (f.numero_fatura?'<div><div class="info-label">Fatura de referência</div><div class="info-val">'+f.numero_fatura+'</div></div>':'')+
+    (f.periodo_inicio?'<div><div class="info-label">Período</div><div class="info-val">'+fmtDt(f.periodo_inicio)+' a '+fmtDt(f.periodo_fim)+'</div></div>':'')+
+  '</div>'+
+  '<table><thead><tr><th style="width:50%">Descrição</th><th style="width:16%;text-align:center">Unidade</th><th style="width:14%;text-align:right">Qtd</th><th style="width:20%;text-align:right">Valor</th></tr></thead>'+
+  '<tbody>'+linhasHTML+'</tbody></table>'+
+  '<div class="totals"><div class="total-final"><span>TOTAL: </span><span style="min-width:130px;text-align:right;display:inline-block">'+fmtBRL(totalND)+'</span></div></div>'+
+  '<div class="aviso">Documento de cobrança de valor fixo. Não constitui nota fiscal de serviço e não incide ISS.</div>'+
+  '<div class="footer">MK LOGÍSTICA LTDA · contato@mklogistica.com · www.mklogistica.com</div>'+
+  '</body></html>';
+  const nomeArq=(f.nd_numero+'-'+(cli?.nome||f.cliente_nome||'')).replace(/\//g,'-').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_\-]/g,'');
+  const old=ge('nd-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='nd-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  setTimeout(()=>{
+    const oldTitle=document.title;
+    document.title=nomeArq;
+    try{iframe.contentWindow.document.title=nomeArq;}catch(e){}
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    setTimeout(()=>{document.title=oldTitle;iframe.remove();},3000);
+  },800);
+}
 
 const RESEND_KEY='re_K8Zg8qFd_CZDb7rP9trD34v7A9rkZnQqg';
 const EMAIL_FROM='noreply@mklogistica.com';
@@ -4738,11 +4823,12 @@ function carregarLinhasFatura(tabelaId){
   fatLinhas=tarifas.flatMap(q=>(q.itens||[]).filter(i=>i.servico).map(it=>({
     quadro:q.quadro||q.nome||'Geral',
     servico:it.servico,
-    unidade:it.unidade||'',
+    unidade:it.unidade||it.unidade_cobranca||'',
     preco_unitario:it.valor||'',
     quantidade:'',
     subtotal:0,
     tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
+    nota_debito:it.nota_debito===true,
   })));
   renderLinhasFatura();
   recalcFatura();
@@ -4829,7 +4915,10 @@ function addLinhaFatura(){
 }
 
 function recalcFatura(){
-  const subtotalLinhas=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  // Separa linhas normais (NF) das de Nota de Débito
+  const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=fatLinhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalLinhas=subtotalNF; // o complemento/ISS incide só sobre a parte NF
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
 
   // Verificar faturamento mínimo da tabela tarifária selecionada
@@ -4838,7 +4927,6 @@ function recalcFatura(){
   let fatMinVal=0;
   let complemento=0;
   if(tabela?.cond_fat_minimo){
-    // Extrai valor numérico do campo cond_fat_minimo (ex: "R$ 10.000,00" ou "10000")
     const minStr=String(tabela.cond_fat_minimo).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.');
     fatMinVal=parseFloat(minStr)||0;
     if(fatMinVal>0 && subtotalLinhas<fatMinVal){
@@ -4846,9 +4934,16 @@ function recalcFatura(){
     }
   }
 
-  const subtotal=subtotalLinhas+complemento;
-  const issVal=issIncluso?0:subtotal*0.02;
-  const total=subtotal+issVal;
+  const subtotal=subtotalLinhas+complemento;       // base NF
+  const issVal=issIncluso?0:subtotal*0.02;          // ISS só sobre NF
+  const totalNF=subtotal+issVal;
+  const total=totalNF+subtotalND;                   // total geral = NF + ND (ND sem imposto)
+
+  // Expor para PDFs e salvamento
+  window._fatComplemento=complemento;
+  window._fatMinVal=fatMinVal;
+  window._fatTotalND=subtotalND;
+  window._fatTotalNF=totalNF;
 
   const el=ge('fat-totais');
   if(!el)return;
@@ -4856,7 +4951,7 @@ function recalcFatura(){
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">Subtotal serviços:</span>
-        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalLinhas)}</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalNF)}</span>
       </div>
       ${complemento>0?`
       <div style="display:flex;gap:40px;font-size:13px">
@@ -4871,15 +4966,15 @@ function recalcFatura(){
         <span style="color:var(--text2)">ISS (2%):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(issVal)}</span>
       </div>`:''}
+      ${subtotalND>0?`<div style="display:flex;gap:40px;font-size:13px">
+        <span style="color:var(--text2)">Nota de Débito (s/ imposto):</span>
+        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalND)}</span>
+      </div>`:''}
       <div style="display:flex;gap:40px;font-size:16px;border-top:2px solid var(--border);padding-top:8px;margin-top:4px">
         <span style="font-weight:700">Total:</span>
         <span style="font-weight:700;color:var(--accent);min-width:120px;text-align:right">${fmtV(total)}</span>
       </div>
     </div>`;
-
-  // Expor complemento para uso no salvarFatura
-  window._fatComplemento=complemento;
-  window._fatMinVal=fatMinVal;
 }
 
 function getFatV(id){const e=ge(id);return e?e.value||null:null;}
@@ -4920,12 +5015,14 @@ async function salvarFatura(status){
   const cli=clientes.find(c=>c.id===clienteId);
   const responsavelId=getFatV('fat-responsavel');
   const tipoOp=getFatV('fat-tipo-op');
-  const subtotalLinhas=fatLinhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
+  // Separa linhas normais (NF) das de Nota de Débito
+  const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=fatLinhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const complemento=window._fatComplemento||0;
-  const subtotal=subtotalLinhas+complemento;
+  const subtotal=subtotalNF+complemento;            // base NF
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
-  const issVal=issIncluso?0:subtotal*0.02;
-  const total=subtotal+issVal;
+  const issVal=issIncluso?0:subtotal*0.02;          // ISS só sobre NF
+  const total=subtotal+issVal+subtotalND;           // total geral = NF + ISS + ND
   // Adiciona linha de complemento nas linhas a salvar
   const linhasParaSalvar=[...fatLinhas];
   if(complemento>0){
@@ -4942,6 +5039,19 @@ async function salvarFatura(status){
   }
   const num=getFatV('fat-num');
 
+  // Gera número da Nota de Débito ao aprovar/emitir, se houver linhas ND e ainda não tiver número
+  let ndCampos={};
+  const statusAprovado=(status==='aprovado'||status==='aprovada'||status==='emitida'||status==='autorizada');
+  if(statusAprovado && subtotalND>0 && !(faturaEditando&&faturaEditando.nd_numero)){
+    try{
+      const ndNum=await dbRpc('next_numero',{p_company:cid,p_prefixo:'ND'});
+      ndCampos={nd_numero:ndNum,nd_em:getFatV('fat-emissao')||new Date().toISOString().slice(0,10),nd_valor:subtotalND};
+    }catch(e){/* não bloqueia o salvamento */}
+  } else if(subtotalND>0 && faturaEditando&&faturaEditando.nd_numero){
+    // mantém número existente, atualiza valor
+    ndCampos={nd_valor:subtotalND};
+  }
+
   const obj={
     owner_id:cu.id, company_id:cid, ...unitPayload(),
     numero_fatura:num,
@@ -4956,6 +5066,7 @@ async function salvarFatura(status){
     nfse_numero:getFatV('fat-nfse-num')||null,
     nfse_em:getFatV('fat-nfse-data')||null,
     ...(fatNfsePdfUrl?{nfse_pdf_url:fatNfsePdfUrl}:{}),
+    ...ndCampos,
     periodicidade:getFatV('fat-period')||'quinzenal',
     periodo_inicio:getFatV('fat-ini'),
     periodo_fim:getFatV('fat-fim'),
@@ -4969,6 +5080,7 @@ async function salvarFatura(status){
   if(faturaEditando){
     await dbUpdate('faturamento',faturaEditando.id,obj);
     faturamento=faturamento.map(f=>f.id===faturaEditando.id?{...f,...obj}:f);
+    faturaEditando={...faturaEditando,...obj};
   } else {
     const res=await dbInsert('faturamento',obj);
     if(res){faturamento.unshift(res);faturaEditando=res;}
@@ -4993,8 +5105,22 @@ async function salvarFaturaAprovar(){
 
 async function aprovarFatura(id){
   if(!confirm('Aprovar esta fatura?'))return;
-  await dbUpdate('faturamento',id,{status:'aprovado',aprovado_por:cu.id,aprovado_em:new Date().toISOString()});
-  faturamento=faturamento.map(f=>f.id===id?{...f,status:'aprovado',aprovado_por:cu.id}:f);
+  const f=faturamento.find(x=>x.id===id);
+  const upd={status:'aprovado',aprovado_por:cu.id,aprovado_em:new Date().toISOString()};
+  // Gera número da Nota de Débito se houver linhas ND e ainda não tiver número
+  if(f && !f.nd_numero){
+    let linhas=[];try{linhas=JSON.parse(f.linhas||'[]');}catch(e){linhas=[];}
+    const ndVal=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+    if(ndVal>0){
+      try{
+        const ndNum=await dbRpc('next_numero',{p_company:f.company_id,p_prefixo:'ND'});
+        upd.nd_numero=ndNum;upd.nd_em=f.data_emissao||new Date().toISOString().slice(0,10);upd.nd_valor=ndVal;
+      }catch(e){/* não bloqueia */}
+    }
+  }
+  await dbUpdate('faturamento',id,upd);
+  faturamento=faturamento.map(f=>f.id===id?{...f,...upd}:f);
+  if(upd.nd_numero&&typeof showToast==='function')showToast('Nota de Débito '+upd.nd_numero+' gerada.','green');
   render();
 }
 
