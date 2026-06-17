@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.340 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.341 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.340';
+const APP_VERSION='v1.0.341';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18903,8 +18903,36 @@ function wmsRomaneioDetalhe(id){
       <div style="font-size:12px;font-weight:600;color:var(--text2)">Pedidos da carga</div>
       ${podeAdd?`<button class="btn btn-sm" onclick="wmsRomAddPedidoModal('${id}')">+ Adicionar pedido</button>`:''}
     </div>
-    <div style="border:1px solid var(--border);border-radius:8px;max-height:300px;overflow:auto">${linhasPed}</div>`,
+    <div style="border:1px solid var(--border);border-radius:8px;max-height:300px;overflow:auto">${linhasPed}</div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;text-align:right">
+      <button class="btn btn-sm" onclick="wmsCancelarRomaneio('${id}')" style="color:var(--red-text)">🗑 Cancelar romaneio</button>
+    </div>`,
     'portClose()',{saveLabel:'Fechar',width:'560px'});
+}
+
+// Cancela um romaneio: libera os pedidos (volta romaneio_id=null), libera prisma, apaga o romaneio
+async function wmsCancelarRomaneio(id){
+  const r=wmsRomaneios.find(x=>x.id===id);if(!r)return;
+  if(!confirm('Cancelar o romaneio '+r.numero+'? Os pedidos voltam a ficar sem romaneio. Esta ação não pode ser desfeita.'))return;
+  try{
+    // libera pedidos
+    const peds=wmsPedidos.filter(p=>p.romaneio_id===id);
+    for(const p of peds){
+      await dbUpdate('wms_pedidos',p.id,{romaneio_id:null});
+      p.romaneio_id=null;
+    }
+    // libera prisma ocupado por este romaneio
+    const pr=wmsPrismas.find(x=>x.romaneio_id===id);
+    if(pr){
+      await dbUpdate('wms_prismas_caminhao',pr.id,{status:'livre',romaneio_id:null,placa:null,motorista:null,atribuido_em:null,atribuido_por:null});
+      Object.assign(pr,{status:'livre',romaneio_id:null,placa:null,motorista:null});
+    }
+    await dbDelete('wms_romaneios',id);
+    wmsRomaneios=wmsRomaneios.filter(x=>x.id!==id);
+    portClose();
+    showToast('Romaneio '+r.numero+' cancelado.','green');
+    render();
+  }catch(e){showToast('Erro ao cancelar: '+e.message,'red');}
 }
 
 async function wmsRomStatus(id,novo){
@@ -19032,8 +19060,40 @@ function wmsListaDetalhe(id){
         </tr></thead>
         <tbody>${linhas}</tbody>
       </table>
+    </div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;text-align:right">
+      <button class="btn btn-sm" onclick="wmsCancelarLista('${l.id}')" style="color:var(--red-text)">🗑 Cancelar lista</button>
     </div>`,
     'portClose()',{saveLabel:'Fechar',width:'720px'});
+}
+
+// Cancela uma lista: volta pedidos para 'importado', apaga tarefas, vínculos e a lista
+async function wmsCancelarLista(id){
+  const l=wmsListasSeparacao.find(x=>x.id===id);if(!l)return;
+  if(!confirm('Cancelar a lista '+(l.numero_lista||'')+'? Os pedidos voltam para "importado" e as tarefas serão apagadas. Esta ação não pode ser desfeita.'))return;
+  try{
+    // pedidos vinculados à lista voltam para importado
+    const vinculos=wmsListaPedidos.filter(lp=>lp.lista_id===id);
+    const pedIds=vinculos.map(v=>v.pedido_id);
+    for(const pid of pedIds){
+      const p=wmsPedidos.find(x=>x.id===pid);
+      if(p && ['em_separacao','em_conferencia','conferido','separado'].includes(p.status)){
+        await dbUpdate('wms_pedidos',pid,{status:'importado'});
+        p.status='importado';
+      }
+    }
+    // apaga tarefas, vínculos e a lista
+    const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===id);
+    for(const t of tarefas){ await dbDelete('wms_tarefas_separacao',t.id); }
+    wmsTarefasSeparacao=wmsTarefasSeparacao.filter(t=>t.lista_id!==id);
+    for(const v of vinculos){ await dbDelete('wms_lista_pedidos',v.id); }
+    wmsListaPedidos=wmsListaPedidos.filter(lp=>lp.lista_id!==id);
+    await dbDelete('wms_listas_separacao',id);
+    wmsListasSeparacao=wmsListasSeparacao.filter(x=>x.id!==id);
+    portClose();
+    showToast('Lista cancelada. Pedidos voltaram para importado.','green');
+    render();
+  }catch(e){showToast('Erro ao cancelar: '+e.message,'red');}
 }
 
 // ── WMS · GERAÇÃO DE LISTAS DE SEPARAÇÃO ──
