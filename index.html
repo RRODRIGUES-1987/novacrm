@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.334 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.335 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -964,7 +964,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.334';
+const APP_VERSION='v1.0.335';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1971,7 +1971,7 @@ function buildCadastroForm(tipo, record, id=null){
           <input class="fi" id="cad-nome_pai" value="${r.nome_pai||''}">
         </div>
         <div class="fg"><label class="fl">Nacionalidade</label>
-          <input class="fi" id="cad-nacionalidade" value="${r.nacionalidade||''}" placeholder="Brasileiro(a)">
+          <input class="fi" id="cad-nacionalidade" value="${r.nacionalidade||(r.id?'':'Brasileiro(a)')}" placeholder="Brasileiro(a)">
         </div>
         <div class="fg"><label class="fl">Local de nascimento</label>
           <input class="fi" id="cad-local_nascimento" value="${r.local_nascimento||''}" placeholder="Cidade/UF">
@@ -2489,7 +2489,7 @@ function openDepModal(pessoaId, depId){
       +'<div class="fg"><label class="fl">Nome *</label><input class="fi" id="dep-nome" value="'+(d?d.nome||'':'')+'"></div>'
       +'<div class="fg"><label class="fl">Parentesco</label><select class="fi" id="dep-parentesco">'
       +'<option value="">Selecione</option>'
-      +['Cônjuge','Filho(a)','Enteado(a)','Pai','Mãe','Outro'].map(function(p){return'<option '+(d&&d.parentesco===p?'selected':'')+'>'+p+'</option>';}).join('')
+      +['Cônjuge','Filho(a)','Enteado(a)','Pai','Mãe','Outro'].map(function(p){return'<option '+(d&&(d.grau_parentesco||d.parentesco)===p?'selected':'')+'>'+p+'</option>';}).join('')
       +'</select></div>'
       +'<div class="fg"><label class="fl">Data de nascimento</label><input class="fi" type="date" id="dep-nasc" value="'+(d?d.data_nascimento||'':'')+'"></div>'
       +'<div class="fg"><label class="fl">CPF</label><input class="fi" id="dep-cpf" value="'+(d?d.cpf||'':'')+'" placeholder="000.000.000-00"></div>'
@@ -2510,7 +2510,7 @@ function openDepModal(pessoaId, depId){
       const obj = {
         pessoa_id: pessoaId, company_id: company.id,
         nome: nome,
-        parentesco: document.getElementById('dep-parentesco')?.value||null,
+        grau_parentesco: document.getElementById('dep-parentesco')?.value||null,
         data_nascimento: document.getElementById('dep-nasc')?.value||null,
         cpf: document.getElementById('dep-cpf')?.value||null,
       };
@@ -2565,7 +2565,7 @@ function switchCadTab(tab){
           deps.forEach(function(d){
             html += '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);display:flex;justify-content:space-between;align-items:center">';
             html += '<div><div style="font-size:13px;font-weight:600">'+d.nome+'</div>';
-            html += '<div style="font-size:11px;color:var(--text3)">'+(d.parentesco||'—')+' · '+(d.data_nascimento?new Date(d.data_nascimento+'T00:00').toLocaleDateString('pt-BR'):'—')+'</div></div>';
+            html += '<div style="font-size:11px;color:var(--text3)">'+(d.grau_parentesco||d.parentesco||'—')+' · '+(d.data_nascimento?new Date(d.data_nascimento+'T00:00').toLocaleDateString('pt-BR'):'—')+'</div></div>';
             html += '<button data-dep-id="'+d.id+'" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer" class="dep-btn-edit">Editar</button>';
             html += '</div>';
           });
@@ -8434,6 +8434,13 @@ async function gerarFichaAdmissaoPdf(pessoaId){
   const unidade=p.unit_id?(userUnits.find(u=>u.id===p.unit_id)?.name||''):'';
   const cboFunc=p.funcao_id?(rhFuncoes.find(f=>f.id===p.funcao_id)?.cbo||''):'';
   const horarioNome=p.turno||'';
+  // Data do exame admissional (exame realizado tipo 'admissional' da pessoa)
+  const exAdm=(exameRealizados||[]).filter(e=>e.pessoa_id===pessoaId&&e.tipo==='admissional')
+    .sort((a,b)=>(b.data_realizacao||'')>(a.data_realizacao||'')?1:-1)[0];
+  const dataExameAdm=exAdm?exAdm.data_realizacao:null;
+  // Endereço completo montado
+  const endLinha=[p.logradouro,p.numero].filter(Boolean).join(', ')
+    +(p.complemento?(' - '+p.complemento):'');
   const LOGO=(typeof window!=='undefined'&&window._mkLogoBase64)?window._mkLogoBase64:null;
   const BORDA='#000';
 
@@ -8449,15 +8456,13 @@ async function gerarFichaAdmissaoPdf(pessoaId){
     margin:[0,12,0,6]
   });
 
-  // Cabeçalho: logo + nome da filial
-  const filial=(company?.name||'MK LOGÍSTICA')+(unidade?(' — '+unidade):'');
+  // Cabeçalho: logo + título (sem nome da filial)
   const topbar={
     columns:[
       LOGO?{image:LOGO,width:90,margin:[0,0,0,0]}:{text:'MK log',bold:true,fontSize:16,margin:[0,8,0,0]},
       {stack:[
-        {text:filial.toUpperCase(),bold:true,fontSize:14,alignment:'right'},
-        {text:'FICHA DE ADMISSÃO',fontSize:11,alignment:'right',margin:[0,2,0,0]},
-      ],margin:[0,6,0,0]},
+        {text:'FICHA DE ADMISSÃO',bold:true,fontSize:16,alignment:'right'},
+      ],margin:[0,10,0,0]},
     ],
     margin:[0,0,0,4]
   };
@@ -8475,7 +8480,7 @@ async function gerarFichaAdmissaoPdf(pessoaId){
       {text:d.nome||'—',fontSize:10},
       {text:d.cpf||'—',fontSize:10},
       {text:fmtData(d.data_nascimento),fontSize:10},
-      {text:d.grau_parentesco||'—',fontSize:10},
+      {text:d.grau_parentesco||d.parentesco||'—',fontSize:10},
     ]));
     depBlock=[secao('DEPENDENTES'),{
       table:{headerRows:1,widths:['*','auto','auto','auto'],body},
@@ -8486,8 +8491,18 @@ async function gerarFichaAdmissaoPdf(pessoaId){
 
   const def={
     pageSize:'A4',
-    pageMargins:[40,36,40,40],
+    pageMargins:[40,36,40,48],
     defaultStyle:{fontSize:10,color:'#000'},
+    footer:function(currentPage,pageCount){
+      return {
+        margin:[40,8,40,0],
+        stack:[
+          {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:0.5,lineColor:'#ccc'}]},
+          {text:'MK LOGÍSTICA LTDA · contato@mklogistica.com · 55 11 4602 6363 · www.mklogistica.com',
+            fontSize:8,italics:true,color:'#1a5ca8',alignment:'center',margin:[0,4,0,0]},
+        ]
+      };
+    },
     content:[
       topbar,
       {canvas:[{type:'line',x1:0,y1:0,x2:515,y2:0,lineWidth:1,lineColor:BORDA}],margin:[0,2,0,0]},
@@ -8516,10 +8531,26 @@ async function gerarFichaAdmissaoPdf(pessoaId){
       campo('Nome da Mãe:',p.nome_mae),
       campo('Nome do Pai:',p.nome_pai),
 
+      secao('ENDEREÇO'),
+      {columns:[
+        {width:'*',stack:[
+          campo('CEP:',p.cep),
+          campo('Logradouro:',p.logradouro),
+          campo('Número:',p.numero),
+          campo('Complemento:',p.complemento),
+        ]},
+        {width:'*',stack:[
+          campo('Bairro:',p.bairro),
+          campo('Cidade:',p.cidade),
+          campo('Estado:',p.estado),
+        ]},
+      ]},
+
       secao('DADOS PROFISSIONAIS'),
       {columns:[
         {width:'*',stack:[
           campo('Admissão:',fmtData(p.data_admissao)),
+          campo('Exame Admissional:',fmtData(dataExameAdm)),
           campo('Função:',funcaoNome),
           campo('CBO:',cboFunc),
           campo('Departamento:',p.departamento),
