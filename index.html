@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.344 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.345 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.344';
+const APP_VERSION='v1.0.345';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -19018,7 +19018,7 @@ function rWmsSeparacao(){
         <button class="bicon btn-sm" title="Etiquetas de separação" onclick="wmsEtiquetasModal('${l.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
         </button>
-        <button class="bicon btn-sm" title="Confirmação manual" onclick="wmsConfManualModal('${l.id}')">
+        <button class="bicon btn-sm" title="Conferir / confirmar separação" onclick="event.stopPropagation();wmsListaDetalhe('${l.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         </button>
         <span style="background:${st.bg};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${st.l}</span>
@@ -19029,43 +19029,63 @@ function rWmsSeparacao(){
 }
 
 function wmsListaDetalhe(id){
+  wmsConfSel=new Set();
   const l=wmsListasSeparacao.find(x=>x.id===id);if(!l)return;
   const cli=clientes.find(c=>c.id===l.cliente_id);
   const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===id).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
   const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888'};
-  const linhas=tarefas.map(t=>{
-    const vol=t.tipo_volume==='pallet'?'<span style="background:rgba(139,92,246,.15);color:#8b5cf6;font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px">PALLET</span>':'<span style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px">FRAÇÃO</span>';
-    return `<tr style="border-top:1px solid var(--border)">
-      <td style="padding:7px 10px;font-size:11px;color:var(--text3)">${t.ordem}</td>
-      <td style="padding:7px 10px;font-weight:700;font-size:12px">${t.sku}</td>
-      <td style="padding:7px 10px;font-size:12px;color:var(--text2)">${t.descricao||'—'}</td>
-      <td style="padding:7px 10px">${vol}</td>
-      <td style="padding:7px 10px;text-align:right;font-size:12px;font-weight:600">${(+t.quantidade).toLocaleString('pt-BR')}</td>
-    </tr>`;
+  const feitas=tarefas.filter(t=>t.status==='concluida').length;
+  // agrupa por pedido (em consolidada, pedido_id pode ser null)
+  const grupos={};
+  tarefas.forEach(t=>{const k=t.pedido_id||'__consolidada__';(grupos[k]=grupos[k]||[]).push(t);});
+  const corpo=Object.keys(grupos).map(pid=>{
+    const arr=grupos[pid];
+    const ped=wmsPedidos.find(p=>p.id===pid);
+    const titulo=pid==='__consolidada__'?'Consolidada (todos os pedidos)':(ped?.numero_pedido||'Pedido');
+    const temFeitaGrupo=arr.some(t=>t.status==='concluida');
+    return `<div style="border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg2);font-weight:600;font-size:12px">
+        <input type="checkbox" onchange="wmsConfMarcarOrdem('${id}','${pid}',this.checked)" style="width:15px;height:15px">
+        <span>${titulo}</span><span style="color:var(--text3);font-weight:400">· ${arr.length} tarefa(s)</span>
+        ${temFeitaGrupo?`<button class="btn btn-sm" style="margin-left:auto;color:var(--red-text);font-size:10px;padding:2px 8px" onclick="wmsDesfazerSeparacaoPedido('${pid==='__consolidada__'?'':pid}','${id}')">↺ Desfazer pedido</button>`:''}
+      </div>
+      ${arr.map(t=>{
+        const feita=t.status==='concluida';
+        const vol=t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
+        const corVol=t.tipo_volume==='pallet'?'#8b5cf6':'#f59e0b';
+        return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px 28px;font-size:12px;cursor:pointer;${feita?'opacity:.6':''}">
+          <input type="checkbox" class="wms-conf-tar" data-id="${t.id}" ${feita?'checked disabled':''} onchange="wmsConfToggle('${t.id}',this.checked)" style="width:15px;height:15px">
+          <span style="color:var(--text3);font-size:10px">${t.ordem}</span>
+          <span style="font-weight:700">${t.sku}</span>
+          <span style="color:var(--text2)">${(t.descricao||'').slice(0,28)}</span>
+          <span style="margin-left:auto;font-size:9px;font-weight:700;color:${corVol}">${vol} · ${(+t.quantidade).toLocaleString('pt-BR')}</span>
+          ${feita?`<span style="font-size:9px;color:var(--green-text);font-weight:700">✓</span><button class="btn btn-sm" style="font-size:9px;padding:1px 7px;color:var(--red-text)" onclick="event.preventDefault();wmsDesfazerTarefa('${t.id}')">↺</button>`:''}
+        </label>`;
+      }).join('')}
+    </div>`;
   }).join('');
-  portModal(`Lista ${l.numero_lista}`,
-    `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+  const inner=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'}</div>
-        <div style="font-size:11px;color:var(--text3)">${l.qtd_pedidos} pedido(s) · ${tarefas.length} tarefa(s)</div></div>
+        <div style="font-size:11px;color:var(--text3)">${l.qtd_pedidos} pedido(s) · ${tarefas.length} tarefa(s) · ${feitas}/${tarefas.length} separadas</div></div>
       <span style="background:${st.bg||'rgba(136,136,136,.12)'};color:${st.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px">${st.l}</span>
     </div>
-    <div style="max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px">
-      <table style="width:100%;border-collapse:collapse">
-        <thead><tr style="background:var(--bg2);position:sticky;top:0">
-          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">#</th>
-          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">SKU</th>
-          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">Descrição</th>
-          <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text2);font-weight:600">Volume</th>
-          <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--text2);font-weight:600">Qtd</th>
-        </tr></thead>
-        <tbody>${linhas}</tbody>
-      </table>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="wmsConfMarcarTodas('${id}',true)">Selecionar todas</button>
+      <button class="btn btn-sm" onclick="wmsConfMarcarTodas('${id}',false)">Limpar seleção</button>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="wmsEtiquetasModal('${id}')">🏷 Etiquetas</button>
     </div>
-    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between">
-      <button class="btn btn-sm" onclick="portClose();wmsConfManualModal('${l.id}')">✓ Confirmar / Desfazer separação</button>
-      <button class="btn btn-sm" onclick="wmsCancelarLista('${l.id}')" style="color:var(--red-text)">🗑 Cancelar lista</button>
-    </div>`,
-    'portClose()',{saveLabel:'Fechar',width:'720px'});
+    <div id="wms-conf-list" style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:8px">${corpo}</div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;align-items:center;gap:10px">
+      <button class="btn btn-p" onclick="wmsConfConfirmar('${id}')">✓ Confirmar separadas</button>
+      ${feitas>0?`<button class="btn" style="color:var(--red-text)" onclick="wmsDesfazerTudoLista('${id}')">↺ Desfazer separadas</button>`:''}
+      <button class="btn btn-sm" style="margin-left:auto;color:var(--red-text)" onclick="wmsCancelarLista('${id}')">🗑 Cancelar lista</button>
+    </div>`;
+  // modal sem rodapé padrão (ações ficam no corpo) — usa um portModal simples e esconde o save
+  portModal(`Lista ${l.numero_lista||''}`,inner,`portClose()`,{saveLabel:'Fechar',width:'680px'});
+  // esconde o botão "Salvar/Fechar" padrão e o "Cancelar" duplicado do rodapé do portModal
+  const save=document.getElementById('port-modal-save');
+  if(save){ save.textContent='Fechar'; }
 }
 
 // Cancela uma lista: volta pedidos para 'importado', apaga tarefas, vínculos e a lista
@@ -19384,60 +19404,9 @@ async function wmsEtiquetasPdf(listaId){
 // ── WMS · CONFIRMAÇÃO MANUAL DE SEPARAÇÃO (Modo 1) ──
 // Tela administrativa: marca ordem inteira / várias ordens / tarefa a tarefa.
 let wmsConfSel=new Set();
-function wmsConfManualModal(listaId){
-  wmsConfSel=new Set();
-  const l=wmsListasSeparacao.find(x=>x.id===listaId);if(!l)return;
-  const cli=clientes.find(c=>c.id===l.cliente_id);
-  const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId).sort((a,b)=>(a.ordem||0)-(b.ordem||0));
-  // agrupa por pedido (ordem) — em consolidada, pedido_id pode ser null
-  const grupos={};
-  tarefas.forEach(t=>{const k=t.pedido_id||'__consolidada__';(grupos[k]=grupos[k]||[]).push(t);});
-  const inner=`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'} · marque as tarefas separadas (ordem inteira ou item a item).</div>
-    <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button class="btn btn-sm" onclick="wmsConfMarcarTodas('${listaId}',true)">Selecionar todas</button>
-      <button class="btn btn-sm" onclick="wmsConfMarcarTodas('${listaId}',false)">Limpar</button>
-    </div>
-    <div id="wms-conf-list" style="max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px">
-      ${Object.keys(grupos).map(pid=>{
-        const arr=grupos[pid];
-        const ped=wmsPedidos.find(p=>p.id===pid);
-        const titulo=pid==='__consolidada__'?'Consolidada (todos os pedidos)':(ped?.numero_pedido||'Pedido');
-        return `<div style="border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg2);font-weight:600;font-size:12px">
-            <input type="checkbox" onchange="wmsConfMarcarOrdem('${listaId}','${pid}',this.checked)" style="width:15px;height:15px">
-            <span>${titulo}</span><span style="color:var(--text3);font-weight:400">· ${arr.length} tarefa(s)</span>
-            ${arr.some(t=>t.status==='concluida')?`<button class="btn btn-sm" style="margin-left:auto;color:var(--red-text);font-size:10px;padding:2px 8px" onclick="wmsDesfazerSeparacaoPedido('${pid==='__consolidada__'?'':pid}','${listaId}')">↺ Desfazer separação</button>`:''}
-          </div>
-          ${arr.map(t=>{
-            const feita=t.status==='concluida';
-            const vol=t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
-            return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px 28px;font-size:12px;cursor:pointer;${feita?'opacity:.6':''}">
-              <input type="checkbox" class="wms-conf-tar" data-id="${t.id}" ${feita?'checked disabled':''} onchange="wmsConfToggle('${t.id}',this.checked)" style="width:15px;height:15px">
-              <span style="font-weight:700">${t.sku}</span>
-              <span style="color:var(--text2)">${(t.descricao||'').slice(0,30)}</span>
-              <span style="margin-left:auto;font-size:9px;font-weight:700;color:${t.tipo_volume==='pallet'?'#8b5cf6':'#f59e0b'}">${vol} · ${(+t.quantidade).toLocaleString('pt-BR')}</span>
-              ${feita?`<span style="font-size:9px;color:var(--green-text);font-weight:700">✓ separada</span><button class="btn btn-sm" style="font-size:9px;padding:1px 7px;color:var(--red-text)" onclick="event.preventDefault();wmsDesfazerTarefa('${t.id}')">↺</button>`:''}
-            </label>`;
-          }).join('')}
-        </div>`;
-      }).join('')}
-    </div>`;
-  portModal(`Confirmação manual — ${l.numero_lista||''}`,inner,`wmsConfConfirmar('${listaId}')`,{saveLabel:'Confirmar separadas',width:'640px'});
-  // adiciona botão "Desfazer separadas" ao lado do Confirmar (só se há tarefa concluída)
-  const temFeita=tarefas.some(t=>t.status==='concluida');
-  if(temFeita){
-    const saveBtn=document.getElementById('port-modal-save');
-    if(saveBtn && !document.getElementById('port-modal-undo')){
-      const undo=document.createElement('button');
-      undo.className='btn';
-      undo.id='port-modal-undo';
-      undo.style.color='var(--red-text)';
-      undo.textContent='↺ Desfazer separadas';
-      undo.onclick=function(){wmsDesfazerTudoLista(listaId);};
-      saveBtn.parentNode.insertBefore(undo,saveBtn);
-    }
-  }
-}
+// wmsConfManualModal agora é um alias do modal único (wmsListaDetalhe)
+function wmsConfManualModal(listaId){ return wmsListaDetalhe(listaId); }
+
 // Desfaz TODAS as tarefas concluídas de uma lista (mesmo bloqueio: nenhum pedido em conferência)
 async function wmsDesfazerTudoLista(listaId){
   const tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId && t.status==='concluida');
@@ -19501,6 +19470,7 @@ async function wmsConfConfirmar(listaId){
     portClose();
     if(typeof showToast==='function')showToast(todasFeitas?'Lista concluída!':'Tarefas confirmadas.','green');
     render();
+    if(!todasFeitas)wmsListaDetalhe(listaId); // reabre para continuar confirmando/desfazendo
   }catch(e){portErr(e.message||'Erro ao confirmar.');}
 }
 
