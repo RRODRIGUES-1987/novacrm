@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.341 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.343 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.341';
+const APP_VERSION='v1.0.343';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -19061,7 +19061,8 @@ function wmsListaDetalhe(id){
         <tbody>${linhas}</tbody>
       </table>
     </div>
-    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;text-align:right">
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;justify-content:space-between">
+      <button class="btn btn-sm" onclick="portClose();wmsConfManualModal('${l.id}')">✓ Confirmar / Desfazer separação</button>
       <button class="btn btn-sm" onclick="wmsCancelarLista('${l.id}')" style="color:var(--red-text)">🗑 Cancelar lista</button>
     </div>`,
     'portClose()',{saveLabel:'Fechar',width:'720px'});
@@ -19405,16 +19406,17 @@ function wmsConfManualModal(listaId){
           <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg2);font-weight:600;font-size:12px">
             <input type="checkbox" onchange="wmsConfMarcarOrdem('${listaId}','${pid}',this.checked)" style="width:15px;height:15px">
             <span>${titulo}</span><span style="color:var(--text3);font-weight:400">· ${arr.length} tarefa(s)</span>
+            ${arr.some(t=>t.status==='concluida')?`<button class="btn btn-sm" style="margin-left:auto;color:var(--red-text);font-size:10px;padding:2px 8px" onclick="wmsDesfazerSeparacaoPedido('${pid==='__consolidada__'?'':pid}','${listaId}')">↺ Desfazer separação</button>`:''}
           </div>
           ${arr.map(t=>{
             const feita=t.status==='concluida';
             const vol=t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
-            return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px 28px;font-size:12px;cursor:pointer;${feita?'opacity:.5':''}">
+            return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px 28px;font-size:12px;cursor:pointer;${feita?'opacity:.6':''}">
               <input type="checkbox" class="wms-conf-tar" data-id="${t.id}" ${feita?'checked disabled':''} onchange="wmsConfToggle('${t.id}',this.checked)" style="width:15px;height:15px">
               <span style="font-weight:700">${t.sku}</span>
               <span style="color:var(--text2)">${(t.descricao||'').slice(0,30)}</span>
               <span style="margin-left:auto;font-size:9px;font-weight:700;color:${t.tipo_volume==='pallet'?'#8b5cf6':'#f59e0b'}">${vol} · ${(+t.quantidade).toLocaleString('pt-BR')}</span>
-              ${feita?'<span style="font-size:9px;color:var(--green-text);font-weight:700">✓ separada</span>':''}
+              ${feita?`<span style="font-size:9px;color:var(--green-text);font-weight:700">✓ separada</span><button class="btn btn-sm" style="font-size:9px;padding:1px 7px;color:var(--red-text)" onclick="event.preventDefault();wmsDesfazerTarefa('${t.id}')">↺</button>`:''}
             </label>`;
           }).join('')}
         </div>`;
@@ -19456,6 +19458,86 @@ async function wmsConfConfirmar(listaId){
     if(typeof showToast==='function')showToast(todasFeitas?'Lista concluída!':'Tarefas confirmadas.','green');
     render();
   }catch(e){portErr(e.message||'Erro ao confirmar.');}
+}
+
+// Verifica se um pedido já tem conferência registrada (bloqueia desfazer separação)
+function wmsPedidoTemConferencia(pedidoId){
+  return (wmsConferencias||[]).some(cf=>cf.pedido_id===pedidoId);
+}
+
+// Reverte a lista para 'em_andamento' se ela estava concluída e ainda há tarefa pendente
+async function wmsReverterStatusLista(listaId){
+  const l=wmsListasSeparacao.find(x=>x.id===listaId);if(!l)return;
+  const tarefas=wmsTarefasSeparacao.filter(x=>x.lista_id===listaId);
+  const todasFeitas=tarefas.length>0 && tarefas.every(x=>x.status==='concluida');
+  const novo=todasFeitas?'concluida':'em_andamento';
+  if(l.status!==novo){
+    await dbUpdate('wms_listas_separacao',listaId,{status:novo});
+    l.status=novo;
+  }
+}
+
+// Desfaz UMA tarefa (volta para pendente)
+async function wmsDesfazerTarefa(id){
+  const t=wmsTarefasSeparacao.find(x=>x.id===id);if(!t)return;
+  if(t.status!=='concluida'){showToast('Tarefa não está confirmada.','blue');return;}
+  // bloqueio: se o pedido já tem conferência, precisa estornar a conferência antes
+  const pedId=t.pedido_id;
+  if(pedId && wmsPedidoTemConferencia(pedId)){
+    showToast('Este pedido já entrou em conferência. Estorne a conferência antes de desfazer a separação.','amber');
+    return;
+  }
+  if(!confirm('Desfazer a separação do item '+t.sku+'? A tarefa volta para pendente.'))return;
+  try{
+    await dbUpdate('wms_tarefas_separacao',id,{status:'pendente',qtd_separada:null,separador_id:null,separador_nome:null,concluido_em:null});
+    Object.assign(t,{status:'pendente',qtd_separada:null,concluido_em:null});
+    await wmsReverterStatusLista(t.lista_id);
+    // se o pedido estava em_separacao/conferido e a separação deixou de estar completa, garante status do pedido
+    if(pedId){
+      const p=wmsPedidos.find(x=>x.id===pedId);
+      if(p && p.status!=='importado'){
+        await dbUpdate('wms_pedidos',pedId,{status:'em_separacao'});
+        p.status='em_separacao';
+      }
+    }
+    showToast('Separação do item desfeita.','green');
+    // reabre a modal de confirmação manual atualizada
+    wmsConfManualModal(t.lista_id);
+  }catch(e){showToast('Erro ao desfazer: '+e.message,'red');}
+}
+
+// Desfaz a separação de um PEDIDO inteiro (todas as tarefas concluídas do pedido naquela lista)
+async function wmsDesfazerSeparacaoPedido(pedidoId,listaId){
+  if(wmsPedidoTemConferencia(pedidoId)){
+    showToast('Este pedido já entrou em conferência. Estorne a conferência antes de desfazer a separação.','amber');
+    return;
+  }
+  // tarefas do pedido (em lista consolidada, pedido_id pode estar na tarefa)
+  let tarefas=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId && t.pedido_id===pedidoId && t.status==='concluida');
+  // consolidada sem pedido_id: desfaz todas as concluídas da lista
+  if(!tarefas.length){
+    const semPedido=wmsTarefasSeparacao.filter(t=>t.lista_id===listaId && !t.pedido_id && t.status==='concluida');
+    if(semPedido.length && confirm('Lista consolidada: desfazer a separação de TODAS as tarefas desta lista?')){
+      tarefas=semPedido;
+    }
+  } else {
+    if(!confirm('Desfazer a separação do pedido inteiro? '+tarefas.length+' tarefa(s) voltam para pendente.'))return;
+  }
+  if(!tarefas.length){showToast('Nenhuma tarefa concluída para desfazer.','blue');return;}
+  try{
+    for(const t of tarefas){
+      await dbUpdate('wms_tarefas_separacao',t.id,{status:'pendente',qtd_separada:null,separador_id:null,separador_nome:null,concluido_em:null});
+      Object.assign(t,{status:'pendente',qtd_separada:null,concluido_em:null});
+    }
+    await wmsReverterStatusLista(listaId);
+    const p=wmsPedidos.find(x=>x.id===pedidoId);
+    if(p && p.status!=='importado'){
+      await dbUpdate('wms_pedidos',pedidoId,{status:'em_separacao'});
+      p.status='em_separacao';
+    }
+    showToast('Separação do pedido desfeita.','green');
+    wmsConfManualModal(listaId);
+  }catch(e){showToast('Erro ao desfazer: '+e.message,'red');}
 }
 
 function wmsGerarListasModal(){
@@ -20285,13 +20367,32 @@ function wmsItensEsperadosPedido(pedidoId){
   return Object.values(porSku);
 }
 
+// Verifica se a separação de um pedido foi concluída (todas as tarefas concluídas)
+function wmsSeparacaoConcluidaPedido(pedidoId){
+  // tarefas diretamente ligadas ao pedido
+  const tDir=wmsTarefasSeparacao.filter(t=>t.pedido_id===pedidoId);
+  if(tDir.length){
+    return tDir.every(t=>t.status==='concluida');
+  }
+  // caso consolidado (tarefas sem pedido_id): verifica a(s) lista(s) do pedido
+  const listas=wmsListaPedidos.filter(lp=>lp.pedido_id===pedidoId).map(lp=>lp.lista_id);
+  if(listas.length){
+    return listas.every(lid=>{
+      const l=wmsListasSeparacao.find(x=>x.id===lid);
+      return l && l.status==='concluida';
+    });
+  }
+  return false; // sem tarefas nem lista → não separado
+}
+
 function rWmsConferencia(){
   // Pedidos que estão em separação concluída e precisam de conferência
   const cid=company?.id;
-  // candidatos: pedidos cujo status permite conferência (em_separacao/separado/conferencia)
+  // candidatos: separação CONCLUÍDA e ainda em fase de conferência
   const candidatos=wmsPedidos.filter(p=>p.company_id===cid &&
     ['em_separacao','separado','em_conferencia','conferido'].includes(p.status) &&
-    wmsConfsDoCliente(p.cliente_id).length>0);
+    wmsConfsDoCliente(p.cliente_id).length>0 &&
+    wmsSeparacaoConcluidaPedido(p.id));
 
   const cliNome=id=>{const c=clientes.find(x=>x.id===id);return c?(c.nome||c.razao_social||'—'):'—';};
 
