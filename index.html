@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.337 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.338 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -867,6 +867,7 @@ let wmsPedidoItens=[];
 let wmsListasSeparacao=[];
 let wmsListaPedidos=[];
 let wmsTarefasSeparacao=[];
+let wmsConferencias=[], wmsPalletsEmbarque=[], wmsPalletItens=[], wmsEtiquetas=[], wmsPrismas=[];
 let portFrotaTab='mov',portPlacasTab='cadastro';
 let cadastrosTab='clientes',cadastroForm=null;
 
@@ -964,7 +965,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.337';
+const APP_VERSION='v1.0.338';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -1706,9 +1707,9 @@ function render(){
   else if(curPage==='wms-pedidos'){c.innerHTML=rWmsPedidos();filterWmsPedidos('');}
   else if(curPage==='wms-importar-pedidos')c.innerHTML=rWmsImportarPedidos();
   else if(curPage==='wms-separacao')c.innerHTML=rWmsSeparacao();
-  else if(curPage==='wms-conferencia')c.innerHTML=rWmsEmConstrucao('Conferência','Conferência dos pedidos separados.');
+  else if(curPage==='wms-conferencia')c.innerHTML=rWmsConferencia();
   else if(curPage==='wms-romaneio')c.innerHTML=rWmsRomaneios();
-  else if(curPage==='wms-expedicao')c.innerHTML=rWmsEmConstrucao('Expedição / Embarque','Etiqueta de embarque e conferência de carga no embarque.');
+  else if(curPage==='wms-expedicao')c.innerHTML=rWmsExpedicao();
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
   else if(curPage==='orcamento'){c.innerHTML=rOrcamento();initOrcamento();}
@@ -18675,6 +18676,13 @@ async function loadWmsData(cid){
     dbSelect('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
   wmsRomaneios=await dbSelect('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
+  [wmsConferencias,wmsPalletsEmbarque,wmsPalletItens,wmsEtiquetas,wmsPrismas]=await Promise.all([
+    dbSelect('wms_conferencias',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
+    dbSelect('wms_pallets_embarque',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
+    dbSelect('wms_pallet_itens',`company_id=eq.${cid}`).catch(()=>[]),
+    dbSelect('wms_etiquetas',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
+    dbSelect('wms_prismas_caminhao',`company_id=eq.${cid}${unitFilter()}&order=codigo.asc`).catch(()=>[]),
+  ]);
   // Backfill: recalcula totais de pedidos importados que ainda não têm (uma vez)
   wmsBackfillTotais(cid);
 }
@@ -20104,7 +20112,31 @@ function wmsCliTabSaida(c){
       <div style="font-size:11px;color:var(--text3)">Se sim, usa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} onchange="wmsCheckEtiqFaltando('${c.id}',this.checked)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
     </div>
-    <div id="wms-etiq-faltando" style="margin-top:10px">${usaEtiq?wmsEtiqFaltandoHtml(c.id):''}</div>`;
+    <div id="wms-etiq-faltando" style="margin-top:10px">${usaEtiq?wmsEtiqFaltandoHtml(c.id):''}</div>
+
+    <div style="font-weight:700;font-size:13px;margin:18px 0 4px;border-top:1px solid var(--border);padding-top:14px">Conferências</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Quais conferências este depositante exige no fluxo de saída.</div>
+    <div style="display:grid;gap:7px">
+      ${[['wms_conf_1','1ª Conferência','Pedido a pedido (confere o separado contra o pedido).'],
+         ['wms_conf_2','2ª Conferência','Pedido a pedido, com conferente diferente da 1ª (dupla conferência).'],
+         ['wms_conf_3','3ª Conferência','Montagem do pallet de embarque (packing list) → gera etiqueta de embarque.'],
+         ['wms_conf_4','4ª Conferência','Embarque na doca (bipa etiqueta de embarque + prisma do caminhão).']
+        ].map(([campo,lbl,desc])=>`
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--bg2)">
+          <input type="checkbox" id="${campo}" ${c[campo]===true?'checked':''} style="width:16px;height:16px;cursor:pointer;margin-top:1px">
+          <div><div style="font-weight:600;font-size:12px;color:var(--text)">${lbl}</div><div style="font-size:11px;color:var(--text3);margin-top:1px">${desc}</div></div>
+        </label>`).join('')}
+    </div>
+    <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
+      <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:7px">Modo de conferência</div>
+      <div style="display:flex;gap:8px">
+        ${[['digita','Digitar','Operador digita SKU e quantidade.'],['bipe','Bipar','Operador bipa a etiqueta (coletor).']].map(([v,lbl,desc])=>`
+        <label style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:9px 11px;border:1.5px solid ${(c.wms_conf_modo||'digita')===v?'var(--blue-text)':'var(--border)'};border-radius:8px;cursor:pointer;background:${(c.wms_conf_modo||'digita')===v?'var(--blue-bg)':'var(--bg)'}">
+          <input type="radio" name="wms-conf-modo" value="${v}" ${(c.wms_conf_modo||'digita')===v?'checked':''} style="margin-top:2px">
+          <div><div style="font-weight:600;font-size:12px">${lbl}</div><div style="font-size:10px;color:var(--text3)">${desc}</div></div>
+        </label>`).join('')}
+      </div>
+    </div>`;
 }
 // Lista produtos do cliente sem etiqueta_cliente cadastrada
 function wmsEtiqFaltandoHtml(clienteId){
@@ -20138,6 +20170,12 @@ async function wmsSalvarParamCliente(clienteId){
     dados.wms_modo_separacao=radio.value;
     dados.wms_usa_etiqueta_cliente=radio.value!=='manual' && (ge('wms-usa-etiq')?.checked||false);
   }
+  // aba Saída: conferências
+  ['wms_conf_1','wms_conf_2','wms_conf_3','wms_conf_4'].forEach(campo=>{
+    const cb=ge(campo);if(cb)dados[campo]=cb.checked;
+  });
+  const cm=document.querySelector('input[name="wms-conf-modo"]:checked');
+  if(cm)dados.wms_conf_modo=cm.value;
   if(!Object.keys(dados).length){portClose();return;}
   portSaving();
   try{
@@ -20148,6 +20186,519 @@ async function wmsSalvarParamCliente(clienteId){
     if(typeof showToast==='function')showToast('Parâmetros salvos.','green');
   }catch(e){portErr(e.message||'Erro ao salvar.');}
 }
+
+
+// ══════════════════════════════════════════════════════════════════
+//  WMS · CONFERÊNCIAS (1ª/2ª pedido a pedido, 3ª montagem pallet)
+// ══════════════════════════════════════════════════════════════════
+const WMS_CONF_LABELS={1:'1ª Conferência',2:'2ª Conferência',3:'3ª Conferência (Pallet)',4:'4ª Conferência (Embarque)'};
+
+// Conferências que um cliente exige (na ordem)
+function wmsConfsDoCliente(clienteId){
+  const c=clientes.find(x=>x.id===clienteId);if(!c)return [];
+  const arr=[];
+  if(c.wms_conf_1)arr.push(1);
+  if(c.wms_conf_2)arr.push(2);
+  if(c.wms_conf_3)arr.push(3);
+  if(c.wms_conf_4)arr.push(4);
+  return arr;
+}
+// Conferências já feitas para um pedido, por tipo
+function wmsConfsFeitas(pedidoId,tipo){
+  return wmsConferencias.filter(cf=>cf.pedido_id===pedidoId && cf.tipo===tipo);
+}
+// Reagrupa as tarefas/itens de um pedido por SKU (esperado da conferência)
+function wmsItensEsperadosPedido(pedidoId){
+  const itens=wmsPedidoItens.filter(it=>it.pedido_id===pedidoId);
+  const porSku={};
+  itens.forEach(it=>{
+    const k=String(it.sku||'').trim();
+    if(!porSku[k])porSku[k]={sku:it.sku,descricao:it.descricao,produto_id:it.produto_id,qtd:0};
+    porSku[k].qtd+=(+it.quantidade||0);
+  });
+  return Object.values(porSku);
+}
+
+function rWmsConferencia(){
+  // Pedidos que estão em separação concluída e precisam de conferência
+  const cid=company?.id;
+  // candidatos: pedidos cujo status permite conferência (em_separacao/separado/conferencia)
+  const candidatos=wmsPedidos.filter(p=>p.company_id===cid &&
+    ['em_separacao','separado','em_conferencia','conferido'].includes(p.status) &&
+    wmsConfsDoCliente(p.cliente_id).length>0);
+
+  const cliNome=id=>{const c=clientes.find(x=>x.id===id);return c?(c.nome||c.razao_social||'—'):'—';};
+
+  const rows=candidatos.map(p=>{
+    const confs=wmsConfsDoCliente(p.cliente_id);
+    // próxima conferência pendente (1/2/3) — a 4 é no embarque
+    const passos=confs.filter(t=>t<=3);
+    const proxima=passos.find(t=>wmsConfsFeitas(p.id,t).length===0);
+    const numCurto=wmsNumeroCurto(p);
+    const badges=passos.map(t=>{
+      const feita=wmsConfsFeitas(p.id,t).length>0;
+      return `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:${feita?'var(--green-bg)':'var(--bg2)'};color:${feita?'var(--green-text)':'var(--text3)'}">${feita?'✓':'○'} ${t}ª</span>`;
+    }).join(' ');
+    const acao=proxima
+      ? `<button class="btn btn-sm btn-primary" onclick="wmsAbrirConferencia('${p.id}',${proxima})">Conferir ${proxima}ª</button>`
+      : `<span style="font-size:11px;color:var(--green-text);font-weight:600">✓ Conferências OK</span>`;
+    return `<div class="li">
+      <div class="linfo">
+        <div class="lname" style="display:flex;align-items:center;gap:8px">${numCurto} <span style="font-size:11px;color:var(--text3)">${cliNome(p.cliente_id)}</span></div>
+        <div class="lsub" style="display:flex;gap:5px;margin-top:3px">${badges}</div>
+      </div>
+      <div class="lright">${acao}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="sechdr"><div class="swrap" style="font-weight:700">Conferência dos pedidos separados</div></div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Pedidos cujos depositantes exigem conferência. As etapas seguem a parametrização de cada cliente.</div>
+    ${rows||`<div class="empty"><p>Nenhum pedido aguardando conferência.</p></div>`}`;
+}
+
+// Abre o modal de conferência (1ª/2ª = itens; 3ª = montagem de pallet)
+let wmsConfPedido=null, wmsConfTipo=null, wmsConfMarcados={};
+function wmsAbrirConferencia(pedidoId,tipo){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  // 2ª conferência exige conferente diferente da 1ª
+  if(tipo===2){
+    const primeira=wmsConfsFeitas(pedidoId,1)[0];
+    if(primeira && primeira.conferente_id===(cu?.id)){
+      showToast('A 2ª conferência precisa de um conferente diferente da 1ª.','amber');return;
+    }
+  }
+  wmsConfPedido=pedidoId;wmsConfTipo=tipo;wmsConfMarcados={};
+  if(tipo===3){ wmsAbrirPalletModal(pedidoId); return; }
+  // 1ª/2ª: conferência de itens
+  const c=clientes.find(x=>x.id===p.cliente_id);
+  const modo=c?.wms_conf_modo||'digita';
+  const itens=wmsItensEsperadosPedido(pedidoId);
+  const numCurto=wmsNumeroCurto(p);
+  const linhas=itens.map((it,i)=>`
+    <tr data-sku="${(it.sku||'').replace(/"/g,'')}" id="conf-row-${i}">
+      <td style="padding:7px 8px;font-size:12px">${it.sku||'—'}</td>
+      <td style="padding:7px 8px;font-size:12px">${it.descricao||'—'}</td>
+      <td style="padding:7px 8px;font-size:12px;text-align:center;font-weight:700">${it.qtd}</td>
+      <td style="padding:7px 8px;text-align:center">
+        <input type="number" id="conf-qtd-${i}" min="0" value="" placeholder="0" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:13px" oninput="wmsConfCheckLinha(${i},${it.qtd})">
+      </td>
+      <td style="padding:7px 8px;text-align:center"><span id="conf-ok-${i}" style="font-size:14px">—</span></td>
+    </tr>`).join('');
+  const bipeBox=modo==='bipe'?`
+    <div style="margin-bottom:12px;padding:11px 13px;background:var(--blue-bg);border-radius:9px">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Modo bipagem — bipe a etiqueta (preenche +1 no SKU lido)</div>
+      <input id="conf-bipe" placeholder="Bipe aqui..." autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key==='Enter'){wmsConfBipe(this.value);this.value='';this.focus();}">
+    </div>`:'';
+  const inner=`
+    <div style="font-size:12px;color:var(--text2);margin-bottom:4px">${WMS_CONF_LABELS[tipo]} · Pedido <b>${numCurto}</b></div>
+    ${bipeBox}
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--bg2)">
+        <th style="padding:7px 8px;text-align:left;font-size:10px">SKU</th>
+        <th style="padding:7px 8px;text-align:left;font-size:10px">Descrição</th>
+        <th style="padding:7px 8px;text-align:center;font-size:10px">Esperado</th>
+        <th style="padding:7px 8px;text-align:center;font-size:10px">Conferido</th>
+        <th style="padding:7px 8px;text-align:center;font-size:10px">OK</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    <div style="margin-top:12px"><label style="font-size:11px;color:var(--text2)">Observação (divergências, avarias)</label>
+      <textarea id="conf-obs" rows="2" style="width:100%;margin-top:4px;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:12px;resize:vertical"></textarea></div>`;
+  window._wmsConfItens=itens;
+  portModal(`Conferência — ${numCurto}`,inner,`wmsSalvarConferencia()`,{saveLabel:'Concluir conferência',width:'640px'});
+}
+function wmsConfCheckLinha(i,esperado){
+  const v=parseFloat(ge('conf-qtd-'+i)?.value||'0')||0;
+  const ok=ge('conf-ok-'+i);if(!ok)return;
+  if(ge('conf-qtd-'+i).value===''){ok.textContent='—';ok.style.color='';return;}
+  ok.textContent=v===esperado?'✓':'✗';
+  ok.style.color=v===esperado?'var(--green-text)':'var(--red-text)';
+}
+function wmsConfBipe(codigo){
+  const itens=window._wmsConfItens||[];
+  const cod=String(codigo||'').trim().toUpperCase();
+  if(!cod)return;
+  // tenta casar por SKU
+  const idx=itens.findIndex(it=>String(it.sku||'').trim().toUpperCase()===cod);
+  if(idx<0){showToast('SKU não encontrado: '+cod,'amber');return;}
+  const inp=ge('conf-qtd-'+idx);
+  inp.value=(parseFloat(inp.value||'0')||0)+1;
+  wmsConfCheckLinha(idx,itens[idx].qtd);
+}
+async function wmsSalvarConferencia(){
+  const itens=window._wmsConfItens||[];
+  const p=wmsPedidos.find(x=>x.id===wmsConfPedido);if(!p)return;
+  const divergencias=[];
+  let qtdConf=0,qtdEsp=0;
+  itens.forEach((it,i)=>{
+    const v=parseFloat(ge('conf-qtd-'+i)?.value||'0')||0;
+    qtdConf+=v;qtdEsp+=it.qtd;
+    if(v!==it.qtd)divergencias.push({sku:it.sku,esperado:it.qtd,conferido:v});
+  });
+  const resultado=divergencias.length?'divergencia':'ok';
+  portSaving();
+  try{
+    const cid=company?.id;
+    const obj={
+      company_id:cid,unit_id:p.unit_id||null,tipo:wmsConfTipo,
+      pedido_id:p.id,cliente_id:p.cliente_id,
+      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      modo:clientes.find(c=>c.id===p.cliente_id)?.wms_conf_modo||'digita',
+      resultado,qtd_conferida:qtdConf,qtd_esperada:qtdEsp,
+      divergencias:divergencias.length?JSON.stringify(divergencias):null,
+      observacao:ge('conf-obs')?.value||null,
+    };
+    const res=await dbInsert('wms_conferencias',obj);
+    if(res)wmsConferencias=[Array.isArray(res)?res[0]:res,...wmsConferencias];
+    // se concluiu a última conferência de itens, marca pedido como conferido
+    const confs=wmsConfsDoCliente(p.cliente_id).filter(t=>t<=2);
+    const todasFeitas=confs.every(t=>wmsConfsFeitas(p.id,t).length>0);
+    if(todasFeitas){
+      await dbUpdate('wms_pedidos',p.id,{status:'conferido'});
+      wmsPedidos=wmsPedidos.map(x=>x.id===p.id?{...x,status:'conferido'}:x);
+    } else {
+      await dbUpdate('wms_pedidos',p.id,{status:'em_conferencia'});
+      wmsPedidos=wmsPedidos.map(x=>x.id===p.id?{...x,status:'em_conferencia'}:x);
+    }
+    portClose();
+    showToast(resultado==='ok'?'Conferência OK registrada.':'Conferência registrada com divergência.',resultado==='ok'?'green':'amber');
+    if(curPage==='wms-conferencia')render();
+  }catch(e){portErr(e.message||'Erro ao salvar conferência.');}
+}
+
+// ── 3ª CONFERÊNCIA: montagem do pallet de embarque (packing list) ──
+let wmsPalletPedido=null, wmsPalletLinhas=[];
+function wmsAbrirPalletModal(pedidoId){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  wmsPalletPedido=pedidoId;
+  const itens=wmsItensEsperadosPedido(pedidoId);
+  wmsPalletLinhas=itens.map(it=>({sku:it.sku,descricao:it.descricao,produto_id:it.produto_id,esperado:it.qtd,qtd:it.qtd}));
+  const numCurto=wmsNumeroCurto(p);
+  portModal(`Montar pallet de embarque — ${numCurto}`,wmsPalletModalBody(),`wmsFecharPallet()`,{saveLabel:'Fechar pallet + etiqueta',width:'640px'});
+}
+function wmsPalletModalBody(){
+  const linhas=wmsPalletLinhas.map((l,i)=>`
+    <tr>
+      <td style="padding:6px 8px;font-size:12px">${l.sku||'—'}</td>
+      <td style="padding:6px 8px;font-size:12px">${l.descricao||'—'}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--text3)">${l.esperado}</td>
+      <td style="padding:6px 8px;text-align:center">
+        <input type="number" min="0" value="${l.qtd}" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:13px" onchange="wmsPalletLinhas[${i}].qtd=parseFloat(this.value)||0">
+      </td>
+    </tr>`).join('');
+  return `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Confirme o que vai dentro deste pallet de embarque. Ao fechar, geramos a etiqueta de embarque (QR + código).</div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--bg2)">
+        <th style="padding:6px 8px;text-align:left;font-size:10px">SKU</th>
+        <th style="padding:6px 8px;text-align:left;font-size:10px">Descrição</th>
+        <th style="padding:6px 8px;text-align:center;font-size:10px">Pedido</th>
+        <th style="padding:6px 8px;text-align:center;font-size:10px">No pallet</th>
+      </tr></thead><tbody>${linhas}</tbody>
+    </table>`;
+}
+async function wmsFecharPallet(){
+  const p=wmsPedidos.find(x=>x.id===wmsPalletPedido);if(!p)return;
+  const linhas=wmsPalletLinhas.filter(l=>l.qtd>0);
+  if(!linhas.length){portErr('Informe ao menos um item no pallet.');return;}
+  portSaving();
+  try{
+    const cid=company?.id;
+    const numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'PLT'});
+    const codigo='PLT|'+numero+'|'+p.id;
+    const palletObj={
+      company_id:cid,unit_id:p.unit_id||null,numero,cliente_id:p.cliente_id,
+      pedido_id:p.id,romaneio_id:p.romaneio_id||null,consolidado:false,
+      status:'montado',tot_volumes:linhas.length,etiqueta_codigo:codigo,owner_id:cu?.id||null,
+    };
+    const palletRes=await dbInsert('wms_pallets_embarque',palletObj);
+    const pallet=Array.isArray(palletRes)?palletRes[0]:palletRes;
+    if(pallet){
+      wmsPalletsEmbarque=[pallet,...wmsPalletsEmbarque];
+      for(const l of linhas){
+        const it=await dbInsert('wms_pallet_itens',{
+          company_id:cid,pallet_id:pallet.id,produto_id:l.produto_id||null,
+          sku:l.sku,descricao:l.descricao,quantidade:l.qtd,pedido_id:p.id,
+        });
+        if(it)wmsPalletItens=[Array.isArray(it)?it[0]:it,...wmsPalletItens];
+      }
+      // registra a 3ª conferência
+      const confRes=await dbInsert('wms_conferencias',{
+        company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,pallet_id:pallet.id,
+        cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+        resultado:'ok',observacao:'Pallet '+numero+' montado',
+      });
+      if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
+      // registra a etiqueta no histórico
+      const dadosEtiq={pallet:numero,pedido:wmsNumeroCurto(p),cliente:clientes.find(c=>c.id===p.cliente_id)?.nome||'',itens:linhas.map(l=>({sku:l.sku,qtd:l.qtd}))};
+      const etiqRes=await dbInsert('wms_etiquetas',{
+        company_id:cid,unit_id:p.unit_id||null,tipo:'embarque',codigo,
+        pallet_id:pallet.id,pedido_id:p.id,romaneio_id:p.romaneio_id||null,cliente_id:p.cliente_id,
+        dados:JSON.stringify(dadosEtiq),gerada_por:cu?.id||null,gerada_por_nome:profile?.full_name||cu?.email||null,
+      });
+      if(etiqRes)wmsEtiquetas=[Array.isArray(etiqRes)?etiqRes[0]:etiqRes,...wmsEtiquetas];
+      portClose();
+      showToast('Pallet '+numero+' fechado. Gerando etiqueta...','green');
+      gerarEtiquetaEmbarque(pallet.id);
+      if(curPage==='wms-conferencia')render();
+    }
+  }catch(e){portErr(e.message||'Erro ao fechar pallet.');}
+}
+
+// ── ETIQUETA DE EMBARQUE (PDF com QR + código) ──
+function gerarEtiquetaEmbarque(palletId){
+  const pl=wmsPalletsEmbarque.find(x=>x.id===palletId);if(!pl){alert('Pallet não encontrado.');return;}
+  const p=wmsPedidos.find(x=>x.id===pl.pedido_id);
+  const cli=clientes.find(c=>c.id===pl.cliente_id);
+  const itens=wmsPalletItens.filter(x=>x.pallet_id===palletId);
+  const numCurto=p?wmsNumeroCurto(p):(pl.consolidado?'CONSOLIDADO':'—');
+  // QR via qrcodejs em canvas → dataURL
+  const tmp=document.createElement('div');
+  new QRCode(tmp,{text:pl.etiqueta_codigo,width:160,height:160,correctLevel:QRCode.CorrectLevel.M});
+  setTimeout(()=>{
+    const img=tmp.querySelector('img')||tmp.querySelector('canvas');
+    let qrData='';
+    try{ qrData=img.tagName==='IMG'?img.src:img.toDataURL('image/png'); }catch(e){ qrData=''; }
+    const itensHtml=itens.map(it=>'<tr><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.sku||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.descricao||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee;text-align:right">'+it.quantidade+'</td></tr>').join('');
+    const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiqueta '+pl.numero+'</title>'+
+    '<style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+    'body{padding:18px}.et{border:2px solid #000;border-radius:8px;padding:16px;width:340px}'+
+    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px}'+
+    '.tt{font-size:16px;font-weight:800}.num{font-size:13px;color:#444}'+
+    '.row{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}'+
+    '.lbl{color:#666}.val{font-weight:700}'+
+    '.qr{text-align:center;margin:10px 0}.cod{text-align:center;font-family:monospace;font-size:10px;color:#333;word-break:break-all;margin-top:4px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:8px}</style></head><body>'+
+    '<div class="et">'+
+    '<div class="hd"><div><div class="tt">ETIQUETA DE EMBARQUE</div><div class="num">'+pl.numero+'</div></div>'+
+    '<div style="text-align:right;font-size:11px"><b>MK LOG</b></div></div>'+
+    '<div class="row"><span class="lbl">Cliente</span><span class="val">'+(cli?.nome||'—')+'</span></div>'+
+    '<div class="row"><span class="lbl">Pedido</span><span class="val">'+numCurto+'</span></div>'+
+    '<div class="row"><span class="lbl">Volumes</span><span class="val">'+itens.length+'</span></div>'+
+    (qrData?'<div class="qr"><img src="'+qrData+'" width="150" height="150"></div>':'')+
+    '<div class="cod">'+pl.etiqueta_codigo+'</div>'+
+    '<table><tbody>'+itensHtml+'</tbody></table>'+
+    '</div></body></html>';
+    const old=ge('etiq-print-frame');if(old)old.remove();
+    const iframe=document.createElement('iframe');
+    iframe.id='etiq-print-frame';
+    iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:150mm;border:none';
+    document.body.appendChild(iframe);
+    const doc=iframe.contentDocument||iframe.contentWindow.document;
+    doc.open();doc.write(html);doc.close();
+    setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},600);
+  },300);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  WMS · EXPEDIÇÃO / EMBARQUE (4ª conferência + pool de prismas)
+// ══════════════════════════════════════════════════════════════════
+let wmsExpTab='embarque';
+function rWmsExpedicao(){
+  const tabs=[['embarque','Embarque (4ª conferência)'],['prismas','Prismas de caminhão']];
+  const tabsHtml=tabs.map(([k,l])=>`<button onclick="wmsExpTab='${k}';render()" style="padding:8px 14px;font-size:12px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:2px solid ${k===wmsExpTab?'var(--blue-text)':'transparent'};color:${k===wmsExpTab?'var(--text)':'var(--text2)'}">${l}</button>`).join('');
+  const body=wmsExpTab==='prismas'?wmsExpPrismasBody():wmsExpEmbarqueBody();
+  return `<div style="border-bottom:1px solid var(--border);display:flex;gap:2px;margin-bottom:14px">${tabsHtml}</div>${body}`;
+}
+
+// — Aba Embarque: romaneios prontos pra embarcar, bipa etiqueta + prisma —
+function wmsExpEmbarqueBody(){
+  const cid=company?.id;
+  const romaneios=wmsRomaneios.filter(r=>r.company_id===cid && ['pendente','em_carregamento'].includes(r.status));
+  if(!romaneios.length)return `<div class="empty"><p>Nenhum romaneio em carregamento.</p></div>`;
+  const cliNome=id=>{const c=clientes.find(x=>x.id===id);return c?(c.nome||c.razao_social||'—'):'—';};
+  const cards=romaneios.map(r=>{
+    const prisma=wmsPrismas.find(pr=>pr.romaneio_id===r.id && pr.status==='ocupado');
+    const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
+    const pallets=wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id));
+    const embarcados=pallets.filter(pl=>pl.status==='embarcado').length;
+    return `<div style="border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:10px;background:var(--bg)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:700;font-size:14px">${r.numero}</div>
+          <div style="font-size:11px;color:var(--text3)">${cliNome(r.cliente_id)} · ${peds.length} pedido(s) · ${pallets.length} pallet(s)</div></div>
+        <div style="text-align:right">
+          ${prisma?`<span style="font-size:11px;font-weight:700;color:var(--green-text)">🚚 ${prisma.codigo}${prisma.placa?' · '+prisma.placa:''}</span>`:`<button class="btn btn-sm" onclick="wmsAtribuirPrismaModal('${r.id}')">Atribuir prisma</button>`}
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <div style="flex:1;font-size:11px;color:var(--text2)">Embarcados: <b>${embarcados}/${pallets.length}</b> pallets</div>
+        <button class="btn btn-sm btn-primary" onclick="wmsAbrirEmbarque('${r.id}')" ${prisma?'':'disabled'} style="${prisma?'':'opacity:.5;cursor:not-allowed'}">Bipar embarque</button>
+      </div>
+    </div>`;
+  }).join('');
+  return cards;
+}
+
+// Modal de embarque: bipa as etiquetas de embarque (4ª conferência)
+let wmsEmbRomaneio=null;
+function wmsAbrirEmbarque(romaneioId){
+  const r=wmsRomaneios.find(x=>x.id===romaneioId);if(!r)return;
+  wmsEmbRomaneio=romaneioId;
+  const peds=wmsPedidos.filter(p=>p.romaneio_id===romaneioId);
+  const pallets=wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id));
+  const prisma=wmsPrismas.find(pr=>pr.romaneio_id===romaneioId && pr.status==='ocupado');
+  const lista=pallets.map(pl=>`
+    <tr id="emb-row-${pl.id}">
+      <td style="padding:6px 8px;font-size:12px">${pl.numero}</td>
+      <td style="padding:6px 8px;font-size:11px;color:var(--text3)">${pl.tot_volumes} vol</td>
+      <td style="padding:6px 8px;text-align:center"><span id="emb-ok-${pl.id}" style="font-size:14px;color:${pl.status==='embarcado'?'var(--green-text)':'var(--text3)'}">${pl.status==='embarcado'?'✓':'○'}</span></td>
+    </tr>`).join('');
+  const inner=`
+    <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Romaneio <b>${r.numero}</b> · Prisma <b>${prisma?.codigo||'—'}</b>${prisma?.placa?' · '+prisma.placa:''}</div>
+    <div style="margin-bottom:12px;padding:11px 13px;background:var(--blue-bg);border-radius:9px">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta de embarque de cada pallet</div>
+      <input id="emb-bipe" placeholder="Bipe a etiqueta..." autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key==='Enter'){wmsEmbarqueBipe(this.value);this.value='';this.focus();}">
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--bg2)"><th style="padding:6px 8px;text-align:left;font-size:10px">Pallet</th><th style="padding:6px 8px;text-align:left;font-size:10px">Volumes</th><th style="padding:6px 8px;text-align:center;font-size:10px">Embarcado</th></tr></thead>
+      <tbody>${lista}</tbody>
+    </table>`;
+  window._wmsEmbPallets=pallets.map(p=>p.id);
+  portModal(`Embarque — ${r.numero}`,inner,`wmsFinalizarEmbarque()`,{saveLabel:'Finalizar embarque',width:'560px'});
+}
+async function wmsEmbarqueBipe(codigo){
+  const cod=String(codigo||'').trim();
+  if(!cod)return;
+  const pl=wmsPalletsEmbarque.find(x=>x.etiqueta_codigo===cod || x.numero===cod);
+  if(!pl){showToast('Etiqueta não reconhecida.','amber');return;}
+  if(!(window._wmsEmbPallets||[]).includes(pl.id)){showToast('Este pallet não é deste romaneio.','amber');return;}
+  if(pl.status==='embarcado'){showToast('Pallet já embarcado.','blue');return;}
+  try{
+    await dbUpdate('wms_pallets_embarque',pl.id,{status:'embarcado'});
+    pl.status='embarcado';
+    const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);
+    await dbInsert('wms_conferencias',{
+      company_id:company?.id,unit_id:pl.unit_id||null,tipo:4,pedido_id:pl.pedido_id,
+      pallet_id:pl.id,romaneio_id:wmsEmbRomaneio,cliente_id:pl.cliente_id,
+      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      modo:'bipe',resultado:'ok',observacao:'Embarcado no romaneio '+(r?.numero||''),
+    });
+    const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='✓';ok.style.color='var(--green-text)';}
+    showToast('Pallet '+pl.numero+' embarcado.','green');
+  }catch(e){showToast('Erro: '+e.message,'red');}
+}
+async function wmsFinalizarEmbarque(){
+  const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);if(!r){portClose();return;}
+  const pendentes=(window._wmsEmbPallets||[]).map(id=>wmsPalletsEmbarque.find(p=>p.id===id)).filter(p=>p&&p.status!=='embarcado');
+  if(pendentes.length){ if(!confirm(pendentes.length+' pallet(s) ainda não bipado(s). Finalizar mesmo assim?'))return; }
+  portSaving();
+  try{
+    await dbUpdate('wms_romaneios',r.id,{status:'carregado'});
+    r.status='carregado';
+    portClose();
+    showToast('Embarque do romaneio '+r.numero+' finalizado.','green');
+    if(curPage==='wms-expedicao')render();
+  }catch(e){portErr(e.message||'Erro ao finalizar.');}
+}
+
+// — Aba Prismas: pool fixo por unidade —
+function wmsExpPrismasBody(){
+  const cid=company?.id;
+  const prismas=wmsPrismas.filter(p=>p.company_id===cid);
+  const livres=prismas.filter(p=>p.status==='livre').length;
+  const ocupados=prismas.filter(p=>p.status==='ocupado').length;
+  const rows=prismas.map(pr=>{
+    const r=pr.romaneio_id?wmsRomaneios.find(x=>x.id===pr.romaneio_id):null;
+    return `<div class="li">
+      <div class="linfo">
+        <div class="lname" style="display:flex;align-items:center;gap:8px">${pr.codigo}
+          <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:99px;background:${pr.status==='livre'?'var(--green-bg)':'var(--amber-bg)'};color:${pr.status==='livre'?'var(--green-text)':'var(--amber-text)'}">${pr.status==='livre'?'LIVRE':'OCUPADO'}</span></div>
+        ${pr.status==='ocupado'?`<div class="lsub">${r?r.numero:''}${pr.placa?' · '+pr.placa:''}${pr.motorista?' · '+pr.motorista:''}</div>`:''}
+      </div>
+      <div class="lright">
+        ${pr.status==='ocupado'?`<button class="btn btn-sm" onclick="wmsZerarPrisma('${pr.id}')">Zerar</button>`:`<button class="btn btn-sm" onclick="wmsRemoverPrisma('${pr.id}')" style="color:var(--red-text)">Remover</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2)">${prismas.length} prisma(s) · <span style="color:var(--green-text)">${livres} livre(s)</span> · <span style="color:var(--amber-text)">${ocupados} ocupado(s)</span></div>
+      <button class="btn btn-sm btn-primary" onclick="wmsCriarPrismasModal()">+ Criar prismas</button>
+    </div>
+    ${rows||`<div class="empty"><p>Nenhum prisma cadastrado nesta unidade.</p></div>`}`;
+}
+function wmsCriarPrismasModal(){
+  const inner=`<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Cria uma sequência de prismas (etiquetas fixas pra colar). Ex: prefixo CAM, de 1 a 20 → CAM-001 a CAM-020.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div><label style="font-size:11px;color:var(--text2)">Prefixo</label><input id="prisma-prefixo" value="CAM" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;margin-top:4px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">De</label><input id="prisma-de" type="number" value="1" min="1" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;margin-top:4px"></div>
+      <div><label style="font-size:11px;color:var(--text2)">Até</label><input id="prisma-ate" type="number" value="20" min="1" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;margin-top:4px"></div>
+    </div>`;
+  portModal('Criar prismas',inner,`wmsCriarPrismas()`,{saveLabel:'Criar',width:'480px'});
+}
+async function wmsCriarPrismas(){
+  const prefixo=(ge('prisma-prefixo')?.value||'CAM').trim().toUpperCase();
+  const de=parseInt(ge('prisma-de')?.value||'1')||1;
+  const ate=parseInt(ge('prisma-ate')?.value||'1')||1;
+  if(ate<de||ate-de>500){portErr('Faixa inválida (máx 500 por vez).');return;}
+  portSaving();
+  try{
+    const cid=company?.id;
+    const existentes=new Set(wmsPrismas.filter(p=>p.company_id===cid&&p.unit_id===(activeUnit||null)).map(p=>p.codigo));
+    const novos=[];
+    for(let i=de;i<=ate;i++){
+      const cod=prefixo+'-'+String(i).padStart(3,'0');
+      if(existentes.has(cod))continue;
+      novos.push({company_id:cid,...unitPayload(),codigo:cod,status:'livre'});
+    }
+    if(!novos.length){portErr('Nenhum prisma novo (já existem).');return;}
+    for(const n of novos){
+      const res=await dbInsert('wms_prismas_caminhao',n);
+      if(res)wmsPrismas=[...wmsPrismas,Array.isArray(res)?res[0]:res];
+    }
+    wmsPrismas.sort((a,b)=>(a.codigo||'')>(b.codigo||'')?1:-1);
+    portClose();
+    showToast(novos.length+' prisma(s) criado(s).','green');
+    if(curPage==='wms-expedicao')render();
+  }catch(e){portErr(e.message||'Erro ao criar prismas.');}
+}
+function wmsAtribuirPrismaModal(romaneioId){
+  const cid=company?.id;
+  const livres=wmsPrismas.filter(p=>p.company_id===cid&&p.status==='livre');
+  if(!livres.length){showToast('Nenhum prisma livre. Crie ou libere um.','amber');return;}
+  wmsEmbRomaneio=romaneioId;
+  const opts=livres.map(p=>`<option value="${p.id}">${p.codigo}</option>`).join('');
+  const inner=`<div style="display:grid;gap:10px">
+    <div><label style="font-size:11px;color:var(--text2)">Prisma livre</label>
+      <select id="atrib-prisma" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;margin-top:4px">${opts}</select></div>
+    <div><label style="font-size:11px;color:var(--text2)">Placa do veículo</label>
+      <input id="atrib-placa" placeholder="ABC-1D23" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;margin-top:4px;text-transform:uppercase"></div>
+    <div><label style="font-size:11px;color:var(--text2)">Motorista (opcional)</label>
+      <input id="atrib-motorista" placeholder="Nome" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;margin-top:4px"></div>
+  </div>`;
+  portModal('Atribuir prisma ao veículo',inner,`wmsAtribuirPrisma('${romaneioId}')`,{saveLabel:'Atribuir',width:'460px'});
+}
+async function wmsAtribuirPrisma(romaneioId){
+  const prismaId=ge('atrib-prisma')?.value;
+  if(!prismaId){portErr('Selecione um prisma.');return;}
+  portSaving();
+  try{
+    const upd={status:'ocupado',romaneio_id:romaneioId,placa:(ge('atrib-placa')?.value||'').toUpperCase()||null,motorista:ge('atrib-motorista')?.value||null,atribuido_em:new Date().toISOString(),atribuido_por:cu?.id||null};
+    await dbUpdate('wms_prismas_caminhao',prismaId,upd);
+    const pr=wmsPrismas.find(p=>p.id===prismaId);if(pr)Object.assign(pr,upd);
+    portClose();
+    showToast('Prisma atribuído.','green');
+    if(curPage==='wms-expedicao')render();
+  }catch(e){portErr(e.message||'Erro ao atribuir.');}
+}
+async function wmsZerarPrisma(prismaId){
+  if(!confirm('Liberar este prisma? O veículo saiu.'))return;
+  try{
+    const upd={status:'livre',romaneio_id:null,placa:null,motorista:null,atribuido_em:null,atribuido_por:null};
+    await dbUpdate('wms_prismas_caminhao',prismaId,upd);
+    const pr=wmsPrismas.find(p=>p.id===prismaId);if(pr)Object.assign(pr,upd);
+    showToast('Prisma liberado.','green');
+    if(curPage==='wms-expedicao')render();
+  }catch(e){showToast('Erro: '+e.message,'red');}
+}
+async function wmsRemoverPrisma(prismaId){
+  if(!confirm('Remover este prisma do pool?'))return;
+  try{
+    await dbDelete('wms_prismas_caminhao',prismaId);
+    wmsPrismas=wmsPrismas.filter(p=>p.id!==prismaId);
+    showToast('Prisma removido.','green');
+    if(curPage==='wms-expedicao')render();
+  }catch(e){showToast('Erro: '+e.message,'red');}
+}
+
 
 function rWmsEmConstrucao(titulo, descricao){
   return `<div style="max-width:560px;margin:60px auto;text-align:center">
