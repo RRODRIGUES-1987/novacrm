@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.346 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.347 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.346';
+const APP_VERSION='v1.0.347';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18999,12 +18999,46 @@ function rWmsSeparacao(){
   if(!listas.length){
     return rWmsEmConstrucao('Separação','Nenhuma lista de separação gerada ainda. Vá em Pedidos, selecione os pedidos e clique em "Gerar listas de separação".');
   }
+  // progresso por lista (tarefas concluídas / total)
+  const prog=l=>{
+    const tar=wmsTarefasSeparacao.filter(t=>t.lista_id===l.id);
+    const feitas=tar.filter(t=>t.status==='concluida').length;
+    const tot=tar.length;
+    return {feitas,tot,pct:tot?Math.round(feitas/tot*100):0};
+  };
+  // macro: totais
+  const totListas=listas.length;
+  const concluidas=listas.filter(l=>l.status==='concluida').length;
+  const emAndamento=listas.filter(l=>l.status!=='concluida').length;
+  let somaFeitas=0,somaTot=0;
+  listas.forEach(l=>{const p=prog(l);somaFeitas+=p.feitas;somaTot+=p.tot;});
+  const pctGeral=somaTot?Math.round(somaFeitas/somaTot*100):0;
+
+  const card=(valor,label,cor)=>`<div style="flex:1;min-width:90px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+    <div style="font-size:24px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:3px">${label}</div></div>`;
+  const topo=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${card(totListas,'Listas','var(--text)')}
+      ${card(concluidas,'Concluídas','var(--green-text)')}
+      ${card(emAndamento,'Em andamento','var(--amber-text)')}
+      <div style="flex:2;min-width:180px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div style="font-size:11px;color:var(--text3)">Separação geral</div>
+          <div style="font-size:18px;font-weight:800;color:var(--blue-text)">${pctGeral}%</div>
+        </div>
+        <div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden;margin-top:7px">
+          <div style="height:100%;width:${pctGeral}%;background:var(--blue-text);border-radius:99px;transition:width .3s"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">${somaFeitas}/${somaTot} tarefas</div>
+      </div>
+    </div>`;
+
   const rows=listas.map(l=>{
     const cli=clientes.find(c=>c.id===l.cliente_id);
     const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888',bg:'rgba(136,136,136,.12)'};
-    const tar=wmsTarefasSeparacao.filter(t=>t.lista_id===l.id);
-    const feitas=tar.filter(t=>t.status==='separada').length;
+    const p=prog(l);
     const data=l.created_at?new Date(l.created_at).toLocaleDateString('pt-BR'):'';
+    const corBar=p.pct===100?'var(--green-text)':'var(--blue-text)';
     return `<div class="li" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
       <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
         <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Lista</div>
@@ -19012,9 +19046,15 @@ function rWmsSeparacao(){
       </div>
       <div class="linfo" style="justify-content:center">
         <div class="lname">${wmsRefPedidoLista(l)}</div>
-        <div class="lsub">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'} · ${l.qtd_tarefas} tarefa(s) · ${feitas}/${tar.length} separadas · ${data}</div>
+        <div class="lsub">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'} · ${data}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:5px;max-width:280px">
+          <div style="flex:1;height:6px;background:var(--bg2);border-radius:99px;overflow:hidden">
+            <div style="height:100%;width:${p.pct}%;background:${corBar};border-radius:99px;transition:width .3s"></div>
+          </div>
+          <span style="font-size:10px;font-weight:700;color:${corBar};white-space:nowrap">${p.pct}% · ${p.feitas}/${p.tot}</span>
+        </div>
       </div>
-      <div class="lright" style="align-items:center;gap:6px" onclick="event.stopPropagation()">
+      <div class="lright" style="flex-direction:row;align-items:center;gap:8px" onclick="event.stopPropagation()">
         <button class="bicon btn-sm" title="Etiquetas de separação" onclick="wmsEtiquetasModal('${l.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
         </button>
@@ -19025,7 +19065,7 @@ function rWmsSeparacao(){
       </div>
     </div>`;
   }).join('');
-  return `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${listas.length} lista(s) de separação</div>${rows}`;
+  return `${topo}<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${listas.length} lista(s) de separação</div>${rows}`;
 }
 
 function wmsListaDetalhe(id){
