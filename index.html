@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.354 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.355 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.354';
+const APP_VERSION='v1.0.355';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -21025,6 +21025,7 @@ function gerarEtiquetasEmbarquePedido(pedidoId){
   const p=wmsPedidos.find(x=>x.id===pedidoId);
   const cli=clientes.find(c=>c.id===p?.cliente_id);
   const numCurto=p?wmsNumeroCurto(p):'—';
+  const romNumero=p&&p.romaneio_id?(wmsRomaneios.find(r=>r.id===p.romaneio_id)?.numero||null):null;
   const N=pallets.length;
   // gera QR de cada pallet
   const qrMap={};let pend=pallets.length;
@@ -21035,39 +21036,83 @@ function gerarEtiquetasEmbarquePedido(pedidoId){
       const img=tmp.querySelector('img')||tmp.querySelector('canvas');
       try{qrMap[pl.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png');}catch(e){qrMap[pl.id]='';}
       pend--;
-      if(pend<=0)wmsEtiquetasEmbarqueRender(pallets,qrMap,{cli,numCurto,N});
+      if(pend<=0)wmsEtiquetasEmbarqueModal(pallets,qrMap,{cli,numCurto,N,romNumero});
     },200);
   });
 }
+// Modal de etiquetas de embarque: preview + PDF + ZPL (igual ao dos prismas)
+function wmsEtiquetasEmbarqueModal(pallets,qrMap,ctx){
+  window._wmsEmbEtiq={pallets,qrMap,ctx};
+  const zpl=wmsEmbarqueZplLista(pallets,ctx);
+  const primeira=zpl.split('^XZ')[0]+'^XZ';
+  const previewUrl='https://api.labelary.com/v1/printers/8dpmm/labels/4x4/0/'+encodeURIComponent(primeira);
+  portModal('Etiquetas de embarque',
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">${pallets.length} etiqueta(s) · formato 10×10cm · Pedido ${ctx.numCurto} · ${ctx.romNumero||'S/ ROMANEIO'}</div>
+     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+       <div style="border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff">
+         <img src="${previewUrl}" alt="preview" style="width:200px;height:200px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+         <div style="display:none;font-size:11px;color:var(--text3);width:200px;text-align:center;padding:40px 0">Preview indisponível (offline). O PDF/ZPL gera normalmente.</div>
+       </div>
+       <div style="flex:1;min-width:200px">
+         <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:12px">Cada etiqueta traz <b>MK LOG + cliente</b>, título com o <b>romaneio</b>, <b>volume X/N</b> e <b>QR Code</b> para bipar no embarque.</div>
+         <button class="btn btn-p" style="width:100%;margin-bottom:8px" onclick="wmsEmbEtiqPdf()">🖨 Visualizar / Imprimir PDF</button>
+         <button class="btn" style="width:100%;margin-bottom:8px" onclick="wmsEmbEtiqZpl()">⬇ Baixar arquivo .zpl (Zebra)</button>
+       </div>
+     </div>`,
+    'portClose()',{saveLabel:'Fechar',width:'560px'});
+}
+function wmsEmbEtiqPdf(){
+  const e=window._wmsEmbEtiq;if(!e)return;
+  wmsEtiquetasEmbarqueRender(e.pallets,e.qrMap,e.ctx);
+}
+function wmsEmbEtiqZpl(){
+  const e=window._wmsEmbEtiq;if(!e)return;
+  const zpl=wmsEmbarqueZplLista(e.pallets,e.ctx);
+  const blob=new Blob([zpl],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='etiquetas_embarque_'+(e.ctx.numCurto||'')+'.zpl';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
 function wmsEtiquetasEmbarqueRender(pallets,qrMap,ctx){
+  const romTxt=ctx.romNumero||'S/ ROMANEIO';
   const paginas=pallets.map((pl,idx)=>{
     const itens=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
     const qrData=qrMap[pl.id]||'';
-    const itensHtml=itens.map(it=>'<tr><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.sku||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.descricao||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee;text-align:right">'+it.quantidade+'</td></tr>').join('');
+    // itens só se couber (até 3); senão, só o número do pedido
+    const cabe=itens.length<=3;
+    const itensBloco=cabe
+      ? '<table>'+itens.map(it=>'<tr><td style="padding:2px 4px;font-size:10px;border-bottom:1px solid #eee">'+(it.sku||'')+'</td><td style="padding:2px 4px;font-size:10px;border-bottom:1px solid #eee">'+((it.descricao||'').slice(0,20))+'</td><td style="padding:2px 4px;font-size:10px;border-bottom:1px solid #eee;text-align:right;font-weight:700">'+it.quantidade+'</td></tr>').join('')+'</table>'
+      : '<div style="font-size:11px;color:#444;text-align:center;margin-top:4px">Pedido '+ctx.numCurto+' · '+itens.length+' itens no volume</div>';
     return '<div class="et" style="'+(idx>0?'page-break-before:always;':'')+'">'+
-      '<div class="hd"><div><div class="tt">ETIQUETA DE EMBARQUE</div><div class="num">'+pl.numero+'</div></div>'+
-      '<div style="text-align:right"><div style="font-size:22px;font-weight:900">'+(pl.vol_num||'?')+'/'+ctx.N+'</div><div style="font-size:10px;color:#666">VOLUME</div></div></div>'+
-      '<div class="row"><span class="lbl">Cliente</span><span class="val">'+(ctx.cli?.nome||'—')+'</span></div>'+
-      '<div class="row"><span class="lbl">Pedido</span><span class="val">'+ctx.numCurto+'</span></div>'+
-      '<div class="row"><span class="lbl">Itens no volume</span><span class="val">'+itens.length+'</span></div>'+
-      (qrData?'<div class="qr"><img src="'+qrData+'" width="140" height="140"></div>':'')+
+      // cabeçalho: MK LOG + cliente
+      '<div class="hd"><div class="mk">MK LOG</div><div class="cli">'+(ctx.cli?.nome||'—')+'</div></div>'+
+      // título + ROM + volume
+      '<div class="tit"><div><div class="tt">ETIQUETA DE EMBARQUE</div><div class="rom">'+romTxt+'</div></div>'+
+      '<div class="vol"><div class="volnum">'+(pl.vol_num||'?')+'/'+ctx.N+'</div><div class="vollbl">VOLUME</div></div></div>'+
+      '<div class="meta">Pedido <b>'+ctx.numCurto+'</b> · Pallet <b>'+pl.numero+'</b></div>'+
+      (qrData?'<div class="qr"><img src="'+qrData+'" width="118" height="118"></div>':'')+
       '<div class="cod">'+pl.etiqueta_codigo+'</div>'+
-      '<table><tbody>'+itensHtml+'</tbody></table>'+
+      itensBloco+
     '</div>';
   }).join('');
   const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas '+ctx.numCurto+'</title>'+
-    '<style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
-    'body{padding:0}.et{border:2px solid #000;padding:16px;width:100mm;min-height:148mm}'+
-    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px}'+
-    '.tt{font-size:15px;font-weight:800}.num{font-size:12px;color:#444}'+
-    '.row{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}'+
-    '.lbl{color:#666}.val{font-weight:700}'+
-    '.qr{text-align:center;margin:10px 0}.cod{text-align:center;font-family:monospace;font-size:9px;color:#333;word-break:break-all;margin-top:4px}'+
-    'table{width:100%;border-collapse:collapse;margin-top:8px}</style></head><body>'+paginas+'</body></html>';
+    '<style>@page{size:100mm 100mm;margin:0}*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+    '.et{width:100mm;height:100mm;border:2px solid #000;padding:5mm;display:flex;flex-direction:column}'+
+    '.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:1.5px solid #000;padding-bottom:4px;margin-bottom:5px}'+
+    '.mk{font-size:15px;font-weight:900;letter-spacing:.5px}.cli{font-size:10px;font-weight:700;color:#333;text-align:right;max-width:52mm;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}'+
+    '.tit{display:flex;justify-content:space-between;align-items:flex-start}'+
+    '.tt{font-size:13px;font-weight:800;line-height:1.1}.rom{font-size:12px;font-weight:700;color:#000;margin-top:1px}'+
+    '.vol{text-align:right}.volnum{font-size:26px;font-weight:900;line-height:1}.vollbl{font-size:8px;color:#666;letter-spacing:1px}'+
+    '.meta{font-size:10px;color:#444;margin:4px 0}'+
+    '.qr{text-align:center;margin:3px 0}'+
+    '.cod{text-align:center;font-family:monospace;font-size:7px;color:#555;word-break:break-all;margin-bottom:3px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:auto}</style></head><body>'+paginas+'</body></html>';
   const old=ge('etiq-print-frame');if(old)old.remove();
   const iframe=document.createElement('iframe');
   iframe.id='etiq-print-frame';
-  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:150mm;border:none';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
   document.body.appendChild(iframe);
   const doc=iframe.contentDocument||iframe.contentWindow.document;
   doc.open();doc.write(html);doc.close();
@@ -21084,7 +21129,8 @@ function gerarEtiquetaEmbarque(palletId){
   setTimeout(()=>{
     const img=tmp.querySelector('img')||tmp.querySelector('canvas');
     const qr={};try{qr[pl.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png');}catch(e){qr[pl.id]='';}
-    wmsEtiquetasEmbarqueRender([pl],qr,{cli,numCurto:p?wmsNumeroCurto(p):'—',N});
+    const romNumero=p&&p.romaneio_id?(wmsRomaneios.find(r=>r.id===p.romaneio_id)?.numero||null):null;
+    wmsEtiquetasEmbarqueRender([pl],qr,{cli,numCurto:p?wmsNumeroCurto(p):'—',N,romNumero});
   },300);
 }
 
@@ -21408,6 +21454,38 @@ async function wmsRemoverPrisma(prismaId){
 
 // ── ETIQUETA DO PRISMA (10x10cm) — ZPL + PDF, código + QR + código de barras ──
 // ZPL de uma etiqueta de prisma: 10x10cm @203dpi = 800x800 dots
+// ZPL da etiqueta de EMBARQUE (10x10cm @203dpi = 800x800 dots)
+function zplEtiquetaEmbarque(o){
+  // o: {mk, cliente, rom, pedido, pallet, volNum, volTotal, codigo}
+  const cli=zplEsc(String(o.cliente||'').slice(0,30));
+  return [
+    '^XA','^CI28','^PW800','^LL800',
+    // cabeçalho: MK LOG (esq) + cliente (dir)
+    '^FO30,30^A0N,40,40^FDMK LOG^FS',
+    '^FO360,38^A0N,24,24^FB410,2,0,R,0^FD'+cli+'^FS',
+    '^FO30,82^GB740,3,3^FS',
+    // título + ROM
+    '^FO30,100^A0N,34,34^FDETIQUETA DE EMBARQUE^FS',
+    '^FO30,142^A0N,30,30^FD'+zplEsc(o.rom||'S/ ROMANEIO')+'^FS',
+    // volume grande (direita)
+    '^FO540,95^A0N,90,90^FD'+(o.volNum||'?')+'/'+(o.volTotal||'?')+'^FS',
+    '^FO540,185^A0N,20,20^FDVOLUME^FS',
+    // pedido + pallet
+    '^FO30,200^A0N,26,26^FDPedido '+zplEsc(o.pedido||'')+'  Pallet '+zplEsc(o.pallet||'')+'^FS',
+    // QR code grande
+    '^FO250,250^BQN,2,9^FDLA,'+zplEsc(o.codigo)+'^FS',
+    // código texto
+    '^FO30,720^A0N,18,18^FB740,1,0,C,0^FD'+zplEsc(o.codigo)+'^FS',
+    '^XZ'
+  ].join('\n');
+}
+function wmsEmbarqueZplLista(pallets,ctx){
+  return pallets.map(pl=>zplEtiquetaEmbarque({
+    mk:'MK LOG',cliente:ctx.cli?.nome||'',rom:ctx.romNumero||'S/ ROMANEIO',
+    pedido:ctx.numCurto,pallet:pl.numero,volNum:pl.vol_num,volTotal:ctx.N,codigo:pl.etiqueta_codigo
+  })).join('\n');
+}
+
 function zplEtiquetaPrisma(o){
   // o: {codigo, unidade}
   return [
