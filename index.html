@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.357 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.358 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -971,7 +971,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.357';
+const APP_VERSION='v1.0.358';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18731,6 +18731,7 @@ const WMS_ROM_STATUS={
   carregado:{l:'Carregado',c:'#22c55e',bg:'rgba(34,197,94,.12)'},
 };
 let wmsRomSelecionados=new Set(); // pedidos selecionados p/ montar romaneio
+let wmsRomFiltroDe='', wmsRomFiltroAte='';
 
 // Recalcula e grava os totais do romaneio (soma dos pedidos vinculados)
 async function wmsRecalcRomaneio(romId){
@@ -18829,12 +18830,39 @@ async function wmsCriarRomaneio(){
 // Tela: lista de romaneios
 function rWmsRomaneios(){
   const cid=company?.id;
-  const roms=wmsRomaneios.filter(r=>r.company_id===cid);
+  let roms=wmsRomaneios.filter(r=>r.company_id===cid);
+  if(wmsRomFiltroDe)roms=roms.filter(r=>(r.data||'')>=wmsRomFiltroDe);
+  if(wmsRomFiltroAte)roms=roms.filter(r=>(r.data||'')<=wmsRomFiltroAte);
   const semRom=wmsPedidosSemRomaneio();
   const btnMontar=`<button class="btn btn-p btn-sm" onclick="wmsMontarRomaneioModal()">+ Montar romaneio</button>`;
+  // cards: status + totalizadores por romaneio (sem entrar nos pedidos, usa os totais do próprio romaneio)
+  const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
+  const cont={}; roms.forEach(r=>{cont[r.status]=(cont[r.status]||0)+1;});
+  const totVol=roms.reduce((s,r)=>{const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);return s+wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;},0);
+  const totL=roms.reduce((s,r)=>s+(+r.tot_litragem||0),0);
+  const totKg=roms.reduce((s,r)=>s+(+r.tot_peso||0),0);
+  const card=(valor,label,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px">
+    <div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:3px">${label}</div></div>`;
+  const cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">
+    ${card(roms.length,'Romaneios','var(--text)')}
+    ${card(cont['pendente']||0,'Pendentes','#3b82f6')}
+    ${card(cont['em_carregamento']||0,'Em carregamento','var(--amber-text)')}
+    ${card(cont['carregado']||0,'Carregados','var(--green-text)')}
+    ${card(fmt(totVol),'Pallets','var(--blue-text)')}
+    ${card(fmt(totL)+' L','Litros','var(--blue-text)')}
+    ${card(fmt(totKg)+' kg','Peso','var(--blue-text)')}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:11px;color:var(--text3)">
+    <span>Período:</span>
+    <input type="date" class="fi" value="${wmsRomFiltroDe}" onchange="wmsRomFiltroDe=this.value;render()" style="height:32px;width:auto">
+    <span>até</span>
+    <input type="date" class="fi" value="${wmsRomFiltroAte}" onchange="wmsRomFiltroAte=this.value;render()" style="height:32px;width:auto">
+    ${(wmsRomFiltroDe||wmsRomFiltroAte)?`<button class="btn btn-sm" onclick="wmsRomFiltroDe='';wmsRomFiltroAte='';render()">Limpar</button>`:''}
+  </div>`;
   if(!roms.length){
-    return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div style="font-size:12px;color:var(--text3)">Nenhum romaneio criado. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
+    return `${cards}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text3)">Nenhum romaneio no período. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
   }
   const rows=roms.map(r=>{
     const cli=clientes.find(c=>c.id===r.cliente_id);
@@ -18856,7 +18884,7 @@ function rWmsRomaneios(){
       </div>
     </div>`;
   }).join('');
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  return `${cards}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
     <div style="font-size:12px;color:var(--text3)">${roms.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div>${btnMontar}</div>${rows}`;
 }
 
@@ -18968,6 +18996,29 @@ async function wmsCancelarRomaneio(id){
   }catch(e){showToast('Erro ao cancelar: '+e.message,'red');}
 }
 
+// Modal para informar a doca ao iniciar o carregamento
+function wmsDocaModal(romaneioId){
+  const r=wmsRomaneios.find(x=>x.id===romaneioId);
+  const inner=`<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Informe a doca onde o veículo será carregado.</div>
+    <div class="fg"><label class="fl">Número da doca</label>
+      <input class="fi" id="doca-input" type="number" min="1" value="${r?.doca||''}" placeholder="Ex: 3" autofocus>
+    </div>`;
+  portModal('Iniciar carregamento — Doca',inner,`wmsConfirmarDoca('${romaneioId}')`,{saveLabel:'Iniciar carregamento',width:'420px'});
+  setTimeout(()=>ge('doca-input')?.focus(),100);
+}
+async function wmsConfirmarDoca(romaneioId){
+  const doca=parseInt(String(ge('doca-input')?.value||'').replace(/\D/g,''))||null;
+  if(!doca){portErr('Informe um número de doca válido.');return;}
+  portSaving();
+  try{
+    await dbUpdate('wms_romaneios',romaneioId,{status:'em_carregamento',doca});
+    const r=wmsRomaneios.find(x=>x.id===romaneioId);if(r){r.status='em_carregamento';r.doca=doca;}
+    portClose();
+    showToast('Carregamento iniciado na doca '+doca+'.','green');
+    wmsRomaneioDetalhe(romaneioId);
+  }catch(e){portErr(e.message||'Erro ao iniciar.');}
+}
+
 async function wmsRomStatus(id,novo){
   // iniciar carregamento exige prisma atribuído + informar a doca
   if(novo==='em_carregamento'){
@@ -18976,16 +19027,7 @@ async function wmsRomStatus(id,novo){
       if(typeof showToast==='function')showToast('Atribua um prisma de caminhão ao romaneio antes de iniciar o carregamento.','amber');
       return;
     }
-    const docaTxt=prompt('Informe o número da DOCA para o carregamento:');
-    if(docaTxt===null)return; // cancelou
-    const doca=parseInt(String(docaTxt).replace(/\D/g,''))||null;
-    if(!doca){if(typeof showToast==='function')showToast('Doca inválida.','amber');return;}
-    try{
-      await dbUpdate('wms_romaneios',id,{status:novo,doca});
-      const r=wmsRomaneios.find(x=>x.id===id);if(r){r.status=novo;r.doca=doca;}
-      if(typeof showToast==='function')showToast('Carregamento iniciado na doca '+doca+'.','green');
-      wmsRomaneioDetalhe(id);
-    }catch(e){if(typeof showToast==='function')showToast(e.message||'Erro.','red');}
+    wmsDocaModal(id);
     return;
   }
   // finalizar (carregado): libera prisma e doca
@@ -19856,7 +19898,7 @@ const WMS_PED_STATUS={
   expedido:{l:'Expedido',c:'#22c55e',bg:'rgba(34,197,94,.12)'},
   cancelado:{l:'Cancelado',c:'#ef4444',bg:'rgba(239,68,68,.12)'},
 };
-let wmsPedFiltroStatus='', wmsPedFiltroCliente='';
+let wmsPedFiltroStatus='', wmsPedFiltroCliente='', wmsPedFiltroDe='', wmsPedFiltroAte='';
 
 function wmsPedBadge(st){
   const s=WMS_PED_STATUS[st]||{l:st,c:'#888',bg:'rgba(136,136,136,.12)'};
@@ -19867,16 +19909,46 @@ function rWmsPedidos(){
   const cid=company?.id;
   const clientesComPed=clientes.filter(c=>c.company_id===cid&&wmsPedidos.some(p=>p.cliente_id===c.id));
   const optCli=clientes.filter(c=>c.company_id===cid).map(c=>`<option value="${c.id}" ${wmsPedFiltroCliente===c.id?'selected':''}>${c.nome}</option>`).join('');
+  // base com filtro de data (por data do pedido / created_at)
+  const dataPed=p=>(p.data_pedido||p.data||(p.created_at||'').slice(0,10)||'');
+  let base=wmsPedidos.filter(p=>p.company_id===cid);
+  if(wmsPedFiltroDe)base=base.filter(p=>dataPed(p)>=wmsPedFiltroDe);
+  if(wmsPedFiltroAte)base=base.filter(p=>dataPed(p)<=wmsPedFiltroAte);
   // contagem por status
-  const todos=wmsPedidos.filter(p=>p.company_id===cid);
+  const todos=base;
   const cont={}; todos.forEach(p=>{cont[p.status]=(cont[p.status]||0)+1;});
+  // totalizadores
+  const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
+  const totVol=todos.reduce((s,p)=>s+(+p.tot_pallets||0)+(+p.tot_un_fracao||0),0);
+  const totL=todos.reduce((s,p)=>s+(+p.tot_litragem||0),0);
+  const totKg=todos.reduce((s,p)=>s+(+p.tot_peso||0),0);
+  const card=(valor,label,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px">
+    <div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:3px">${label}</div></div>`;
+  const cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">
+    ${card(todos.length,'Pedidos','var(--text)')}
+    ${card(cont['importado']||0,'Importados','var(--text2)')}
+    ${card(cont['em_separacao']||0,'Em separação','var(--amber-text)')}
+    ${card((cont['separado']||0)+(cont['conferido']||0),'Separados/Conf.','var(--green-text)')}
+    ${card(fmt(totVol),'Volumes','var(--blue-text)')}
+    ${card(fmt(totL)+' L','Litros','var(--blue-text)')}
+    ${card(fmt(totKg)+' kg','Peso','var(--blue-text)')}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:11px;color:var(--text3)">
+    <span>Período:</span>
+    <input type="date" class="fi" value="${wmsPedFiltroDe}" onchange="wmsPedFiltroDe=this.value;render()" style="height:32px;width:auto">
+    <span>até</span>
+    <input type="date" class="fi" value="${wmsPedFiltroAte}" onchange="wmsPedFiltroAte=this.value;render()" style="height:32px;width:auto">
+    ${(wmsPedFiltroDe||wmsPedFiltroAte)?`<button class="btn btn-sm" onclick="wmsPedFiltroDe='';wmsPedFiltroAte='';render()">Limpar</button>`:''}
+  </div>`;
+
   const chips=['',...Object.keys(WMS_PED_STATUS).filter(s=>s!=='em_romaneio')].map(st=>{
     const lbl=st===''?`Todos (${todos.length})`:`${WMS_PED_STATUS[st].l} (${cont[st]||0})`;
     const ativo=wmsPedFiltroStatus===st;
     return `<button onclick="wmsPedFiltroStatus='${st}';render()" style="border:1.5px solid ${ativo?'var(--text)':'var(--border)'};background:${ativo?'var(--text)':'transparent'};color:${ativo?'#fff':'var(--text2)'};font-size:11px;font-weight:600;padding:5px 12px;border-radius:99px;cursor:pointer;white-space:nowrap">${lbl}</button>`;
   }).join('');
 
-  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
+  return `${cards}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
   <div class="sechdr" style="gap:10px">
     <select class="fi" id="wms-ped-cli" onchange="wmsPedFiltroCliente=this.value;render()" style="height:36px;width:auto;min-width:200px">
       <option value="">Todos os depositantes</option>${optCli}
@@ -20436,7 +20508,7 @@ function wmsCliTabSaida(c){
       ${modoOpt('bipagem_simples','Bipagem simples','Coletor bipa 1 etiqueta e informa a quantidade.')}
       ${modoOpt('bipagem_completa','Bipagem completa','Coletor bipa todas as etiquetas: fração = N etiquetas, pallet fechado = 1 etiqueta.')}
     </div>
-    <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:${semEtiq?'none':'flex'};align-items:center;justify-content:space-between;gap:10px">
+    <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:10px">
       <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utiliza etiqueta do cliente</div>
       <div style="font-size:11px;color:var(--text3)">Se sim, usa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} onchange="wmsCheckEtiqFaltando('${c.id}',this.checked)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
@@ -20498,8 +20570,7 @@ function wmsCheckEtiqFaltando(clienteId,ligado){
   box.innerHTML=ligado?wmsEtiqFaltandoHtml(clienteId):'';
 }
 function wmsToggleEtiqVis(){
-  const modo=document.querySelector('input[name="wms-modo-sep"]:checked')?.value||'manual';
-  const box=ge('wms-etiq-cliente-box');if(box)box.style.display=modo==='manual'?'none':'flex';
+  // etiqueta do cliente é transversal (separação e conferência) — sempre visível
 }
 async function wmsSalvarParamCliente(clienteId){
   const dados={};
@@ -20510,8 +20581,8 @@ async function wmsSalvarParamCliente(clienteId){
   const radio=document.querySelector('input[name="wms-modo-sep"]:checked');
   if(radio){
     dados.wms_modo_separacao=radio.value;
-    dados.wms_usa_etiqueta_cliente=radio.value!=='manual' && (ge('wms-usa-etiq')?.checked||false);
   }
+  dados.wms_usa_etiqueta_cliente=ge('wms-usa-etiq')?.checked||false;
   // aba Saída: conferências
   ['wms_conf_1','wms_conf_2','wms_conf_3','wms_conf_4'].forEach(campo=>{
     const cb=ge(campo);if(cb)dados[campo]=cb.checked;
