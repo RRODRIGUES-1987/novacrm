@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.349 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.350 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.349';
+const APP_VERSION='v1.0.350';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -18892,12 +18892,22 @@ function wmsRomaneioDetalhe(id){
     </div>`;
   }).join('')||'<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Sem pedidos.</div>';
   const podeAdd=r.status==='pendente';
+  const prismaR=wmsPrismas.find(pr=>pr.romaneio_id===r.id && pr.status==='ocupado');
+  const prismaBox=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:9px;background:${prismaR?'var(--green-bg)':'var(--amber-bg)'};margin-bottom:12px">
+      <div style="font-size:12px;font-weight:600;color:${prismaR?'var(--green-text)':'var(--amber-text)'}">
+        ${prismaR?('🚚 Prisma '+prismaR.codigo+(prismaR.placa?' · '+prismaR.placa:'')):'⚠ Nenhum prisma atribuído'}
+      </div>
+      ${r.status!=='carregado'?(prismaR
+        ?`<button class="btn btn-sm" onclick="wmsZerarPrisma('${prismaR.id}')" style="color:var(--red-text)">Liberar</button>`
+        :`<button class="btn btn-sm" onclick="wmsAtribuirPrismaModal('${id}')">Atribuir prisma</button>`):''}
+    </div>`;
   portModal(`Romaneio ${r.numero}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
       <div style="font-size:11px;color:var(--text3)">${wmsRomResumo(r)} · ${data}</div></div>
       <span style="background:${st.bg||'rgba(136,136,136,.12)'};color:${st.c};font-size:11px;font-weight:700;padding:4px 11px;border-radius:99px">${st.l}</span>
     </div>
+    ${prismaBox}
     ${btnStatus?`<div style="margin-bottom:12px">${btnStatus}</div>`:''}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <div style="font-size:12px;font-weight:600;color:var(--text2)">Pedidos da carga</div>
@@ -18936,6 +18946,14 @@ async function wmsCancelarRomaneio(id){
 }
 
 async function wmsRomStatus(id,novo){
+  // iniciar carregamento exige prisma atribuído (caminhão na doca)
+  if(novo==='em_carregamento'){
+    const prisma=wmsPrismas.find(pr=>pr.romaneio_id===id && pr.status==='ocupado');
+    if(!prisma){
+      if(typeof showToast==='function')showToast('Atribua um prisma de caminhão ao romaneio antes de iniciar o carregamento.','amber');
+      return;
+    }
+  }
   try{
     await dbUpdate('wms_romaneios',id,{status:novo});
     const r=wmsRomaneios.find(x=>x.id===id);if(r)r.status=novo;
@@ -21017,16 +21035,19 @@ async function wmsAtribuirPrisma(romaneioId){
     portClose();
     showToast('Prisma atribuído.','green');
     if(curPage==='wms-expedicao'||curPage==='wms-prismas')render();
+    else wmsRomaneioDetalhe(romaneioId);
   }catch(e){portErr(e.message||'Erro ao atribuir.');}
 }
 async function wmsZerarPrisma(prismaId){
   if(!confirm('Liberar este prisma? O veículo saiu.'))return;
+  const romAntes=wmsPrismas.find(p=>p.id===prismaId)?.romaneio_id;
   try{
     const upd={status:'livre',romaneio_id:null,placa:null,motorista:null,atribuido_em:null,atribuido_por:null};
     await dbUpdate('wms_prismas_caminhao',prismaId,upd);
     const pr=wmsPrismas.find(p=>p.id===prismaId);if(pr)Object.assign(pr,upd);
     showToast('Prisma liberado.','green');
     if(curPage==='wms-expedicao'||curPage==='wms-prismas')render();
+    else if(romAntes)wmsRomaneioDetalhe(romAntes);
   }catch(e){showToast('Erro: '+e.message,'red');}
 }
 async function wmsRemoverPrisma(prismaId){
