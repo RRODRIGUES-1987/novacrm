@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.355 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.356 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.355';
+const APP_VERSION='v1.0.356';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -20569,15 +20569,23 @@ function rWmsConferencia(){
       const feita=wmsConfsFeitas(p.id,t).length>0;
       return `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:${feita?'var(--green-bg)':'var(--bg2)'};color:${feita?'var(--green-text)':'var(--text3)'}">${feita?'✓':'○'} ${t}ª</span>`;
     }).join(' ');
-    const acao=proxima
-      ? `<button class="btn btn-sm btn-primary" onclick="wmsAbrirConferencia('${p.id}',${proxima})">Conferir ${proxima}ª</button>`
-      : `<span style="font-size:11px;color:var(--green-text);font-weight:600">✓ Conferências OK</span>`;
+    const temUnit=wmsConfsFeitas(p.id,3).length>0 || wmsPalletsEmbarque.some(pl=>pl.pedido_id===p.id);
+    let acao;
+    if(proxima){
+      acao=`<button class="btn btn-sm btn-primary" onclick="wmsAbrirConferencia('${p.id}',${proxima})">Conferir ${proxima}ª</button>`;
+    } else {
+      acao=`<span style="font-size:11px;color:var(--green-text);font-weight:600">✓ OK</span>`;
+    }
+    // se já unitizou (tem pallet/3ª), oferece reimprimir e estornar
+    const acaoUnit=temUnit?`
+      <button class="btn btn-sm" title="Reimprimir etiquetas" onclick="wmsReimprimirEtiquetas('${p.id}')">🏷</button>
+      <button class="btn btn-sm" title="Estornar 3ª (unitização)" style="color:var(--red-text)" onclick="wmsEstornarUnitizacao('${p.id}')">↺</button>`:'';
     return `<div class="li">
       <div class="linfo">
         <div class="lname" style="display:flex;align-items:center;gap:8px">${numCurto} <span style="font-size:11px;color:var(--text3)">${cliNome(p.cliente_id)}</span></div>
         <div class="lsub" style="display:flex;gap:5px;margin-top:3px">${badges}</div>
       </div>
-      <div class="lright">${acao}</div>
+      <div class="lright" style="flex-direction:row;align-items:center;gap:6px">${acao}${acaoUnit}</div>
     </div>`;
   }).join('');
 
@@ -21014,6 +21022,47 @@ async function wmsFinalizarUnitizacao(){
     gerarEtiquetasEmbarquePedido(p.id);
     if(curPage==='wms-conferencia')render();
   }catch(e){portErr(e.message||'Erro ao encerrar unitização.');}
+}
+
+// Reimprime as etiquetas de embarque de um pedido (reabre o modal PDF/ZPL)
+function wmsReimprimirEtiquetas(pedidoId){
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId);
+  if(!pallets.length){showToast('Este pedido não tem pallets/etiquetas.','amber');return;}
+  gerarEtiquetasEmbarquePedido(pedidoId);
+}
+
+// Estorna a 3ª conferência (unitização): apaga pallets, itens, etiquetas e a conferência tipo 3
+async function wmsEstornarUnitizacao(pedidoId){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  // bloqueio: se já embarcou algum pallet, não pode estornar
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId);
+  if(pallets.some(pl=>pl.status==='embarcado')){
+    showToast('Há pallet já embarcado. Não é possível estornar a unitização.','red');return;
+  }
+  if(!confirm('Estornar a 3ª conferência (unitização) do pedido '+wmsNumeroCurto(p)+'?\n\nTodos os pallets, itens e etiquetas serão apagados e o pedido volta a ser unitizado do zero.'))return;
+  try{
+    // apaga itens e pallets
+    for(const pl of pallets){
+      const its=wmsPalletItens.filter(pi=>pi.pallet_id===pl.id);
+      for(const it of its){await dbDelete('wms_pallet_itens',it.id);}
+      wmsPalletItens=wmsPalletItens.filter(pi=>pi.pallet_id!==pl.id);
+      await dbDelete('wms_pallets_embarque',pl.id);
+    }
+    wmsPalletsEmbarque=wmsPalletsEmbarque.filter(pl=>pl.pedido_id!==pedidoId);
+    // apaga etiquetas do pedido
+    const etiqs=wmsEtiquetas.filter(e=>e.pedido_id===pedidoId && e.tipo==='embarque');
+    for(const e of etiqs){await dbDelete('wms_etiquetas',e.id);}
+    wmsEtiquetas=wmsEtiquetas.filter(e=>!(e.pedido_id===pedidoId && e.tipo==='embarque'));
+    // apaga a conferência tipo 3
+    const confs3=wmsConferencias.filter(cf=>cf.pedido_id===pedidoId && cf.tipo===3);
+    for(const cf of confs3){await dbDelete('wms_conferencias',cf.id);}
+    wmsConferencias=wmsConferencias.filter(cf=>!(cf.pedido_id===pedidoId && cf.tipo===3));
+    // pedido volta a não-unitizado
+    await dbUpdate('wms_pedidos',pedidoId,{unitizado:false});p.unitizado=false;
+    if(p.status==='conferido'){await dbUpdate('wms_pedidos',pedidoId,{status:'em_conferencia'});p.status='em_conferencia';}
+    showToast('3ª conferência estornada. Pode unitizar novamente.','green');
+    render();
+  }catch(e){showToast('Erro ao estornar: '+e.message,'red');}
 }
 
 
