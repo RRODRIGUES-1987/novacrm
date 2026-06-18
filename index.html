@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.352 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.353 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.352';
+const APP_VERSION='v1.0.353';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -20597,7 +20597,7 @@ function wmsAbrirConferencia(pedidoId,tipo){
     }
   }
   wmsConfPedido=pedidoId;wmsConfTipo=tipo;wmsConfMarcados={};wmsConfContados={};
-  if(tipo===3){ wmsAbrirPalletModal(pedidoId); return; }
+  if(tipo===3){ wmsAbrirUnitizacao(pedidoId); return; }
   const c=clientes.find(x=>x.id===p.cliente_id);
   const modo=c?.wms_conf_modo||'digita';
   const sugestao=c?.wms_conf_sugestao||'codigo_qtd';
@@ -20769,126 +20769,320 @@ async function wmsSalvarConferencia(){
   }catch(e){portErr(e.message||'Erro ao salvar conferência.');}
 }
 
-// ── 3ª CONFERÊNCIA: montagem do pallet de embarque (packing list) ──
-let wmsPalletPedido=null, wmsPalletLinhas=[];
-function wmsAbrirPalletModal(pedidoId){
-  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
-  wmsPalletPedido=pedidoId;
+// ── 3ª CONFERÊNCIA: UNITIZAÇÃO (multi-pallet por pedido) ──
+let wmsUnitPedido=null, wmsPalletLinhas=[], wmsPalletAtual={};
+
+// Saldo a unitizar por SKU = esperado - já colocado nos pallets do pedido
+function wmsSaldoUnitizar(pedidoId){
   const itens=wmsItensEsperadosPedido(pedidoId);
-  wmsPalletLinhas=itens.map(it=>({sku:it.sku,descricao:it.descricao,produto_id:it.produto_id,esperado:it.qtd,qtd:it.qtd}));
-  const numCurto=wmsNumeroCurto(p);
-  portModal(`Montar pallet de embarque — ${numCurto}`,wmsPalletModalBody(),`wmsFecharPallet()`,{saveLabel:'Fechar pallet + etiqueta',width:'640px'});
+  const palletsPed=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId);
+  const colocado={};
+  palletsPed.forEach(pl=>{
+    wmsPalletItens.filter(pi=>pi.pallet_id===pl.id).forEach(pi=>{
+      colocado[pi.sku]=(colocado[pi.sku]||0)+(+pi.quantidade||0);
+    });
+  });
+  return itens.map(it=>({
+    sku:it.sku, descricao:it.descricao, produto_id:it.produto_id,
+    esperado:it.qtd, colocado:colocado[it.sku]||0, saldo:it.qtd-(colocado[it.sku]||0)
+  }));
 }
-function wmsPalletModalBody(){
-  const linhas=wmsPalletLinhas.map((l,i)=>`
-    <tr>
-      <td style="padding:6px 8px;font-size:12px">${l.sku||'—'}</td>
-      <td style="padding:6px 8px;font-size:12px">${l.descricao||'—'}</td>
-      <td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--text3)">${l.esperado}</td>
-      <td style="padding:6px 8px;text-align:center">
-        <input type="number" min="0" value="${l.qtd}" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:13px" onchange="wmsPalletLinhas[${i}].qtd=parseFloat(this.value)||0">
-      </td>
-    </tr>`).join('');
-  return `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Confirme o que vai dentro deste pallet de embarque. Ao fechar, geramos a etiqueta de embarque (QR + código).</div>
-    <table style="width:100%;border-collapse:collapse">
+function wmsPedidoUnitizado(pedidoId){
+  // unitizado = todo o saldo zerado E ao menos 1 pallet
+  const saldo=wmsSaldoUnitizar(pedidoId);
+  const temPallet=wmsPalletsEmbarque.some(pl=>pl.pedido_id===pedidoId);
+  return temPallet && saldo.every(s=>s.saldo<=0);
+}
+
+// Tela principal de unitização do pedido
+function wmsAbrirUnitizacao(pedidoId){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  wmsUnitPedido=pedidoId;
+  portModal('Unitização — '+wmsNumeroCurto(p),wmsUnitBody(),null,{width:'700px',noFooter:true});
+}
+function wmsUnitBody(){
+  const p=wmsPedidos.find(x=>x.id===wmsUnitPedido);
+  const saldo=wmsSaldoUnitizar(wmsUnitPedido);
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===wmsUnitPedido).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
+  const tudoOk=saldo.every(s=>s.saldo<=0);
+  const temSaldo=saldo.some(s=>s.saldo>0);
+  // tabela de saldo
+  const saldoRows=saldo.map(s=>`<tr style="${s.saldo<=0?'opacity:.5':''}">
+    <td style="padding:6px 8px;font-size:12px;font-weight:700">${s.sku}</td>
+    <td style="padding:6px 8px;font-size:11px;color:var(--text2)">${(s.descricao||'').slice(0,28)}</td>
+    <td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--text3)">${s.esperado}</td>
+    <td style="padding:6px 8px;text-align:center;font-size:11px">${s.colocado}</td>
+    <td style="padding:6px 8px;text-align:center;font-size:12px;font-weight:700;color:${s.saldo>0?'var(--amber-text)':'var(--green-text)'}">${s.saldo>0?s.saldo:'✓'}</td>
+  </tr>`).join('');
+  // lista de pallets montados
+  const palletRows=pallets.length?pallets.map(pl=>{
+    const its=wmsPalletItens.filter(pi=>pi.pallet_id===pl.id);
+    const resumo=its.map(i=>i.sku+'×'+i.quantidade).join(', ');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--border)">
+      <div style="font-weight:700;font-size:12px;min-width:50px">Vol ${pl.vol_num||'?'}/${pl_total(pallets)}</div>
+      <div style="flex:1;font-size:11px;color:var(--text2)">${pl.numero} · ${its.length} item(ns) · ${resumo.slice(0,50)}${resumo.length>50?'...':''}</div>
+      <button class="btn btn-sm" style="color:var(--red-text);font-size:10px;padding:2px 7px" onclick="wmsExcluirPallet('${pl.id}')">×</button>
+    </div>`;
+  }).join(''):'<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px">Nenhum pallet montado ainda.</div>';
+
+  return `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">3ª Conferência · Pedido <b>${wmsNumeroCurto(p)}</b> · ${pallets.length} pallet(s)</div>
+    <div style="font-weight:600;font-size:12px;margin:10px 0 5px">Saldo a unitizar</div>
+    <table style="width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:8px;overflow:hidden">
       <thead><tr style="background:var(--bg2)">
         <th style="padding:6px 8px;text-align:left;font-size:10px">SKU</th>
         <th style="padding:6px 8px;text-align:left;font-size:10px">Descrição</th>
         <th style="padding:6px 8px;text-align:center;font-size:10px">Pedido</th>
-        <th style="padding:6px 8px;text-align:center;font-size:10px">No pallet</th>
-      </tr></thead><tbody>${linhas}</tbody>
-    </table>`;
+        <th style="padding:6px 8px;text-align:center;font-size:10px">Unitizado</th>
+        <th style="padding:6px 8px;text-align:center;font-size:10px">Saldo</th>
+      </tr></thead><tbody>${saldoRows}</tbody>
+    </table>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 5px">
+      <div style="font-weight:600;font-size:12px">Pallets montados</div>
+      ${temSaldo?`<button class="btn btn-sm btn-primary" onclick="wmsNovoPallet()">+ Abrir pallet</button>`:''}
+    </div>
+    <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">${palletRows}</div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;align-items:center;gap:10px">
+      <button class="btn btn-p" onclick="wmsFinalizarUnitizacao()" ${tudoOk?'':'disabled style=opacity:.5'}>✓ Encerrar 3ª + emitir etiquetas</button>
+      ${!tudoOk?'<span style="font-size:11px;color:var(--amber-text)">Falta unitizar o saldo restante</span>':'<span style="font-size:11px;color:var(--green-text)">Tudo unitizado</span>'}
+      <button class="btn btn-sm" style="margin-left:auto" onclick="portClose()">Fechar</button>
+    </div>`;
 }
-async function wmsFecharPallet(){
-  const p=wmsPedidos.find(x=>x.id===wmsPalletPedido);if(!p)return;
-  const linhas=wmsPalletLinhas.filter(l=>l.qtd>0);
-  if(!linhas.length){portErr('Informe ao menos um item no pallet.');return;}
+function pl_total(pallets){return pallets.length;}
+
+// Abre modal para montar UM novo pallet (coleta itens conforme cegueira do cliente)
+function wmsNovoPallet(){
+  const p=wmsPedidos.find(x=>x.id===wmsUnitPedido);if(!p)return;
+  const c=clientes.find(x=>x.id===p.cliente_id);
+  const sugestao=c?.wms_conf_sugestao||'codigo_qtd';
+  const modo=c?.wms_conf_modo||'digita';
+  const saldo=wmsSaldoUnitizar(wmsUnitPedido).filter(s=>s.saldo>0);
+  wmsPalletAtual={}; // sku -> qtd neste pallet
+  window._wmsPalletSaldo=saldo;
+  window._wmsPalletSugestao=sugestao;
+  const entradaBox=(modo==='bipe'||sugestao==='cega')?`
+    <div style="margin-bottom:12px;padding:11px 13px;background:var(--blue-bg);border-radius:9px">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">${sugestao==='cega'?'Bipe/digite o código e a quantidade':'Bipe a etiqueta (+1 no SKU lido)'}</div>
+      <div style="display:flex;gap:8px">
+        <input id="pal-bipe" placeholder="Código / etiqueta..." autocomplete="off" style="flex:1;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key==='Enter'){wmsPalletBipe(this.value);this.value='';this.focus();}">
+        ${sugestao==='cega'?`<input id="pal-bipe-qtd" type="number" min="1" value="1" style="width:80px;padding:9px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px;text-align:center">`:''}
+      </div>
+    </div>`:'';
+  portModal('Novo pallet — montar',wmsNovoPalletBody(entradaBox),`wmsEncerrarPallet()`,{saveLabel:'Encerrar pallet',width:'620px'});
+}
+function wmsNovoPalletBody(entradaBox){
+  const saldo=window._wmsPalletSaldo||[];
+  const sugestao=window._wmsPalletSugestao||'codigo_qtd';
+  const mostraSku=sugestao!=='cega';
+  let corpo;
+  if(sugestao==='cega'){
+    corpo=`<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg2)">
+        <th style="padding:6px 8px;text-align:left;font-size:10px">Código</th><th style="padding:6px 8px;text-align:center;font-size:10px">Neste pallet</th><th></th>
+      </tr></thead><tbody id="pal-body"><tr id="pal-vazio"><td colspan="3" style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Nenhum item ainda.</td></tr></tbody></table>`;
+  } else {
+    const linhas=saldo.map((s,i)=>`<tr>
+      <td style="padding:6px 8px;font-size:12px;font-weight:700">${s.sku}</td>
+      <td style="padding:6px 8px;font-size:11px;color:var(--text2)">${(s.descricao||'').slice(0,24)}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:11px;color:var(--text3)">saldo ${s.saldo}</td>
+      <td style="padding:6px 8px;text-align:center"><input type="number" id="pal-qtd-${i}" min="0" max="${s.saldo}" value="" placeholder="0" data-sku="${s.sku}" style="width:70px;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:center" oninput="wmsPalletQtdInput('${s.sku}',this.value,${s.saldo})"></td>
+    </tr>`).join('');
+    corpo=`<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg2)">
+        <th style="padding:6px 8px;text-align:left;font-size:10px">SKU</th><th style="padding:6px 8px;text-align:left;font-size:10px">Descrição</th>
+        <th style="padding:6px 8px;text-align:center;font-size:10px">Saldo</th><th style="padding:6px 8px;text-align:center;font-size:10px">Neste pallet</th>
+      </tr></thead><tbody>${linhas}</tbody></table>`;
+  }
+  return `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Coloque os itens deste pallet. O saldo limita a quantidade. Ao encerrar, o pallet recebe seu número de volume.</div>${entradaBox}${corpo}`;
+}
+function wmsPalletQtdInput(sku,val,saldoMax){
+  let v=parseFloat(val||'0')||0;
+  if(v>saldoMax){v=saldoMax;showToast('Limitado ao saldo: '+saldoMax,'amber');}
+  if(v>0)wmsPalletAtual[sku]=v;else delete wmsPalletAtual[sku];
+}
+function wmsPalletBipe(codigo){
+  const saldo=window._wmsPalletSaldo||[];
+  const sugestao=window._wmsPalletSugestao||'codigo_qtd';
+  const cod=String(codigo||'').trim().toUpperCase();
+  if(!cod)return;
+  const item=saldo.find(s=>{
+    if(String(s.sku||'').trim().toUpperCase()===cod)return true;
+    const prod=wmsProdutos.find(pr=>pr.id===s.produto_id);
+    return prod && String(prod.etiqueta_cliente||'').trim().toUpperCase()===cod;
+  });
+  if(!item){showToast('⛔ Código não pertence ao saldo deste pedido: '+cod,'red');return;}
+  const qtd=sugestao==='cega'?(parseFloat(ge('pal-bipe-qtd')?.value||'1')||1):1;
+  const jaNoPallet=wmsPalletAtual[item.sku]||0;
+  if(jaNoPallet+qtd>item.saldo){showToast('Excede o saldo de '+item.sku+' (saldo '+item.saldo+')','amber');return;}
+  wmsPalletAtual[item.sku]=jaNoPallet+qtd;
+  if(sugestao==='cega')wmsPalletCegaRender();
+  else { // atualiza o input correspondente
+    const inp=document.querySelector('[id^=pal-qtd-][data-sku="'+item.sku+'"]');
+    if(inp)inp.value=wmsPalletAtual[item.sku];
+  }
+}
+function wmsPalletCegaRender(){
+  const body=ge('pal-body');if(!body)return;
+  const skus=Object.keys(wmsPalletAtual);
+  if(!skus.length){body.innerHTML='<tr id="pal-vazio"><td colspan="3" style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Nenhum item ainda.</td></tr>';return;}
+  body.innerHTML=skus.map(sku=>`<tr><td style="padding:6px 8px;font-size:12px;font-weight:700">${sku}</td>
+    <td style="padding:6px 8px;text-align:center;font-weight:700">${wmsPalletAtual[sku]}</td>
+    <td style="padding:6px 8px;text-align:center"><button class="btn btn-sm" style="color:var(--red-text);font-size:10px;padding:1px 6px" onclick="delete wmsPalletAtual['${sku.replace(/'/g,"")}'];wmsPalletCegaRender()">×</button></td></tr>`).join('');
+}
+async function wmsEncerrarPallet(){
+  const p=wmsPedidos.find(x=>x.id===wmsUnitPedido);if(!p)return;
+  const skus=Object.keys(wmsPalletAtual).filter(s=>wmsPalletAtual[s]>0);
+  if(!skus.length){portErr('Coloque ao menos um item no pallet.');return;}
   portSaving();
   try{
     const cid=company?.id;
     const numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'PLT'});
+    const palletsPed=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===p.id);
+    const volNum=palletsPed.length+1;
     const codigo='PLT|'+numero+'|'+p.id;
     const palletObj={
       company_id:cid,unit_id:p.unit_id||null,numero,cliente_id:p.cliente_id,
-      pedido_id:p.id,romaneio_id:p.romaneio_id||null,consolidado:false,
-      status:'montado',tot_volumes:linhas.length,etiqueta_codigo:codigo,owner_id:cu?.id||null,
+      pedido_id:p.id,consolidado:false,status:'montado',
+      tot_volumes:skus.length,vol_num:volNum,vol_total:null,encerrado:true,
+      etiqueta_codigo:codigo,owner_id:cu?.id||null,
     };
     const palletRes=await dbInsert('wms_pallets_embarque',palletObj);
     const pallet=Array.isArray(palletRes)?palletRes[0]:palletRes;
     if(pallet){
       wmsPalletsEmbarque=[pallet,...wmsPalletsEmbarque];
-      for(const l of linhas){
+      for(const sku of skus){
+        const s=(window._wmsPalletSaldo||[]).find(x=>x.sku===sku)||{};
         const it=await dbInsert('wms_pallet_itens',{
-          company_id:cid,pallet_id:pallet.id,produto_id:l.produto_id||null,
-          sku:l.sku,descricao:l.descricao,quantidade:l.qtd,pedido_id:p.id,
+          company_id:cid,pallet_id:pallet.id,produto_id:s.produto_id||null,
+          sku,descricao:s.descricao||null,quantidade:wmsPalletAtual[sku],pedido_id:p.id,
         });
         if(it)wmsPalletItens=[Array.isArray(it)?it[0]:it,...wmsPalletItens];
       }
-      // registra a 3ª conferência
-      const confRes=await dbInsert('wms_conferencias',{
-        company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,pallet_id:pallet.id,
-        cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
-        resultado:'ok',observacao:'Pallet '+numero+' montado',
-      });
-      if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
-      // registra a etiqueta no histórico
-      const dadosEtiq={pallet:numero,pedido:wmsNumeroCurto(p),cliente:clientes.find(c=>c.id===p.cliente_id)?.nome||'',itens:linhas.map(l=>({sku:l.sku,qtd:l.qtd}))};
-      const etiqRes=await dbInsert('wms_etiquetas',{
-        company_id:cid,unit_id:p.unit_id||null,tipo:'embarque',codigo,
-        pallet_id:pallet.id,pedido_id:p.id,romaneio_id:p.romaneio_id||null,cliente_id:p.cliente_id,
-        dados:JSON.stringify(dadosEtiq),gerada_por:cu?.id||null,gerada_por_nome:profile?.full_name||cu?.email||null,
-      });
-      if(etiqRes)wmsEtiquetas=[Array.isArray(etiqRes)?etiqRes[0]:etiqRes,...wmsEtiquetas];
       portClose();
-      showToast('Pallet '+numero+' fechado. Gerando etiqueta...','green');
-      gerarEtiquetaEmbarque(pallet.id);
-      if(curPage==='wms-conferencia')render();
+      showToast('Pallet '+numero+' (vol '+volNum+') encerrado.','green');
+      wmsAbrirUnitizacao(p.id); // reabre a tela de unitização atualizada
     }
-  }catch(e){portErr(e.message||'Erro ao fechar pallet.');}
+  }catch(e){portErr(e.message||'Erro ao encerrar pallet.');}
+}
+async function wmsExcluirPallet(palletId){
+  if(!confirm('Excluir este pallet? Os itens voltam para o saldo.'))return;
+  try{
+    const its=wmsPalletItens.filter(pi=>pi.pallet_id===palletId);
+    for(const it of its){await dbDelete('wms_pallet_itens',it.id);}
+    wmsPalletItens=wmsPalletItens.filter(pi=>pi.pallet_id!==palletId);
+    await dbDelete('wms_pallets_embarque',palletId);
+    wmsPalletsEmbarque=wmsPalletsEmbarque.filter(pl=>pl.id!==palletId);
+    showToast('Pallet excluído.','green');
+    if(wmsUnitPedido)wmsAbrirUnitizacao(wmsUnitPedido);
+  }catch(e){showToast('Erro: '+e.message,'red');}
+}
+// Encerra a 3ª: valida saldo zerado, define vol_total, registra conferência tipo 3, emite etiquetas
+async function wmsFinalizarUnitizacao(){
+  const p=wmsPedidos.find(x=>x.id===wmsUnitPedido);if(!p)return;
+  const saldo=wmsSaldoUnitizar(wmsUnitPedido);
+  if(saldo.some(s=>s.saldo>0)){portErr('Ainda há saldo a unitizar.');return;}
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===p.id).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
+  if(!pallets.length){portErr('Monte ao menos um pallet.');return;}
+  portSaving();
+  try{
+    const cid=company?.id;
+    const N=pallets.length;
+    // define vol_total em todos os pallets do pedido
+    for(const pl of pallets){
+      if(pl.vol_total!==N){await dbUpdate('wms_pallets_embarque',pl.id,{vol_total:N});pl.vol_total=N;}
+    }
+    // registra a 3ª conferência (uma para o pedido)
+    const confRes=await dbInsert('wms_conferencias',{
+      company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,cliente_id:p.cliente_id,
+      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      resultado:'ok',auditoria_status:'ok',observacao:N+' pallet(s) unitizado(s)',
+    });
+    if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
+    // etiquetas de embarque (uma por pallet, com vol X/N)
+    for(const pl of pallets){
+      const its=wmsPalletItens.filter(pi=>pi.pallet_id===pl.id);
+      const dados={pallet:pl.numero,vol:pl.vol_num+'/'+N,pedido:wmsNumeroCurto(p),cliente:clientes.find(c=>c.id===p.cliente_id)?.nome||'',itens:its.map(i=>({sku:i.sku,qtd:i.quantidade}))};
+      await dbInsert('wms_etiquetas',{
+        company_id:cid,unit_id:p.unit_id||null,tipo:'embarque',codigo:pl.etiqueta_codigo,
+        pallet_id:pl.id,pedido_id:p.id,cliente_id:p.cliente_id,
+        dados:JSON.stringify(dados),gerada_por:cu?.id||null,gerada_por_nome:profile?.full_name||cu?.email||null,
+      });
+    }
+    // marca pedido como unitizado
+    await dbUpdate('wms_pedidos',p.id,{unitizado:true});p.unitizado=true;
+    portClose();
+    showToast('3ª conferência encerrada. Gerando etiquetas...','green');
+    gerarEtiquetasEmbarquePedido(p.id);
+    if(curPage==='wms-conferencia')render();
+  }catch(e){portErr(e.message||'Erro ao encerrar unitização.');}
 }
 
+
 // ── ETIQUETA DE EMBARQUE (PDF com QR + código) ──
+// Gera as etiquetas de TODOS os pallets de um pedido (cada uma com vol X/N), numa única impressão
+function gerarEtiquetasEmbarquePedido(pedidoId){
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
+  if(!pallets.length){alert('Nenhum pallet para etiquetar.');return;}
+  const p=wmsPedidos.find(x=>x.id===pedidoId);
+  const cli=clientes.find(c=>c.id===p?.cliente_id);
+  const numCurto=p?wmsNumeroCurto(p):'—';
+  const N=pallets.length;
+  // gera QR de cada pallet
+  const qrMap={};let pend=pallets.length;
+  pallets.forEach(pl=>{
+    const tmp=document.createElement('div');
+    new QRCode(tmp,{text:pl.etiqueta_codigo,width:160,height:160,correctLevel:QRCode.CorrectLevel.M});
+    setTimeout(()=>{
+      const img=tmp.querySelector('img')||tmp.querySelector('canvas');
+      try{qrMap[pl.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png');}catch(e){qrMap[pl.id]='';}
+      pend--;
+      if(pend<=0)wmsEtiquetasEmbarqueRender(pallets,qrMap,{cli,numCurto,N});
+    },200);
+  });
+}
+function wmsEtiquetasEmbarqueRender(pallets,qrMap,ctx){
+  const paginas=pallets.map((pl,idx)=>{
+    const itens=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
+    const qrData=qrMap[pl.id]||'';
+    const itensHtml=itens.map(it=>'<tr><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.sku||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.descricao||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee;text-align:right">'+it.quantidade+'</td></tr>').join('');
+    return '<div class="et" style="'+(idx>0?'page-break-before:always;':'')+'">'+
+      '<div class="hd"><div><div class="tt">ETIQUETA DE EMBARQUE</div><div class="num">'+pl.numero+'</div></div>'+
+      '<div style="text-align:right"><div style="font-size:22px;font-weight:900">'+(pl.vol_num||'?')+'/'+ctx.N+'</div><div style="font-size:10px;color:#666">VOLUME</div></div></div>'+
+      '<div class="row"><span class="lbl">Cliente</span><span class="val">'+(ctx.cli?.nome||'—')+'</span></div>'+
+      '<div class="row"><span class="lbl">Pedido</span><span class="val">'+ctx.numCurto+'</span></div>'+
+      '<div class="row"><span class="lbl">Itens no volume</span><span class="val">'+itens.length+'</span></div>'+
+      (qrData?'<div class="qr"><img src="'+qrData+'" width="140" height="140"></div>':'')+
+      '<div class="cod">'+pl.etiqueta_codigo+'</div>'+
+      '<table><tbody>'+itensHtml+'</tbody></table>'+
+    '</div>';
+  }).join('');
+  const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas '+ctx.numCurto+'</title>'+
+    '<style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+    'body{padding:0}.et{border:2px solid #000;padding:16px;width:100mm;min-height:148mm}'+
+    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px}'+
+    '.tt{font-size:15px;font-weight:800}.num{font-size:12px;color:#444}'+
+    '.row{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}'+
+    '.lbl{color:#666}.val{font-weight:700}'+
+    '.qr{text-align:center;margin:10px 0}.cod{text-align:center;font-family:monospace;font-size:9px;color:#333;word-break:break-all;margin-top:4px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:8px}</style></head><body>'+paginas+'</body></html>';
+  const old=ge('etiq-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='etiq-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:150mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},600);
+}
+// Etiqueta individual de um pallet (reimpressão) — delega para o lote do pedido filtrando 1
 function gerarEtiquetaEmbarque(palletId){
   const pl=wmsPalletsEmbarque.find(x=>x.id===palletId);if(!pl){alert('Pallet não encontrado.');return;}
   const p=wmsPedidos.find(x=>x.id===pl.pedido_id);
   const cli=clientes.find(c=>c.id===pl.cliente_id);
-  const itens=wmsPalletItens.filter(x=>x.pallet_id===palletId);
-  const numCurto=p?wmsNumeroCurto(p):(pl.consolidado?'CONSOLIDADO':'—');
-  // QR via qrcodejs em canvas → dataURL
+  const N=pl.vol_total||wmsPalletsEmbarque.filter(x=>x.pedido_id===pl.pedido_id).length;
   const tmp=document.createElement('div');
   new QRCode(tmp,{text:pl.etiqueta_codigo,width:160,height:160,correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{
     const img=tmp.querySelector('img')||tmp.querySelector('canvas');
-    let qrData='';
-    try{ qrData=img.tagName==='IMG'?img.src:img.toDataURL('image/png'); }catch(e){ qrData=''; }
-    const itensHtml=itens.map(it=>'<tr><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.sku||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee">'+(it.descricao||'')+'</td><td style="padding:3px 6px;font-size:11px;border-bottom:1px solid #eee;text-align:right">'+it.quantidade+'</td></tr>').join('');
-    const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiqueta '+pl.numero+'</title>'+
-    '<style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
-    'body{padding:18px}.et{border:2px solid #000;border-radius:8px;padding:16px;width:340px}'+
-    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:10px}'+
-    '.tt{font-size:16px;font-weight:800}.num{font-size:13px;color:#444}'+
-    '.row{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}'+
-    '.lbl{color:#666}.val{font-weight:700}'+
-    '.qr{text-align:center;margin:10px 0}.cod{text-align:center;font-family:monospace;font-size:10px;color:#333;word-break:break-all;margin-top:4px}'+
-    'table{width:100%;border-collapse:collapse;margin-top:8px}</style></head><body>'+
-    '<div class="et">'+
-    '<div class="hd"><div><div class="tt">ETIQUETA DE EMBARQUE</div><div class="num">'+pl.numero+'</div></div>'+
-    '<div style="text-align:right;font-size:11px"><b>MK LOG</b></div></div>'+
-    '<div class="row"><span class="lbl">Cliente</span><span class="val">'+(cli?.nome||'—')+'</span></div>'+
-    '<div class="row"><span class="lbl">Pedido</span><span class="val">'+numCurto+'</span></div>'+
-    '<div class="row"><span class="lbl">Volumes</span><span class="val">'+itens.length+'</span></div>'+
-    (qrData?'<div class="qr"><img src="'+qrData+'" width="150" height="150"></div>':'')+
-    '<div class="cod">'+pl.etiqueta_codigo+'</div>'+
-    '<table><tbody>'+itensHtml+'</tbody></table>'+
-    '</div></body></html>';
-    const old=ge('etiq-print-frame');if(old)old.remove();
-    const iframe=document.createElement('iframe');
-    iframe.id='etiq-print-frame';
-    iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:150mm;border:none';
-    document.body.appendChild(iframe);
-    const doc=iframe.contentDocument||iframe.contentWindow.document;
-    doc.open();doc.write(html);doc.close();
-    setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},600);
+    const qr={};try{qr[pl.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png');}catch(e){qr[pl.id]='';}
+    wmsEtiquetasEmbarqueRender([pl],qr,{cli,numCurto:p?wmsNumeroCurto(p):'—',N});
   },300);
 }
 
@@ -20978,7 +21172,8 @@ function wmsExpEmbarqueBody(){
     const pctEmb=pallets.length?Math.round(embarcados/pallets.length*100):0;
     const detalhe=peds.map(p=>{
       const ok=wmsPedidoConferenciasOk(p.id);
-      return `<span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${ok?'var(--green-bg)':'var(--bg2)'};color:${ok?'var(--green-text)':'var(--text3)'};margin:2px 2px 0 0;display:inline-block">${ok?'✓':'○'} ${wmsNumeroCurto(p)}</span>`;
+      const nPal=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===p.id).length;
+      return `<span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${ok?'var(--green-bg)':'var(--bg2)'};color:${ok?'var(--green-text)':'var(--text3)'};margin:2px 2px 0 0;display:inline-block">${ok?'✓':'○'} ${wmsNumeroCurto(p)} · ${nPal} pallet(s)</span>`;
     }).join('');
     return `<div style="border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:10px;background:var(--bg)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
