@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.361 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.362 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -976,7 +976,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.361';
+const APP_VERSION='v1.0.362';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -21072,6 +21072,7 @@ async function wmsEncerrarPallet(){
       pedido_id:p.id,consolidado:false,status:'montado',
       tot_volumes:skus.length,vol_num:volNum,vol_total:null,encerrado:true,
       etiqueta_codigo:codigo,owner_id:cu?.id||null,
+      montado_por_nome:profile?.full_name||cu?.email||null,montado_em:new Date().toISOString(),
     };
     const palletRes=await dbInsert('wms_pallets_embarque',palletObj);
     const pallet=Array.isArray(palletRes)?palletRes[0]:palletRes;
@@ -21954,17 +21955,35 @@ function wmsTrackConteudo(pedidoId){
   }).join(''):'';
   const etapaConf=etapaWrap('#3b82f6','✓','Conferência','Quem conferiu (1ª/2ª) — registro por pedido',['Qtd','Conferente(s)'],confLinhas,'Cliente não exige conferência 1ª/2ª, ou ainda não conferido.');
 
-  // ══ ETAPA 3 · UNITIZAÇÃO (produto a produto → em qual pallet) ══
-  const unitLinhas=itensEsper.map(it=>{
-    const ondeEsta=pallets.map(pl=>{
-      const pi=wmsPalletItens.find(x=>x.pallet_id===pl.id && x.sku===it.sku);
-      return pi?{pl,qtd:pi.quantidade}:null;
-    }).filter(Boolean);
-    if(!ondeEsta.length)return prodRow(it.sku,it.descricao,it.qtd,'','<span style="color:var(--text3)">não unitizado</span>');
-    const locs=ondeEsta.map(o=>'<span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;margin:1px;background:var(--bg2)">'+o.pl.numero+' (vol '+(o.pl.vol_num||'?')+'/'+N+') · '+o.qtd+'un</span>').join('');
-    return prodRow(it.sku,it.descricao,it.qtd,'',locs);
-  }).join('');
-  const etapaUnit=etapaWrap('#8b5cf6','🏗','Unitização','Em qual pallet (volume) cada produto foi colocado',['Qtd','Pallet · volume'],unitLinhas,'Pedido ainda não unitizado.');
+  // ══ ETAPA 3 · UNITIZAÇÃO (pallet → produtos dentro) ══
+  let etapaUnit;
+  if(!pallets.length){
+    etapaUnit=etapaWrap('#8b5cf6','🏗','Unitização','Pallets montados e o que há dentro de cada um','','','Pedido ainda não unitizado.');
+  } else {
+    const palletsHtml=pallets.map(pl=>{
+      const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
+      const itHtml=its.map(i=>`<tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:11px;font-weight:700">${i.sku}</td>
+        <td style="padding:5px 10px;font-size:11px;color:var(--text2)">${(i.descricao||'').slice(0,34)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:11px;font-weight:600">${i.quantidade}un</td>
+      </tr>`).join('');
+      const emb=pl.status==='embarcado';
+      const respM=pl.montado_por_nome?(pl.montado_por_nome+' · '+fmtDt(pl.montado_em)):'<span style="color:var(--text3)">—</span>';
+      return `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;background:var(--bg2)">
+          <div style="font-size:12px;font-weight:800">${pl.numero} <span style="font-size:11px;font-weight:600;color:var(--text2)">· volume ${pl.vol_num||'?'}/${N}</span>
+            ${emb?'<span style="font-size:9px;font-weight:700;color:var(--green-text);margin-left:6px">✓ carregado</span>':'<span style="font-size:9px;font-weight:700;color:var(--text3);margin-left:6px">📦 montado</span>'}</div>
+          <div style="font-size:10px;color:var(--text2)">🏗 ${respM}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse"><tbody>${itHtml}</tbody></table>
+      </div>`;
+    }).join('');
+    etapaUnit=`<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+        <span style="width:26px;height:26px;border-radius:50%;background:#8b5cf622;color:#8b5cf6;display:flex;align-items:center;justify-content:center;font-size:13px">🏗</span>
+        <div><div style="font-size:13px;font-weight:700">Unitização</div><div style="font-size:10px;color:var(--text3)">Cada pallet e os produtos colocados dentro — com quem montou</div></div>
+      </div>${palletsHtml}</div>`;
+  }
 
   // ══ ETAPA 4 · EMBARQUE (produto a produto → carregado, seq, quem) ══
   const embLinhas=itensEsper.map(it=>{
@@ -21981,7 +22000,83 @@ function wmsTrackConteudo(pedidoId){
   return head+etapaSep+etapaConf+etapaUnit+etapaEmb;
 }
 function wmsTrackModal(pedidoId){
-  portModal('Rastreabilidade do pedido',wmsTrackConteudo(pedidoId),'portClose()',{saveLabel:'Fechar',width:'720px'});
+  window._wmsTrackPed=pedidoId;
+  const inner=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="wmsTrackImprimir('${pedidoId}')">🖨 Imprimir / Enviar ao cliente</button>
+    </div>${wmsTrackConteudo(pedidoId)}`;
+  portModal('Rastreabilidade do pedido',inner,'portClose()',{saveLabel:'Fechar',width:'720px'});
+}
+// Versão de impressão (comprovante de rastreabilidade ao cliente)
+function wmsTrackImprimir(pedidoId){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  const cli=clientes.find(c=>c.id===p.cliente_id);
+  const rom=p.romaneio_id?wmsRomaneios.find(r=>r.id===p.romaneio_id):null;
+  const fmtDt=ts=>ts?new Date(ts).toLocaleString('pt-BR'):'—';
+  const itensEsper=wmsItensEsperadosPedido(pedidoId);
+  const tarefas=wmsTarefasSeparacao.filter(t=>t.pedido_id===pedidoId);
+  const confs=wmsConferencias.filter(c=>c.pedido_id===pedidoId).sort((a,b)=>a.tipo-b.tipo);
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
+  const N=pallets.length;
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // separação
+  const sepRows=itensEsper.map(it=>{
+    const feitas=tarefas.filter(t=>t.sku===it.sku && t.status==='concluida');
+    const sepQtd=feitas.reduce((s,t)=>s+(+t.qtd_separada||0),0);
+    const resp=feitas.length?[...new Set(feitas.map(t=>t.separador_informado_nome||t.separador_nome).filter(Boolean))].join(', ')+' · '+fmtDt(feitas.map(t=>t.concluido_em).filter(Boolean).sort().pop()):'pendente';
+    return '<tr><td>'+esc(it.sku)+'</td><td>'+esc(it.descricao)+'</td><td style="text-align:center">'+sepQtd+'/'+it.qtd+'</td><td>'+esc(resp)+'</td></tr>';
+  }).join('');
+  // conferência
+  const conf12=confs.filter(c=>c.tipo<=2);
+  const confRows=conf12.map(c=>{
+    const lbl=WMS_CONF_LABELS[c.tipo]||('Conf.'+c.tipo);
+    let st=c.auditoria_status==='pendente'?' (pend. auditoria)':c.auditoria_status==='aprovada'?' (aprovada por '+esc(c.auditor_nome||'')+')':c.auditoria_status==='rejeitada'?' (rejeitada)':'';
+    return '<tr><td>'+esc(lbl)+'</td><td>'+esc(c.conferente_nome||'—')+st+'</td><td>'+fmtDt(c.created_at)+'</td></tr>';
+  }).join('')||'<tr><td colspan="3" style="color:#888">Sem conferência 1ª/2ª.</td></tr>';
+  // unitização (pallet -> produtos)
+  const unitBlocks=pallets.map(pl=>{
+    const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
+    const itRows=its.map(i=>'<tr><td>'+esc(i.sku)+'</td><td>'+esc(i.descricao)+'</td><td style="text-align:right">'+i.quantidade+'un</td></tr>').join('');
+    const emb=pl.status==='embarcado'?'CARREGADO':'montado';
+    return '<div class="pl"><div class="plh"><b>'+esc(pl.numero)+'</b> · volume '+(pl.vol_num||'?')+'/'+N+' · '+emb+' · montado por '+esc(pl.montado_por_nome||'—')+' ('+fmtDt(pl.montado_em)+')</div>'+
+      '<table class="t2"><tbody>'+itRows+'</tbody></table></div>';
+  }).join('')||'<p style="color:#888">Não unitizado.</p>';
+  // embarque
+  const embRows=pallets.filter(pl=>pl.status==='embarcado').sort((a,b)=>(a.seq_leitura||0)-(b.seq_leitura||0)).map(pl=>
+    '<tr><td>'+esc(pl.numero)+'</td><td style="text-align:center">'+(pl.vol_num||'?')+'/'+N+'</td><td style="text-align:center">'+(pl.seq_leitura||'?')+'</td><td>'+esc(pl.embarcado_por_nome||'—')+'</td><td>'+fmtDt(pl.embarcado_em)+'</td></tr>'
+  ).join('')||'<tr><td colspan="5" style="color:#888">Nenhum pallet carregado.</td></tr>';
+
+  const carregado=pallets.length&&pallets.every(pl=>pl.status==='embarcado');
+  const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rastreabilidade '+esc(wmsNumeroCurto(p))+'</title>'+
+    '<style>*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+    'body{padding:26px;color:#1a1a1a;font-size:12px}'+
+    'h1{font-size:18px;margin-bottom:2px}.sub{color:#666;font-size:12px;margin-bottom:14px}'+
+    '.tag{display:inline-block;padding:3px 11px;border-radius:99px;font-size:11px;font-weight:700;margin-bottom:16px}'+
+    '.sec{font-size:13px;font-weight:700;margin:16px 0 6px;padding-bottom:3px;border-bottom:2px solid #1a1a1a}'+
+    'table{width:100%;border-collapse:collapse;margin-bottom:6px}'+
+    'th,td{text-align:left;padding:5px 8px;font-size:11px;border-bottom:1px solid #e5e5e5}'+
+    'th{background:#f4f4f0;font-size:10px;text-transform:uppercase;color:#555}'+
+    '.pl{border:1px solid #ddd;border-radius:6px;margin-bottom:7px;overflow:hidden}'+
+    '.plh{background:#f4f4f0;padding:6px 9px;font-size:11px}.t2 td{border-bottom:1px solid #eee}'+
+    '.foot{margin-top:24px;padding-top:10px;border-top:1px solid #ccc;font-size:10px;color:#888;text-align:center}'+
+    '@media print{body{padding:12mm}}</style></head><body>'+
+    '<h1>Comprovante de Rastreabilidade</h1>'+
+    '<div class="sub">Pedido '+esc(wmsNumeroCurto(p))+' · '+esc(cli?.nome||'—')+(rom?(' · Romaneio '+esc(rom.numero)+(rom.doca?' · Doca '+rom.doca:'')):'')+'</div>'+
+    '<div class="tag" style="background:'+(carregado?'#d1fae5':'#fef3c7')+';color:'+(carregado?'#065f46':'#92400e')+'">'+(carregado?'✓ TOTALMENTE CARREGADO':'⏳ CARREGAMENTO PENDENTE')+'</div>'+
+    '<div class="sec">1 · Separação</div><table><thead><tr><th>SKU</th><th>Descrição</th><th style="text-align:center">Separado</th><th>Responsável · quando</th></tr></thead><tbody>'+sepRows+'</tbody></table>'+
+    '<div class="sec">2 · Conferência</div><table><thead><tr><th>Etapa</th><th>Conferente</th><th>Quando</th></tr></thead><tbody>'+confRows+'</tbody></table>'+
+    '<div class="sec">3 · Unitização (pallets)</div>'+unitBlocks+
+    '<div class="sec">4 · Embarque (comprovação de carga)</div><table><thead><tr><th>Pallet</th><th style="text-align:center">Volume</th><th style="text-align:center">Seq. leitura</th><th>Embarcado por</th><th>Quando</th></tr></thead><tbody>'+embRows+'</tbody></table>'+
+    '<div class="foot">MK LOGÍSTICA LTDA · Documento gerado por VERUS ERP em '+fmtDt(new Date().toISOString())+'</div>'+
+    '</body></html>';
+  const old=ge('trk-print-frame');if(old)old.remove();
+  const iframe=document.createElement('iframe');
+  iframe.id='trk-print-frame';
+  iframe.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentDocument||iframe.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  setTimeout(()=>{iframe.contentWindow.focus();iframe.contentWindow.print();setTimeout(()=>iframe.remove(),3000);},500);
 }
 
 // Expande/recolhe o detalhe (cadeia) de um produto no tracking
