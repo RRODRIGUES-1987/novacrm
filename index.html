@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.364 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.365 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.364';
+const APP_VERSION='v1.0.365';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -20927,16 +20927,12 @@ async function wmsSalvarConferencia(){
     const confRow=res?(Array.isArray(res)?res[0]:res):null;
     if(confRow)wmsConferencias=[confRow,...wmsConferencias];
     // registra leituras da conferência (pallet=1, fração=N) — só 1ª e 2ª
+    // usa as TAREFAS REAIS de separação (tipo_volume já definido), não recalcula
     if(wmsConfTipo===1||wmsConfTipo===2){
       const etapaConf='conf'+wmsConfTipo;
       const modoConf=(window._wmsConfModo==='bipe')?'bipe':'manual';
-      const itensLeitura=[];
-      itens.forEach(it=>{
-        const v=conferido[it.sku]||0; if(v<=0)return;
-        const mult=wmsMultiploDe(it.produto_id,it.sku,p.cliente_id);
-        const sub=wmsCalcTarefas(v,mult); // expande em pallet+fração
-        sub.forEach(s=>itensLeitura.push({sku:it.sku,descricao:it.descricao,produto_id:it.produto_id,tipo_volume:s.tipo_volume,quantidade:s.quantidade}));
-      });
+      const tarefasPed=wmsTarefasSeparacao.filter(t=>t.pedido_id===p.id);
+      const itensLeitura=tarefasPed.map(t=>({sku:t.sku,descricao:t.descricao,produto_id:t.produto_id,tipo_volume:t.tipo_volume,quantidade:t.quantidade}));
       await wmsRegistrarLeituras(etapaConf,itensLeitura,{pedido_id:p.id,conferencia_id:confRow?.id,unit_id:p.unit_id,modo:modoConf});
     }
     // status do pedido: só avança se NÃO há divergência pendente
@@ -21135,7 +21131,6 @@ async function wmsEncerrarPallet(){
     const pallet=Array.isArray(palletRes)?palletRes[0]:palletRes;
     if(pallet){
       wmsPalletsEmbarque=[pallet,...wmsPalletsEmbarque];
-      const itensLeitura=[];
       for(const sku of skus){
         const s=(window._wmsPalletSaldo||[]).find(x=>x.sku===sku)||{};
         const it=await dbInsert('wms_pallet_itens',{
@@ -21143,13 +21138,7 @@ async function wmsEncerrarPallet(){
           sku,descricao:s.descricao||null,quantidade:wmsPalletAtual[sku],pedido_id:p.id,
         });
         if(it)wmsPalletItens=[Array.isArray(it)?it[0]:it,...wmsPalletItens];
-        // expande em pallet/fração conforme o múltiplo
-        const mult=wmsMultiploDe(s.produto_id,sku,p.cliente_id);
-        wmsCalcTarefas(wmsPalletAtual[sku],mult).forEach(sub=>itensLeitura.push({sku,descricao:s.descricao,produto_id:s.produto_id,tipo_volume:sub.tipo_volume,quantidade:sub.quantidade}));
       }
-      // registra leituras da unitização (pallet=1, fração=N)
-      const modoUnit=(window._wmsPalletSugestao==='cega'||window._wmsConfModo==='bipe')?'bipe':'manual';
-      await wmsRegistrarLeituras('unitizacao',itensLeitura,{pedido_id:p.id,pallet_id:pallet.id,unit_id:p.unit_id,modo:modoUnit});
       portClose();
       showToast('Pallet '+numero+' (vol '+volNum+') encerrado.','green');
       wmsAbrirUnitizacao(p.id); // reabre a tela de unitização atualizada
@@ -21190,6 +21179,12 @@ async function wmsFinalizarUnitizacao(){
       resultado:'ok',auditoria_status:'ok',observacao:N+' pallet(s) unitizado(s)',
     });
     if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
+    // registra leituras da unitização (pallet=1, fração=N) a partir das TAREFAS REAIS do pedido
+    const confRow3=confRes?(Array.isArray(confRes)?confRes[0]:confRes):null;
+    const tarefasPed=wmsTarefasSeparacao.filter(t=>t.pedido_id===p.id);
+    const itensLeitura=tarefasPed.map(t=>({sku:t.sku,descricao:t.descricao,produto_id:t.produto_id,tipo_volume:t.tipo_volume,quantidade:t.quantidade}));
+    const modoUnit=(window._wmsConfModo==='bipe')?'bipe':'manual';
+    await wmsRegistrarLeituras('unitizacao',itensLeitura,{pedido_id:p.id,conferencia_id:confRow3?.id,unit_id:p.unit_id,modo:modoUnit});
     // etiquetas de embarque (uma por pallet, com vol X/N)
     for(const pl of pallets){
       const its=wmsPalletItens.filter(pi=>pi.pallet_id===pl.id);
