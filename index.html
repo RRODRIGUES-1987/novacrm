@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.365 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.366 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.365';
+const APP_VERSION='v1.0.366';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -19326,7 +19326,8 @@ async function wmsRegistrarLeituras(etapa, itens, ctx){
 }
 // Conta leituras de um produto numa etapa de um pedido
 function wmsLeiturasContagem(pedidoId,etapa,sku){
-  return wmsLeituras.filter(l=>l.pedido_id===pedidoId && l.etapa===etapa && (!sku||l.sku===sku)).length;
+  const skuN=sku!=null?String(sku).trim():null;
+  return wmsLeituras.filter(l=>l.pedido_id===pedidoId && l.etapa===etapa && (skuN==null||String(l.sku||'').trim()===skuN)).length;
 }
 
 // Calcula tarefas de um item: pallets cheios + fração (cada um = 1 tarefa)
@@ -22086,16 +22087,18 @@ function wmsTrackImprimir(pedidoId){
   const sepRows=itensEsper.map(it=>{
     const feitas=tarefas.filter(t=>t.sku===it.sku && t.status==='concluida');
     const sepQtd=feitas.reduce((s,t)=>s+(+t.qtd_separada||0),0);
+    const nLeit=wmsLeiturasContagem(pedidoId,'separacao',it.sku);
     const resp=feitas.length?[...new Set(feitas.map(t=>t.separador_informado_nome||t.separador_nome).filter(Boolean))].join(', ')+' · '+fmtDt(feitas.map(t=>t.concluido_em).filter(Boolean).sort().pop()):'pendente';
-    return '<tr><td>'+esc(it.sku)+'</td><td>'+esc(it.descricao)+'</td><td style="text-align:center">'+sepQtd+'/'+it.qtd+'</td><td>'+esc(resp)+'</td></tr>';
+    return '<tr><td>'+esc(it.sku)+'</td><td>'+esc(it.descricao)+'</td><td style="text-align:center">'+sepQtd+'/'+it.qtd+'</td><td style="text-align:center">'+(nLeit||'—')+'</td><td>'+esc(resp)+'</td></tr>';
   }).join('');
   // conferência
   const conf12=confs.filter(c=>c.tipo<=2);
   const confRows=conf12.map(c=>{
     const lbl=WMS_CONF_LABELS[c.tipo]||('Conf.'+c.tipo);
+    const nLeit=wmsLeiturasContagem(pedidoId,'conf'+c.tipo);
     let st=c.auditoria_status==='pendente'?' (pend. auditoria)':c.auditoria_status==='aprovada'?' (aprovada por '+esc(c.auditor_nome||'')+')':c.auditoria_status==='rejeitada'?' (rejeitada)':'';
-    return '<tr><td>'+esc(lbl)+'</td><td>'+esc(c.conferente_nome||'—')+st+'</td><td>'+fmtDt(c.created_at)+'</td></tr>';
-  }).join('')||'<tr><td colspan="3" style="color:#888">Sem conferência 1ª/2ª.</td></tr>';
+    return '<tr><td>'+esc(lbl)+'</td><td>'+esc(c.conferente_nome||'—')+st+'</td><td style="text-align:center">'+(nLeit||'—')+'</td><td>'+fmtDt(c.created_at)+'</td></tr>';
+  }).join('')||'<tr><td colspan="4" style="color:#888">Sem conferência 1ª/2ª.</td></tr>';
   // unitização (pallet -> produtos)
   const unitBlocks=pallets.map(pl=>{
     const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
@@ -22138,8 +22141,8 @@ function wmsTrackImprimir(pedidoId){
     '<h1>Comprovante de Rastreabilidade</h1>'+
     '<div class="sub">Pedido '+esc(wmsNumeroCurto(p))+' · '+esc(cli?.nome||'—')+(rom?(' · Romaneio '+esc(rom.numero)+(rom.doca?' · Doca '+rom.doca:'')):'')+'</div>'+
     '<div class="tag" style="background:'+(carregado?'#d1fae5':'#fef3c7')+';color:'+(carregado?'#065f46':'#92400e')+'">'+(carregado?'✓ TOTALMENTE CARREGADO':'⏳ CARREGAMENTO PENDENTE')+'</div>'+
-    '<div class="sec">1 · Separação</div><table><thead><tr><th>SKU</th><th>Descrição</th><th style="text-align:center">Separado</th><th>Responsável · quando</th></tr></thead><tbody>'+sepRows+'</tbody></table>'+
-    '<div class="sec">2 · Conferência</div><table><thead><tr><th>Etapa</th><th>Conferente</th><th>Quando</th></tr></thead><tbody>'+confRows+'</tbody></table>'+
+    '<div class="sec">1 · Separação</div><table><thead><tr><th>SKU</th><th>Descrição</th><th style="text-align:center">Separado</th><th style="text-align:center">Leituras</th><th>Responsável · quando</th></tr></thead><tbody>'+sepRows+'</tbody></table>'+
+    '<div class="sec">2 · Conferência</div><table><thead><tr><th>Etapa</th><th>Conferente</th><th style="text-align:center">Leituras</th><th>Quando</th></tr></thead><tbody>'+confRows+'</tbody></table>'+
     '<div class="sec">3 · Unitização (pallets)</div>'+unitBlocks+
     '<div class="sec">4 · Embarque (comprovação de carga)</div><table><thead><tr><th>Pallet</th><th style="text-align:center">Volume</th><th style="text-align:center">Seq. leitura</th><th>Embarcado por</th><th>Quando</th></tr></thead><tbody>'+embRows+'</tbody></table>'+
     '<div class="foot">MK LOGÍSTICA LTDA · Documento gerado por VERUS ERP em '+fmtDt(new Date().toISOString())+'</div>'+
