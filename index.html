@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.366 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.367 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.366';
+const APP_VERSION='v1.0.367';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -21988,36 +21988,61 @@ function wmsTrackConteudo(pedidoId){
         </table></div>`:`<div style="font-size:11px;color:var(--text3);padding:8px 12px;border:1px dashed var(--border);border-radius:8px">${vazio}</div>`}
     </div>`;
 
-  // ══ ETAPA 1 · SEPARAÇÃO (produto a produto) ══
-  const sepLinhas=itensEsper.map(it=>{
-    const tars=tarefas.filter(t=>t.sku===it.sku);
-    const feitas=tars.filter(t=>t.status==='concluida');
-    if(!tars.length)return prodRow(it.sku,it.descricao,it.qtd,'','<span style="color:var(--text3)">sem tarefa</span>');
-    const sepQtd=feitas.reduce((s,t)=>s+(+t.qtd_separada||0),0);
-    const nLeit=wmsLeiturasContagem(pedidoId,'separacao',it.sku);
-    const leitTxt=nLeit?` <span style="font-size:9px;color:var(--text3)">· ${nLeit} leit.</span>`:'';
-    const resp=feitas.length
-      ? [...new Set(feitas.map(t=>t.separador_informado_nome||t.separador_nome).filter(Boolean))].join(', ')+' · '+fmtDt(feitas.map(t=>t.concluido_em).filter(Boolean).sort().pop())
-      : '<span style="color:var(--amber-text)">pendente</span>';
-    return prodRow(it.sku,it.descricao,sepQtd+'/'+it.qtd+leitTxt,'',resp);
-  }).join('');
-  const etapaSep=etapaWrap('#f59e0b','📦','Separação','Quem separou cada produto',['Separado','Responsável · quando'],sepLinhas,'Sem separação registrada.');
+  // helper: tabela de leituras linha a linha (sequência, SKU, tipo, modo, usuário, hora)
+  const leiturasTabela=(cor,icone,titulo,subtitulo,etapasArr,vazio)=>{
+    let linhas=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa));
+    linhas=linhas.sort((a,b)=>{
+      const ea=etapasArr.indexOf(a.etapa)-etapasArr.indexOf(b.etapa);
+      if(ea!==0)return ea;
+      return (a.sequencia||0)-(b.sequencia||0);
+    });
+    const multi=etapasArr.length>1;
+    const corpoLinhas=linhas.map((l,i)=>{
+      const tipo=l.tipo_volume==='pallet'
+        ? '<span style="font-size:9px;font-weight:700;color:#8b5cf6;background:#8b5cf622;padding:1px 6px;border-radius:4px">PALLET</span>'
+        : '<span style="font-size:9px;font-weight:700;color:#f59e0b;background:#f59e0b22;padding:1px 6px;border-radius:4px">FRAÇÃO</span>';
+      const modo=l.modo==='bipe'
+        ? '<span style="font-size:9px;color:#3b82f6">📟 bipe</span>'
+        : '<span style="font-size:9px;color:var(--text3)">✎ manual</span>';
+      const etiqEtapa=multi?('<td style="padding:5px 8px;font-size:10px;color:var(--text3)">'+(WMS_CONF_LABELS[parseInt(l.etapa.replace('conf',''))]||l.etapa)+'</td>'):'';
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 8px;text-align:center;font-size:11px;color:var(--text3);font-weight:600">${l.sequencia||(i+1)}</td>
+        ${etiqEtapa}
+        <td style="padding:5px 8px;font-size:11px;font-weight:700">${l.sku||'—'}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text2)">${(l.descricao||'').slice(0,26)}</td>
+        <td style="padding:5px 8px;text-align:center">${tipo}</td>
+        <td style="padding:5px 8px;text-align:center">${modo}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text2)">${l.usuario_nome||'—'}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3)">${fmtDt(l.created_at)}</td>
+      </tr>`;
+    }).join('');
+    const totalTxt=linhas.length?(' · '+linhas.length+' leitura'+(linhas.length>1?'s':'')):'';
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+        <span style="width:26px;height:26px;border-radius:50%;background:${cor}22;color:${cor};display:flex;align-items:center;justify-content:center;font-size:13px">${icone}</span>
+        <div><div style="font-size:13px;font-weight:700">${titulo}${totalTxt}</div><div style="font-size:10px;color:var(--text3)">${subtitulo}</div></div>
+      </div>
+      ${linhas.length?`<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--bg2)">
+            <th style="padding:6px 8px;text-align:center;font-size:10px">#</th>
+            ${multi?'<th style="padding:6px 8px;text-align:left;font-size:10px">Etapa</th>':''}
+            <th style="padding:6px 8px;text-align:left;font-size:10px">SKU</th>
+            <th style="padding:6px 8px;text-align:left;font-size:10px">Descrição</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px">Tipo</th>
+            <th style="padding:6px 8px;text-align:center;font-size:10px">Modo</th>
+            <th style="padding:6px 8px;text-align:left;font-size:10px">Usuário</th>
+            <th style="padding:6px 8px;text-align:left;font-size:10px">Hora</th>
+          </tr></thead><tbody>${corpoLinhas}</tbody>
+        </table></div>`:`<div style="font-size:11px;color:var(--text3);padding:8px 12px;border:1px dashed var(--border);border-radius:8px">${vazio}</div>`}
+    </div>`;
+  };
 
-  // ══ ETAPA 2 · CONFERÊNCIA (produto a produto) ══
-  // a conferência grava por pedido; mostramos cada produto com o resultado das conferências 1ª/2ª do pedido
-  const conf12=confs.filter(c=>c.tipo<=2);
-  const confLinhas=conf12.length?itensEsper.map(it=>{
-    const resp=conf12.map(c=>{
-      const lbl=WMS_CONF_LABELS[c.tipo]||('Conf.'+c.tipo);
-      let st='';
-      if(c.auditoria_status==='pendente')st=' ⏳';else if(c.auditoria_status==='aprovada')st=' ✓aud';else if(c.auditoria_status==='rejeitada')st=' ✗';
-      return lbl+': '+(c.conferente_nome||'—')+st;
-    }).join(' · ');
-    const n1=wmsLeiturasContagem(pedidoId,'conf1',it.sku), n2=wmsLeiturasContagem(pedidoId,'conf2',it.sku);
-    const leitTxt=(n1||n2)?`<br><span style="font-size:9px;color:var(--text3)">leituras: ${n1?'1ª '+n1:''}${n1&&n2?' · ':''}${n2?'2ª '+n2:''}</span>`:'';
-    return prodRow(it.sku,it.descricao,it.qtd+leitTxt,'',resp+'<br><span style="color:var(--text3);font-size:10px">'+fmtDt(conf12[conf12.length-1].created_at)+'</span>');
-  }).join(''):'';
-  const etapaConf=etapaWrap('#3b82f6','✓','Conferência','Quem conferiu (1ª/2ª) — registro por pedido',['Qtd','Conferente(s)'],confLinhas,'Cliente não exige conferência 1ª/2ª, ou ainda não conferido.');
+  // ══ ETAPA 1 · SEPARAÇÃO (leitura a leitura) ══
+  const etapaSep=leiturasTabela('#f59e0b','📦','Separação','Cada leitura registrada (pallet cheio = 1 · fração = 1 por unidade)',['separacao'],'Sem leituras de separação registradas.');
+
+  // ══ ETAPA 2 · CONFERÊNCIA (leitura a leitura: 1ª e 2ª) ══
+  const etapaConf=leiturasTabela('#3b82f6','✓','Conferência','Cada leitura das conferências 1ª e 2ª',['conf1','conf2'],'Sem leituras de conferência registradas.');
 
   // ══ ETAPA 3 · UNITIZAÇÃO (pallet → produtos dentro) ══
   let etapaUnit;
@@ -22046,7 +22071,8 @@ function wmsTrackConteudo(pedidoId){
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
         <span style="width:26px;height:26px;border-radius:50%;background:#8b5cf622;color:#8b5cf6;display:flex;align-items:center;justify-content:center;font-size:13px">🏗</span>
         <div><div style="font-size:13px;font-weight:700">Unitização</div><div style="font-size:10px;color:var(--text3)">Cada pallet e os produtos colocados dentro — com quem montou</div></div>
-      </div>${palletsHtml}</div>`;
+      </div>${palletsHtml}</div>`
+      + leiturasTabela('#8b5cf6','🏗','Leituras da unitização','Cada leitura registrada na montagem (pallet = 1 · fração = 1 por unidade)',['unitizacao'],'Sem leituras de unitização registradas.');
   }
 
   // ══ ETAPA 4 · EMBARQUE (produto a produto → carregado, seq, quem) ══
@@ -22083,23 +22109,22 @@ function wmsTrackImprimir(pedidoId){
   const N=pallets.length;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  // separação
-  const sepRows=itensEsper.map(it=>{
-    const feitas=tarefas.filter(t=>t.sku===it.sku && t.status==='concluida');
-    const sepQtd=feitas.reduce((s,t)=>s+(+t.qtd_separada||0),0);
-    const nLeit=wmsLeiturasContagem(pedidoId,'separacao',it.sku);
-    const resp=feitas.length?[...new Set(feitas.map(t=>t.separador_informado_nome||t.separador_nome).filter(Boolean))].join(', ')+' · '+fmtDt(feitas.map(t=>t.concluido_em).filter(Boolean).sort().pop()):'pendente';
-    return '<tr><td>'+esc(it.sku)+'</td><td>'+esc(it.descricao)+'</td><td style="text-align:center">'+sepQtd+'/'+it.qtd+'</td><td style="text-align:center">'+(nLeit||'—')+'</td><td>'+esc(resp)+'</td></tr>';
-  }).join('');
-  // conferência
-  const conf12=confs.filter(c=>c.tipo<=2);
-  const confRows=conf12.map(c=>{
-    const lbl=WMS_CONF_LABELS[c.tipo]||('Conf.'+c.tipo);
-    const nLeit=wmsLeiturasContagem(pedidoId,'conf'+c.tipo);
-    let st=c.auditoria_status==='pendente'?' (pend. auditoria)':c.auditoria_status==='aprovada'?' (aprovada por '+esc(c.auditor_nome||'')+')':c.auditoria_status==='rejeitada'?' (rejeitada)':'';
-    return '<tr><td>'+esc(lbl)+'</td><td>'+esc(c.conferente_nome||'—')+st+'</td><td style="text-align:center">'+(nLeit||'—')+'</td><td>'+fmtDt(c.created_at)+'</td></tr>';
-  }).join('')||'<tr><td colspan="4" style="color:#888">Sem conferência 1ª/2ª.</td></tr>';
-  // unitização (pallet -> produtos)
+  // helper: linhas de leitura para o PDF (sequência, [etapa], sku, tipo, modo, usuário, hora)
+  const leiturasRowsPdf=(etapasArr)=>{
+    const multi=etapasArr.length>1;
+    let ls=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa));
+    ls=ls.sort((a,b)=>{const e=etapasArr.indexOf(a.etapa)-etapasArr.indexOf(b.etapa);return e!==0?e:(a.sequencia||0)-(b.sequencia||0);});
+    if(!ls.length)return null;
+    return ls.map((l,i)=>{
+      const et=multi?('<td>'+esc(WMS_CONF_LABELS[parseInt(String(l.etapa).replace('conf',''))]||l.etapa)+'</td>'):'';
+      const tipo=l.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
+      const modo=l.modo==='bipe'?'bipe':'manual';
+      return '<tr><td style="text-align:center">'+(l.sequencia||(i+1))+'</td>'+et+'<td>'+esc(l.sku)+'</td><td>'+esc(l.descricao)+'</td><td style="text-align:center">'+tipo+'</td><td style="text-align:center">'+modo+'</td><td>'+esc(l.usuario_nome||'—')+'</td><td>'+fmtDt(l.created_at)+'</td></tr>';
+    }).join('');
+  };
+  const sepRows=leiturasRowsPdf(['separacao']);
+  const confRows=leiturasRowsPdf(['conf1','conf2']);
+  const unitLeitRows=leiturasRowsPdf(['unitizacao']);
   const unitBlocks=pallets.map(pl=>{
     const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
     const itRows=its.map(i=>'<tr><td>'+esc(i.sku)+'</td><td>'+esc(i.descricao)+'</td><td style="text-align:right">'+i.quantidade+'un</td></tr>').join('');
@@ -22141,9 +22166,10 @@ function wmsTrackImprimir(pedidoId){
     '<h1>Comprovante de Rastreabilidade</h1>'+
     '<div class="sub">Pedido '+esc(wmsNumeroCurto(p))+' · '+esc(cli?.nome||'—')+(rom?(' · Romaneio '+esc(rom.numero)+(rom.doca?' · Doca '+rom.doca:'')):'')+'</div>'+
     '<div class="tag" style="background:'+(carregado?'#d1fae5':'#fef3c7')+';color:'+(carregado?'#065f46':'#92400e')+'">'+(carregado?'✓ TOTALMENTE CARREGADO':'⏳ CARREGAMENTO PENDENTE')+'</div>'+
-    '<div class="sec">1 · Separação</div><table><thead><tr><th>SKU</th><th>Descrição</th><th style="text-align:center">Separado</th><th style="text-align:center">Leituras</th><th>Responsável · quando</th></tr></thead><tbody>'+sepRows+'</tbody></table>'+
-    '<div class="sec">2 · Conferência</div><table><thead><tr><th>Etapa</th><th>Conferente</th><th style="text-align:center">Leituras</th><th>Quando</th></tr></thead><tbody>'+confRows+'</tbody></table>'+
+    '<div class="sec">1 · Separação</div>'+(sepRows?'<table><thead><tr><th style="text-align:center">#</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+sepRows+'</tbody></table>':'<p style="color:#888;font-size:11px">Sem leituras de separação.</p>')+
+    '<div class="sec">2 · Conferência</div>'+(confRows?'<table><thead><tr><th style="text-align:center">#</th><th>Etapa</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+confRows+'</tbody></table>':'<p style="color:#888;font-size:11px">Sem leituras de conferência.</p>')+
     '<div class="sec">3 · Unitização (pallets)</div>'+unitBlocks+
+    (unitLeitRows?'<table style="margin-top:6px"><thead><tr><th style="text-align:center">#</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+unitLeitRows+'</tbody></table>':'')+
     '<div class="sec">4 · Embarque (comprovação de carga)</div><table><thead><tr><th>Pallet</th><th style="text-align:center">Volume</th><th style="text-align:center">Seq. leitura</th><th>Embarcado por</th><th>Quando</th></tr></thead><tbody>'+embRows+'</tbody></table>'+
     '<div class="foot">MK LOGÍSTICA LTDA · Documento gerado por VERUS ERP em '+fmtDt(new Date().toISOString())+'</div>'+
     '</body></html>';
