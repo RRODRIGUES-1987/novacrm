@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.359 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.360 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -237,6 +237,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .pdf-viewer-body iframe{width:100%;height:100%;border:none}
 .pdf-viewer-loading{display:flex;align-items:center;justify-content:center;height:100%;color:#fff;font-size:13px;gap:10px}
 .empty{text-align:center;padding:32px 16px;color:var(--text2)}.empty svg{width:48px!important;height:48px!important;max-width:48px;max-height:48px;stroke:var(--border2);margin:0 auto 10px;display:block}.empty p{font-size:13px}
+.trk-step{display:flex;gap:9px;align-items:flex-start;padding:5px 0}
+.trk-ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.trk-step b{font-size:11px;font-weight:700}
+.trk-meta{font-size:10px;color:var(--text2)}
 .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:rotate .7s linear infinite;display:inline-block;vertical-align:middle}
 .divider{height:1px;background:var(--border);margin:12px 0}
 @keyframes pulse-logo{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:0.85}}
@@ -976,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.359';
+const APP_VERSION='v1.0.360';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -21909,8 +21913,9 @@ function wmsTrackConteudo(pedidoId){
     </div>
   </div>`;
 
-  // ── localização dos produtos (produto → pallet vol X/N → carregado) ──
-  const linhasProd=itensEsper.map(it=>{
+  // ── localização dos produtos (produto → pallet vol X/N → carregado) + cadeia por produto ──
+  const fmtD=ts=>ts?new Date(ts).toLocaleString('pt-BR'):'—';
+  const linhasProd=itensEsper.map((it,idx)=>{
     // onde este SKU está
     const ondeEsta=pallets.map(pl=>{
       const pi=wmsPalletItens.find(x=>x.pallet_id===pl.id && x.sku===it.sku);
@@ -21922,17 +21927,45 @@ function wmsTrackConteudo(pedidoId){
       return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;margin:2px;background:${emb?'var(--green-bg)':'var(--bg2)'};color:${emb?'var(--green-text)':'var(--text2)'}">
         ${emb?'✓':'📦'} ${o.pl.numero} (${o.pl.vol_num||'?'}/${N}) · ${o.qtd}un${emb?' · carregado':''}</span>`;
     }).join(''):'<span style="font-size:10px;color:var(--text3)">não unitizado</span>';
-    return `<tr style="border-top:1px solid var(--border)">
+
+    // ── cadeia INDIVIDUAL do produto ──
+    // separação: tarefas deste SKU
+    const tarSku=tarefas.filter(t=>t.sku===it.sku);
+    const sepFeitas=tarSku.filter(t=>t.status==='concluida');
+    const sepLinha=sepFeitas.length
+      ? sepFeitas.map(t=>`<div class="trk-step"><span class="trk-ic" style="background:#f59e0b22;color:#f59e0b">📦</span><div><b>Separação</b> · ${t.tipo_volume==='pallet'?'Pallet':'Fração'} ${t.quantidade}un<br><span class="trk-meta">${t.separador_informado_nome||t.separador_nome||'—'} · ${fmtD(t.concluido_em)}</span></div></div>`).join('')
+      : `<div class="trk-step"><span class="trk-ic" style="background:#9ca3af22;color:#9ca3af">📦</span><div><b>Separação</b><br><span class="trk-meta" style="color:var(--text3)">pendente</span></div></div>`;
+    // conferências do pedido (1/2/3) que cobrem esse item — grava por pedido, então mostramos as do pedido
+    const confSku=confs.filter(c=>c.tipo<=3).map(c=>{
+      const lbl=WMS_CONF_LABELS[c.tipo]||('Conf. '+c.tipo);
+      let st='';
+      if(c.auditoria_status==='pendente')st=' · ⏳ pend. auditoria';
+      else if(c.auditoria_status==='aprovada')st=' · ✓ aprovada '+(c.auditor_nome||'');
+      else if(c.auditoria_status==='rejeitada')st=' · ✗ rejeitada';
+      return `<div class="trk-step"><span class="trk-ic" style="background:#3b82f622;color:#3b82f6">✓</span><div><b>${lbl}</b>${st}<br><span class="trk-meta">${c.conferente_nome||'—'} · ${fmtD(c.created_at)}</span></div></div>`;
+    }).join('');
+    // embarque: pallets deste SKU que foram embarcados
+    const embSku=ondeEsta.filter(o=>o.pl.status==='embarcado').sort((a,b)=>(a.pl.seq_leitura||0)-(b.pl.seq_leitura||0))
+      .map(o=>`<div class="trk-step"><span class="trk-ic" style="background:#22c55e22;color:#22c55e">🚚</span><div><b>Embarque</b> · ${o.pl.numero} (vol ${o.pl.vol_num||'?'}/${N}) · ${o.qtd}un<br><span class="trk-meta">Seq. ${o.pl.seq_leitura||'?'} · ${o.pl.embarcado_por_nome||'—'} · ${fmtD(o.pl.embarcado_em)}</span></div></div>`).join('');
+    const embBloco=embSku||`<div class="trk-step"><span class="trk-ic" style="background:#9ca3af22;color:#9ca3af">🚚</span><div><b>Embarque</b><br><span class="trk-meta" style="color:var(--text3)">aguardando carregamento</span></div></div>`;
+
+    const detalhe=`<tr id="trk-det-${idx}" style="display:table-row"><td colspan="5" style="padding:0 10px 12px 10px;background:var(--bg2)">
+      <div style="padding:10px 0 4px">${sepLinha}${confSku}${embBloco}</div>
+    </td></tr>`;
+
+    return `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="wmsTrackToggle(${idx})">
+      <td style="padding:8px 10px;font-size:11px;color:var(--text3)"><span id="trk-arrow-${idx}">▾</span></td>
       <td style="padding:8px 10px;font-size:12px;font-weight:700">${it.sku}</td>
-      <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${(it.descricao||'').slice(0,30)}</td>
+      <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${it.descricao||'—'}</td>
       <td style="padding:8px 10px;text-align:center;font-size:12px">${it.qtd}</td>
       <td style="padding:8px 10px">${locHtml}</td>
-    </tr>`;
+    </tr>${detalhe}`;
   }).join('');
-  const tabelaProd=`<div style="font-weight:600;font-size:13px;margin-bottom:8px">📍 Localização dos produtos</div>
+  const tabelaProd=`<div style="font-weight:600;font-size:13px;margin-bottom:8px">📍 Localização e cadeia por produto <span style="font-size:11px;color:var(--text3);font-weight:400">· clique no produto para ver quem separou / conferiu / embarcou</span></div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px">
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--bg2)">
+          <th style="padding:7px 10px;width:20px"></th>
           <th style="padding:7px 10px;text-align:left;font-size:10px">SKU</th>
           <th style="padding:7px 10px;text-align:left;font-size:10px">Descrição</th>
           <th style="padding:7px 10px;text-align:center;font-size:10px">Qtd</th>
@@ -21972,7 +22005,7 @@ function wmsTrackConteudo(pedidoId){
       'Seq. leitura '+(pl.seq_leitura||'?')+' · '+(pl.embarcado_por_nome||'—')+' · '+fmtDt(pl.embarcado_em),'#22c55e')
   ).join(''):'';
 
-  const timeline=`<div style="font-weight:600;font-size:13px;margin-bottom:8px">🕓 Cadeia de responsáveis</div>
+  const timeline=`<div style="font-weight:600;font-size:13px;margin-bottom:8px">🕓 Resumo do pedido (visão consolidada)</div>
     <div style="border:1px solid var(--border);border-radius:10px;padding:6px 14px">
       ${linhaTimeline('📦','Separação',sepResp,'#f59e0b')}
       ${confHtml||''}
@@ -21980,6 +22013,14 @@ function wmsTrackConteudo(pedidoId){
     </div>`;
 
   return head+tabelaProd+timeline;
+}
+// Expande/recolhe o detalhe (cadeia) de um produto no tracking
+function wmsTrackToggle(idx){
+  const det=ge('trk-det-'+idx);const arr=ge('trk-arrow-'+idx);
+  if(!det)return;
+  const aberto=det.style.display!=='none';
+  det.style.display=aberto?'none':'table-row';
+  if(arr)arr.textContent=aberto?'▸':'▾';
 }
 
 
