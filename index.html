@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.375 | Gerado: 2026-06-21 19:55 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.376 | Gerado: 2026-06-21 20:25 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.375';
+const APP_VERSION='v1.0.376';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20655,13 +20655,23 @@ function wmsProdutoModal(id){
        </div>
      </div>
      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-       <div style="font-weight:700;font-size:13px;margin-bottom:4px">Etiqueta do cliente</div>
+       <div style="font-weight:700;font-size:13px;margin-bottom:4px">Etiqueta do cliente (caixa)</div>
        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Quando o depositante usa etiqueta própria, bipamos a dele. Configure a leitura bipando uma etiqueta real: o sistema mostra o que leu e você recorta o trecho que é o código.</div>
-       <label class="fl">Valor esperado (preenchido pela configuração da leitura)</label>
+       <label class="fl">Valor esperado da caixa (preenchido pela configuração)</label>
        <input class="fi" id="wp-etiqcli" value="${(p.etiqueta_cliente||'').replace(/"/g,'&quot;')}" placeholder="bipe e configure a leitura">
        <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-         <button type="button" class="btn btn-p btn-sm" onclick="wmsConfigLeitura('${id}')">⛶ Configurar leitura (bipe)</button>
-         <span style="font-size:11px;color:${wmsMascaraResumo(p)?'var(--green-text)':'var(--text3)'}">${wmsMascaraResumo(p)||'Leitura não configurada'}</span>
+         <button type="button" class="btn btn-p btn-sm" onclick="wmsConfigLeitura('${id}','caixa')">⛶ Configurar leitura (caixa)</button>
+         <span style="font-size:11px;color:${wmsMascaraResumo(p,'caixa')?'var(--green-text)':'var(--text3)'}">${wmsMascaraResumo(p,'caixa')||'Leitura não configurada'}</span>
+       </div>
+       <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+         <div style="font-weight:700;font-size:13px;margin-bottom:4px">Etiqueta pallet</div>
+         <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Etiqueta que identifica o <b>pallet inteiro</b> (não a caixa). Ao bipar, lança o múltiplo (qtd por pallet) do produto.</div>
+         <label class="fl">Valor esperado do pallet (preenchido pela configuração)</label>
+         <input class="fi" id="wp-etiqpallet" value="${(p.etiqueta_pallet||'').replace(/"/g,'&quot;')}" placeholder="bipe e configure a leitura do pallet">
+         <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+           <button type="button" class="btn btn-p btn-sm" onclick="wmsConfigLeitura('${id}','pallet')">⛶ Configurar leitura (pallet)</button>
+           <span style="font-size:11px;color:${wmsMascaraResumo(p,'pallet')?'var(--green-text)':'var(--text3)'}">${wmsMascaraResumo(p,'pallet')||'Leitura não configurada'}</span>
+         </div>
        </div>
      </div>`,
     `wmsProdutoSalvar('${id}')`);
@@ -20682,7 +20692,8 @@ async function wmsProdutoSalvar(id){
       validade_dias:(()=>{const v=ge('wp-validade')?.value;return v===''||v==null?null:parseInt(v);})(),
       e_liquido:ge('wp-liquido')?.checked||false,
       litragem:ge('wp-liquido')?.checked?n('wp-litragem'):null,
-      etiqueta_cliente:g('wp-etiqcli')?.trim()||null};
+      etiqueta_cliente:g('wp-etiqcli')?.trim()||null,
+      etiqueta_pallet:g('wp-etiqpallet')?.trim()||null};
     await dbUpdate('wms_produtos',id,obj);
     wmsProdutos=wmsProdutos.map(p=>p.id===id?{...p,...obj}:p);
     portClose();
@@ -20695,8 +20706,8 @@ async function wmsProdutoSalvar(id){
 //  Bipe uma etiqueta real → o VERUS mostra o que leu → o usuário recorta
 //  o trecho que é o código (início + tamanho). Salva a máscara no produto.
 // ══════════════════════════════════════════════════════════════════
-function wmsMascaraResumo(p){
-  var m=p&&p.etiqueta_mascara;
+function wmsMascaraResumo(p,alvo){
+  var m=alvo==='pallet'?(p&&p.etiqueta_pallet_mascara):(p&&p.etiqueta_mascara);
   if(!m||m.tipo!=='posicao'||!(parseInt(m.tamanho,10)>0))return '';
   return 'Recorte: posição '+m.inicio+' · '+m.tamanho+' caractere(s)';
 }
@@ -20709,22 +20720,26 @@ function wmsCfgGlyph(ch){
 }
 function wmsCfgGlyphAll(s){var o='';for(var i=0;i<s.length;i++)o+=wmsCfgGlyph(s.charAt(i));return o;}
 
-let _cfgLeitura=null; // {produtoId, raw, inicio, tamanho, selStart}
+let _cfgLeitura=null; // {produtoId, alvo, raw, inicio, tamanho, selStart}
 
-function wmsConfigLeitura(produtoId){
+function wmsConfigLeitura(produtoId,alvo){
+  alvo=(alvo==='pallet')?'pallet':'caixa';
   const p=wmsProdutos.find(x=>x.id===produtoId);
   if(!p){showToast('Salve o produto antes de configurar a leitura.','amber');return;}
-  const m=(p.etiqueta_mascara&&p.etiqueta_mascara.tipo==='posicao')?p.etiqueta_mascara:{};
-  _cfgLeitura={produtoId:produtoId,raw:wmsLeituraLimpa(m.amostra||''),inicio:parseInt(m.inicio,10)||1,tamanho:parseInt(m.tamanho,10)||0,selStart:null};
+  const mm=alvo==='pallet'?p.etiqueta_pallet_mascara:p.etiqueta_mascara;
+  const m=(mm&&mm.tipo==='posicao')?mm:{};
+  _cfgLeitura={produtoId:produtoId,alvo:alvo,raw:wmsLeituraLimpa(m.amostra||''),inicio:parseInt(m.inicio,10)||1,tamanho:parseInt(m.tamanho,10)||0,selStart:null};
   portClose(); // abre como modal único (evita colisão de ids do portModal)
+  const titulo='Configurar leitura '+(alvo==='pallet'?'(pallet)':'(caixa)')+' — '+(p.sku||'');
+  const dica=alvo==='pallet'?'Bipe uma etiqueta real de um PALLET inteiro deste produto.':'Bipe uma etiqueta real de uma CAIXA deste produto.';
   const inner=''
-    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Bipe uma etiqueta real deste produto. O VERUS mostra exatamente o que foi lido — clique no 1º e no último caractere do código do produto.</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">'+dica+' O VERUS mostra exatamente o que foi lido — clique no 1º e no último caractere do código.</div>'
     +'<div style="display:flex;gap:8px;margin-bottom:10px">'
     +'  <input id="cfg-scan" placeholder="Bipe a etiqueta aqui…" autocomplete="off" style="flex:1;padding:10px 12px;border:1.5px solid var(--blue-text);border-radius:8px;font-size:14px" onkeydown="if(event.key===&apos;Enter&apos;){wmsCfgSetRaw(this.value);}">'
     +'  <button class="btn btn-p" onclick="wmsCfgSetRaw(ge(&apos;cfg-scan&apos;).value)" style="white-space:nowrap">Ler</button>'
     +'</div>'
     +'<div id="cfg-area"></div>';
-  portModal('Configurar leitura — '+(p.sku||''),inner,'wmsSalvarMascara()',{saveLabel:'Salvar leitura',width:'650px'});
+  portModal(titulo,inner,'wmsSalvarMascara()',{saveLabel:'Salvar leitura',width:'650px'});
   setTimeout(function(){var i=ge('cfg-scan');if(i)i.focus();wmsCfgRender();},60);
 }
 function wmsCfgSetRaw(v){
@@ -20798,6 +20813,7 @@ function wmsCfgInput(){
 }
 async function wmsSalvarMascara(){
   if(!_cfgLeitura)return;
+  const alvo=_cfgLeitura.alvo==='pallet'?'pallet':'caixa';
   const raw=_cfgLeitura.raw||'';
   const ini=_cfgLeitura.inicio,tam=_cfgLeitura.tamanho;
   if(!raw){portErr('Bipe uma etiqueta primeiro.');return;}
@@ -20805,35 +20821,40 @@ async function wmsSalvarMascara(){
   const extraido=raw.substr(ini-1,tam).trim();
   if(!extraido){portErr('O trecho selecionado está vazio.');return;}
   const masc={tipo:'posicao',inicio:ini,tamanho:tam,amostra:raw};
+  const patch=alvo==='pallet'?{etiqueta_pallet_mascara:masc,etiqueta_pallet:extraido}:{etiqueta_mascara:masc,etiqueta_cliente:extraido};
   portSaving();
   try{
-    await dbUpdate('wms_produtos',_cfgLeitura.produtoId,{etiqueta_mascara:masc,etiqueta_cliente:extraido});
-    wmsProdutos=wmsProdutos.map(p=>p.id===_cfgLeitura.produtoId?{...p,etiqueta_mascara:masc,etiqueta_cliente:extraido}:p);
-    const inp=ge('wp-etiqcli'); if(inp)inp.value=extraido;
+    await dbUpdate('wms_produtos',_cfgLeitura.produtoId,patch);
+    wmsProdutos=wmsProdutos.map(p=>p.id===_cfgLeitura.produtoId?{...p,...patch}:p);
+    const inp=ge(alvo==='pallet'?'wp-etiqpallet':'wp-etiqcli'); if(inp)inp.value=extraido;
     portClose();
-    showToast('Leitura configurada: '+extraido,'green');
+    showToast('Leitura ('+alvo+') configurada: '+extraido,'green');
     if(curPage==='wms-produtos')render();
   }catch(e){portErr('Erro: '+e.message);}
 }
-// Importação entre itens: puxa a máscara de outro produto do mesmo cliente
+// Importação entre itens: puxa a máscara (do mesmo alvo) de outro produto do mesmo cliente
 function wmsImportarMascara(produtoId){
   const p=wmsProdutos.find(x=>x.id===produtoId);if(!p)return;
-  const irmaos=wmsProdutos.filter(x=>x.cliente_id===p.cliente_id&&x.id!==produtoId&&x.etiqueta_mascara&&x.etiqueta_mascara.tipo==='posicao'&&parseInt(x.etiqueta_mascara.tamanho,10)>0);
+  const alvo=(_cfgLeitura&&_cfgLeitura.alvo==='pallet')?'pallet':'caixa';
+  const getM=function(x){return alvo==='pallet'?x.etiqueta_pallet_mascara:x.etiqueta_mascara;};
+  const irmaos=wmsProdutos.filter(function(x){var m=getM(x);return x.cliente_id===p.cliente_id&&x.id!==produtoId&&m&&m.tipo==='posicao'&&parseInt(m.tamanho,10)>0;});
   const area=ge('cfg-area');if(!area)return;
-  if(!irmaos.length){showToast('Nenhum outro produto deste cliente tem máscara configurada.','amber');return;}
-  let lista=irmaos.map(x=>'<div onclick="wmsAplicarMascaraDe(&apos;'+x.id+'&apos;)" style="padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center">'
-    +'<div><div style="font-weight:600;font-size:12px">'+x.sku+'</div><div style="font-size:10px;color:var(--text3)">pos '+x.etiqueta_mascara.inicio+' · '+x.etiqueta_mascara.tamanho+' car.</div></div>'
-    +'<span class="btn btn-sm">Usar este padrão</span></div>').join('');
+  if(!irmaos.length){showToast('Nenhum outro produto deste cliente tem máscara ('+alvo+') configurada.','amber');return;}
+  let lista=irmaos.map(function(x){var m=getM(x);return '<div onclick="wmsAplicarMascaraDe(&apos;'+x.id+'&apos;)" style="padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center">'
+    +'<div><div style="font-weight:600;font-size:12px">'+x.sku+'</div><div style="font-size:10px;color:var(--text3)">pos '+m.inicio+' · '+m.tamanho+' car.</div></div>'
+    +'<span class="btn btn-sm">Usar este padrão</span></div>';}).join('');
   area.innerHTML=''
-    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Escolha um produto com o <b>mesmo padrão</b> de etiqueta. O recorte (início/tamanho) será copiado — depois bipe a etiqueta deste produto para extrair o valor.</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Escolha um produto com o <b>mesmo padrão</b> de etiqueta ('+alvo+'). O recorte (início/tamanho) será copiado — depois bipe a etiqueta deste produto para extrair o valor.</div>'
     +lista
     +'<div style="margin-top:8px"><button class="btn btn-sm" onclick="wmsCfgRender()">← Voltar</button></div>';
 }
 function wmsAplicarMascaraDe(fromId){
   const from=wmsProdutos.find(x=>x.id===fromId);
-  if(!from||!from.etiqueta_mascara){wmsCfgRender();return;}
-  _cfgLeitura.inicio=parseInt(from.etiqueta_mascara.inicio,10)||1;
-  _cfgLeitura.tamanho=parseInt(from.etiqueta_mascara.tamanho,10)||0;
+  const alvo=(_cfgLeitura&&_cfgLeitura.alvo==='pallet')?'pallet':'caixa';
+  const m=from?(alvo==='pallet'?from.etiqueta_pallet_mascara:from.etiqueta_mascara):null;
+  if(!m){wmsCfgRender();return;}
+  _cfgLeitura.inicio=parseInt(m.inicio,10)||1;
+  _cfgLeitura.tamanho=parseInt(m.tamanho,10)||0;
   _cfgLeitura.selStart=null;
   showToast('Padrão importado de '+from.sku+'. Bipe a etiqueta deste produto para extrair o valor.','blue');
   wmsCfgRender();
@@ -21284,17 +21305,41 @@ function wmsExtrairMascara(raw,masc){
   return s.substr(ini-1,tam);
 }
 
-// Produto pronto p/ etiqueta do cliente? (precisa de máscara + valor esperado)
-function wmsProdutoConfigurado(prod){
-  var m=prod&&prod.etiqueta_mascara;
-  return !!(m && m.tipo==='posicao' && parseInt(m.tamanho,10)>0 && wmsNorm(prod.etiqueta_cliente));
+// Acesso à máscara/valor por alvo ('caixa' → etiqueta_cliente; 'pallet' → etiqueta_pallet)
+function wmsAlvoMascara(prod,alvo){return alvo==='pallet'?(prod&&prod.etiqueta_pallet_mascara):(prod&&prod.etiqueta_mascara);}
+function wmsAlvoValor(prod,alvo){return alvo==='pallet'?(prod&&prod.etiqueta_pallet):(prod&&prod.etiqueta_cliente);}
+
+// Alvo (caixa|pallet) configurado? (máscara por posição + valor esperado)
+function wmsAlvoConfigurado(prod,alvo){
+  var m=wmsAlvoMascara(prod,alvo);
+  return !!(m && m.tipo==='posicao' && parseInt(m.tamanho,10)>0 && wmsNorm(wmsAlvoValor(prod,alvo)));
 }
 
-// Verdadeiro se a leitura, recortada pela máscara do produto, bate com o valor esperado
-function wmsEtiquetaCasaProduto(raw,prod){
-  if(!wmsProdutoConfigurado(prod))return false;
-  var ext=wmsExtrairMascara(raw,prod.etiqueta_mascara);
-  return ext!=null && wmsNorm(ext)===wmsNorm(prod.etiqueta_cliente);
+// Produto pronto p/ etiqueta do cliente? Exige CAIXA e PALLET configurados
+function wmsProdutoConfigurado(prod){
+  return wmsAlvoConfigurado(prod,'caixa') && wmsAlvoConfigurado(prod,'pallet');
+}
+
+// Como a leitura casa com o produto: 'pallet' | 'caixa' | null
+// Pallet tem prioridade: evita que um código de pallet (que muitas vezes contém o
+// código da caixa como prefixo) seja lido como caixa e lance 1 em vez do múltiplo.
+function wmsEtiquetaTipoCasa(raw,prod){
+  if(!prod)return null;
+  if(wmsAlvoConfigurado(prod,'pallet')){
+    var ep=wmsExtrairMascara(raw,prod.etiqueta_pallet_mascara);
+    if(ep!=null && wmsNorm(ep)===wmsNorm(prod.etiqueta_pallet))return 'pallet';
+  }
+  if(wmsAlvoConfigurado(prod,'caixa')){
+    var ec=wmsExtrairMascara(raw,prod.etiqueta_mascara);
+    if(ec!=null && wmsNorm(ec)===wmsNorm(prod.etiqueta_cliente))return 'caixa';
+  }
+  return null;
+}
+
+// Quantidade de um pallet inteiro do produto (múltiplo); null se não cadastrado
+function wmsQtdPallet(prod){
+  var q=parseInt(prod&&prod.qtd_por_pallet,10);
+  return (q>0)?q:null;
 }
 
 // Produtos de um cliente ainda SEM a leitura configurada
@@ -21311,12 +21356,14 @@ function wmsConfBipe(codigo){
   const raw=wmsLeituraLimpa(codigo);
   const cod=wmsNorm(raw);
   if(!cod)return;
-  // casa por SKU sempre; pela etiqueta do cliente só com o flag ligado (e máscara por produto)
+  // casa por SKU sempre; por etiqueta (caixa/pallet) só com o flag ligado
+  let tipoCasa='sku', prodCasa=null;
   const idx=itens.findIndex(it=>{
-    if(wmsNorm(it.sku)===cod)return true;
+    if(wmsNorm(it.sku)===cod){tipoCasa='sku';return true;}
     if(usaEtiq){
       const prod=wmsProdutos.find(pr=>pr.id===it.produto_id);
-      return prod && wmsEtiquetaCasaProduto(raw,prod);
+      const t=prod?wmsEtiquetaTipoCasa(raw,prod):null;
+      if(t){tipoCasa=t;prodCasa=prod;return true;}
     }
     return false;
   });
@@ -21325,17 +21372,23 @@ function wmsConfBipe(codigo){
     showToast('⛔ Código não pertence a este pedido: '+cod,'red');
     return;
   }
+  // pallet cheio lança o múltiplo do produto; caixa/SKU lança 1
+  let qtdLanc=1;
+  if(tipoCasa==='pallet'){
+    const qp=wmsQtdPallet(prodCasa);
+    if(qp)qtdLanc=qp; else showToast('⚠ Produto sem "qtd por pallet" — lançando 1.','amber');
+  }
   if(sugestao==='cega'){
-    // modo cega: usa a quantidade informada no campo ao lado (default 1)
-    const qtd=parseFloat(ge('conf-bipe-qtd')?.value||'1')||1;
+    const qtd=(tipoCasa==='pallet')?qtdLanc:(parseFloat(ge('conf-bipe-qtd')?.value||'1')||1);
     const it=itens[idx];
     wmsConfContados[it.sku]=(wmsConfContados[it.sku]||0)+qtd;
     wmsConfCegaRender();
   } else {
     const inp=ge('conf-qtd-'+idx);
-    inp.value=(parseFloat(inp.value||'0')||0)+1;
+    inp.value=(parseFloat(inp.value||'0')||0)+qtdLanc;
     wmsConfCheckLinha(idx,itens[idx].qtd);
   }
+  if(tipoCasa==='pallet')showToast('Pallet: +'+qtdLanc+' '+(itens[idx].sku||''),'blue');
 }
 // Renderiza a tabela da conferência cega conforme os itens vão sendo contados
 function wmsConfCegaRender(){
@@ -21558,19 +21611,29 @@ function wmsPalletBipe(codigo){
   const raw=wmsLeituraLimpa(codigo);
   const cod=wmsNorm(raw);
   if(!cod)return;
+  let tipoCasa='sku', prodCasa=null;
   const item=saldo.find(s=>{
-    if(wmsNorm(s.sku)===cod)return true;
+    if(wmsNorm(s.sku)===cod){tipoCasa='sku';return true;}
     if(usaEtiq){
       const prod=wmsProdutos.find(pr=>pr.id===s.produto_id);
-      return prod && wmsEtiquetaCasaProduto(raw,prod);
+      const t=prod?wmsEtiquetaTipoCasa(raw,prod):null;
+      if(t){tipoCasa=t;prodCasa=prod;return true;}
     }
     return false;
   });
   if(!item){showToast('⛔ Código não pertence ao saldo deste pedido: '+cod,'red');return;}
-  const qtd=sugestao==='cega'?(parseFloat(ge('pal-bipe-qtd')?.value||'1')||1):1;
+  // pallet cheio lança o múltiplo (respeitando o saldo); caixa/SKU lança a qtd informada/1
+  let qtd;
+  if(tipoCasa==='pallet'){
+    const qp=wmsQtdPallet(prodCasa);
+    if(qp){qtd=qp;} else {qtd=1;showToast('⚠ Produto sem "qtd por pallet" — lançando 1.','amber');}
+  } else {
+    qtd=sugestao==='cega'?(parseFloat(ge('pal-bipe-qtd')?.value||'1')||1):1;
+  }
   const jaNoPallet=wmsPalletAtual[item.sku]||0;
   if(jaNoPallet+qtd>item.saldo){showToast('Excede o saldo de '+item.sku+' (saldo '+item.saldo+')','amber');return;}
   wmsPalletAtual[item.sku]=jaNoPallet+qtd;
+  if(tipoCasa==='pallet')showToast('Pallet: +'+qtd+' '+item.sku,'blue');
   if(sugestao==='cega')wmsPalletCegaRender();
   else { // atualiza o input correspondente
     const inp=document.querySelector('[id^=pal-qtd-][data-sku="'+item.sku+'"]');
