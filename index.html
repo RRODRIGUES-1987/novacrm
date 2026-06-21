@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.369 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.371 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.369';
+const APP_VERSION='v1.0.371';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -5320,7 +5320,9 @@ async function saveFaturamento(){await salvarFaturaRascunho();}
 
 // ── MÓDULO RH ──
 function rRHPessoas(){
-  const sorted=[...pessoas].sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  // gestor vê apenas sua cadeia (equipe direta + indiretos); admin/adm/rh veem todos
+  const visiveis=pessoas.filter(p=>podeVerColaborador(p));
+  const sorted=[...visiveis].sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
   const ativos=sorted.filter(p=>p.ativo!==false);
   const inativos=sorted.filter(p=>p.ativo===false);
 
@@ -5362,7 +5364,7 @@ function rRHPessoas(){
 }
 
 function filterRHPessoas(q){
-  const f=pessoas.filter(p=>p.nome.toLowerCase().includes(q.toLowerCase())||(p.cargo||'').toLowerCase().includes(q.toLowerCase())||(p.departamento||'').toLowerCase().includes(q.toLowerCase())||(p.cpf||'').includes(q));
+  const f=pessoas.filter(p=>podeVerColaborador(p)&&(p.nome.toLowerCase().includes(q.toLowerCase())||(p.cargo||'').toLowerCase().includes(q.toLowerCase())||(p.departamento||'').toLowerCase().includes(q.toLowerCase())||(p.cpf||'').includes(q)));
   const el=ge('rh-pessoas-list');if(!el)return;
   if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
   const tcMap={'clt':'CLT','pj':'PJ','estagiario':'Estágio','menor_aprendiz':'Men. Aprendiz'};
@@ -9157,6 +9159,42 @@ function souGestorDe(p){
   if(minhaPessoa && p.responde_para && p.responde_para===minhaPessoa) return true;
   // fallback legado: gestor_id apontando para o usuário logado
   if(p.gestor_id && p.gestor_id===cu?.id) return true;
+  return false;
+}
+// Conjunto de pessoa_ids da equipe do gestor logado: equipe direta + indiretos (toda a cadeia abaixo).
+// Percorre responde_para recursivamente a partir da pessoa vinculada ao usuário logado.
+function minhaEquipeIds(){
+  const raiz=profile?.pessoa_id||null;
+  const ids=new Set();
+  if(!raiz)return ids;
+  // mapa pai -> filhos (quem responde_para X)
+  const filhosDe={};
+  pessoas.forEach(function(p){
+    if(p.responde_para){
+      if(!filhosDe[p.responde_para])filhosDe[p.responde_para]=[];
+      filhosDe[p.responde_para].push(p.id);
+    }
+  });
+  // BFS a partir da raiz
+  const fila=[raiz];
+  const visit=new Set([raiz]);
+  while(fila.length){
+    const atual=fila.shift();
+    (filhosDe[atual]||[]).forEach(function(fid){
+      if(!visit.has(fid)){visit.add(fid);ids.add(fid);fila.push(fid);}
+    });
+  }
+  return ids; // não inclui o próprio gestor
+}
+// O usuário logado enxerga este colaborador? (admin/adm/rh veem todos; gestor vê sua cadeia)
+function podeVerColaborador(p){
+  if(!p)return false;
+  const role=profile?.role||'';
+  if(['admin','adm','rh'].includes(role))return true;
+  if(role==='gestor'){
+    const eq=minhaEquipeIds();
+    return eq.has(p.id);
+  }
   return false;
 }
 function feriasPodeProgramar(pessoaId){
@@ -18346,6 +18384,16 @@ async function loadDisciplinarData(cid){
 }
 
 const DEM_TIPO={pedido:'Pedido do colaborador',sem_causa:'Dispensa sem justa causa',justa_causa:'Dispensa por justa causa'};
+const DEM_MOTIVO={
+  desempenho:'Desempenho insuficiente',
+  reestruturacao:'Reestruturação / mudança organizacional',
+  reducao_quadro:'Redução de quadro',
+  conduta:'Conduta / disciplina',
+  absenteismo:'Absenteísmo / faltas',
+  fim_contrato:'Término de contrato / experiência',
+  pedido_colaborador:'Pedido do colaborador',
+  outros:'Outros'
+};
 const DEM_STATUS={
   solicitado:    {l:'Aguardando RH',     bg:'var(--amber-bg)',  c:'var(--amber-text)'},
   aprovado_rh:   {l:'Aguardando Admin',  bg:'var(--blue-bg)',   c:'var(--blue-text)'},
@@ -18359,6 +18407,7 @@ const ADV_COR={verbal:{bg:'var(--amber-bg)',c:'var(--amber-text)'},escrita:{bg:'
 
 function demPodeRH(){return['admin','adm','rh'].includes(profile?.role||'');}
 function demPodeAdmin(){return['admin','adm'].includes(profile?.role||'');}
+function demPodeSolicitar(){return['gestor','admin','adm'].includes(profile?.role||'');}
 function advPodeEditar(){return['admin','adm','rh'].includes(profile?.role||'');}
 
 // ── SEÇÃO SITUAÇÃO DO COLABORADOR (demissão + advertências) ──
@@ -18390,7 +18439,7 @@ function rCadSituacaoExtras(pessoaId){
         <button class="btn btn-sm" onclick="demCancelar('${demAtiva.id}')">Cancelar solicitação</button>
       </div>
     </div>`;
-  } else if(p.ativo!==false&&p.tipo_contrato!=='pj'){
+  } else if(p.ativo!==false&&p.tipo_contrato!=='pj'&&demPodeSolicitar()){
     html+=`<div style="margin-top:12px">
       <button onclick="demSolicitar('${pessoaId}')" style="font-size:12px;padding:8px 16px;border:1px solid var(--red-text);border-radius:8px;background:var(--red-bg);color:var(--red-text);cursor:pointer;width:100%;font-weight:600">
         🚪 Solicitar demissão deste colaborador
@@ -18429,6 +18478,7 @@ function rCadSituacaoExtras(pessoaId){
 
 // ── FLUXO DE DEMISSÃO ──
 function demSolicitar(pessoaId){
+  if(!demPodeSolicitar()){showToast&&showToast('Apenas gerentes podem solicitar demissão.','amber');return;}
   const p=pessoas.find(x=>x.id===pessoaId);if(!p)return;
   // Verifica estabilidade
   if(p.estabilidade&&p.estabilidade_fim){
@@ -18438,34 +18488,41 @@ function demSolicitar(pessoaId){
       if(!ok)return;
     }
   }
+  const optMotivos=Object.keys(DEM_MOTIVO).map(function(k){return '<option value="'+k+'">'+DEM_MOTIVO[k]+'</option>';}).join('');
   portModal(`Solicitar demissão — ${p.nome}`,
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div style="grid-column:1/-1"><label class="fl">Tipo de demissão *</label>
+      <div><label class="fl">Tipo de demissão *</label>
         <select class="fi" id="dem-tipo">
           <option value="sem_causa">Dispensa sem justa causa</option>
           <option value="justa_causa">Dispensa por justa causa</option>
           <option value="pedido">Pedido do colaborador</option>
         </select></div>
+      <div><label class="fl">Motivo *</label>
+        <select class="fi" id="dem-motivo">${optMotivos}</select></div>
       <div><label class="fl">Data prevista</label>
         <input class="fi" id="dem-data" type="date"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:11px 13px;background:var(--bg2);border-radius:var(--radius)">
         <input type="checkbox" id="dem-reposicao" style="width:16px;height:16px;cursor:pointer;flex-shrink:0">
-        <label for="dem-reposicao" style="font-size:13px;font-weight:500;cursor:pointer;margin:0">Com reposição</label>
+        <label for="dem-reposicao" style="font-size:13px;font-weight:500;cursor:pointer;margin:0">Reposição imediata</label>
       </div>
-      <div style="grid-column:1/-1"><label class="fl">Motivo *</label>
-        <textarea class="fi" id="dem-motivo" rows="3" placeholder="Descreva o motivo da demissão..."></textarea></div>
+      <div style="grid-column:1/-1"><label class="fl">Observação (opcional)</label>
+        <textarea class="fi" id="dem-obs" rows="2" placeholder="Detalhes adicionais, se necessário..."></textarea></div>
     </div>`,`demSalvar('${pessoaId}')`,{saveLabel:'Enviar solicitação'});
 }
 
 async function demSalvar(pessoaId){
-  const motivo=ge('dem-motivo')?.value?.trim();
-  if(!motivo){portErr('Informe o motivo.');return;}
+  const motivo=ge('dem-motivo')?.value||'';
+  if(!motivo){portErr('Selecione o motivo.');return;}
+  const obs=ge('dem-obs')?.value?.trim()||null;
   portSaving();
   const dados={company_id:company?.id,pessoa_id:pessoaId,
     tipo:ge('dem-tipo')?.value||'sem_causa',
+    motivo_codigo:motivo,
+    motivo:DEM_MOTIVO[motivo]||motivo,
+    obs_solicitante:obs,
     com_reposicao:ge('dem-reposicao')?.checked||false,
     data_prevista:ge('dem-data')?.value||null,
-    motivo,status:'solicitado',solicitado_por:cu?.id,owner_id:cu?.id};
+    status:'solicitado',solicitado_por:cu?.id,owner_id:cu?.id};
   try{const s=await dbInsert('rh_demissoes',dados);if(s)rhDemissoes=[s,...rhDemissoes];portClose();render();}
   catch(e){portErr('Erro: '+e.message);}
 }
