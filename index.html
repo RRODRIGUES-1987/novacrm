@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.372 | Gerado: 2026-06-21 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.373 | Gerado: 2026-06-21 14:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.372';
+const APP_VERSION='v1.0.373';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -2090,16 +2090,10 @@ function buildCadastroForm(tipo, record, id=null){
           </select>
         </div>
         <div class="fg"><label class="fl">Responde para (hierarquia)</label>
-          <select class="fi" id="cad-responde_para">
-            <option value="">— Ninguém —</option>
-            ${(function(){
-              const gestorFuncIds=new Set(rhFuncoes.filter(function(f){return f.e_gestor===true;}).map(function(f){return f.id;}));
-              return pessoas.filter(function(p){
-                return p.id!==r.id && p.ativo!==false && (gestorFuncIds.has(p.funcao_id)||rhFuncoes.find(function(f){return f.funcao===p.cargo&&f.e_gestor===true;}));
-              }).sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');})
-                .map(function(p){return'<option value="'+p.id+'" '+(r.responde_para===p.id?'selected':'')+'>'+p.nome+(p.cargo?' — '+p.cargo:'')+'</option>';}).join('');
-            })()}
-          </select>
+          <div class="fi" style="display:flex;align-items:center;min-height:38px;background:var(--bg2);color:var(--text2)">
+            ${(function(){var t=pessoas.find(function(x){return x.id===r.responde_para;});return t?(t.nome+(t.cargo?' — '+t.cargo:'')):'— definido pelo organograma —';})()}
+          </div>
+          <div style="font-size:10px;color:var(--text3);margin-top:3px">🔗 Definido automaticamente pelo organograma</div>
         </div>
         <div class="fg"><label class="fl">Cargo</label>
           <input class="fi" id="cad-cargo" value="${r.cargo||''}" placeholder="Cargo">
@@ -3308,7 +3302,7 @@ async function saveCadastro(){
     obj.tipo_pessoa='funcionario';
     obj.tipo_contrato=ge('cad-tipo_contrato')?.value||null;
     obj.gestor_id=ge('cad-gestor_id')?.value||null;
-    obj.responde_para=ge('cad-responde_para')?.value||null;
+    // responde_para é gerenciado automaticamente pelo organograma (orgRecalcResponde)
     if(ge('cad-unit_id')?.value) obj.unit_id=ge('cad-unit_id').value;
     const _fid=ge('cad-funcao')?.value||null;
     obj.funcao_id=_fid||null;
@@ -16938,7 +16932,8 @@ function rRHOrganograma(){
   </div>`;
   if(tab==='arvore') return tabs+rOrgArvore();
   if(tab==='estrutura') return tabs+rOrgEstrutura();
-  return tabs+rOrgAlocacoes();
+  const btnSyncResp=orgPodeCriar()?`<div style="margin-bottom:12px"><button class="btn btn-sm" onclick="orgBackfillResponde()">🔗 Sincronizar 'responde para' pelo organograma</button></div>`:'';
+  return tabs+btnSyncResp+rOrgAlocacoes();
 }
 
 // ── ABA ÁRVORE ──
@@ -17312,6 +17307,7 @@ async function orgSalvarNo(id){
   try{
     if(id){await dbUpdate('org_nos',id,dados);orgNos=orgNos.map(x=>x.id===id?{...x,...dados}:x);}
     else{const salvo=await dbInsert('org_nos',dados);if(salvo)orgNos=[...orgNos,salvo];}
+    await orgRecalcResponde(true);
     portClose();render();
   }catch(e){portErr('Erro: '+e.message);}
 }
@@ -17375,6 +17371,7 @@ async function orgSalvarAlocacao(noId){
   try{
     const salvo=await dbInsert('org_alocacoes',dados);
     if(salvo)orgAlocacoes=[...orgAlocacoes,salvo];
+    await orgRecalcResponde(true);
     portClose();render();
   }catch(e){portErr('Erro: '+e.message);}
 }
@@ -17384,9 +17381,63 @@ async function orgRemoverAlocacao(id){
   try{
     await dbDelete('org_alocacoes',id);
     orgAlocacoes=orgAlocacoes.filter(x=>x.id!==id);
+    await orgRecalcResponde(true);
     render();
   }catch(e){alert('Erro: '+e.message);}
 }
+// ── DERIVAÇÃO AUTOMÁTICA DO "RESPONDE PARA" PELO ORGANOGRAMA ──
+function orgProfundidade(noId){
+  var d=0,atual=noId,g=0;
+  while(atual&&g<60){g++;var no=orgNos.find(function(x){return x.id===atual;});if(!no)break;atual=no.parent_id;d++;}
+  return d;
+}
+function orgGestorAscendente(noId,excluirPessoaId){
+  var atual=noId,g=0;
+  while(atual&&g<60){
+    g++;
+    var ges=orgAlocacoes.find(function(a){return a.org_no_id===atual&&a.is_gestor&&a.pessoa_id!==excluirPessoaId;});
+    if(ges)return ges.pessoa_id;
+    var no=orgNos.find(function(x){return x.id===atual;});
+    atual=no?no.parent_id:null;
+  }
+  return null;
+}
+function orgRespondeParaDe(pessoaId){
+  var nodesGestor=orgAlocacoes.filter(function(a){return a.pessoa_id===pessoaId&&a.is_gestor;});
+  if(nodesGestor.length){
+    var noPrim=nodesGestor.map(function(a){return orgNos.find(function(x){return x.id===a.org_no_id;});}).filter(Boolean)
+      .sort(function(a,b){return orgProfundidade(a.id)-orgProfundidade(b.id);})[0];
+    if(noPrim&&noPrim.parent_id)return orgGestorAscendente(noPrim.parent_id,pessoaId);
+    return null;
+  }
+  var alocCol=orgAlocacoes.find(function(a){return a.pessoa_id===pessoaId&&!a.is_gestor;});
+  if(alocCol)return orgGestorAscendente(alocCol.org_no_id,pessoaId);
+  return null;
+}
+async function orgRecalcResponde(persist){
+  var alvos=pessoas.filter(function(p){return ['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false;});
+  var changed=[];
+  alvos.forEach(function(p){
+    var novo=orgRespondeParaDe(p.id)||null;
+    if((p.responde_para||null)!==novo)changed.push({id:p.id,novo:novo});
+  });
+  if(persist){
+    for(var i=0;i<changed.length;i++){
+      try{await dbUpdate('pessoas',changed[i].id,{responde_para:changed[i].novo});}catch(e){}
+    }
+  }
+  changed.forEach(function(c){var p=pessoas.find(function(x){return x.id===c.id;});if(p)p.responde_para=c.novo;});
+  return changed.length;
+}
+async function orgBackfillResponde(){
+  if(!confirm("Recalcular o 'responde para' de todos os colaboradores a partir do organograma?\n\nColaboradores fora do organograma ficarão sem responde para."))return;
+  try{
+    var n=await orgRecalcResponde(true);
+    render();
+    showToast&&showToast(n+" colaborador(es) atualizado(s).","green");
+  }catch(e){alert('Erro: '+e.message);}
+}
+
 // ========================== FIM ORGANOGRAMA ==========================
 
 // ============================ EPIs ============================
@@ -18561,10 +18612,12 @@ async function demAprovarAdmin(id,pessoaId){
     // 2) Inativa colaborador
     await dbUpdate('pessoas',pessoaId,{ativo:false,data_desligamento:dataISO});
     pessoas=pessoas.map(p=>p.id===pessoaId?{...p,ativo:false}:p);
-    // 3) Remove alocações no organograma (mantém headcount — vaga fica aberta)
-    const alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId&&!a.is_gestor);
+    // 3) Remove TODAS as alocações no organograma (inclusive onde era gestor) — vaga fica aberta
+    const alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId);
     await Promise.all(alocacoesPessoa.map(a=>dbDelete('org_alocacoes',a.id)));
-    orgAlocacoes=orgAlocacoes.filter(a=>!(a.pessoa_id===pessoaId&&!a.is_gestor));
+    orgAlocacoes=orgAlocacoes.filter(a=>a.pessoa_id!==pessoaId);
+    // 4) Recalcula "responde para" — subordinados sobem para o nó superior
+    await orgRecalcResponde(true);
     render();
     showToast&&showToast('Colaborador desligado. Vaga aberta no organograma.','green');
   }catch(e){alert('Erro: '+e.message);}
