@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.376 | Gerado: 2026-06-21 20:25 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.377 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -813,7 +813,7 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const STAGES=['Prospecção','Negociação','Fechado','Perdido'];
 const SBM={Cliente:'bdg bg',Lead:'bdg bb',Prospecto:'bdg ba',Inativo:'bdg bgr'};
 const AVC=['av0','av1','av2','av3','av4'];
-const ROLES={admin:'Admin',adm:'ADM / Financeiro',gestor:'ADM',rh:'RH',compras:'Compras',qualidade:'Qualidade',vendedor:'Vendedor',portaria:'Portaria',operacao:'Operação'};
+const ROLES={admin:'Admin',adm:'ADM / Financeiro',gestor:'ADM',rh:'RH',compras:'Compras',qualidade:'Qualidade',vendedor:'Vendedor',portaria:'Portaria',operacao:'Operação',separador:'Separador (coletor)',conferente:'Conferente (coletor)'};
 const ROLE_CLASS={admin:'role-admin',adm:'role-adm',gestor:'role-adm',rh:'role-gestor',compras:'role-adm',qualidade:'role-gestor',vendedor:'role-vendedor',portaria:'role-portaria',operacao:'role-operacao'};
 
 let cu=null,tok=null,profile=null,company=null;
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.376';
+const APP_VERSION='v1.0.377';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -1328,6 +1328,9 @@ async function finishEnterApp(user){
   }
   const isReload=!!savedPage; // se tem página salva é F5
 
+  // Papel de coletor → shell dedicado (separação/conferência), sem app normal
+  if(coletorRole(role)){ coletorEnter(); return; }
+
   if(isReload&&savedPage){
     const mod=MODULE_MAP[savedPage];
     pg(savedPage);
@@ -1562,6 +1565,14 @@ async function loadData(){
       dbSelect('rh_funcoes',`company_id=eq.${cid}`),
     ]);
     await loadUserUnits();
+  } else if(coletorRole(role)&&cid){
+    // Papel de coletor: carrega só o necessário p/ separação/conferência
+    [profiles,clientes]=await Promise.all([
+      dbSelect('profiles',`company_id=eq.${cid}`).catch(()=>[]),
+      dbSelect('clientes',`company_id=eq.${cid}`).catch(()=>[]),
+    ]);
+    await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
+    await loadWmsData(cid).catch(e=>console.warn('loadWmsData:',e));
   } else {
     [contacts,deals,tasks,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao]=await Promise.all([
       dbSelect('contacts',`owner_id=eq.${uid}`),
@@ -19982,6 +19993,243 @@ async function wmsConfConfirmar(listaId){
   }catch(e){portErr(e.message||'Erro ao confirmar.');}
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  MODO COLETOR (mobile dedicado) — Separação e Conferência
+//  Papéis de coletor entram num shell próprio, sem sidebar/menu.
+//  Reusa toda a lógica/dados do WMS; só adiciona a camada mobile.
+//  Extensível: novos papéis/funções entram nos mapas abaixo.
+// ══════════════════════════════════════════════════════════════════
+const COLETOR_FUNCS={
+  separar:{key:'separar',label:'Separar',icon:'📦',desc:'Separar pedidos por bipe',abrir:'coletorSepListas'},
+  conferir:{key:'conferir',label:'Conferir',icon:'✅',desc:'Conferir pedidos separados',abrir:'coletorConfListas'}
+  // futuro: inventario:{...}, mover/enderecar (empilhadeira):{...}
+};
+const COLETOR_ROLES={
+  separador:['separar'],
+  conferente:['conferir']
+  // futuro: inventario:['inventario'], empilhadeira:['mover','enderecar']
+};
+function coletorRole(role){return !!COLETOR_ROLES[role];}
+function coletorFuncs(role){return (COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean);}
+function coletorAbrirFunc(key){var f=COLETOR_FUNCS[key];if(f&&window[f.abrir])window[f.abrir]();}
+
+let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null;
+
+function coletorEnter(){
+  ge('app').classList.remove('on');
+  document.body.classList.add('coletor-on');
+  let ov=ge('coletor');
+  if(!ov){ov=document.createElement('div');ov.id='coletor';document.body.appendChild(ov);}
+  ov.style.cssText='position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;overflow:hidden';
+  coletorHome();
+}
+async function coletorSair(){
+  coletorCamStop();
+  await doLogout(); // confirma e desloga (ou retorna se cancelar)
+  if(!tok){ document.body.classList.remove('coletor-on'); const ov=ge('coletor'); if(ov)ov.remove(); }
+}
+function coletorHeader(titulo,voltarFn){
+  const emp=company?.name||'—';const role=profile?.role||'';
+  const back=voltarFn?'<button onclick="'+voltarFn+'" style="background:none;border:none;color:#fff;font-size:24px;line-height:1;cursor:pointer;padding:0 6px">‹</button>':'';
+  return '<div style="flex-shrink:0;background:var(--blue-text);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px">'
+    +back
+    +'<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(titulo||'VERUS Coletor')+'</div>'
+    +'<div style="font-size:10px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+emp+' · '+(ROLES[role]||role)+'</div></div>'
+    +'<button onclick="coletorSair()" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;cursor:pointer">Sair</button>'
+    +'</div>';
+}
+function coletorShow(titulo,voltarFn,bodyHtml){
+  coletorCamStop();
+  const ov=ge('coletor');if(!ov)return;
+  ov.innerHTML=coletorHeader(titulo,voltarFn)
+    +'<div id="col-content" style="flex:1;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch">'+bodyHtml+'</div>';
+}
+function coletorHome(){
+  const funcs=coletorFuncs(profile?.role);
+  if(funcs.length===1){window[funcs[0].abrir]();return;}
+  const cards=funcs.map(function(f){return '<button onclick="coletorAbrirFunc(&apos;'+f.key+'&apos;)" style="display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:12px;cursor:pointer">'
+    +'<div style="font-size:34px">'+f.icon+'</div>'
+    +'<div><div style="font-size:18px;font-weight:800;color:var(--text)">'+f.label+'</div><div style="font-size:12px;color:var(--text3)">'+f.desc+'</div></div></button>';}).join('');
+  coletorShow('VERUS Coletor',null,'<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Escolha a operação:</div>'+(cards||'<div style="color:var(--text3)">Nenhuma função liberada para seu papel.</div>'));
+}
+
+// ── Câmera (BarcodeDetector nativo; Android/Chrome) ──
+function coletorCamSuporta(){return ('BarcodeDetector' in window);}
+async function coletorCamStart(onCode){
+  if(_colCamOn)return;
+  if(!coletorCamSuporta()){showToast('Câmera não suportada neste aparelho — use o coletor.','amber');return;}
+  const wrap=ge('col-cam');const v=ge('col-cam-video');if(!wrap||!v)return;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    _colCamStream=stream;_colCamOn=true;v.srcObject=stream;await v.play();wrap.style.display='block';
+    let det;try{det=new window.BarcodeDetector({formats:['code_128','ean_13','ean_8','code_39','itf','codabar','data_matrix','qr_code','upc_a','upc_e']});}catch(_){det=new window.BarcodeDetector();}
+    let ultimo='',ultimoT=0;
+    const tick=async function(){
+      if(!_colCamOn)return;
+      try{
+        const codes=await det.detect(v);
+        if(codes&&codes.length){
+          const val=codes[0].rawValue||'';const now=Date.now();
+          if(val&&(val!==ultimo||now-ultimoT>1500)){ultimo=val;ultimoT=now;if(navigator.vibrate)navigator.vibrate(60);onCode(val);}
+        }
+      }catch(e){}
+      _colCamRAF=requestAnimationFrame(tick);
+    };
+    _colCamRAF=requestAnimationFrame(tick);
+  }catch(e){showToast('Não foi possível abrir a câmera: '+(e.message||e),'red');_colCamOn=false;}
+}
+function coletorCamStop(){
+  _colCamOn=false;
+  if(_colCamRAF){cancelAnimationFrame(_colCamRAF);_colCamRAF=null;}
+  if(_colCamStream){_colCamStream.getTracks().forEach(function(t){t.stop();});_colCamStream=null;}
+  const wrap=ge('col-cam');if(wrap)wrap.style.display='none';
+}
+function coletorCamToggle(onCode){if(_colCamOn)coletorCamStop();else coletorCamStart(onCode);}
+function coletorScanSubmit(v){
+  if(v==null)return;
+  var raw=String(v).replace(/[\r\n]+$/,'');
+  if(!raw.trim())return;
+  if(_colScanHandler)_colScanHandler(raw);
+  var i=ge('col-scan');if(i){i.value='';i.focus();}
+}
+function coletorScanBox(){
+  var cam=coletorCamSuporta()?'<button type="button" onclick="coletorCamToggle(coletorScanSubmit)" style="flex-shrink:0;width:54px;border:2px solid var(--blue-text);background:var(--blue-bg);border-radius:10px;font-size:22px;cursor:pointer">📷</button>':'';
+  return '<div style="position:sticky;top:0;background:var(--bg);padding-bottom:10px;z-index:2;border-bottom:1px solid var(--border);margin-bottom:10px">'
+    +'<div style="display:flex;gap:8px">'
+    +'<input id="col-scan" placeholder="Bipe ou digite o código…" autocomplete="off" style="flex:1;padding:13px 14px;border:2px solid var(--blue-text);border-radius:10px;font-size:16px" onkeydown="if(event.key===&apos;Enter&apos;){coletorScanSubmit(this.value);}">'
+    +cam
+    +'</div>'
+    +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>'
+    +'</div>';
+}
+
+// ── SEPARAR ──
+function coletorSepListas(){
+  _colScanHandler=null;
+  const cid=company?.id;
+  const listas=wmsListasSeparacao.filter(function(l){return l.company_id===cid&&l.status!=='concluida'&&l.status!=='cancelada';});
+  let html;
+  if(!listas.length){html='<div style="text-align:center;color:var(--text3);padding:40px 16px">Nenhuma lista de separação pendente.</div>';}
+  else{
+    html=listas.map(function(l){
+      const cli=clientes.find(function(c){return c.id===l.cliente_id;});
+      const tar=wmsTarefasSeparacao.filter(function(t){return t.lista_id===l.id;});
+      const feitas=tar.filter(function(t){return t.status==='concluida';}).length;
+      const pct=tar.length?Math.round(feitas/tar.length*100):0;
+      return '<button onclick="coletorSepAbrir(&apos;'+l.id+'&apos;)" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:800">Lista '+(l.numero_lista||'—')+'</div><div style="font-size:12px;font-weight:700;color:var(--blue-text)">'+pct+'%</div></div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+((cli&&cli.nome)||'—')+' · '+feitas+'/'+tar.length+' tarefas</div>'
+        +'<div style="height:6px;background:var(--bg2);border-radius:99px;overflow:hidden;margin-top:8px"><div style="height:100%;width:'+pct+'%;background:var(--blue-text)"></div></div></button>';
+    }).join('');
+  }
+  const back=coletorFuncs(profile?.role).length>1?'coletorHome()':null;
+  coletorShow('Separar',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Selecione a lista para separar:</div>'+html);
+}
+function coletorSepRowHtml(t){
+  const ok=t.status==='concluida';
+  const vol=t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
+  const corVol=t.tipo_volume==='pallet'?'#8b5cf6':'#f59e0b';
+  return '<div id="col-tar-'+t.id+'" style="display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:7px;background:'+(ok?'var(--green-bg)':'var(--bg)')+'">'
+    +'<div style="font-size:18px">'+(ok?'✅':'⬜')+'</div>'
+    +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">'+t.sku+'</div><div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+((t.descricao||'').slice(0,40))+'</div></div>'
+    +'<div style="text-align:right"><div style="font-size:9px;font-weight:700;color:'+corVol+'">'+vol+'</div><div style="font-size:13px;font-weight:800">'+(+t.quantidade).toLocaleString('pt-BR')+'</div></div></div>';
+}
+function coletorSepProgHtml(listaId){
+  const tarefas=wmsTarefasSeparacao.filter(function(t){return t.lista_id===listaId;});
+  const feitas=tarefas.filter(function(t){return t.status==='concluida';}).length;
+  const pct=tarefas.length?Math.round(feitas/tarefas.length*100):0;
+  const concl=tarefas.length>0&&feitas===tarefas.length;
+  return '<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:7px;background:var(--bg2);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(concl?'var(--green-text)':'var(--blue-text)')+'"></div></div><span style="font-size:11px;font-weight:700;color:'+(concl?'var(--green-text)':'var(--blue-text)')+'">'+feitas+'/'+tarefas.length+'</span></div>';
+}
+function coletorSepAbrir(listaId){
+  const l=wmsListasSeparacao.find(function(x){return x.id===listaId;});if(!l)return;
+  const cli=clientes.find(function(c){return c.id===l.cliente_id;});
+  const tarefas=wmsTarefasSeparacao.filter(function(t){return t.lista_id===listaId;}).sort(function(a,b){return (a.ordem||0)-(b.ordem||0);});
+  _colScanHandler=function(code){coletorSepBipe(listaId,code);};
+  const topo='<div style="margin-bottom:10px"><div style="font-size:13px;font-weight:700">Lista '+(l.numero_lista||'')+' · '+((cli&&cli.nome)||'—')+'</div><div id="col-sep-prog" style="margin-top:6px">'+coletorSepProgHtml(listaId)+'</div></div>';
+  const lista='<div id="col-sep-list">'+tarefas.map(coletorSepRowHtml).join('')+'</div><div id="col-sep-fim"></div>';
+  coletorShow('Separar','coletorSepListas()',coletorScanBox()+topo+lista);
+  setTimeout(function(){var i=ge('col-scan');if(i)i.focus();},80);
+}
+async function coletorSepBipe(listaId,code){
+  const raw=wmsLeituraLimpa(code);const cod=wmsNorm(raw);if(!cod)return;
+  const l=wmsListasSeparacao.find(function(x){return x.id===listaId;});
+  const cli=l?clientes.find(function(c){return c.id===l.cliente_id;}):null;
+  const usaEtiq=!!(cli&&cli.wms_usa_etiqueta_cliente===true);
+  const pend=wmsTarefasSeparacao.filter(function(t){return t.lista_id===listaId&&t.status!=='concluida';}).sort(function(a,b){return (a.ordem||0)-(b.ordem||0);});
+  let alvo=null,tipoCasa='sku';
+  for(const t of pend){
+    if(wmsNorm(t.sku)===cod){alvo=t;tipoCasa='sku';break;}
+    if(usaEtiq){
+      const prod=wmsProdutos.find(function(pr){return pr.id===t.produto_id;});
+      const tc=prod?wmsEtiquetaTipoCasa(raw,prod):null;
+      if(tc&&((tc==='pallet'&&t.tipo_volume==='pallet')||(tc==='caixa'&&t.tipo_volume!=='pallet'))){alvo=t;tipoCasa=tc;break;}
+    }
+  }
+  if(!alvo){showToast('⛔ Código não confere com tarefa pendente: '+cod,'red');if(navigator.vibrate)navigator.vibrate([60,40,60]);return;}
+  try{
+    const agora=new Date().toISOString();
+    await dbUpdate('wms_tarefas_separacao',alvo.id,{status:'concluida',qtd_separada:alvo.quantidade,separador_id:cu?.id||null,separador_nome:profile?.full_name||cu?.email||null,concluido_em:agora,houve_falta:false});
+    alvo.status='concluida';alvo.qtd_separada=alvo.quantidade;alvo.concluido_em=agora;
+    await wmsRegistrarLeituras('separacao',[{sku:alvo.sku,descricao:alvo.descricao,produto_id:alvo.produto_id,tipo_volume:alvo.tipo_volume,quantidade:alvo.quantidade}],{pedido_id:alvo.pedido_id,lista_id:listaId,tarefa_id:alvo.id,unit_id:alvo.unit_id,modo:'bipe'});
+    if(navigator.vibrate)navigator.vibrate(60);
+    showToast('✓ '+alvo.sku+(tipoCasa==='pallet'?' (pallet)':'')+' separado','green');
+    const row=ge('col-tar-'+alvo.id);if(row)row.outerHTML=coletorSepRowHtml(alvo);
+    const prog=ge('col-sep-prog');if(prog)prog.innerHTML=coletorSepProgHtml(listaId);
+    const tarefas=wmsTarefasSeparacao.filter(function(x){return x.lista_id===listaId;});
+    if(tarefas.every(function(x){return x.status==='concluida';})){
+      await dbUpdate('wms_listas_separacao',listaId,{status:'concluida'});
+      const ll=wmsListasSeparacao.find(function(x){return x.id===listaId;});if(ll)ll.status='concluida';
+      const pedIds=[...new Set([].concat(tarefas.map(function(x){return x.pedido_id;}).filter(Boolean),wmsListaPedidos.filter(function(lp){return lp.lista_id===listaId;}).map(function(lp){return lp.pedido_id;})))];
+      for(const pid of pedIds){const p=wmsPedidos.find(function(x){return x.id===pid;});if(p&&wmsSeparacaoConcluidaPedido(pid)&&(p.status==='em_separacao'||p.status==='importado')){await dbUpdate('wms_pedidos',pid,{status:'separado'});p.status='separado';}}
+      const fim=ge('col-sep-fim');if(fim)fim.innerHTML='<div style="margin-top:12px;padding:14px;background:var(--green-bg);color:var(--green-text);border-radius:12px;text-align:center;font-weight:700">✓ Separação concluída</div>';
+    }
+  }catch(e){showToast('Erro: '+(e.message||e),'red');}
+  const i=ge('col-scan');if(i)i.focus();
+}
+
+// ── CONFERIR (reusa o fluxo de conferência/unitização existente) ──
+function coletorConfListas(){
+  _colScanHandler=null;
+  const cid=company?.id;
+  const candidatos=wmsPedidos.filter(function(p){return p.company_id===cid&&['em_separacao','separado','em_conferencia','conferido'].includes(p.status)&&wmsConfsDoCliente(p.cliente_id).length>0&&wmsSeparacaoConcluidaPedido(p.id);});
+  const lista=candidatos.map(function(p){
+    const passos=wmsConfsDoCliente(p.cliente_id).filter(function(t){return t<=3;});
+    const proxima=passos.find(function(t){return wmsConfsFeitas(p.id,t).length===0;});
+    return {p:p,proxima:proxima,passos:passos};
+  }).filter(function(o){return o.proxima;});
+  let html;
+  if(!lista.length){html='<div style="text-align:center;color:var(--text3);padding:40px 16px">Nenhum pedido aguardando conferência.</div>';}
+  else{
+    html=lista.map(function(o){
+      const cli=clientes.find(function(c){return c.id===o.p.cliente_id;});
+      const badges=o.passos.map(function(t){const f=wmsConfsFeitas(o.p.id,t).length>0;return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:'+(f?'var(--green-bg)':'var(--bg2)')+';color:'+(f?'var(--green-text)':'var(--text3)')+'">'+(f?'✓':'○')+' '+t+'ª</span>';}).join(' ');
+      return '<button onclick="coletorConfAbrir(&apos;'+o.p.id+'&apos;,'+o.proxima+')" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:800">'+wmsNumeroCurto(o.p)+'</div><span style="font-size:11px;font-weight:700;color:var(--blue-text)">Conferir '+o.proxima+'ª</span></div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+((cli&&cli.nome)||'—')+'</div>'
+        +'<div style="display:flex;gap:5px;margin-top:7px">'+badges+'</div></button>';
+    }).join('');
+  }
+  const back=coletorFuncs(profile?.role).length>1?'coletorHome()':null;
+  coletorShow('Conferir',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Selecione o pedido para conferir:</div>'+html);
+}
+function coletorConfScan(c){if(ge('conf-bipe'))wmsConfBipe(c);else if(ge('pal-bipe'))wmsPalletBipe(c);}
+function coletorConfAbrir(pedidoId,tipo){
+  wmsAbrirConferencia(pedidoId,tipo); // modal existente (z-index 200, acima do coletor)
+  setTimeout(coletorConfInjetarCamera,120);
+}
+function coletorConfInjetarCamera(){
+  if(!coletorCamSuporta())return;
+  if(ge('col-cam-conf'))return;
+  const inp=ge('conf-bipe')||ge('pal-bipe');if(!inp)return;
+  const host=inp.parentElement&&inp.parentElement.parentElement?inp.parentElement.parentElement:inp.parentElement;
+  if(!host)return;
+  const box=document.createElement('div');box.id='col-cam-conf';box.style.cssText='margin-top:8px';
+  box.innerHTML='<button type="button" onclick="coletorCamToggle(coletorConfScan)" style="width:100%;padding:10px;border:2px solid var(--blue-text);background:var(--blue-bg);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">📷 Ler com a câmera</button>'
+    +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>';
+  host.appendChild(box);
+}
+
 // Verifica se um pedido já tem conferência registrada (bloqueia desfazer separação)
 function wmsPedidoTemConferencia(pedidoId){
   return (wmsConferencias||[]).some(cf=>cf.pedido_id===pedidoId);
@@ -21470,6 +21718,7 @@ async function wmsSalvarConferencia(){
     portClose();
     showToast(temDiverg?'Conferência com divergência — pendente de auditoria.':'Conferência OK registrada.',temDiverg?'amber':'green');
     if(curPage==='wms-conferencia')render();
+    if(document.body.classList.contains('coletor-on')&&typeof coletorConfListas==='function'){coletorCamStop();coletorConfListas();}
   }catch(e){portErr(e.message||'Erro ao salvar conferência.');}
 }
 
