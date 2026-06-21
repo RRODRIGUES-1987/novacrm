@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.373 | Gerado: 2026-06-21 14:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.375 | Gerado: 2026-06-21 19:55 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.373';
+const APP_VERSION='v1.0.375';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20656,8 +20656,13 @@ function wmsProdutoModal(id){
      </div>
      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
        <div style="font-weight:700;font-size:13px;margin-bottom:4px">Etiqueta do cliente</div>
-       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Código/valor da etiqueta que o cliente já aplica no produto. Quando o depositante usa etiqueta própria, bipamos a dele — sem gerar a nossa.</div>
-       <input class="fi" id="wp-etiqcli" value="${(p.etiqueta_cliente||'').replace(/"/g,'&quot;')}" placeholder="código da etiqueta do cliente">
+       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Quando o depositante usa etiqueta própria, bipamos a dele. Configure a leitura bipando uma etiqueta real: o sistema mostra o que leu e você recorta o trecho que é o código.</div>
+       <label class="fl">Valor esperado (preenchido pela configuração da leitura)</label>
+       <input class="fi" id="wp-etiqcli" value="${(p.etiqueta_cliente||'').replace(/"/g,'&quot;')}" placeholder="bipe e configure a leitura">
+       <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+         <button type="button" class="btn btn-p btn-sm" onclick="wmsConfigLeitura('${id}')">⛶ Configurar leitura (bipe)</button>
+         <span style="font-size:11px;color:${wmsMascaraResumo(p)?'var(--green-text)':'var(--text3)'}">${wmsMascaraResumo(p)||'Leitura não configurada'}</span>
+       </div>
      </div>`,
     `wmsProdutoSalvar('${id}')`);
 }
@@ -20683,6 +20688,155 @@ async function wmsProdutoSalvar(id){
     portClose();
     if(curPage==='wms-produtos')render();
   }catch(e){portErr('Erro: '+e.message);}
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  WMS · CONFIGURADOR DA LEITURA DA ETIQUETA (por produto, 17f)
+//  Bipe uma etiqueta real → o VERUS mostra o que leu → o usuário recorta
+//  o trecho que é o código (início + tamanho). Salva a máscara no produto.
+// ══════════════════════════════════════════════════════════════════
+function wmsMascaraResumo(p){
+  var m=p&&p.etiqueta_mascara;
+  if(!m||m.tipo!=='posicao'||!(parseInt(m.tamanho,10)>0))return '';
+  return 'Recorte: posição '+m.inicio+' · '+m.tamanho+' caractere(s)';
+}
+function wmsCfgGlyph(ch){
+  var code=ch.charCodeAt(0);
+  if(code===29)return '⎮';      // GS / FNC1
+  if(code<32)return '·';
+  if(ch===' ')return '␣';
+  return ch.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function wmsCfgGlyphAll(s){var o='';for(var i=0;i<s.length;i++)o+=wmsCfgGlyph(s.charAt(i));return o;}
+
+let _cfgLeitura=null; // {produtoId, raw, inicio, tamanho, selStart}
+
+function wmsConfigLeitura(produtoId){
+  const p=wmsProdutos.find(x=>x.id===produtoId);
+  if(!p){showToast('Salve o produto antes de configurar a leitura.','amber');return;}
+  const m=(p.etiqueta_mascara&&p.etiqueta_mascara.tipo==='posicao')?p.etiqueta_mascara:{};
+  _cfgLeitura={produtoId:produtoId,raw:wmsLeituraLimpa(m.amostra||''),inicio:parseInt(m.inicio,10)||1,tamanho:parseInt(m.tamanho,10)||0,selStart:null};
+  portClose(); // abre como modal único (evita colisão de ids do portModal)
+  const inner=''
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Bipe uma etiqueta real deste produto. O VERUS mostra exatamente o que foi lido — clique no 1º e no último caractere do código do produto.</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:10px">'
+    +'  <input id="cfg-scan" placeholder="Bipe a etiqueta aqui…" autocomplete="off" style="flex:1;padding:10px 12px;border:1.5px solid var(--blue-text);border-radius:8px;font-size:14px" onkeydown="if(event.key===&apos;Enter&apos;){wmsCfgSetRaw(this.value);}">'
+    +'  <button class="btn btn-p" onclick="wmsCfgSetRaw(ge(&apos;cfg-scan&apos;).value)" style="white-space:nowrap">Ler</button>'
+    +'</div>'
+    +'<div id="cfg-area"></div>';
+  portModal('Configurar leitura — '+(p.sku||''),inner,'wmsSalvarMascara()',{saveLabel:'Salvar leitura',width:'650px'});
+  setTimeout(function(){var i=ge('cfg-scan');if(i)i.focus();wmsCfgRender();},60);
+}
+function wmsCfgSetRaw(v){
+  if(!_cfgLeitura)return;
+  _cfgLeitura.raw=wmsLeituraLimpa(v);
+  _cfgLeitura.selStart=null;
+  if(!(_cfgLeitura.tamanho>0)){_cfgLeitura.inicio=1;_cfgLeitura.tamanho=_cfgLeitura.raw.length;}
+  wmsCfgRender();
+}
+function wmsCfgCells(){
+  const raw=_cfgLeitura.raw||'';
+  const ini=_cfgLeitura.inicio,tam=_cfgLeitura.tamanho;
+  const a=ini-1,b=ini-1+tam-1;
+  let cells='';
+  for(let i=0;i<raw.length;i++){
+    const sel=(i>=a&&i<=b&&tam>0);
+    const isStart=(_cfgLeitura.selStart===i);
+    const bg=sel?'var(--blue-text)':(isStart?'var(--amber-bg)':'var(--bg)');
+    const fg=sel?'#fff':'var(--text)';
+    cells+='<div onclick="wmsCfgClick('+i+')" style="display:inline-flex;flex-direction:column;align-items:center;cursor:pointer;margin:1px">'
+      +'<div style="min-width:18px;height:24px;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:13px;border:1px solid var(--border);border-radius:4px;background:'+bg+';color:'+fg+'">'+wmsCfgGlyph(raw.charAt(i))+'</div>'
+      +'<div style="font-size:8px;color:var(--text3);margin-top:1px">'+(i+1)+'</div>'
+    +'</div>';
+  }
+  return cells;
+}
+function wmsCfgExtraido(){
+  const raw=_cfgLeitura.raw||'';
+  const tam=_cfgLeitura.tamanho;
+  const ext=tam>0?raw.substr(_cfgLeitura.inicio-1,tam):'';
+  return ext?wmsCfgGlyphAll(ext):'<span style="color:var(--text3);font-weight:400">—</span>';
+}
+function wmsCfgRender(){
+  const area=ge('cfg-area');if(!area||!_cfgLeitura)return;
+  if(!_cfgLeitura.raw){area.innerHTML='<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px;background:var(--bg2);border-radius:8px">Aguardando a leitura…</div>';return;}
+  area.innerHTML=''
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:4px">Leitura (clique no 1º e no último caractere do código):</div>'
+    +'<div id="cfg-cells" style="display:flex;flex-wrap:wrap;padding:8px;background:var(--bg2);border-radius:8px;max-height:150px;overflow:auto">'+wmsCfgCells()+'</div>'
+    +'<div style="display:flex;gap:10px;align-items:flex-end;margin-top:12px">'
+    +'  <div><label class="fl">Início</label><input class="fi" id="cfg-ini" type="number" min="1" value="'+_cfgLeitura.inicio+'" style="width:90px" oninput="wmsCfgInput()"></div>'
+    +'  <div><label class="fl">Tamanho</label><input class="fi" id="cfg-tam" type="number" min="0" value="'+_cfgLeitura.tamanho+'" style="width:90px" oninput="wmsCfgInput()"></div>'
+    +'</div>'
+    +'<div style="margin-top:12px;padding:10px 12px;background:var(--blue-bg);border-radius:8px">'
+    +'  <div style="font-size:11px;color:var(--text2)">Código extraído (valor esperado do produto):</div>'
+    +'  <div id="cfg-extraido" style="font-family:monospace;font-size:15px;font-weight:700;color:var(--text);margin-top:3px;word-break:break-all">'+wmsCfgExtraido()+'</div>'
+    +'</div>'
+    +'<div style="margin-top:10px"><button class="btn btn-sm" onclick="wmsImportarMascara(&apos;'+_cfgLeitura.produtoId+'&apos;)">Importar máscara de outro produto</button></div>';
+}
+function wmsCfgPaint(){
+  const c=ge('cfg-cells'); if(c)c.innerHTML=wmsCfgCells();
+  const e=ge('cfg-extraido'); if(e)e.innerHTML=wmsCfgExtraido();
+}
+function wmsCfgClick(i){
+  if(!_cfgLeitura)return;
+  if(_cfgLeitura.selStart===null){
+    _cfgLeitura.selStart=i;
+  }else{
+    const a=Math.min(_cfgLeitura.selStart,i),b=Math.max(_cfgLeitura.selStart,i);
+    _cfgLeitura.inicio=a+1;_cfgLeitura.tamanho=b-a+1;_cfgLeitura.selStart=null;
+    const ii=ge('cfg-ini'),tt=ge('cfg-tam');
+    if(ii)ii.value=_cfgLeitura.inicio; if(tt)tt.value=_cfgLeitura.tamanho;
+  }
+  wmsCfgPaint();
+}
+function wmsCfgInput(){
+  if(!_cfgLeitura)return;
+  _cfgLeitura.inicio=Math.max(1,parseInt(ge('cfg-ini')?.value,10)||1);
+  _cfgLeitura.tamanho=Math.max(0,parseInt(ge('cfg-tam')?.value,10)||0);
+  _cfgLeitura.selStart=null;
+  wmsCfgPaint();
+}
+async function wmsSalvarMascara(){
+  if(!_cfgLeitura)return;
+  const raw=_cfgLeitura.raw||'';
+  const ini=_cfgLeitura.inicio,tam=_cfgLeitura.tamanho;
+  if(!raw){portErr('Bipe uma etiqueta primeiro.');return;}
+  if(!(tam>0)){portErr('Selecione o trecho do código (início e tamanho).');return;}
+  const extraido=raw.substr(ini-1,tam).trim();
+  if(!extraido){portErr('O trecho selecionado está vazio.');return;}
+  const masc={tipo:'posicao',inicio:ini,tamanho:tam,amostra:raw};
+  portSaving();
+  try{
+    await dbUpdate('wms_produtos',_cfgLeitura.produtoId,{etiqueta_mascara:masc,etiqueta_cliente:extraido});
+    wmsProdutos=wmsProdutos.map(p=>p.id===_cfgLeitura.produtoId?{...p,etiqueta_mascara:masc,etiqueta_cliente:extraido}:p);
+    const inp=ge('wp-etiqcli'); if(inp)inp.value=extraido;
+    portClose();
+    showToast('Leitura configurada: '+extraido,'green');
+    if(curPage==='wms-produtos')render();
+  }catch(e){portErr('Erro: '+e.message);}
+}
+// Importação entre itens: puxa a máscara de outro produto do mesmo cliente
+function wmsImportarMascara(produtoId){
+  const p=wmsProdutos.find(x=>x.id===produtoId);if(!p)return;
+  const irmaos=wmsProdutos.filter(x=>x.cliente_id===p.cliente_id&&x.id!==produtoId&&x.etiqueta_mascara&&x.etiqueta_mascara.tipo==='posicao'&&parseInt(x.etiqueta_mascara.tamanho,10)>0);
+  const area=ge('cfg-area');if(!area)return;
+  if(!irmaos.length){showToast('Nenhum outro produto deste cliente tem máscara configurada.','amber');return;}
+  let lista=irmaos.map(x=>'<div onclick="wmsAplicarMascaraDe(&apos;'+x.id+'&apos;)" style="padding:9px 11px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center">'
+    +'<div><div style="font-weight:600;font-size:12px">'+x.sku+'</div><div style="font-size:10px;color:var(--text3)">pos '+x.etiqueta_mascara.inicio+' · '+x.etiqueta_mascara.tamanho+' car.</div></div>'
+    +'<span class="btn btn-sm">Usar este padrão</span></div>').join('');
+  area.innerHTML=''
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Escolha um produto com o <b>mesmo padrão</b> de etiqueta. O recorte (início/tamanho) será copiado — depois bipe a etiqueta deste produto para extrair o valor.</div>'
+    +lista
+    +'<div style="margin-top:8px"><button class="btn btn-sm" onclick="wmsCfgRender()">← Voltar</button></div>';
+}
+function wmsAplicarMascaraDe(fromId){
+  const from=wmsProdutos.find(x=>x.id===fromId);
+  if(!from||!from.etiqueta_mascara){wmsCfgRender();return;}
+  _cfgLeitura.inicio=parseInt(from.etiqueta_mascara.inicio,10)||1;
+  _cfgLeitura.tamanho=parseInt(from.etiqueta_mascara.tamanho,10)||0;
+  _cfgLeitura.selStart=null;
+  showToast('Padrão importado de '+from.sku+'. Bipe a etiqueta deste produto para extrair o valor.','blue');
+  wmsCfgRender();
 }
 
 // ── WMS · PARÂMETROS / CLIENTES (depositantes) ──
@@ -20798,7 +20952,7 @@ function wmsCliTabSaida(c){
   const modo=c.wms_modo_separacao||'manual';
   const usaEtiq=c.wms_usa_etiqueta_cliente===true;
   const modoOpt=(v,lbl,desc)=>`<label style="display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:1.5px solid ${modo===v?'var(--blue-text)':'var(--border)'};border-radius:9px;cursor:pointer;background:${modo===v?'var(--blue-bg)':'var(--bg2)'}">
-    <input type="radio" name="wms-modo-sep" value="${v}" ${modo===v?'checked':''} style="margin-top:2px" onchange="wmsToggleEtiqVis()">
+    <input type="radio" name="wms-modo-sep" value="${v}" ${modo===v?'checked':''} style="margin-top:2px">
     <div><div style="font-weight:600;font-size:13px;color:var(--text)">${lbl}</div><div style="font-size:11px;color:var(--text3);margin-top:1px">${desc}</div></div>
   </label>`;
   const semEtiq=modo==='manual'; // 'manual' puro não usa etiqueta; demais sim
@@ -20813,7 +20967,7 @@ function wmsCliTabSaida(c){
     <div id="wms-etiq-cliente-box" style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:10px">
       <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utiliza etiqueta do cliente</div>
       <div style="font-size:11px;color:var(--text3)">Se sim, usa a etiqueta do próprio cliente (cadastrada no produto) — não geramos a nossa.</div></div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} onchange="wmsCheckEtiqFaltando('${c.id}',this.checked)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-usa-etiq" ${usaEtiq?'checked':''} onchange="wmsToggleUsaEtiq('${c.id}',this)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
     </div>
     <div id="wms-etiq-faltando" style="margin-top:10px">${usaEtiq?wmsEtiqFaltandoHtml(c.id):''}</div>
 
@@ -20854,25 +21008,32 @@ function wmsCliTabSaida(c){
       </div>
     </div>`;
 }
-// Lista produtos do cliente sem etiqueta_cliente cadastrada
+// Lista produtos do cliente SEM a leitura configurada (máscara + valor esperado)
 function wmsEtiqFaltandoHtml(clienteId){
   const prods=wmsProdutos.filter(p=>p.cliente_id===clienteId);
-  const faltando=prods.filter(p=>!p.etiqueta_cliente||String(p.etiqueta_cliente).trim()==='');
-  if(!prods.length)return'';
-  if(!faltando.length)return`<div style="font-size:11px;color:var(--green-text);background:var(--green-bg);padding:8px 11px;border-radius:8px">✓ Todos os ${prods.length} produtos têm a etiqueta do cliente cadastrada.</div>`;
-  const amostra=faltando.slice(0,8).map(p=>`<span style="display:inline-block;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:2px">${p.sku}</span>`).join('');
+  if(!prods.length)return`<div style="font-size:11px;color:var(--text3);background:var(--bg);border:1px solid var(--border);padding:8px 11px;border-radius:8px">Este cliente ainda não tem produtos cadastrados.</div>`;
+  const faltando=wmsProdutosNaoConfig(clienteId);
+  if(!faltando.length)return`<div style="font-size:11px;color:var(--green-text);background:var(--green-bg);padding:8px 11px;border-radius:8px">✓ Todos os ${prods.length} produtos têm a leitura da etiqueta configurada.</div>`;
+  const amostra=faltando.slice(0,10).map(p=>`<span style="display:inline-block;font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:2px 7px;margin:2px">${p.sku}</span>`).join('');
   return `<div style="font-size:11px;color:var(--amber-text);background:var(--amber-bg);padding:9px 11px;border-radius:8px">
-    ⚠ <b>${faltando.length}</b> de ${prods.length} produto(s) sem a etiqueta do cliente cadastrada.
-    <div style="margin-top:5px">${amostra}${faltando.length>8?`<span style="font-size:10px;color:var(--text3)"> +${faltando.length-8} mais</span>`:''}</div>
-    <div style="margin-top:6px"><button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ir para Produtos →</button></div>
+    🚫 Não é possível ativar: <b>${faltando.length}</b> de ${prods.length} produto(s) sem a leitura da etiqueta configurada.
+    <div style="margin-top:5px">${amostra}${faltando.length>10?`<span style="font-size:10px;color:var(--text3)"> +${faltando.length-10} mais</span>`:''}</div>
+    <div style="margin-top:6px"><button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Configurar nos Produtos →</button></div>
   </div>`;
 }
-function wmsCheckEtiqFaltando(clienteId,ligado){
-  const box=ge('wms-etiq-faltando');if(!box)return;
-  box.innerHTML=ligado?wmsEtiqFaltandoHtml(clienteId):'';
-}
-function wmsToggleEtiqVis(){
-  // etiqueta do cliente é transversal (separação e conferência) — sempre visível
+// Toggle bloqueante: só liga se TODOS os produtos do cliente estiverem configurados
+function wmsToggleUsaEtiq(clienteId,el){
+  const box=ge('wms-etiq-faltando');
+  if(el&&el.checked){
+    const pend=wmsProdutosNaoConfig(clienteId);
+    if(pend.length){
+      el.checked=false;
+      if(box)box.innerHTML=wmsEtiqFaltandoHtml(clienteId);
+      showToast('Configure a leitura de todos os produtos antes de ativar.','amber');
+      return;
+    }
+  }
+  if(box)box.innerHTML=el&&el.checked?wmsEtiqFaltandoHtml(clienteId):'';
 }
 async function wmsSalvarParamCliente(clienteId){
   const dados={};
@@ -20884,7 +21045,13 @@ async function wmsSalvarParamCliente(clienteId){
   if(radio){
     dados.wms_modo_separacao=radio.value;
   }
-  dados.wms_usa_etiqueta_cliente=ge('wms-usa-etiq')?.checked||false;
+  // flag bloqueante: nunca salva ligado se houver produto sem leitura configurada
+  const querEtiq=ge('wms-usa-etiq')?.checked||false;
+  if(querEtiq){
+    const pend=wmsProdutosNaoConfig(clienteId);
+    if(pend.length){portErr('Há '+pend.length+' produto(s) sem a leitura da etiqueta configurada. Configure-os antes de ativar.');return;}
+  }
+  dados.wms_usa_etiqueta_cliente=querEtiq;
   // aba Saída: conferências
   ['wms_conf_1','wms_conf_2','wms_conf_3','wms_conf_4'].forEach(campo=>{
     const cb=ge(campo);if(cb)dados[campo]=cb.checked;
@@ -21094,16 +21261,64 @@ function wmsConfCheckLinha(i,esperado){
   ok.textContent=v===esperado?'✓':'✗';
   ok.style.color=v===esperado?'var(--green-text)':'var(--red-text)';
 }
+// ══════════════════════════════════════════════════════════════════
+//  WMS · LEITURA DA ETIQUETA DO CLIENTE — MÁSCARA POR PRODUTO (17f)
+//  A interpretação da leitura é CONFIGURADA pelo usuário (não chumbada
+//  no código): cada produto guarda em etiqueta_mascara COMO recortar o
+//  código a partir da leitura crua. Tipo suportado: 'posicao'
+//  → {tipo:'posicao', inicio, tamanho, amostra} (inicio 1-based).
+//  Usado só quando o cliente bipa E "Utiliza etiqueta do cliente" ON.
+// ══════════════════════════════════════════════════════════════════
+function wmsNorm(s){return String(s==null?'':s).trim().toUpperCase();}
+
+// Remove só CR/LF residual do coletor; preserva o resto (a posição é literal)
+function wmsLeituraLimpa(raw){return String(raw==null?'':raw).replace(/[\r\n]+$/,'');}
+
+// Aplica a máscara do produto sobre a leitura crua → código extraído (ou null)
+function wmsExtrairMascara(raw,masc){
+  if(!masc||masc.tipo!=='posicao')return null;
+  var s=wmsLeituraLimpa(raw);
+  var ini=Math.max(1,parseInt(masc.inicio,10)||1);
+  var tam=parseInt(masc.tamanho,10)||0;
+  if(tam<=0)return null;
+  return s.substr(ini-1,tam);
+}
+
+// Produto pronto p/ etiqueta do cliente? (precisa de máscara + valor esperado)
+function wmsProdutoConfigurado(prod){
+  var m=prod&&prod.etiqueta_mascara;
+  return !!(m && m.tipo==='posicao' && parseInt(m.tamanho,10)>0 && wmsNorm(prod.etiqueta_cliente));
+}
+
+// Verdadeiro se a leitura, recortada pela máscara do produto, bate com o valor esperado
+function wmsEtiquetaCasaProduto(raw,prod){
+  if(!wmsProdutoConfigurado(prod))return false;
+  var ext=wmsExtrairMascara(raw,prod.etiqueta_mascara);
+  return ext!=null && wmsNorm(ext)===wmsNorm(prod.etiqueta_cliente);
+}
+
+// Produtos de um cliente ainda SEM a leitura configurada
+function wmsProdutosNaoConfig(clienteId){
+  return wmsProdutos.filter(function(p){return p.cliente_id===clienteId && !wmsProdutoConfigurado(p);});
+}
+
 function wmsConfBipe(codigo){
   const itens=window._wmsConfItens||[];
   const sugestao=window._wmsConfSugestao||'codigo_qtd';
-  const cod=String(codigo||'').trim().toUpperCase();
+  const _ped=wmsPedidos.find(x=>x.id===wmsConfPedido);
+  const _cli=clientes.find(c=>c.id===(_ped&&_ped.cliente_id));
+  const usaEtiq=!!(_cli&&_cli.wms_usa_etiqueta_cliente===true);
+  const raw=wmsLeituraLimpa(codigo);
+  const cod=wmsNorm(raw);
   if(!cod)return;
-  // casa por SKU ou pela etiqueta do cliente do produto
+  // casa por SKU sempre; pela etiqueta do cliente só com o flag ligado (e máscara por produto)
   const idx=itens.findIndex(it=>{
-    if(String(it.sku||'').trim().toUpperCase()===cod)return true;
-    const prod=wmsProdutos.find(pr=>pr.id===it.produto_id);
-    return prod && String(prod.etiqueta_cliente||'').trim().toUpperCase()===cod;
+    if(wmsNorm(it.sku)===cod)return true;
+    if(usaEtiq){
+      const prod=wmsProdutos.find(pr=>pr.id===it.produto_id);
+      return prod && wmsEtiquetaCasaProduto(raw,prod);
+    }
+    return false;
   });
   // VALIDAÇÃO EM TEMPO REAL: código intruso (não está no pedido) → rejeita na hora
   if(idx<0){
@@ -21337,12 +21552,19 @@ function wmsPalletQtdInput(sku,val,saldoMax){
 function wmsPalletBipe(codigo){
   const saldo=window._wmsPalletSaldo||[];
   const sugestao=window._wmsPalletSugestao||'codigo_qtd';
-  const cod=String(codigo||'').trim().toUpperCase();
+  const _pedU=wmsPedidos.find(x=>x.id===wmsUnitPedido);
+  const _cliU=clientes.find(c=>c.id===(_pedU&&_pedU.cliente_id));
+  const usaEtiq=!!(_cliU&&_cliU.wms_usa_etiqueta_cliente===true);
+  const raw=wmsLeituraLimpa(codigo);
+  const cod=wmsNorm(raw);
   if(!cod)return;
   const item=saldo.find(s=>{
-    if(String(s.sku||'').trim().toUpperCase()===cod)return true;
-    const prod=wmsProdutos.find(pr=>pr.id===s.produto_id);
-    return prod && String(prod.etiqueta_cliente||'').trim().toUpperCase()===cod;
+    if(wmsNorm(s.sku)===cod)return true;
+    if(usaEtiq){
+      const prod=wmsProdutos.find(pr=>pr.id===s.produto_id);
+      return prod && wmsEtiquetaCasaProduto(raw,prod);
+    }
+    return false;
   });
   if(!item){showToast('⛔ Código não pertence ao saldo deste pedido: '+cod,'red');return;}
   const qtd=sugestao==='cega'?(parseFloat(ge('pal-bipe-qtd')?.value||'1')||1):1;
