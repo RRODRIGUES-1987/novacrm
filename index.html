@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.367 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.368 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.367';
+const APP_VERSION='v1.0.368';
 document.addEventListener('DOMContentLoaded',()=>{
   const el=ge('sidebar-logo-top');
   if(el) el.title=APP_VERSION;
@@ -2206,12 +2206,12 @@ function buildCadastroForm(tipo, record, id=null){
         const adm=new Date(r.data_admissao+'T00:00:00');
         const hoje=new Date();hoje.setHours(0,0,0,0);
         const dias=Math.floor((hoje-adm)/(1000*60*60*24));
-        if(dias>90)return'<div style="padding:10px 12px;background:var(--green-bg);border-radius:10px;font-size:12px;color:var(--green-text);margin-bottom:10px">✅ Período de experiência concluído ('+dias+' dias de empresa)</div>';
+        if(dias>=90)return'<div style="padding:10px 12px;background:var(--green-bg);border-radius:10px;font-size:12px;color:var(--green-text);margin-bottom:10px">✅ Período de experiência concluído ('+dias+' dias de empresa)</div>';
         const p1ok=dias>=45;const p2ok=dias>=90;
         const p1pct=Math.min(100,Math.round(dias/45*100));
         const p2pct=p1ok?Math.min(100,Math.round((dias-45)/45*100)):0;
-        const fimP1=new Date(adm);fimP1.setDate(fimP1.getDate()+45);
-        const fimP2=new Date(adm);fimP2.setDate(fimP2.getDate()+90);
+        const fimP1=new Date(adm);fimP1.setDate(fimP1.getDate()+44);
+        const fimP2=new Date(adm);fimP2.setDate(fimP2.getDate()+89);
         return'<div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px">'
           +'<div style="font-size:12px;font-weight:600;margin-bottom:10px">Período de Experiência</div>'
           +'<div style="margin-bottom:8px">'
@@ -9588,11 +9588,11 @@ function rRHExperiencia(){
   pessoasCLT.forEach(function(p){
     const adm = new Date(p.data_admissao+'T00:00:00');
     const diasAdm = Math.floor((hoje-adm)/(1000*60*60*24));
-    if(diasAdm > 90) return; // experiência já concluída
+    if(diasAdm >= 90) return; // experiência já concluída
 
     const parcela = diasAdm < 45 ? 1 : 2;
     const dataFim = new Date(adm);
-    dataFim.setDate(dataFim.getDate() + (parcela===1?45:90));
+    dataFim.setDate(dataFim.getDate() + (parcela===1?44:89));
 
     // Buscar avaliação existente
     const avaliacao = rhExperiencia.find(function(e){
@@ -9686,7 +9686,7 @@ function openExpModal(pessoaId, parcela){
 
   const adm = new Date(p.data_admissao+'T00:00:00');
   const dataInicio = new Date(adm); if(parcela===2) dataInicio.setDate(dataInicio.getDate()+45);
-  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?45:90));
+  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?44:89));
 
   const avaliacao = rhExperiencia.find(function(e){return e.pessoa_id===pessoaId&&e.parcela===parcela;});
   const isRH = ['admin','adm','rh'].includes(profile?.role||'');
@@ -9782,7 +9782,7 @@ async function salvarExpAvaliacao(pessoaId, parcela, expId){
   const p = pessoas.find(function(x){return x.id===pessoaId;});
   const adm = new Date(p.data_admissao+'T00:00:00');
   const dataInicio = new Date(adm); if(parcela===2) dataInicio.setDate(dataInicio.getDate()+45);
-  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?45:90));
+  const dataFim = new Date(adm); dataFim.setDate(dataFim.getDate()+(parcela===1?44:89));
 
   const obj = {
     company_id: company.id,
@@ -19327,7 +19327,7 @@ async function wmsRegistrarLeituras(etapa, itens, ctx){
 // Conta leituras de um produto numa etapa de um pedido
 function wmsLeiturasContagem(pedidoId,etapa,sku){
   const skuN=sku!=null?String(sku).trim():null;
-  return wmsLeituras.filter(l=>l.pedido_id===pedidoId && l.etapa===etapa && (skuN==null||String(l.sku||'').trim()===skuN)).length;
+  return wmsLeituras.filter(l=>l.pedido_id===pedidoId && l.etapa===etapa && !l.estornada && (skuN==null||String(l.sku||'').trim()===skuN)).length;
 }
 
 // Calcula tarefas de um item: pallets cheios + fração (cada um = 1 tarefa)
@@ -20742,12 +20742,21 @@ function rWmsConferencia(){
     const acaoUnit=temUnit?`
       <button class="btn btn-sm" title="Reimprimir etiquetas" onclick="wmsReimprimirEtiquetas('${p.id}')">🏷</button>
       <button class="btn btn-sm" title="Estornar 3ª (unitização)" style="color:var(--red-text)" onclick="wmsEstornarUnitizacao('${p.id}')">↺</button>`:'';
+    // estorno de conferência 1ª/2ª — só a ÚLTIMA feita pode ser estornada (cascata reversa), e só se não houver unitização
+    let acaoEstornoConf='';
+    if(!temUnit){
+      const feitas12=[1,2].filter(t=>wmsConfsFeitas(p.id,t).length>0);
+      if(feitas12.length){
+        const ultima=Math.max(...feitas12); // estorna de trás pra frente
+        acaoEstornoConf=`<button class="btn btn-sm" title="Estornar ${ultima}ª conferência" style="color:var(--red-text)" onclick="wmsEstornarConferencia('${p.id}',${ultima})">↺ ${ultima}ª</button>`;
+      }
+    }
     return `<div class="li">
       <div class="linfo">
         <div class="lname" style="display:flex;align-items:center;gap:8px">${numCurto} <span style="font-size:11px;color:var(--text3)">${cliNome(p.cliente_id)}</span></div>
         <div class="lsub" style="display:flex;gap:5px;margin-top:3px">${badges}</div>
       </div>
-      <div class="lright" style="flex-direction:row;align-items:center;gap:6px">${acao}${acaoUnit}</div>
+      <div class="lright" style="flex-direction:row;align-items:center;gap:6px">${acao}${acaoEstornoConf}${acaoUnit}</div>
     </div>`;
   }).join('');
 
@@ -21247,7 +21256,53 @@ async function wmsEstornarUnitizacao(pedidoId){
 }
 
 
-// ── ETIQUETA DE EMBARQUE (PDF com QR + código) ──
+// Estorno de conferência 1ª/2ª — cascata reversa (não pula etapa)
+// Ordem do fluxo: 1ª → 2ª → 3ª(unitização) → embarque
+// Para estornar a Nª, as etapas POSTERIORES não podem estar feitas.
+async function wmsEstornarConferencia(pedidoId,tipo){
+  const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return;
+  if(tipo!==1 && tipo!==2){showToast('Use o botão de estorno da unitização para a 3ª.','amber');return;}
+  // bloqueio cascata: não pode haver etapa posterior concluída
+  const temUnit=wmsConfsFeitas(pedidoId,3).length>0 || wmsPalletsEmbarque.some(pl=>pl.pedido_id===pedidoId);
+  const temEmbarque=wmsPalletsEmbarque.some(pl=>pl.pedido_id===pedidoId && pl.status==='embarcado');
+  if(temEmbarque){showToast('Pedido com pallet embarcado. Estorne o embarque primeiro.','red');return;}
+  if(temUnit){showToast('Há 3ª conferência (unitização). Estorne a unitização antes de mexer nas conferências anteriores.','red');return;}
+  // se estornando a 1ª, a 2ª não pode estar feita
+  if(tipo===1 && wmsConfsFeitas(pedidoId,2).length>0){
+    showToast('Existe 2ª conferência. Estorne a 2ª antes de estornar a 1ª.','red');return;
+  }
+  const lbl=WMS_CONF_LABELS[tipo]||(tipo+'ª Conferência');
+  if(!confirm('Estornar a '+lbl+' do pedido '+wmsNumeroCurto(p)+'?\n\nO registro da conferência e suas leituras serão apagados. O pedido volta para a etapa anterior.'))return;
+  try{
+    // apaga as conferências do tipo
+    const confs=wmsConferencias.filter(cf=>cf.pedido_id===pedidoId && cf.tipo===tipo);
+    for(const cf of confs){await dbDelete('wms_conferencias',cf.id);}
+    wmsConferencias=wmsConferencias.filter(cf=>!(cf.pedido_id===pedidoId && cf.tipo===tipo));
+    // marca as leituras da etapa (conf1/conf2) como estornadas — mantém histórico no banco
+    const etapaL='conf'+tipo;
+    const leituras=wmsLeituras.filter(l=>l.pedido_id===pedidoId && l.etapa===etapaL && !l.estornada);
+    const estTs=new Date().toISOString();
+    for(const l of leituras){
+      await dbUpdate('wms_leituras',l.id,{estornada:true,estornada_em:estTs});
+      l.estornada=true;l.estornada_em=estTs;
+    }
+    // ajusta status do pedido conforme o que sobrou
+    let novoStatus;
+    if(tipo===2){
+      // volta a estar com 1ª feita → continua em conferência
+      novoStatus='em_conferencia';
+    } else {
+      // estornou a 1ª (e não havia 2ª) → volta para separado
+      novoStatus='separado';
+    }
+    if(p.status!==novoStatus){await dbUpdate('wms_pedidos',pedidoId,{status:novoStatus});p.status=novoStatus;}
+    showToast(lbl+' estornada. Pode conferir novamente.','green');
+    render();
+    if(typeof wmsAprovacoesModal==='function'){/* noop */}
+  }catch(e){showToast('Erro ao estornar: '+e.message,'red');}
+}
+
+
 // Gera as etiquetas de TODOS os pallets de um pedido (cada uma com vol X/N), numa única impressão
 function gerarEtiquetasEmbarquePedido(pedidoId){
   const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
@@ -21990,7 +22045,7 @@ function wmsTrackConteudo(pedidoId){
 
   // helper: tabela de leituras linha a linha (sequência, SKU, tipo, modo, usuário, hora)
   const leiturasTabela=(cor,icone,titulo,subtitulo,etapasArr,vazio)=>{
-    let linhas=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa));
+    let linhas=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa) && !l.estornada);
     linhas=linhas.sort((a,b)=>{
       const ea=etapasArr.indexOf(a.etapa)-etapasArr.indexOf(b.etapa);
       if(ea!==0)return ea;
@@ -22112,7 +22167,7 @@ function wmsTrackImprimir(pedidoId){
   // helper: linhas de leitura para o PDF (sequência, [etapa], sku, tipo, modo, usuário, hora)
   const leiturasRowsPdf=(etapasArr)=>{
     const multi=etapasArr.length>1;
-    let ls=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa));
+    let ls=wmsLeituras.filter(l=>l.pedido_id===pedidoId && etapasArr.includes(l.etapa) && !l.estornada);
     ls=ls.sort((a,b)=>{const e=etapasArr.indexOf(a.etapa)-etapasArr.indexOf(b.etapa);return e!==0?e:(a.sequencia||0)-(b.sequencia||0);});
     if(!ls.length)return null;
     return ls.map((l,i)=>{
