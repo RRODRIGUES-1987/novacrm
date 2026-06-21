@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.371 | Gerado: 2026-06-06 13:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.372 | Gerado: 2026-06-21 13:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -977,7 +977,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.371';
+const APP_VERSION='v1.0.372';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -18430,6 +18430,7 @@ function rCadSituacaoExtras(pessoaId){
       ${demAtiva.motivo?`<div style="font-size:11px;color:var(--text2)">${demAtiva.motivo}</div>`:''}
       ${demAtiva.data_prevista?`<div style="font-size:11px;color:var(--text2)">Data prevista: ${new Date(demAtiva.data_prevista+'T00:00').toLocaleDateString('pt-BR')}</div>`:''}
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="demGerarTermo('${demAtiva.id}','${pessoaId}')">📄 Gerar termo</button>
         ${demAtiva.status==='solicitado'&&demPodeRH()?`
           <button class="btn btn-p btn-sm" onclick="demAprovarRH('${demAtiva.id}')">✓ Aprovar (RH)</button>
           <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red-text)" onclick="demRejeitar('${demAtiva.id}')">✗ Rejeitar</button>`:''}
@@ -18445,6 +18446,15 @@ function rCadSituacaoExtras(pessoaId){
         🚪 Solicitar demissão deste colaborador
       </button>
     </div>`;
+  } else {
+    const demConc=rhDemissoes.find(d=>d.pessoa_id===pessoaId&&d.status==='concluido');
+    if(demConc){
+      html+=`<div style="margin-top:12px;padding:12px 14px;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px">🚪 Desligamento concluído</div>
+        ${demConc.data_desligamento?`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">Data: ${new Date(demConc.data_desligamento+'T00:00').toLocaleDateString('pt-BR')}</div>`:''}
+        <button class="btn btn-sm" onclick="demGerarTermo('${demConc.id}','${pessoaId}')">📄 Gerar termo de desligamento</button>
+      </div>`;
+    }
   }
 
   // ── Advertências ──
@@ -18569,6 +18579,86 @@ async function demCancelar(id){
   if(!confirm('Cancelar esta solicitação de demissão?'))return;
   try{await dbUpdate('rh_demissoes',id,{status:'cancelado'});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'cancelado'}:d);render();}
   catch(e){alert('Erro: '+e.message);}
+}
+
+// ── TERMO DE DESLIGAMENTO (assinaturas progressivas: gestor -> RH -> diretor) ──
+function demGerarTermo(id,pessoaId){
+  var d=rhDemissoes.find(function(x){return x.id===id;});
+  var p=pessoas.find(function(x){return x.id===pessoaId;});
+  if(!d||!p)return;
+  function nomeUser(uid){
+    if(!uid)return '';
+    var pr=profiles.find(function(x){return x.id===uid;});
+    if(pr)return pr.full_name||pr.email||'';
+    var ps=pessoas.find(function(x){return x.id===uid;});
+    return ps?ps.nome:'';
+  }
+  function fmtData(iso){
+    if(!iso)return '';
+    var dt=new Date(iso);
+    if(isNaN(dt.getTime()))return '';
+    return dt.toLocaleDateString('pt-BR');
+  }
+  function assBlock(nome,dataAss,papel,assinou){
+    var topo=assinou
+      ? '<div style="font-size:12px;font-weight:600">'+(nome||'')+'</div>'+(dataAss?'<div style="font-size:10px;color:#555">'+dataAss+'</div>':'<div style="height:13px"></div>')
+      : '<div style="height:31px"></div>';
+    return '<div class="ass-item">'+topo+'<div class="ass-line"></div><div class="ass-role">'+papel+'</div></div>';
+  }
+  var logoMatch=document.documentElement.innerHTML.match(/data:image\/png;base64,[A-Za-z0-9+/=]{5000,}/);
+  var logo=logoMatch?logoMatch[0]:'';
+  var tipoLabel=DEM_TIPO[d.tipo]||d.tipo;
+  var repo=d.com_reposicao?'Com reposição imediata':'Sem reposição';
+  var dataPrev=d.data_prevista?fmtData(d.data_prevista+'T00:00:00'):'';
+  var dataDesl=d.data_desligamento?fmtData(d.data_desligamento+'T00:00:00'):'';
+
+  var assGestor=assBlock(nomeUser(d.solicitado_por),'','Gestor responsável',!!d.solicitado_por);
+  var assRH=assBlock(nomeUser(d.aprovado_rh_por),fmtData(d.aprovado_rh_em),'Recursos Humanos',!!d.aprovado_rh_em);
+  var assDir=assBlock(nomeUser(d.aprovado_admin_por),fmtData(d.aprovado_admin_em),'Diretoria',!!d.aprovado_admin_em);
+  var assColab='<div class="ass-item"><div style="height:31px"></div><div class="ass-line"></div><div class="ass-role">'+(p.nome||'')+'<br>Colaborador (ciência)</div></div>';
+
+  var html=''
+    +'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Termo de Desligamento</title>'
+    +'<style>'
+    +'body{font-family:Arial,sans-serif;max-width:720px;margin:30px auto;padding:30px;color:#000;line-height:1.6}'
+    +'.hdr{text-align:center;border-bottom:3px solid #c0392b;padding-bottom:14px;margin-bottom:22px}'
+    +'.hdr img{max-height:54px;margin-bottom:8px}'
+    +'h1{font-size:19px;color:#c0392b;margin:6px 0 0}'
+    +'h2{font-size:13px;font-weight:normal;color:#555;margin:3px 0 0}'
+    +'.info{background:#f9f9f9;padding:16px;border-radius:8px;margin-bottom:18px;font-size:13px}'
+    +'.info table{width:100%;border-collapse:collapse}'
+    +'.info td{padding:4px 0;vertical-align:top}.info td:first-child{font-weight:600;width:170px}'
+    +'.corpo{font-size:13px;margin-bottom:14px}'
+    +'.ass-row{display:flex;justify-content:space-between;gap:18px;margin-top:54px;flex-wrap:wrap}'
+    +'.ass-item{flex:1;min-width:150px;text-align:center}'
+    +'.ass-line{border-top:1px solid #000;margin-top:4px}'
+    +'.ass-role{font-size:11px;padding-top:5px;color:#333}'
+    +'.rodape{margin-top:40px;font-size:10px;color:#888;text-align:center}'
+    +'</style></head><body>'
+    +'<div class="hdr">'+(logo?'<img src="'+logo+'">':'')+'<h1>TERMO DE COMUNICAÇÃO DE DESLIGAMENTO</h1><h2>'+((company&&company.name)?company.name:'')+'</h2></div>'
+    +'<div class="info"><table>'
+    +'<tr><td>Colaborador:</td><td>'+(p.nome||'—')+'</td></tr>'
+    +'<tr><td>Cargo:</td><td>'+(p.cargo||'—')+'</td></tr>'
+    +'<tr><td>Departamento:</td><td>'+(p.departamento||'—')+'</td></tr>'
+    +'<tr><td>Tipo de desligamento:</td><td>'+tipoLabel+'</td></tr>'
+    +'<tr><td>Motivo:</td><td>'+(d.motivo||'—')+'</td></tr>'
+    +'<tr><td>Reposição:</td><td>'+repo+'</td></tr>'
+    +(dataPrev?'<tr><td>Data prevista:</td><td>'+dataPrev+'</td></tr>':'')
+    +(dataDesl?'<tr><td>Data de desligamento:</td><td>'+dataDesl+'</td></tr>':'')
+    +'</table></div>'
+    +'<div class="corpo"><p>Comunicamos o desligamento do(a) colaborador(a) acima identificado(a), nos termos da legislação trabalhista vigente, conforme as informações registradas neste documento.</p>'
+    +(d.obs_solicitante?'<p><strong>Observações:</strong> '+d.obs_solicitante+'</p>':'')
+    +'<p>O(A) colaborador(a) declara ter recebido a presente comunicação e ciência das providências decorrentes.</p></div>'
+    +'<div class="ass-row">'+assGestor+assRH+assDir+'</div>'
+    +'<div class="ass-row" style="margin-top:46px">'+assColab+'<div class="ass-item"></div><div class="ass-item"></div></div>'
+    +'<div class="rodape">Documento gerado eletronicamente pelo VERUS ERP em '+new Date().toLocaleString('pt-BR')+'</div>'
+    +'</body></html>';
+
+  var iframe=document.createElement('iframe');
+  iframe.style.cssText='position:fixed;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.write(html);iframe.contentDocument.close();
+  setTimeout(function(){iframe.contentWindow.print();setTimeout(function(){iframe.remove();},3000);},500);
 }
 
 // ── ADVERTÊNCIAS ──
