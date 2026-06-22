@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.379 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.380 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -978,7 +978,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.379';
+const APP_VERSION='v1.0.380';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -18594,41 +18594,57 @@ async function demSalvar(pessoaId){
   if(!motivo){portErr('Selecione o motivo.');return;}
   const obs=ge('dem-obs')?.value?.trim()||null;
   portSaving();
+  const dataPrev=ge('dem-data')?.value||null;
   const dados={company_id:company?.id,pessoa_id:pessoaId,
     tipo:ge('dem-tipo')?.value||'sem_causa',
     motivo_codigo:motivo,
     motivo:DEM_MOTIVO[motivo]||motivo,
     obs_solicitante:obs,
     com_reposicao:ge('dem-reposicao')?.checked||false,
-    data_prevista:ge('dem-data')?.value||null,
+    data_prevista:dataPrev,
     status:'solicitado',solicitado_por:cu?.id,owner_id:cu?.id};
+  // Se quem solicita já tem aprovação de RH (admin/adm/rh), pula o passo de RH:
+  // entra direto como aprovado_rh, usando a data prevista como data de desligamento.
+  if(demPodeRH()){
+    dados.status='aprovado_rh';
+    dados.aprovado_rh_por=cu?.id;
+    dados.aprovado_rh_em=new Date().toISOString();
+    dados.data_desligamento=dataPrev;
+  }
   try{const s=await dbInsert('rh_demissoes',dados);if(s)rhDemissoes=[s,...rhDemissoes];portClose();render();}
   catch(e){portErr('Erro: '+e.message);}
 }
 
-async function demAprovarRH(id){
-  const obs=prompt('Observação do RH (opcional):');
-  if(obs===null)return;
+function demAprovarRH(id){
+  const d=rhDemissoes.find(x=>x.id===id);if(!d)return;
+  const dataDef=d.data_prevista||d.data_desligamento||'';
+  portModal('Aprovar demissão (RH)',
+    `<div style="font-size:13px;color:var(--text2);margin-bottom:12px">Confirme a data de desligamento. O motivo já foi informado na solicitação.</div>
+     <div><label class="fl">Data de desligamento *</label>
+       <input class="fi" id="dem-rh-data" type="date" value="${dataDef}"></div>`,
+    `demAprovarRHSalvar('${id}')`,{saveLabel:'Aprovar (RH)'});
+}
+async function demAprovarRHSalvar(id){
+  const data=ge('dem-rh-data')?.value||null;
+  if(!data){portErr('Informe a data de desligamento.');return;}
+  portSaving();
   try{
-    await dbUpdate('rh_demissoes',id,{status:'aprovado_rh',aprovado_rh_por:cu?.id,aprovado_rh_em:new Date().toISOString(),obs_rh:obs||null});
-    rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'aprovado_rh',aprovado_rh_por:cu?.id}:d);
-    render();
-  }catch(e){alert('Erro: '+e.message);}
+    await dbUpdate('rh_demissoes',id,{status:'aprovado_rh',aprovado_rh_por:cu?.id,aprovado_rh_em:new Date().toISOString(),data_desligamento:data});
+    rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'aprovado_rh',aprovado_rh_por:cu?.id,data_desligamento:data}:d);
+    portClose();render();
+  }catch(e){portErr('Erro: '+e.message);}
 }
 
 async function demAprovarAdmin(id,pessoaId){
-  const dataDesl=prompt('Data de desligamento (DD/MM/AAAA):');
-  if(dataDesl===null)return;
-  // Converte data BR para ISO
-  const parts=dataDesl.split('/');
-  const dataISO=parts.length===3?`${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`:null;
-  portSaving&&portSaving();
+  const d=rhDemissoes.find(x=>x.id===id);if(!d)return;
+  const dataISO=d.data_desligamento||d.data_prevista||new Date().toISOString().slice(0,10);
+  if(!confirm('Confirmar aprovação definitiva e desligar o colaborador?'))return;
   try{
-    // 1) Finaliza demissão
+    // 1) Finaliza demissão (data já confirmada na etapa do RH)
     await dbUpdate('rh_demissoes',id,{status:'concluido',aprovado_admin_por:cu?.id,aprovado_admin_em:new Date().toISOString(),data_desligamento:dataISO});
-    rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'concluido'}:d);
-    // 2) Inativa colaborador
-    await dbUpdate('pessoas',pessoaId,{ativo:false,data_desligamento:dataISO});
+    rhDemissoes=rhDemissoes.map(x=>x.id===id?{...x,status:'concluido',data_desligamento:dataISO}:x);
+    // 2) Inativa colaborador (a data de desligamento fica em rh_demissoes; pessoas não tem essa coluna)
+    await dbUpdate('pessoas',pessoaId,{ativo:false});
     pessoas=pessoas.map(p=>p.id===pessoaId?{...p,ativo:false}:p);
     // 3) Remove TODAS as alocações no organograma (inclusive onde era gestor) — vaga fica aberta
     const alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId);
