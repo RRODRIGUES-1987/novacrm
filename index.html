@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.377 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.378 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -876,6 +876,7 @@ let wmsListasSeparacao=[];
 let wmsListaPedidos=[];
 let wmsTarefasSeparacao=[];
 let wmsConferencias=[], wmsPalletsEmbarque=[], wmsPalletItens=[], wmsEtiquetas=[], wmsPrismas=[];
+let wmsOperadores=[];
 let wmsLeituras=[];
 let portFrotaTab='mov',portPlacasTab='cadastro';
 let cadastrosTab='clientes',cadastroForm=null;
@@ -977,7 +978,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.377';
+const APP_VERSION='v1.0.378';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -18946,6 +18947,7 @@ async function loadWmsData(cid){
     dbSelect('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
   wmsRomaneios=await dbSelect('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
+  wmsOperadores=await dbSelect('wms_operadores',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
   [wmsConferencias,wmsPalletsEmbarque,wmsPalletItens,wmsEtiquetas,wmsPrismas,wmsLeituras]=await Promise.all([
     dbSelect('wms_conferencias',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
     dbSelect('wms_pallets_embarque',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
@@ -19390,7 +19392,7 @@ function rWmsSeparacao(){
   const card=(valor,label,cor)=>`<div style="flex:1;min-width:90px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
     <div style="font-size:24px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:3px">${label}</div></div>`;
-  const topo=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+  const topo=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm" onclick="wmsOperadoresModal()">\u{1F477} Operadores</button></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${card(totListas,'Listas','var(--text)')}
       ${card(concluidas,'Concluídas','var(--green-text)')}
       ${card(emAndamento,'Em andamento','var(--amber-text)')}
@@ -19556,7 +19558,7 @@ async function wmsRegistrarLeituras(etapa, itens, ctx){
     company_id:cid, unit_id:ctx.unit_id||null, etapa,
     pedido_id:ctx.pedido_id||null, lista_id:ctx.lista_id||null, tarefa_id:ctx.tarefa_id||null,
     conferencia_id:ctx.conferencia_id||null, pallet_id:ctx.pallet_id||null,
-    modo:ctx.modo||'bipe', usuario_id:cu?.id||null, usuario_nome:profile?.full_name||cu?.email||null,
+    modo:ctx.modo||'bipe', usuario_id:cu?.id||null, usuario_nome:coletorAutor(),
   };
   // sequência inicial: continua a contagem dentro do pedido+etapa
   let seq=wmsLeituras.filter(l=>l.pedido_id===ctx.pedido_id && l.etapa===etapa).length;
@@ -19658,7 +19660,7 @@ async function wmsPedidoHist(pedidoId,acao,descricao){
   try{
     await dbInsert('wms_pedido_historico',{
       company_id:company?.id,pedido_id:pedidoId,acao,descricao:descricao||null,
-      usuario_id:cu?.id||null,usuario_nome:profile?.full_name||cu?.email||null
+      usuario_id:cu?.id||null,usuario_nome:coletorAutor()
     });
   }catch(e){/* histórico não bloqueia o fluxo */}
 }
@@ -20005,6 +20007,7 @@ const COLETOR_FUNCS={
   // futuro: inventario:{...}, mover/enderecar (empilhadeira):{...}
 };
 const COLETOR_ROLES={
+  coletor:['separar','conferir'],
   separador:['separar'],
   conferente:['conferir']
   // futuro: inventario:['inventario'], empilhadeira:['mover','enderecar']
@@ -20013,7 +20016,8 @@ function coletorRole(role){return !!COLETOR_ROLES[role];}
 function coletorFuncs(role){return (COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean);}
 function coletorAbrirFunc(key){var f=COLETOR_FUNCS[key];if(f&&window[f.abrir])window[f.abrir]();}
 
-let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null;
+let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null,_colOperador=null;
+function coletorAutor(){return (_colOperador&&_colOperador.nome)||profile?.full_name||cu?.email||null;}
 
 function coletorEnter(){
   ge('app').classList.remove('on');
@@ -20021,7 +20025,8 @@ function coletorEnter(){
   let ov=ge('coletor');
   if(!ov){ov=document.createElement('div');ov.id='coletor';document.body.appendChild(ov);}
   ov.style.cssText='position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;overflow:hidden';
-  coletorHome();
+  coletorRestoreOperador();
+  if(_colOperador)coletorHome(); else coletorPickOperador();
 }
 async function coletorSair(){
   coletorCamStop();
@@ -20031,10 +20036,12 @@ async function coletorSair(){
 function coletorHeader(titulo,voltarFn){
   const emp=company?.name||'—';const role=profile?.role||'';
   const back=voltarFn?'<button onclick="'+voltarFn+'" style="background:none;border:none;color:#fff;font-size:24px;line-height:1;cursor:pointer;padding:0 6px">‹</button>':'';
-  return '<div style="flex-shrink:0;background:var(--blue-text);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px">'
+  const op=_colOperador?'<button onclick="coletorTrocarOperador()" title="Trocar operador" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:11px;font-weight:700;padding:7px 10px;border-radius:8px;cursor:pointer;white-space:nowrap">\u{1F477} '+String(_colOperador.nome||'').split(' ')[0]+' \u27F3</button>':'';
+  return '<div style="flex-shrink:0;background:var(--blue-text);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px">'
     +back
     +'<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(titulo||'VERUS Coletor')+'</div>'
     +'<div style="font-size:10px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+emp+' · '+(ROLES[role]||role)+'</div></div>'
+    +op
     +'<button onclick="coletorSair()" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;cursor:pointer">Sair</button>'
     +'</div>';
 }
@@ -20053,6 +20060,69 @@ function coletorHome(){
   coletorShow('VERUS Coletor',null,'<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Escolha a operação:</div>'+(cards||'<div style="color:var(--text3)">Nenhuma função liberada para seu papel.</div>'));
 }
 
+// -- Operadores do coletor (estacao compartilhada -> operador escolhe o nome) --
+function coletorRestoreOperador(){
+  try{var ss=sessionStorage.getItem('col_operador');if(ss)_colOperador=JSON.parse(ss);}catch(e){}
+}
+function coletorOperadoresAtivos(){
+  var cid=company?.id;
+  return wmsOperadores.filter(function(o){return o.company_id===cid&&o.ativo!==false;}).sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+}
+function coletorPickOperador(){
+  var ops=coletorOperadoresAtivos();
+  if(!ops.length){_colOperador=null;coletorHome();return;}
+  var cards=ops.map(function(o){return '<button onclick="coletorSetOperador(&apos;'+o.id+'&apos;)" style="display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px;cursor:pointer">'
+    +'<div style="width:38px;height:38px;border-radius:50%;background:var(--blue-bg);color:var(--blue-text);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex-shrink:0">'+String(o.nome||'?').charAt(0).toUpperCase()+'</div>'
+    +'<div style="font-size:16px;font-weight:700;color:var(--text)">'+o.nome+'</div></button>';}).join('');
+  coletorShow('Quem esta operando?',null,'<div style="font-size:13px;color:var(--text3);margin-bottom:14px">Toque no seu nome para comecar:</div>'+cards);
+}
+function coletorSetOperador(id){
+  var o=wmsOperadores.find(function(x){return x.id===id;});if(!o)return;
+  _colOperador={id:o.id,nome:o.nome};
+  try{sessionStorage.setItem('col_operador',JSON.stringify(_colOperador));}catch(e){}
+  coletorHome();
+}
+function coletorTrocarOperador(){
+  _colOperador=null;try{sessionStorage.removeItem('col_operador');}catch(e){}
+  coletorPickOperador();
+}
+// -- Cadastro de operadores (admin/gestor, no app) --
+function wmsOperadoresListaHtml(cid){
+  var ops=wmsOperadores.filter(function(o){return o.company_id===cid;}).sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'');});
+  if(!ops.length)return '<div style="color:var(--text3);font-size:12px;padding:8px">Nenhum operador cadastrado.</div>';
+  return ops.map(function(o){return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">'
+    +'<input class="fi" value="'+String(o.nome||'').replace(/"/g,'&quot;')+'" id="op-nome-'+o.id+'" style="flex:1">'
+    +'<label style="display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap"><input type="checkbox" '+(o.ativo!==false?'checked':'')+' id="op-ativo-'+o.id+'">ativo</label>'
+    +'<button class="btn btn-sm" onclick="wmsOperadorSalvar(&apos;'+o.id+'&apos;)">Salvar</button></div>';}).join('');
+}
+function wmsOperadoresModal(){
+  var cid=company?.id;
+  var inner='<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Operadores que aparecem no coletor para o operador escolher o nome (auditoria de separacao/conferencia).</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:12px"><input class="fi" id="op-novo" placeholder="Nome do operador" style="flex:1"><button class="btn btn-p" onclick="wmsOperadorNovo()">+ Adicionar</button></div>'
+    +'<div id="op-lista">'+wmsOperadoresListaHtml(cid)+'</div>';
+  portModal('Operadores do coletor',inner,'portClose()',{width:'520px',saveLabel:'Fechar'});
+}
+async function wmsOperadorNovo(){
+  var nome=(ge('op-novo')?.value||'').trim();
+  if(!nome){showToast('Informe o nome.','amber');return;}
+  try{
+    var r=await dbInsert('wms_operadores',{company_id:company?.id,nome:nome,ativo:true});
+    var row=Array.isArray(r)?r[0]:r; if(row)wmsOperadores=[...wmsOperadores,row];
+    var inp=ge('op-novo'); if(inp)inp.value='';
+    var lst=ge('op-lista'); if(lst)lst.innerHTML=wmsOperadoresListaHtml(company?.id);
+    showToast('Operador adicionado.','green');
+  }catch(e){showToast('Erro: '+(e.message||e),'red');}
+}
+async function wmsOperadorSalvar(id){
+  var nome=(ge('op-nome-'+id)?.value||'').trim();
+  var ativo=ge('op-ativo-'+id)?ge('op-ativo-'+id).checked:true;
+  if(!nome){showToast('Nome nao pode ficar vazio.','amber');return;}
+  try{
+    await dbUpdate('wms_operadores',id,{nome:nome,ativo:ativo});
+    wmsOperadores=wmsOperadores.map(function(o){return o.id===id?Object.assign({},o,{nome:nome,ativo:ativo}):o;});
+    showToast('Salvo.','green');
+  }catch(e){showToast('Erro: '+(e.message||e),'red');}
+}
 // ── Câmera (BarcodeDetector nativo; Android/Chrome) ──
 function coletorCamSuporta(){return ('BarcodeDetector' in window);}
 async function coletorCamStart(onCode){
@@ -20169,7 +20239,7 @@ async function coletorSepBipe(listaId,code){
   if(!alvo){showToast('⛔ Código não confere com tarefa pendente: '+cod,'red');if(navigator.vibrate)navigator.vibrate([60,40,60]);return;}
   try{
     const agora=new Date().toISOString();
-    await dbUpdate('wms_tarefas_separacao',alvo.id,{status:'concluida',qtd_separada:alvo.quantidade,separador_id:cu?.id||null,separador_nome:profile?.full_name||cu?.email||null,concluido_em:agora,houve_falta:false});
+    await dbUpdate('wms_tarefas_separacao',alvo.id,{status:'concluida',qtd_separada:alvo.quantidade,separador_id:cu?.id||null,separador_nome:profile?.full_name||cu?.email||null,separador_informado_nome:(_colOperador&&_colOperador.nome)||null,concluido_em:agora,houve_falta:false});
     alvo.status='concluida';alvo.qtd_separada=alvo.quantidade;alvo.concluido_em=agora;
     await wmsRegistrarLeituras('separacao',[{sku:alvo.sku,descricao:alvo.descricao,produto_id:alvo.produto_id,tipo_volume:alvo.tipo_volume,quantidade:alvo.quantidade}],{pedido_id:alvo.pedido_id,lista_id:listaId,tarefa_id:alvo.id,unit_id:alvo.unit_id,modo:'bipe'});
     if(navigator.vibrate)navigator.vibrate(60);
@@ -21686,7 +21756,7 @@ async function wmsSalvarConferencia(){
     const obj={
       company_id:cid,unit_id:p.unit_id||null,tipo:wmsConfTipo,
       pedido_id:p.id,cliente_id:p.cliente_id,
-      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
       modo:clientes.find(c=>c.id===p.cliente_id)?.wms_conf_modo||'digita',
       resultado,qtd_conferida:qtdConf,qtd_esperada:qtdEsp,
       divergencias:temDiverg?JSON.stringify(divergencias):null,
@@ -21963,7 +22033,7 @@ async function wmsFinalizarUnitizacao(){
     // registra a 3ª conferência (uma para o pedido)
     const confRes=await dbInsert('wms_conferencias',{
       company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,cliente_id:p.cliente_id,
-      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
       resultado:'ok',auditoria_status:'ok',observacao:N+' pallet(s) unitizado(s)',
     });
     if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
@@ -22367,7 +22437,7 @@ async function wmsEmbarqueBipe(codigo){
     await dbInsert('wms_conferencias',{
       company_id:company?.id,unit_id:pl.unit_id||null,tipo:4,pedido_id:pl.pedido_id,
       pallet_id:pl.id,romaneio_id:wmsEmbRomaneio,cliente_id:pl.cliente_id,
-      conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
+      conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
       modo:'bipe',resultado:'ok',observacao:'Embarcado (seq '+seq+') no romaneio '+(r?.numero||''),
     });
     const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='✓ '+seq;ok.style.color='var(--green-text)';}
