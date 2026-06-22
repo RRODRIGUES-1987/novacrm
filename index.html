@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.382 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.383 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -40,7 +40,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .back-link{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:14px}.back-link:hover{color:var(--text)}
 .pw-strength{height:3px;border-radius:2px;margin-top:5px;background:var(--border)}.pw-bar{height:100%;border-radius:2px;transition:all .3s;width:0}.pw-hint{font-size:11px;margin-top:3px}
 /* APP */
-.app{display:none;height:100vh;height:100dvh;flex-direction:column;overflow:hidden}.app.on{display:flex}
+.app{display:none;height:100vh;height:100dvh;flex-direction:column;overflow:hidden}.app.on{display:flex}body.coletor-on{overflow:hidden}
 
 /* ── SELETOR DE UNIDADE ── */
 .unit-selector-bar{display:none;align-items:center;gap:6px;padding:7px 18px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -978,7 +978,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.382';
+const APP_VERSION='v1.0.383';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20062,7 +20062,7 @@ function coletorRole(role){return !!COLETOR_ROLES[role];}
 function coletorFuncs(role){return (COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean);}
 function coletorAbrirFunc(key){var f=COLETOR_FUNCS[key];if(f&&window[f.abrir])window[f.abrir]();}
 
-let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null,_colOperador=null;
+let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null,_colOperador=null,_colZxing=null,_colZxingLoading=null,_colSepDep='todos';
 function coletorAutor(){return (_colOperador&&_colOperador.nome)||profile?.full_name||cu?.email||null;}
 
 function coletorEnter(){
@@ -20082,8 +20082,8 @@ async function coletorSair(){
 function coletorHeader(titulo,voltarFn){
   const emp=company?.name||'—';const role=profile?.role||'';
   const back=voltarFn?'<button onclick="'+voltarFn+'" style="background:none;border:none;color:#fff;font-size:24px;line-height:1;cursor:pointer;padding:0 6px">‹</button>':'';
-  const op=_colOperador?'<button onclick="coletorTrocarOperador()" title="Trocar operador" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:11px;font-weight:700;padding:7px 10px;border-radius:8px;cursor:pointer;white-space:nowrap">\u{1F477} '+String(_colOperador.nome||'').split(' ')[0]+' \u27F3</button>':'';
-  return '<div style="flex-shrink:0;background:var(--blue-text);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px">'
+  const op=_colOperador?'<button onclick="coletorTrocarOperador()" title="Trocar operador" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:11px;font-weight:700;padding:7px 10px;border-radius:8px;cursor:pointer;white-space:nowrap">\u{1F477} '+String(_colOperador.nome||'').split(' ')[0]+' \u27F3</button>':(coletorOperadoresAtivos&&coletorOperadoresAtivos().length?'<button onclick="coletorPickOperador()" style="background:#fff;color:var(--blue-text);border:none;font-size:11px;font-weight:800;padding:7px 11px;border-radius:8px;cursor:pointer;white-space:nowrap">\u{1F464} Identificar</button>':'');
+  return '<div style="flex-shrink:0;background:var(--blue-text);color:#fff;padding:calc(env(safe-area-inset-top) + 12px) 14px 12px;display:flex;align-items:center;gap:8px">'
     +back
     +'<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(titulo||'VERUS Coletor')+'</div>'
     +'<div style="font-size:10px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+emp+' · '+(ROLES[role]||role)+'</div></div>'
@@ -20095,7 +20095,7 @@ function coletorShow(titulo,voltarFn,bodyHtml){
   coletorCamStop();
   const ov=ge('coletor');if(!ov)return;
   ov.innerHTML=coletorHeader(titulo,voltarFn)
-    +'<div id="col-content" style="flex:1;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch">'+bodyHtml+'</div>';
+    +'<div id="col-content" style="flex:1;overflow:auto;padding:14px 14px calc(14px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch">'+bodyHtml+'</div>';
 }
 function coletorHome(){
   const funcs=coletorFuncs(profile?.role);
@@ -20169,34 +20169,57 @@ async function wmsOperadorSalvar(id){
     showToast('Salvo.','green');
   }catch(e){showToast('Erro: '+(e.message||e),'red');}
 }
-// ── Câmera (BarcodeDetector nativo; Android/Chrome) ──
-function coletorCamSuporta(){return ('BarcodeDetector' in window);}
+// ── Câmera: BarcodeDetector nativo (Android/Chrome) com fallback ZXing (CDN) ──
+function coletorCamSuporta(){return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);}
+function coletorLoadZXing(){
+  if(window.ZXing)return Promise.resolve();
+  if(_colZxingLoading)return _colZxingLoading;
+  _colZxingLoading=new Promise(function(resolve,reject){
+    var sc=document.createElement('script');
+    sc.src='https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+    sc.onload=function(){resolve();};
+    sc.onerror=function(){reject(new Error('Falha ao carregar o leitor (CDN).'));};
+    document.head.appendChild(sc);
+  });
+  return _colZxingLoading;
+}
 async function coletorCamStart(onCode){
   if(_colCamOn)return;
-  if(!coletorCamSuporta()){showToast('Câmera não suportada neste aparelho — use o coletor.','amber');return;}
+  if(!coletorCamSuporta()){showToast('Câmera não disponível neste aparelho — use o leitor físico.','amber');return;}
   const wrap=ge('col-cam');const v=ge('col-cam-video');if(!wrap||!v)return;
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    _colCamStream=stream;_colCamOn=true;v.srcObject=stream;await v.play();wrap.style.display='block';
-    let det;try{det=new window.BarcodeDetector({formats:['code_128','ean_13','ean_8','code_39','itf','codabar','data_matrix','qr_code','upc_a','upc_e']});}catch(_){det=new window.BarcodeDetector();}
-    let ultimo='',ultimoT=0;
-    const tick=async function(){
-      if(!_colCamOn)return;
-      try{
-        const codes=await det.detect(v);
-        if(codes&&codes.length){
-          const val=codes[0].rawValue||'';const now=Date.now();
-          if(val&&(val!==ultimo||now-ultimoT>1500)){ultimo=val;ultimoT=now;if(navigator.vibrate)navigator.vibrate(60);onCode(val);}
-        }
-      }catch(e){}
+  wrap.style.display='block';_colCamOn=true;
+  let ultimo='',ultimoT=0;
+  const emite=function(val){
+    if(!val)return;const now=Date.now();
+    if(val!==ultimo||now-ultimoT>1500){ultimo=val;ultimoT=now;if(navigator.vibrate)navigator.vibrate(60);onCode(val);}
+  };
+  if('BarcodeDetector' in window){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      _colCamStream=stream;v.srcObject=stream;await v.play();
+      let det;try{det=new window.BarcodeDetector({formats:['code_128','ean_13','ean_8','code_39','itf','codabar','data_matrix','qr_code','upc_a','upc_e']});}catch(_){det=new window.BarcodeDetector();}
+      const tick=async function(){
+        if(!_colCamOn)return;
+        try{const codes=await det.detect(v);if(codes&&codes.length)emite(codes[0].rawValue||'');}catch(e){}
+        _colCamRAF=requestAnimationFrame(tick);
+      };
       _colCamRAF=requestAnimationFrame(tick);
-    };
-    _colCamRAF=requestAnimationFrame(tick);
-  }catch(e){showToast('Não foi possível abrir a câmera: '+(e.message||e),'red');_colCamOn=false;}
+    }catch(e){showToast('Não foi possível abrir a câmera: '+(e.message||e),'red');coletorCamStop();}
+  }else{
+    try{
+      await coletorLoadZXing();
+      _colZxing=new ZXing.BrowserMultiFormatReader();
+      _colZxing.decodeFromConstraints({video:{facingMode:'environment'}},v,function(result,err){
+        if(!_colCamOn)return;
+        if(result)emite(result.getText()||'');
+      });
+    }catch(e){showToast('Não foi possível iniciar o leitor: '+(e.message||e),'red');coletorCamStop();}
+  }
 }
 function coletorCamStop(){
   _colCamOn=false;
   if(_colCamRAF){cancelAnimationFrame(_colCamRAF);_colCamRAF=null;}
+  if(_colZxing){try{_colZxing.reset();}catch(e){}_colZxing=null;}
   if(_colCamStream){_colCamStream.getTracks().forEach(function(t){t.stop();});_colCamStream=null;}
   const wrap=ge('col-cam');if(wrap)wrap.style.display='none';
 }
@@ -20223,9 +20246,20 @@ function coletorScanBox(){
 function coletorSepListas(){
   _colScanHandler=null;
   const cid=company?.id;
-  const listas=wmsListasSeparacao.filter(function(l){return l.company_id===cid&&l.status!=='concluida'&&l.status!=='cancelada';});
+  const todas=wmsListasSeparacao.filter(function(l){return l.company_id===cid&&l.status!=='concluida'&&l.status!=='cancelada';});
+  // depositantes com listas pendentes
+  const depIds=[],depMap={};
+  todas.forEach(function(l){if(l.cliente_id&&depIds.indexOf(l.cliente_id)<0){depIds.push(l.cliente_id);const c=clientes.find(function(x){return x.id===l.cliente_id;});depMap[l.cliente_id]=(c&&c.nome)||'—';}});
+  depIds.sort(function(a,b){return (depMap[a]||'').localeCompare(depMap[b]||'');});
+  if(_colSepDep!=='todos'&&depIds.indexOf(_colSepDep)<0)_colSepDep='todos';
+  const listas=_colSepDep==='todos'?todas:todas.filter(function(l){return l.cliente_id===_colSepDep;});
+  const chip=function(v,lbl){return '<button onclick="coletorSepSetDep(&apos;'+v+'&apos;)" style="flex-shrink:0;font-size:12px;font-weight:700;padding:7px 13px;border-radius:99px;border:1px solid '+(_colSepDep===v?'var(--blue-text)':'var(--border)')+';background:'+(_colSepDep===v?'var(--blue-text)':'var(--bg)')+';color:'+(_colSepDep===v?'#fff':'var(--text2)')+';cursor:pointer;white-space:nowrap">'+lbl+'</button>';};
+  let chips='';
+  if(depIds.length>1){
+    chips='<div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;-webkit-overflow-scrolling:touch">'+chip('todos','Todos ('+todas.length+')')+depIds.map(function(id){return chip(id,depMap[id]);}).join('')+'</div>';
+  }
   let html;
-  if(!listas.length){html='<div style="text-align:center;color:var(--text3);padding:40px 16px">Nenhuma lista de separação pendente.</div>';}
+  if(!listas.length){html='<div style="text-align:center;color:var(--text3);padding:40px 16px">Nenhuma lista pendente para este depositante.</div>';}
   else{
     html=listas.map(function(l){
       const cli=clientes.find(function(c){return c.id===l.cliente_id;});
@@ -20239,8 +20273,9 @@ function coletorSepListas(){
     }).join('');
   }
   const back=coletorFuncs(profile?.role).length>1?'coletorHome()':null;
-  coletorShow('Separar',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Selecione a lista para separar:</div>'+html);
+  coletorShow('Separar',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:10px">Selecione a lista para separar:</div>'+chips+html);
 }
+function coletorSepSetDep(v){_colSepDep=v;coletorSepListas();}
 function coletorSepRowHtml(t){
   const ok=t.status==='concluida';
   const vol=t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO';
