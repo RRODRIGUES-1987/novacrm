@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.384 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.386 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -445,10 +445,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <button class="navitem sub" id="nav-wms-prismas" onclick="pg('wms-prismas')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 4v16"/></svg>
           <span>Prismas</span>
-        </button>
-        <button class="navitem sub" id="nav-wms-produtos" onclick="pg('wms-produtos')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-          <span>Produtos</span>
         </button>
         <button class="navitem sub" id="nav-wms-pedidos" onclick="pg('wms-pedidos')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11H3v10h6zM21 3h-6v18h6zM15 7H9v14h6z"/></svg>
@@ -978,7 +974,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.384';
+const APP_VERSION='v1.0.386';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -19139,11 +19135,15 @@ async function wmsCriarRomaneio(){
 }
 
 // Tela: lista de romaneios
+const WMS_CHIPS_ROM=[{v:'pendente',l:'Pendente'},{v:'em_carregamento',l:'Em carregamento'},{v:'carregado',l:'Carregado'}];
 function rWmsRomaneios(){
   const cid=company?.id;
+  const _fr=_wmsTelaFiltro.rom;
   let roms=wmsRomaneios.filter(r=>r.company_id===cid);
-  if(wmsRomFiltroDe)roms=roms.filter(r=>(r.data||'')>=wmsRomFiltroDe);
-  if(wmsRomFiltroAte)roms=roms.filter(r=>(r.data||'')<=wmsRomFiltroAte);
+  if(_fr.dep)roms=roms.filter(r=>r.cliente_id===_fr.dep);
+  if(_fr.de)roms=roms.filter(r=>(r.data||'')>=_fr.de);
+  if(_fr.ate)roms=roms.filter(r=>(r.data||'')<=_fr.ate);
+  const _romsView=_fr.st?roms.filter(r=>r.status===_fr.st):roms;
   const semRom=wmsPedidosSemRomaneio();
   const btnMontar=`<button class="btn btn-p btn-sm" onclick="wmsMontarRomaneioModal()">+ Montar romaneio</button>`;
   // cards: status + totalizadores por romaneio (sem entrar nos pedidos, usa os totais do próprio romaneio)
@@ -19163,24 +19163,17 @@ function rWmsRomaneios(){
     ${card(fmt(totVol),'Pallets','var(--blue-text)')}
     ${card(fmt(totL)+' L','Litros','var(--blue-text)')}
     ${card(fmt(totKg)+' kg','Peso','var(--blue-text)')}
-  </div>
-  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:11px;color:var(--text3)">
-    <span>Período:</span>
-    <input type="date" class="fi" value="${wmsRomFiltroDe}" onchange="wmsRomFiltroDe=this.value;render()" style="height:32px;width:auto">
-    <span>até</span>
-    <input type="date" class="fi" value="${wmsRomFiltroAte}" onchange="wmsRomFiltroAte=this.value;render()" style="height:32px;width:auto">
-    ${(wmsRomFiltroDe||wmsRomFiltroAte)?`<button class="btn btn-sm" onclick="wmsRomFiltroDe='';wmsRomFiltroAte='';render()">Limpar</button>`:''}
-  </div>`;
+  </div>${wmsTFBar('rom',WMS_CHIPS_ROM,'Buscar nº do romaneio / depositante...')}`;
   if(!roms.length){
     return `${cards}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text3)">Nenhum romaneio no período. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
   }
-  const rows=roms.map(r=>{
+  const rows=_romsView.map(r=>{
     const cli=clientes.find(c=>c.id===r.cliente_id);
     const st=WMS_ROM_STATUS[r.status]||{l:r.status,c:'#888',bg:'rgba(136,136,136,.12)'};
     const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
     const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
-    return `<div class="li" style="cursor:pointer" onclick="wmsRomaneioDetalhe('${r.id}')">
+    return `<div class="li" data-busca="${((r.numero||'')+' '+(cli?.nome||'')).toLowerCase().replace(/"/g,'')}" style="cursor:pointer" onclick="wmsRomaneioDetalhe('${r.id}')">
       <div style="display:flex;flex-direction:column;justify-content:center;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
         <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Romaneio</div>
         <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${r.numero}</div>
@@ -19196,7 +19189,7 @@ function rWmsRomaneios(){
     </div>`;
   }).join('');
   return `${cards}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-    <div style="font-size:12px;color:var(--text3)">${roms.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div>${btnMontar}</div>${rows}`;
+    <div id="wms-rom-count" style="font-size:12px;color:var(--text3)">${_romsView.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div>${btnMontar}</div><div id="wms-rom-list">${rows||'<div class="empty"><p>Nenhum romaneio com este filtro.</p></div>'}</div>`;
 }
 
 // Modal: seleção de pedidos para montar romaneio
@@ -19414,9 +19407,42 @@ function wmsRefPedidoLista(l){
   return 'Lista '+(l.numero_lista||'');
 }
 
+// ── Filtros compartilhados das telas WMS (depositante + período + status + busca) ──
+let _wmsTelaFiltro={sep:{dep:'',de:'',ate:'',st:'',q:''},conf:{dep:'',de:'',ate:'',st:'',q:''},rom:{dep:'',de:'',ate:'',st:'',q:''},exp:{dep:'',de:'',ate:'',st:'',q:''}};
+function wmsTFSet(sc,k,v){_wmsTelaFiltro[sc][k]=v;render();}
+function wmsTFLimparPeriodo(sc){_wmsTelaFiltro[sc].de='';_wmsTelaFiltro[sc].ate='';render();}
+function wmsTFBusca(sc,q){
+  const list=ge('wms-'+sc+'-list');if(!list)return;
+  const ql=(q||'').toLowerCase();let vis=0;
+  list.querySelectorAll('[data-busca]').forEach(function(el){
+    const ok=!ql||(el.getAttribute('data-busca')||'').indexOf(ql)>=0;
+    el.style.display=ok?'':'none';if(ok)vis++;
+  });
+  const cnt=ge('wms-'+sc+'-count');if(cnt&&ql!=='')cnt.textContent=vis+' resultado(s)';
+}
+function wmsTFBar(sc,chips,buscaPh){
+  const f=_wmsTelaFiltro[sc];const cid=company?.id;
+  const optCli=clientes.filter(c=>c.company_id===cid).map(c=>'<option value="'+c.id+'"'+(f.dep===c.id?' selected':'')+'>'+(c.nome||c.razao_social||'—')+'</option>').join('');
+  const chipsHtml=[{v:'',l:'Todos'}].concat(chips).map(function(x){var a=f.st===x.v;return '<button onclick="wmsTFSet(&apos;'+sc+'&apos;,&apos;st&apos;,&apos;'+x.v+'&apos;)" style="border:1.5px solid '+(a?'var(--text)':'var(--border)')+';background:'+(a?'var(--text)':'transparent')+';color:'+(a?'#fff':'var(--text2)')+';font-size:11px;font-weight:600;padding:5px 12px;border-radius:99px;cursor:pointer;white-space:nowrap">'+x.l+'</button>';}).join('');
+  return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:11px;color:var(--text3);flex-wrap:wrap">'
+    +'<span>Período:</span><input type="date" class="fi" value="'+f.de+'" onchange="wmsTFSet(&apos;'+sc+'&apos;,&apos;de&apos;,this.value)" style="height:32px;width:auto"><span>até</span><input type="date" class="fi" value="'+f.ate+'" onchange="wmsTFSet(&apos;'+sc+'&apos;,&apos;ate&apos;,this.value)" style="height:32px;width:auto">'
+    +((f.de||f.ate)?'<button class="btn btn-sm" onclick="wmsTFLimparPeriodo(&apos;'+sc+'&apos;)">Limpar</button>':'')
+    +'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+chipsHtml+'</div>'
+    +'<div class="sechdr" style="gap:10px;margin-bottom:12px"><select class="fi" onchange="wmsTFSet(&apos;'+sc+'&apos;,&apos;dep&apos;,this.value)" style="height:36px;width:auto;min-width:200px"><option value="">Todos os depositantes</option>'+optCli+'</select>'
+    +'<div class="swrap" style="flex:1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input placeholder="'+(buscaPh||'Buscar...')+'" oninput="wmsTFBusca(&apos;'+sc+'&apos;,this.value)"></div></div>';
+}
+const WMS_CHIPS_SEP=[{v:'gerada',l:'Gerada'},{v:'em_execucao',l:'Em execução'},{v:'concluida',l:'Concluída'},{v:'cancelada',l:'Cancelada'}];
+
 function rWmsSeparacao(){
   const cid=company?.id;
-  const listas=wmsListasSeparacao.filter(l=>l.company_id===cid);
+  const _fs=_wmsTelaFiltro.sep;
+  const _dataL=l=>(l.created_at||'').slice(0,10);
+  let listas=wmsListasSeparacao.filter(l=>l.company_id===cid);
+  if(_fs.dep)listas=listas.filter(l=>l.cliente_id===_fs.dep);
+  if(_fs.de)listas=listas.filter(l=>_dataL(l)>=_fs.de);
+  if(_fs.ate)listas=listas.filter(l=>_dataL(l)<=_fs.ate);
+  const _listasView=_fs.st?listas.filter(l=>l.status===_fs.st):listas;
   if(!listas.length){
     return rWmsEmConstrucao('Separação','Nenhuma lista de separação gerada ainda. Vá em Pedidos, selecione os pedidos e clique em "Gerar listas de separação".');
   }
@@ -19454,13 +19480,13 @@ function rWmsSeparacao(){
       </div>
     </div>`;
 
-  const rows=listas.map(l=>{
+  const rows=_listasView.map(l=>{
     const cli=clientes.find(c=>c.id===l.cliente_id);
     const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888',bg:'rgba(136,136,136,.12)'};
     const p=prog(l);
     const data=l.created_at?new Date(l.created_at).toLocaleDateString('pt-BR'):'';
     const corBar=p.pct===100?'var(--green-text)':'var(--blue-text)';
-    return `<div class="li" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
+    return `<div class="li" data-busca="${((l.numero_lista||'')+' '+(cli?.nome||'')+' '+wmsRefPedidoLista(l)).toLowerCase().replace(/"/g,'')}" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
       <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
         <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Lista</div>
         <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${l.numero_lista||'—'}</div>
@@ -19486,7 +19512,7 @@ function rWmsSeparacao(){
       </div>
     </div>`;
   }).join('');
-  return `${topo}<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${listas.length} lista(s) de separação</div>${rows}`;
+  return `${topo}${wmsTFBar('sep',WMS_CHIPS_SEP,'Buscar lista / pedido...')}<div id="wms-sep-count" style="font-size:12px;color:var(--text3);margin-bottom:10px">${_listasView.length} lista(s) de separação</div><div id="wms-sep-list">${rows}</div>`;
 }
 
 function wmsListaDetalhe(id){
@@ -20991,6 +21017,25 @@ function wmsProdLinha(p){
   </div>`;
 }
 
+function wmsCliProdutosBody(clienteId){
+  const prods=wmsProdutos.filter(p=>p.cliente_id===clienteId).sort((a,b)=>(a.sku||'').localeCompare(b.sku||''));
+  const empty='<div class="empty" style="padding:30px"><p style="color:var(--text3)">Nenhum produto cadastrado para este depositante. Importe em Admin → Importação → Produtos (WMS).</p></div>';
+  const listHtml=prods.length?prods.slice(0,300).map(wmsProdLinha).join(''):empty;
+  return '<div style="display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:0 11px;margin-bottom:10px">'
+    +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+    +'<input placeholder="Buscar por SKU ou descricao..." oninput="wmsCliProdFilter(&apos;'+clienteId+'&apos;,this.value)" style="border:none;outline:none;background:none;flex:1;padding:10px 0;font-size:13px">'
+    +'</div>'
+    +'<div id="wms-cliprod-count" style="font-size:12px;color:var(--text3);margin-bottom:8px">'+prods.length+' produto(s)</div>'
+    +'<div id="wms-cliprod-list">'+listHtml+'</div>';
+}
+function wmsCliProdFilter(clienteId,q){
+  let lista=wmsProdutos.filter(p=>p.cliente_id===clienteId);
+  if(q){const ql=q.toLowerCase();lista=lista.filter(p=>(p.sku||'').toLowerCase().includes(ql)||(p.descricao||'').toLowerCase().includes(ql));}
+  lista.sort((a,b)=>(a.sku||'').localeCompare(b.sku||''));
+  const el=ge('wms-cliprod-list');if(!el)return;
+  const cnt=ge('wms-cliprod-count');if(cnt)cnt.textContent=lista.length+' produto(s)';
+  el.innerHTML=lista.length?lista.slice(0,300).map(wmsProdLinha).join(''):'<div class="empty" style="padding:30px"><p style="color:var(--text3)">Nenhum produto encontrado.</p></div>';
+}
 function filterWmsProdutos(q){
   const cid=company?.id;
   let lista=wmsProdutos.filter(p=>p.company_id===cid);
@@ -21007,6 +21052,7 @@ function filterWmsProdutos(q){
 function wmsProdutoModal(id){
   const p=wmsProdutos.find(x=>x.id===id);if(!p)return;
   const cli=clientes.find(c=>c.id===p.cliente_id);
+  portClose();
   portModal(`Produto — ${p.sku}`,
     `<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Depositante: <b style="color:var(--text)">${cli?.nome||'—'}</b></div>
      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -21343,12 +21389,7 @@ function wmsCliConteudo(clienteId){
 function wmsCliTabBody(clienteId){
   const c=clientes.find(x=>x.id===clienteId);if(!c)return'';
   if(wmsCliTab==='saida') return wmsCliTabSaida(c);
-  if(wmsCliTab==='produtos'){
-    const nProd=wmsProdutos.filter(p=>p.cliente_id===clienteId).length;
-    return `<div style="padding:14px;background:var(--bg2);border-radius:9px;display:flex;align-items:center;justify-content:space-between">
-      <div><div style="font-weight:600;font-size:13px">Produtos do depositante</div><div style="font-size:11px;color:var(--text3)">${nProd} produto(s) cadastrado(s)</div></div>
-      <button class="btn btn-sm" onclick="portClose();pg('wms-produtos')">Ver produtos</button></div>`;
-  }
+  if(wmsCliTab==='produtos') return wmsCliProdutosBody(clienteId);
   const titulos={geral:'Geral',entrada:'Entrada (recebimento)',fiscal:'Fiscal'};
   if(wmsCliTab==='geral'){
     const nd=c.wms_digitos_pedido||5;
@@ -21551,8 +21592,22 @@ function rWmsConferencia(){
     wmsSeparacaoConcluidaPedido(p.id));
 
   const cliNome=id=>{const c=clientes.find(x=>x.id===id);return c?(c.nome||c.razao_social||'—'):'—';};
+  const _fc=_wmsTelaFiltro.conf;
+  const _dataP=p=>(p.data_pedido||p.data||(p.created_at||'').slice(0,10)||'');
+  let base=candidatos;
+  if(_fc.dep)base=base.filter(p=>p.cliente_id===_fc.dep);
+  if(_fc.de)base=base.filter(p=>_dataP(p)>=_fc.de);
+  if(_fc.ate)base=base.filter(p=>_dataP(p)<=_fc.ate);
+  const _proxOf=p=>{const passos=wmsConfsDoCliente(p.cliente_id).filter(t=>t<=3);return passos.find(t=>wmsConfsFeitas(p.id,t).length===0)||null;};
+  const _temDiv=p=>wmsConferencias.some(cf=>cf.pedido_id===p.id&&cf.auditoria_status==='pendente');
+  const _stOf=p=>{if(_temDiv(p))return 'div';const px=_proxOf(p);return px?String(px):'ok';};
+  const _ag=t=>base.filter(p=>_stOf(p)===String(t)).length;
+  const _cCard=(v,l,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px"><div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${v}</div><div style="font-size:10px;color:var(--text3);margin-top:3px">${l}</div></div>`;
+  const _cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">${_cCard(base.length,'Pedidos','var(--text)')}${_cCard(_ag(1),'Aguard. 1ª','#3b82f6')}${_cCard(_ag(2),'Aguard. 2ª','var(--amber-text)')}${_cCard(_ag(3),'Aguard. 3ª','#8b5cf6')}${_cCard(base.filter(p=>_stOf(p)==='ok').length,'Conferidos','var(--green-text)')}${_cCard(base.filter(p=>_stOf(p)==='div').length,'Divergência','var(--red-text)')}</div>`;
+  const WMS_CHIPS_CONF=[{v:'1',l:'Aguard. 1ª'},{v:'2',l:'Aguard. 2ª'},{v:'3',l:'Aguard. 3ª'},{v:'ok',l:'Conferido'},{v:'div',l:'Divergência'}];
+  const view=_fc.st?base.filter(p=>_stOf(p)===_fc.st):base;
 
-  const rows=candidatos.map(p=>{
+  const rows=view.map(p=>{
     const confs=wmsConfsDoCliente(p.cliente_id);
     // próxima conferência pendente (1/2/3) — a 4 é no embarque
     const passos=confs.filter(t=>t<=3);
@@ -21582,7 +21637,7 @@ function rWmsConferencia(){
         acaoEstornoConf=`<button class="btn btn-sm" title="Estornar ${ultima}ª conferência" style="color:var(--red-text)" onclick="wmsEstornarConferencia('${p.id}',${ultima})">↺ ${ultima}ª</button>`;
       }
     }
-    return `<div class="li">
+    return `<div class="li" data-busca="${(numCurto+' '+cliNome(p.cliente_id)).toLowerCase().replace(/"/g,'')}">
       <div class="linfo">
         <div class="lname" style="display:flex;align-items:center;gap:8px">${numCurto} <span style="font-size:11px;color:var(--text3)">${cliNome(p.cliente_id)}</span></div>
         <div class="lsub" style="display:flex;gap:5px;margin-top:3px">${badges}</div>
@@ -21591,11 +21646,11 @@ function rWmsConferencia(){
     </div>`;
   }).join('');
 
-  return `<div class="sechdr" style="display:flex;justify-content:space-between;align-items:center"><div class="swrap" style="font-weight:700">Conferência dos pedidos separados</div>
+  return `${_cards}${wmsTFBar('conf',WMS_CHIPS_CONF,'Buscar nº do pedido...')}<div class="sechdr" style="display:flex;justify-content:space-between;align-items:center"><div class="swrap" style="font-weight:700">Conferência dos pedidos separados</div>
     ${(()=>{const pend=wmsConferencias.filter(cf=>cf.company_id===company?.id&&cf.auditoria_status==='pendente').length;return pend>0?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);font-weight:700" onclick="wmsAprovacoesModal()">⏳ Aprovações (${pend})</button>`:`<button class="btn btn-sm" onclick="wmsAprovacoesModal()">Aprovações</button>`;})()}
     </div>
-    <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Pedidos cujos depositantes exigem conferência. As etapas seguem a parametrização de cada cliente.</div>
-    ${rows||`<div class="empty"><p>Nenhum pedido aguardando conferência.</p></div>`}`;
+    <div id="wms-conf-count" style="font-size:12px;color:var(--text3);margin-bottom:10px">${view.length} pedido(s) aguardando conferência</div>
+    <div id="wms-conf-list">${rows||`<div class="empty"><p>Nenhum pedido aguardando conferência.</p></div>`}</div>`;
 }
 
 // Abre o modal de conferência (1ª/2ª = itens; 3ª = montagem de pallet)
@@ -22417,8 +22472,17 @@ function wmsRomaneioProntoEmbarque(romaneioId){
 
 function wmsExpEmbarqueBody(){
   const cid=company?.id;
-  const romaneios=wmsRomaneios.filter(r=>r.company_id===cid && ['pendente','em_carregamento'].includes(r.status));
-  if(!romaneios.length)return `<div class="empty"><p>Nenhum romaneio em carregamento.</p></div>`;
+  const _fe=_wmsTelaFiltro.exp;
+  let romaneios=wmsRomaneios.filter(r=>r.company_id===cid && ['pendente','em_carregamento'].includes(r.status));
+  if(_fe.dep)romaneios=romaneios.filter(r=>r.cliente_id===_fe.dep);
+  if(_fe.de)romaneios=romaneios.filter(r=>(r.data||'')>=_fe.de);
+  if(_fe.ate)romaneios=romaneios.filter(r=>(r.data||'')<=_fe.ate);
+  const _prontoR=r=>{const d=wmsRomaneioProntoEmbarque(r.id);return d.temPrisma&&d.todosConf;};
+  if(_fe.st==='pronto')romaneios=romaneios.filter(_prontoR);
+  else if(_fe.st==='aguardando')romaneios=romaneios.filter(r=>!_prontoR(r));
+  const WMS_CHIPS_EXP=[{v:'pronto',l:'Pronto p/ embarque'},{v:'aguardando',l:'Aguardando'}];
+  const _bar=wmsTFBar('exp',WMS_CHIPS_EXP,'Buscar nº romaneio / depositante...');
+  if(!romaneios.length)return _bar+`<div class="empty"><p>Nenhum romaneio em carregamento (verifique os filtros).</p></div>`;
   const cliNome=id=>{const c=clientes.find(x=>x.id===id);return c?(c.nome||c.razao_social||'—'):'—';};
   const cards=romaneios.map(r=>{
     const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
@@ -22436,7 +22500,7 @@ function wmsExpEmbarqueBody(){
       const nPal=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===p.id).length;
       return `<span style="font-size:10px;padding:2px 7px;border-radius:6px;background:${ok?'var(--green-bg)':'var(--bg2)'};color:${ok?'var(--green-text)':'var(--text3)'};margin:2px 2px 0 0;display:inline-block">${ok?'✓':'○'} ${wmsNumeroCurto(p)} · ${nPal} pallet(s)</span>`;
     }).join('');
-    return `<div style="border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:10px;background:var(--bg)">
+    return `<div data-busca="${((r.numero||'')+' '+cliNome(r.cliente_id)).toLowerCase().replace(/"/g,'')}" style="border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:10px;background:var(--bg)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div><div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">${r.numero} ${badge}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${cliNome(r.cliente_id)} · ${peds.length} pedido(s) · ${pallets.length} pallet(s)</div></div>
@@ -22454,7 +22518,7 @@ function wmsExpEmbarqueBody(){
       </div>
     </div>`;
   }).join('');
-  return cards;
+  return _bar+'<div id="wms-exp-list">'+cards+'</div>';
 }
 
 // Modal de embarque: bipa as etiquetas de embarque (4ª conferência)
