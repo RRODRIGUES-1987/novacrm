@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.381 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.382 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -978,7 +978,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.381';
+const APP_VERSION='v1.0.382';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -18569,6 +18569,15 @@ function rCadSituacaoExtras(pessoaId){
 }
 
 // ── FLUXO DE DEMISSÃO ──
+function demRefreshCadastro(pessoaId){
+  const panel=ge('cad-panel-situacao');
+  if(!panel)return;
+  const extra=panel.querySelector('#cad-sit-extras');
+  if(extra)extra.innerHTML=rCadSituacaoExtras(pessoaId);
+  const chk=ge('cad-ativo');
+  const p=pessoas.find(x=>x.id===pessoaId);
+  if(chk&&p)chk.checked=p.ativo!==false;
+}
 function demSolicitar(pessoaId){
   if(!demPodeSolicitar()){showToast&&showToast('Apenas gerentes podem solicitar demissão.','amber');return;}
   const p=pessoas.find(x=>x.id===pessoaId);if(!p)return;
@@ -18624,7 +18633,7 @@ async function demSalvar(pessoaId){
     dados.aprovado_rh_em=new Date().toISOString();
     dados.data_desligamento=dataPrev;
   }
-  try{const s=await dbInsert('rh_demissoes',dados);if(s)rhDemissoes=[s,...rhDemissoes];portClose();render();}
+  try{const s=await dbInsert('rh_demissoes',dados);if(s)rhDemissoes=[s,...rhDemissoes];portClose();render();demRefreshCadastro(pessoaId);}
   catch(e){portErr('Erro: '+e.message);}
 }
 
@@ -18645,6 +18654,7 @@ async function demAprovarRHSalvar(id){
     await dbUpdate('rh_demissoes',id,{status:'aprovado_rh',aprovado_rh_por:cu?.id,aprovado_rh_em:new Date().toISOString(),data_desligamento:data});
     rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'aprovado_rh',aprovado_rh_por:cu?.id,data_desligamento:data}:d);
     portClose();render();
+    const _d=rhDemissoes.find(x=>x.id===id);if(_d)demRefreshCadastro(_d.pessoa_id);
   }catch(e){portErr('Erro: '+e.message);}
 }
 
@@ -18666,18 +18676,19 @@ async function demAprovarAdmin(id,pessoaId){
     // 4) Recalcula "responde para" — subordinados sobem para o nó superior
     await orgRecalcResponde(true);
     render();
+    demRefreshCadastro(pessoaId);
     showToast&&showToast('Colaborador desligado. Vaga aberta no organograma.','green');
   }catch(e){alert('Erro: '+e.message);}
 }
 
 async function demRejeitar(id){
   const obs=prompt('Motivo da rejeição:');if(obs===null)return;
-  try{await dbUpdate('rh_demissoes',id,{status:'rejeitado',obs_admin:obs||null});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'rejeitado'}:d);render();}
+  try{await dbUpdate('rh_demissoes',id,{status:'rejeitado',obs_admin:obs||null});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'rejeitado'}:d);render();const _d=rhDemissoes.find(x=>x.id===id);if(_d)demRefreshCadastro(_d.pessoa_id);}
   catch(e){alert('Erro: '+e.message);}
 }
 async function demCancelar(id){
   if(!confirm('Cancelar esta solicitação de demissão?'))return;
-  try{await dbUpdate('rh_demissoes',id,{status:'cancelado'});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'cancelado'}:d);render();}
+  try{await dbUpdate('rh_demissoes',id,{status:'cancelado'});rhDemissoes=rhDemissoes.map(d=>d.id===id?{...d,status:'cancelado'}:d);render();const _d=rhDemissoes.find(x=>x.id===id);if(_d)demRefreshCadastro(_d.pessoa_id);}
   catch(e){alert('Erro: '+e.message);}
 }
 
