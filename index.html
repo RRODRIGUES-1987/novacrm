@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.387 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.388 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -974,7 +974,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.387';
+const APP_VERSION='v1.0.388';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -19149,14 +19149,14 @@ function rWmsRomaneios(){
   // cards: status + totalizadores por romaneio (sem entrar nos pedidos, usa os totais do próprio romaneio)
   const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
   const cont={}; roms.forEach(r=>{cont[r.status]=(cont[r.status]||0)+1;});
-  const totVol=roms.reduce((s,r)=>{const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);return s+wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;},0);
-  const totL=roms.reduce((s,r)=>s+(+r.tot_litragem||0),0);
-  const totKg=roms.reduce((s,r)=>s+(+r.tot_peso||0),0);
+  const totVol=_romsView.reduce((s,r)=>{const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);return s+wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;},0);
+  const totL=_romsView.reduce((s,r)=>s+(+r.tot_litragem||0),0);
+  const totKg=_romsView.reduce((s,r)=>s+(+r.tot_peso||0),0);
   const card=(valor,label,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px">
     <div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
     <div style="font-size:10px;color:var(--text3);margin-top:3px">${label}</div></div>`;
   const cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">
-    ${card(roms.length,'Romaneios','var(--text)')}
+    ${card(_romsView.length,'Romaneios','var(--text)')}
     ${card(cont['pendente']||0,'Pendentes','#3b82f6')}
     ${card(cont['em_carregamento']||0,'Em carregamento','var(--amber-text)')}
     ${card(cont['carregado']||0,'Carregados','var(--green-text)')}
@@ -19493,11 +19493,11 @@ function rWmsSeparacao(){
     return {feitas,tot,pct:tot?Math.round(feitas/tot*100):0};
   };
   // macro: totais
-  const totListas=listas.length;
-  const concluidas=listas.filter(l=>l.status==='concluida').length;
-  const emAndamento=listas.filter(l=>l.status!=='concluida').length;
+  const totListas=_listasView.length;
+  const concluidas=_listasView.filter(l=>l.status==='concluida').length;
+  const emAndamento=_listasView.filter(l=>l.status!=='concluida'&&l.status!=='cancelada').length;
   let somaFeitas=0,somaTot=0;
-  listas.forEach(l=>{const p=prog(l);somaFeitas+=p.feitas;somaTot+=p.tot;});
+  _listasView.forEach(l=>{const p=prog(l);somaFeitas+=p.feitas;somaTot+=p.tot;});
   const pctGeral=somaTot?Math.round(somaFeitas/somaTot*100):0;
 
   const card=(valor,label,cor)=>`<div style="flex:1;min-width:90px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
@@ -20676,11 +20676,12 @@ function rWmsPedidos(){
   // base com filtro de data (por data do pedido / created_at)
   const dataPed=p=>(p.data_pedido||p.data||(p.created_at||'').slice(0,10)||'');
   let base=wmsPedidos.filter(p=>p.company_id===cid);
+  if(wmsPedFiltroCliente)base=base.filter(p=>p.cliente_id===wmsPedFiltroCliente);
   if(wmsPedFiltroDe)base=base.filter(p=>dataPed(p)>=wmsPedFiltroDe);
   if(wmsPedFiltroAte)base=base.filter(p=>dataPed(p)<=wmsPedFiltroAte);
-  // contagem por status
-  const todos=base;
-  const cont={}; todos.forEach(p=>{cont[p.status]=(cont[p.status]||0)+1;});
+  // chips: contagem por depositante+período; cards-resumo refletem também o status filtrado
+  const cont={}; base.forEach(p=>{cont[p.status]=(cont[p.status]||0)+1;});
+  const todos=wmsPedFiltroStatus?base.filter(p=>p.status===wmsPedFiltroStatus):base;
   // totalizadores
   const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
   const totVol=todos.reduce((s,p)=>s+(+p.tot_pallets||0)+(+p.tot_un_fracao||0),0);
@@ -21641,11 +21642,11 @@ function rWmsConferencia(){
   const _proxOf=p=>{const passos=wmsConfsDoCliente(p.cliente_id).filter(t=>t<=3);return passos.find(t=>wmsConfsFeitas(p.id,t).length===0)||null;};
   const _temDiv=p=>wmsConferencias.some(cf=>cf.pedido_id===p.id&&cf.auditoria_status==='pendente');
   const _stOf=p=>{if(_temDiv(p))return 'div';const px=_proxOf(p);return px?String(px):'ok';};
+  const view=_fc.st?base.filter(p=>_stOf(p)===_fc.st):base;
   const _ag=t=>base.filter(p=>_stOf(p)===String(t)).length;
   const _cCard=(v,l,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px"><div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${v}</div><div style="font-size:10px;color:var(--text3);margin-top:3px">${l}</div></div>`;
-  const _cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">${_cCard(base.length,'Pedidos','var(--text)')}${_cCard(_ag(1),'Aguard. 1ª','#3b82f6')}${_cCard(_ag(2),'Aguard. 2ª','var(--amber-text)')}${_cCard(_ag(3),'Aguard. 3ª','#8b5cf6')}${_cCard(base.filter(p=>_stOf(p)==='ok').length,'Conferidos','var(--green-text)')}${_cCard(base.filter(p=>_stOf(p)==='div').length,'Divergência','var(--red-text)')}</div>`;
+  const _cards=`<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:8px">${_cCard(view.length,'Pedidos','var(--text)')}${_cCard(_ag(1),'Aguard. 1ª','#3b82f6')}${_cCard(_ag(2),'Aguard. 2ª','var(--amber-text)')}${_cCard(_ag(3),'Aguard. 3ª','#8b5cf6')}${_cCard(base.filter(p=>_stOf(p)==='ok').length,'Conferidos','var(--green-text)')}${_cCard(base.filter(p=>_stOf(p)==='div').length,'Divergência','var(--red-text)')}</div>`;
   const WMS_CHIPS_CONF=[{v:'1',l:'Aguard. 1ª'},{v:'2',l:'Aguard. 2ª'},{v:'3',l:'Aguard. 3ª'},{v:'ok',l:'Conferido'},{v:'div',l:'Divergência'}];
-  const view=_fc.st?base.filter(p=>_stOf(p)===_fc.st):base;
 
   const rows=view.map(p=>{
     const confs=wmsConfsDoCliente(p.cliente_id);
