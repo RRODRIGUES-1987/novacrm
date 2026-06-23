@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.394 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.395 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.394';
+const APP_VERSION='v1.0.395';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -1772,7 +1772,7 @@ function render(){
   else if(curPage==='wms-tracking')c.innerHTML=rWmsTracking();
   else if(curPage==='wms-aprovacoes')c.innerHTML=rWmsAprovacoes();
   else if(curPage==='wms-produtos'){c.innerHTML=rWmsProdutos();filterWmsProdutos('');}
-  else if(curPage==='wms-visao')c.innerHTML=rWmsVisaoGeral();
+  else if(curPage==='wms-visao'){c.innerHTML=rWmsVisaoGeral();wmsVGRenderCharts();}
   else if(curPage==='wms-pedidos'){c.innerHTML=rWmsPedidos();filterWmsPedidos('');}
   else if(curPage==='wms-importar-pedidos')c.innerHTML=rWmsImportarPedidos();
   else if(curPage==='wms-separacao'){c.innerHTML=rWmsSeparacao();wmsSelBarUpd('sep');}
@@ -20767,36 +20767,69 @@ function wmsVGQuadro(fluxo,titulo,subsHtml,placeholder){
 }
 function rWmsVisaoGeral(){
   const cid=company?.id;const f=wmsVGFiltro;const D=wmsVGDados();
-  const pImport=D.peds.filter(p=>p.status==='importado').length;
   const pSep=D.peds.filter(p=>p.status==='em_separacao').length;
-  const pConf=D.peds.filter(p=>p.status==='separado'||p.status==='conferido').length;
-  const lGer=D.listas.filter(l=>l.status==='gerada').length;
-  const lExec=D.listas.filter(l=>l.status==='em_execucao').length;
-  const lConc=D.listas.filter(l=>l.status==='concluida').length;
-  const cAg1=D.cand.filter(p=>!D.temDiv(p)&&D.proxOf(p)===1).length;
-  const cAg23=D.cand.filter(p=>!D.temDiv(p)&&(D.proxOf(p)===2||D.proxOf(p)===3)).length;
+  const lAtivas=D.listas.filter(l=>l.status==='gerada'||l.status==='em_execucao').length;
+  const cAguard=D.cand.filter(p=>!D.temDiv(p)&&D.proxOf(p)).length;
   const cDiv=D.cand.filter(p=>D.temDiv(p)).length;
-  const rPend=D.roms.filter(r=>r.status==='pendente').length;
-  const rCarr=D.roms.filter(r=>r.status==='em_carregamento').length;
-  const rDone=D.roms.filter(r=>r.status==='carregado').length;
+  const rAtivos=D.roms.filter(r=>r.status==='pendente'||r.status==='em_carregamento').length;
   const ePront=D.embRoms.filter(D.prontoR).length;
-  const eAg=D.embRoms.length-ePront;
   const optCli=clientes.filter(c=>c.company_id===cid).map(function(c){return '<option value="'+c.id+'"'+(f.dep===c.id?' selected':'')+'>'+(c.nome||c.razao_social||'—')+'</option>';}).join('');
-  const s=wmsVGSub,q=wmsVGQuadro;
-  let h='<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;font-size:11px;color:var(--text3)">'
+  const kpi=function(label,valor,cor){return '<div style="background:var(--bg);border:1px solid var(--border);border-left:4px solid '+cor+';border-radius:12px;padding:13px 15px"><div style="font-size:26px;font-weight:800;color:'+cor+';line-height:1">'+valor+'</div><div style="font-size:10px;color:var(--text3);margin-top:4px;text-transform:uppercase;letter-spacing:.4px">'+label+'</div></div>';};
+  const grupo=function(titulo,tag){return '<div style="display:flex;align-items:center;gap:10px;margin:6px 0 12px"><div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--text2)">'+titulo+'</div>'+(tag?'<span style="font-size:9px;font-weight:700;color:var(--text3);background:var(--bg3);padding:2px 8px;border-radius:99px">'+tag+'</span>':'')+'<div style="flex:1;height:1px;background:var(--border)"></div></div>';};
+  const painel=function(titulo,canvasId){return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:14px 16px"><div style="font-size:12px;font-weight:700;margin-bottom:10px">'+titulo+'</div><div style="height:210px;position:relative"><canvas id="'+canvasId+'"></canvas></div></div>';};
+  const ph=function(t,sub){return '<div style="background:var(--bg);border:1px dashed var(--border2);border-radius:12px;padding:16px;opacity:.7"><div style="font-size:13px;font-weight:800">'+t+'</div><div style="font-size:11px;color:var(--text3);margin-top:3px">'+sub+'</div><div style="font-size:22px;font-weight:800;color:var(--text3);margin-top:8px">—</div></div>';};
+  let h='<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap;font-size:11px;color:var(--text3)">'
     +'<span>Período:</span><input type="date" class="fi" value="'+f.de+'" onchange="wmsVGSet(&apos;de&apos;,this.value)" style="height:32px;width:auto"><span>até</span><input type="date" class="fi" value="'+f.ate+'" onchange="wmsVGSet(&apos;ate&apos;,this.value)" style="height:32px;width:auto">'
     +'<select class="fi" onchange="wmsVGSet(&apos;dep&apos;,this.value)" style="height:32px;width:auto;min-width:180px"><option value="">Todos os depositantes</option>'+optCli+'</select>'
     +((f.de||f.ate||f.dep)?'<button class="btn btn-sm" onclick="wmsVGLimpar()">Limpar</button>':'')
     +'</div>';
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">';
-  h+=q('pedidos','Pedidos',s('Importados',pImport,'var(--text2)')+s('Em separação',pSep,'var(--amber-text)')+s('Separados/Conf.',pConf,'var(--green-text)'));
-  h+=q('separacao','Separação',s('Geradas',lGer,'var(--text2)')+s('Em execução',lExec,'var(--amber-text)')+s('Concluídas',lConc,'var(--green-text)'));
-  h+=q('conferencia','Conferência',s('Aguard. 1ª',cAg1,'#3b82f6')+s('Aguard. 2ª/3ª',cAg23,'var(--amber-text)')+s('Divergências',cDiv,'var(--red-text)'));
-  h+=q('romaneios','Romaneios',s('Pendentes',rPend,'var(--text2)')+s('Em carregamento',rCarr,'var(--amber-text)')+s('Carregados',rDone,'var(--green-text)'));
-  h+=q('expedicao','Expedição',s('Prontos',ePront,'var(--green-text)')+s('Aguardando',eAg,'var(--amber-text)'));
-  h+=q('veiculos','Veículos',s('Pátio','—','var(--text3)')+s('Docas','—','var(--text3)')+s('Agendamento','—','var(--text3)'),true);
-  h+='</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">'
+    +kpi('Pedidos no período',D.peds.length,'var(--blue-text)')
+    +kpi('Em separação',lAtivas,'var(--amber-text)')
+    +kpi('Aguard. conferência',cAguard,'#3b82f6')
+    +kpi('Romaneios ativos',rAtivos,'var(--text)')
+    +kpi('Prontos p/ embarque',ePront,'var(--green-text)')
+    +kpi('Divergências',cDiv,'var(--red-text)')
+    +'</div>';
+  h+=grupo('Saída','');
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:22px">'
+    +painel('Pedidos por etapa','vg-ch-pedidos')
+    +painel('Conferência por etapa','vg-ch-conf')
+    +painel('Romaneios por status','vg-ch-rom')
+    +painel('Pedidos por depositante','vg-ch-dep')
+    +'</div>';
+  h+=grupo('Veículos / Pátio','em breve');
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:10px">'
+    +ph('Pátio','Veículos no pátio')+ph('Docas','Ocupação de docas')+ph('Agendamento','Janelas agendadas')
+    +'</div>';
   return h;
+}
+function wmsVGLoadChart(){
+  if(window.Chart)return Promise.resolve();
+  if(window._vgChartLoading)return window._vgChartLoading;
+  window._vgChartLoading=new Promise(function(res,rej){var sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';sc.onload=function(){res();};sc.onerror=function(){rej(new Error('Falha Chart.js'));};document.head.appendChild(sc);});
+  return window._vgChartLoading;
+}
+let _vgCharts=[];
+function wmsVGRenderCharts(){
+  if(curPage!=='wms-visao')return;
+  wmsVGLoadChart().then(function(){
+    if(curPage!=='wms-visao'||!window.Chart)return;
+    _vgCharts.forEach(function(c){try{c.destroy();}catch(e){}});_vgCharts=[];
+    const D=wmsVGDados();
+    Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.font.size=11;
+    function mk(idc,cfg){const el=ge(idc);if(!el)return;try{_vgCharts.push(new Chart(el,cfg));}catch(e){}}
+    const baseBar={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}};
+    mk('vg-ch-pedidos',{type:'bar',data:{labels:['Importados','Em separação','Separados','Conferidos'],datasets:[{data:[D.peds.filter(p=>p.status==='importado').length,D.peds.filter(p=>p.status==='em_separacao').length,D.peds.filter(p=>p.status==='separado').length,D.peds.filter(p=>p.status==='conferido').length],backgroundColor:['#9aa4ad','#e0a23a','#3b82f6','#1D9E75'],borderRadius:6}]},options:baseBar});
+    const c1=D.cand.filter(p=>!D.temDiv(p)&&D.proxOf(p)===1).length,c2=D.cand.filter(p=>!D.temDiv(p)&&D.proxOf(p)===2).length,c3=D.cand.filter(p=>!D.temDiv(p)&&D.proxOf(p)===3).length,cok=D.cand.filter(p=>!D.temDiv(p)&&!D.proxOf(p)).length,cd=D.cand.filter(p=>D.temDiv(p)).length;
+    mk('vg-ch-conf',{type:'bar',data:{labels:['Aguard.1ª','Aguard.2ª','Aguard.3ª','Conferidos','Diverg.'],datasets:[{data:[c1,c2,c3,cok,cd],backgroundColor:['#3b82f6','#e0a23a','#8b5cf6','#1D9E75','#c0392b'],borderRadius:6}]},options:baseBar});
+    mk('vg-ch-rom',{type:'doughnut',data:{labels:['Pendentes','Em carregamento','Carregados'],datasets:[{data:[D.roms.filter(r=>r.status==='pendente').length,D.roms.filter(r=>r.status==='em_carregamento').length,D.roms.filter(r=>r.status==='carregado').length],backgroundColor:['#9aa4ad','#e0a23a','#1D9E75']}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{display:true,position:'bottom'}}}});
+    const byDep={};D.peds.forEach(function(p){const n=wmsVGCliNome(p.cliente_id);byDep[n]=(byDep[n]||0)+1;});
+    const arr=Object.keys(byDep).map(function(k){return [k,byDep[k]];}).sort(function(a,b){return b[1]-a[1];}).slice(0,8);
+    mk('vg-ch-dep',{type:'bar',data:{labels:arr.map(function(x){return x[0];}),datasets:[{data:arr.map(function(x){return x[1];}),backgroundColor:'#1a4a8a',borderRadius:6}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{precision:0}}}}});
+  }).catch(function(e){
+    ['vg-ch-pedidos','vg-ch-conf','vg-ch-rom','vg-ch-dep'].forEach(function(idc){const el=ge(idc);if(el&&el.parentElement)el.parentElement.innerHTML='<div style="font-size:11px;color:var(--text3);padding:24px;text-align:center">Não foi possível carregar os gráficos (CDN).</div>';});
+  });
 }
 function wmsVGDrill(fluxo){
   const D=wmsVGDados();
