@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.392 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.393 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -970,7 +970,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.392';
+const APP_VERSION='v1.0.393';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -6938,7 +6938,7 @@ let propTarifas=[];
 function rPropostas(){
   const role=profile?.role||'vendedor';
   const pendAprov=propostas.filter(p=>p.status==='aguardando_aprovacao').length;
-  const rows=propostas.map((p,i)=>{
+  const rows=propostas.filter(p=>propEhCorrente(p)).map((p,i)=>{
     const deal=deals.find(d=>d.id===p.deal_id);
     const st=PROP_STATUS[p.status]||PROP_STATUS.rascunho;
     return`<div class="li" style="cursor:pointer" onclick="openPropostaDetalhe('${p.id}')">
@@ -6963,6 +6963,7 @@ function rPropostas(){
           <button class="bicon btn-sm" title="Nova versão" onclick="novaVersaoProposta('${p.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
+          ${propNumAnteriores(p)>0?`<button class="bicon btn-sm" title="Versões anteriores (${propNumAnteriores(p)})" onclick="propVersoesAnteriores('${p.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>`:''}
           ${(role==='admin'||role==='adm')&&p.status==='aguardando_aprovacao'?`<button class="bicon btn-sm" style="color:var(--green)" title="Aprovar" onclick="aprovarProposta('${p.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></button>`:''}
         </div>
       </div>
@@ -6970,7 +6971,7 @@ function rPropostas(){
   }).join('');
   return`
   <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;justify-content:space-between">
-    <div style="font-size:13px;color:var(--text2)">${propostas.length} proposta(s)${pendAprov>0?` · <span style="color:var(--amber-text);font-weight:600">${pendAprov} aguardando aprovação</span>`:''}</div>
+    <div style="font-size:13px;color:var(--text2)">${propostas.filter(p=>propEhCorrente(p)).length} proposta(s)${pendAprov>0?` · <span style="color:var(--amber-text);font-weight:600">${pendAprov} aguardando aprovação</span>`:''}</div>
     <button class="btn btn-p btn-sm" onclick="openPropostaEditor()">+ Nova proposta</button>
   </div>
   ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma proposta</p></div>'}`;
@@ -7431,6 +7432,24 @@ function propEhAtual(p){
   const maxV=Math.max.apply(null,grupo.map(x=>x.versao||1));
   return (p.versao||1)===maxV;
 }
+function propCorrenteId(key){
+  const grupo=propostas.filter(x=>propPropKey(x)===key);
+  if(!grupo.length)return null;
+  return grupo.reduce((a,b)=>((b.versao||1)>(a.versao||1)?b:a)).id;
+}
+function propEhCorrente(p){return propCorrenteId(propPropKey(p))===p.id;}
+function propNumAnteriores(p){return propostas.filter(x=>propPropKey(x)===propPropKey(p)).length-1;}
+function propVersoesAnteriores(id){
+  const p=propostas.find(x=>x.id===id);if(!p)return;
+  const key=propPropKey(p);const corr=propCorrenteId(key);
+  const ant=propostas.filter(x=>propPropKey(x)===key&&x.id!==corr).sort((a,b)=>(b.versao||1)-(a.versao||1));
+  if(!ant.length){if(typeof showToast==='function')showToast('Não há versões anteriores.','amber');return;}
+  const linhas=ant.map(function(x){const st=PROP_STATUS[x.status]||PROP_STATUS.rascunho;return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">'
+    +'<div><div style="font-weight:700;font-size:13px">v'+(x.versao||1)+' <span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:99px;background:'+st.bg+';color:'+st.color+'">'+st.label+'</span></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+(x.created_at?new Date(x.created_at).toLocaleDateString('pt-BR'):'—')+'</div></div>'
+    +'<div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="gerarPDF(&apos;'+x.id+'&apos;)">PDF</button><button class="btn btn-sm" onclick="portClose();openPropostaDetalhe(&apos;'+x.id+'&apos;)">Abrir</button></div></div>';}).join('');
+  portModal('Versões anteriores · '+(p.numero_po||'')+(p.cliente_nome?(' · '+p.cliente_nome):''),linhas,'portClose()',{width:'560px',saveLabel:'Fechar'});
+}
 async function novaVersaoProposta(id){
   const p=propostas.find(x=>x.id===id);if(!p)return;
   if(!confirm('Criar uma nova versão desta proposta? A versão atual será mantida como histórico.'))return;
@@ -7483,6 +7502,7 @@ function gerarPDF(id){
   doc.open();
   doc.write(buildPropostaPDF(p,tarifas,aprovada));
   doc.close();
+  try{doc.title=(p.numero_po||'Proposta')+(p.versao?('_v'+p.versao):'');}catch(e){}
 
   // Aguarda carregar imagens e imprime
   setTimeout(()=>{
