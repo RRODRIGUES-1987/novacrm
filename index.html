@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.396 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.397 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.396';
+const APP_VERSION='v1.0.397';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -22761,12 +22761,18 @@ function wmsAbrirEmbarque(romaneioId){
   const peds=wmsPedidos.filter(p=>p.romaneio_id===romaneioId);
   const pallets=wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id));
   const prisma=wmsPrismas.find(pr=>pr.romaneio_id===romaneioId && pr.status==='ocupado');
-  const lista=pallets.map(pl=>`
-    <tr id="emb-row-${pl.id}">
-      <td style="padding:6px 8px;font-size:12px">${pl.numero}</td>
-      <td style="padding:6px 8px;font-size:11px;color:var(--text3)">${pl.tot_volumes} vol</td>
-      <td style="padding:6px 8px;text-align:center"><span id="emb-ok-${pl.id}" style="font-size:14px;color:${pl.status==='embarcado'?'var(--green-text)':'var(--text3)'}">${pl.status==='embarcado'?'✓':'○'}</span></td>
-    </tr>`).join('');
+  const lista=pallets.map(pl=>{
+    const emb=pl.status==='embarcado';
+    const acao=emb
+      ?'<span style="font-size:10px;color:var(--text3)">—</span>'
+      :'<button id="emb-btn-'+pl.id+'" class="btn btn-sm" onclick="wmsEmbarqueManual(\''+pl.id+'\')">Confirmar manual</button>';
+    return '<tr id="emb-row-'+pl.id+'">'
+      +'<td style="padding:6px 8px;font-size:12px">'+pl.numero+'</td>'
+      +'<td style="padding:6px 8px;font-size:11px;color:var(--text3)">'+pl.tot_volumes+' vol</td>'
+      +'<td style="padding:6px 8px;text-align:center"><span id="emb-ok-'+pl.id+'" style="font-size:14px;color:'+(emb?'var(--green-text)':'var(--text3)')+'">'+(emb?'✓':'○')+'</span></td>'
+      +'<td style="padding:6px 8px;text-align:right">'+acao+'</td>'
+    +'</tr>';
+  }).join('');
   const jaEmb=pallets.filter(pl=>pl.status==='embarcado').length;
   const pct0=pallets.length?Math.round(jaEmb/pallets.length*100):0;
   const inner=`
@@ -22776,11 +22782,11 @@ function wmsAbrirEmbarque(romaneioId){
       <div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden"><div id="emb-pct-bar" style="height:100%;width:${pct0}%;background:var(--blue-text);border-radius:99px;transition:width .3s"></div></div>
     </div>
     <div style="margin-bottom:12px;padding:11px 13px;background:var(--blue-bg);border-radius:9px">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta de embarque de cada pallet</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta de embarque de cada pallet — ou use <b>Confirmar manual</b> na tabela abaixo</div>
       <input id="emb-bipe" placeholder="Bipe a etiqueta..." autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key==='Enter'){wmsEmbarqueBipe(this.value);this.value='';this.focus();}">
     </div>
     <table style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:var(--bg2)"><th style="padding:6px 8px;text-align:left;font-size:10px">Pallet</th><th style="padding:6px 8px;text-align:left;font-size:10px">Volumes</th><th style="padding:6px 8px;text-align:center;font-size:10px">Embarcado</th></tr></thead>
+      <thead><tr style="background:var(--bg2)"><th style="padding:6px 8px;text-align:left;font-size:10px">Pallet</th><th style="padding:6px 8px;text-align:left;font-size:10px">Volumes</th><th style="padding:6px 8px;text-align:center;font-size:10px">Embarcado</th><th style="padding:6px 8px;text-align:right;font-size:10px">Ação</th></tr></thead>
       <tbody>${lista}</tbody>
     </table>`;
   window._wmsEmbPallets=pallets.map(p=>p.id);
@@ -22795,6 +22801,27 @@ function wmsEmbAtualizaProgresso(){
   if(bar){bar.style.width=pct+'%';bar.style.background=pct===100?'var(--green-text)':'var(--blue-text)';}
   if(lbl)lbl.textContent=emb+'/'+ids.length+' · '+pct+'%';
 }
+// Núcleo do embarque de um pallet — usado pela bipagem e pela confirmação manual
+async function _wmsEmbarcarPallet(pl,modo){
+  // sequência de leitura = quantos pallets deste romaneio já foram embarcados + 1
+  const jaEmb=wmsPalletsEmbarque.filter(x=>(window._wmsEmbPallets||[]).includes(x.id)&&x.status==='embarcado').length;
+  const seq=jaEmb+1;
+  const agora=new Date().toISOString();
+  const carimbo={status:'embarcado',embarcado_por:cu?.id||null,embarcado_por_nome:profile?.full_name||cu?.email||null,embarcado_em:agora,seq_leitura:seq};
+  await dbUpdate('wms_pallets_embarque',pl.id,carimbo);
+  Object.assign(pl,carimbo);
+  const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);
+  await dbInsert('wms_conferencias',{
+    company_id:company?.id,unit_id:pl.unit_id||null,tipo:4,pedido_id:pl.pedido_id,
+    pallet_id:pl.id,romaneio_id:wmsEmbRomaneio,cliente_id:pl.cliente_id,
+    conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
+    modo:modo,resultado:'ok',observacao:(modo==='manual'?'Embarcado manualmente':'Embarcado')+' (seq '+seq+') no romaneio '+(r?.numero||''),
+  });
+  const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='✓ '+seq;ok.style.color='var(--green-text)';}
+  const btn=ge('emb-btn-'+pl.id);if(btn){btn.outerHTML='<span style="font-size:10px;color:var(--text3)">'+(modo==='manual'?'manual':'bipe')+'</span>';}
+  wmsEmbAtualizaProgresso();
+  return seq;
+}
 async function wmsEmbarqueBipe(codigo){
   const cod=String(codigo||'').trim();
   if(!cod)return;
@@ -22803,23 +22830,20 @@ async function wmsEmbarqueBipe(codigo){
   if(!(window._wmsEmbPallets||[]).includes(pl.id)){showToast('Este pallet não é deste romaneio.','amber');return;}
   if(pl.status==='embarcado'){showToast('Pallet já embarcado.','blue');return;}
   try{
-    // sequência de leitura = quantos pallets deste romaneio já foram embarcados + 1
-    const jaEmb=wmsPalletsEmbarque.filter(x=>(window._wmsEmbPallets||[]).includes(x.id)&&x.status==='embarcado').length;
-    const seq=jaEmb+1;
-    const agora=new Date().toISOString();
-    const carimbo={status:'embarcado',embarcado_por:cu?.id||null,embarcado_por_nome:profile?.full_name||cu?.email||null,embarcado_em:agora,seq_leitura:seq};
-    await dbUpdate('wms_pallets_embarque',pl.id,carimbo);
-    Object.assign(pl,carimbo);
-    const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);
-    await dbInsert('wms_conferencias',{
-      company_id:company?.id,unit_id:pl.unit_id||null,tipo:4,pedido_id:pl.pedido_id,
-      pallet_id:pl.id,romaneio_id:wmsEmbRomaneio,cliente_id:pl.cliente_id,
-      conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
-      modo:'bipe',resultado:'ok',observacao:'Embarcado (seq '+seq+') no romaneio '+(r?.numero||''),
-    });
-    const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='✓ '+seq;ok.style.color='var(--green-text)';}
-    wmsEmbAtualizaProgresso();
+    const seq=await _wmsEmbarcarPallet(pl,'bipe');
     showToast('Pallet '+pl.numero+' embarcado (seq '+seq+').','green');
+  }catch(e){showToast('Erro: '+e.message,'red');}
+}
+// Confirmação manual de embarque (etiqueta danificada / leitor indisponível)
+async function wmsEmbarqueManual(palletId){
+  const pl=wmsPalletsEmbarque.find(x=>x.id===palletId);
+  if(!pl){showToast('Pallet não encontrado.','amber');return;}
+  if(!(window._wmsEmbPallets||[]).includes(pl.id)){showToast('Este pallet não é deste romaneio.','amber');return;}
+  if(pl.status==='embarcado'){showToast('Pallet já embarcado.','blue');return;}
+  if(!confirm('Confirmar manualmente a entrada do pallet '+pl.numero+' no caminhão (sem bipar a etiqueta)?'))return;
+  try{
+    const seq=await _wmsEmbarcarPallet(pl,'manual');
+    showToast('Pallet '+pl.numero+' embarcado manualmente (seq '+seq+').','green');
   }catch(e){showToast('Erro: '+e.message,'red');}
 }
 async function wmsFinalizarEmbarque(){
@@ -24156,5 +24180,3 @@ function unitLabel(){
 </script>
 </body>
 </html>
-
-  
