@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.405 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.406 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.405';
+const APP_VERSION='v1.0.406';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -5623,6 +5623,11 @@ function rDashRH(role){
   const hoje = new Date();
   const feriasEscalonadas=[], feriasVencidas=[], feriasAguardando=[];
   let expUrgentes=[], pessoasAtivas2=[];
+  try{
+    (typeof expPendentesLista==='function'?expPendentesLista():[]).filter(function(l){return l.urgente;}).forEach(function(l){
+      expUrgentes.push({nome:l.p.nome,parcela:l.parcela,fim:l.dataFim.toLocaleDateString('pt-BR'),du:l.diasUteis,vencida:l.vencida});
+    });
+  }catch(e){}
 
   pessoas.filter(p=>['funcionario','colaborador'].includes(p.tipo_pessoa)&&p.ativo!==false&&p.data_admissao).forEach(p=>{
     let pi=new Date(p.data_admissao+'T00:00:00');
@@ -5720,11 +5725,11 @@ function rDashRH(role){
     html += '<div onclick="pg(\'rh-experiencia\')" style="background:var(--bg);border:1.5px solid var(--red-text);border-radius:14px;padding:16px;cursor:pointer;margin-top:12px" onmouseover="this.style.boxShadow=\'0 4px 16px rgba(0,0,0,.1)\'" onmouseout="this.style.boxShadow=\'\'">';
     html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="width:36px;height:36px;background:var(--red-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">📋</div>';
     html += '<div><div style="font-size:13px;font-weight:700;color:var(--red-text)">Avaliação de Experiência — Urgente</div>';
-    html += '<div style="font-size:11px;color:var(--text3)">'+expUrgentes.length+' avaliação'+(expUrgentes.length>1?'ões':'')+' venc'+(expUrgentes.length>1?'em':'e')+' em até 5 dias úteis</div></div></div>';
+    html += '<div style="font-size:11px;color:var(--text3)">'+expUrgentes.length+' avaliação'+(expUrgentes.length>1?'ões':'')+' vencida(s) ou vencendo em 5 dias úteis</div></div></div>';
     expUrgentes.forEach(function(e){
       html += '<div style="font-size:12px;padding:6px 8px;background:var(--red-bg);border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between">';
       html += '<span style="color:var(--red-text);font-weight:600">'+e.nome+' ('+e.parcela+'º período)</span>';
-      html += '<span style="color:var(--red-text);font-size:11px">'+e.fim+' · '+e.du+'d úteis</span></div>';
+      html += '<span style="color:var(--red-text);font-size:11px">'+(e.vencida?'VENCIDA':e.fim+' · '+e.du+'d úteis')+'</span></div>';
     });
     html += '</div>';
   }
@@ -9723,49 +9728,54 @@ function calcDiasUteisRestantes(dataFim){
   return dias;
 }
 
+// Regra 45+45 da experiência: lista parcelas PENDENTES (permanecem até serem avaliadas, mesmo vencidas) + as recém-avaliadas dentro da janela. Usado na tela e no dashboard.
+function expPendentesLista(){
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const out=[];
+  pessoas.filter(function(p){return p.tipo_contrato==='clt'&&p.data_admissao&&p.tipo_pessoa==='funcionario'&&p.ativo!==false;}).forEach(function(p){
+    const adm=new Date(p.data_admissao+'T00:00:00');
+    const diasAdm=Math.floor((hoje-adm)/(1000*60*60*24));
+    [1,2].forEach(function(parcela){
+      const startDay=parcela===1?0:45;
+      if(diasAdm<startDay)return; // período ainda não iniciou
+      const fimJanela=parcela===1?44:89;
+      const dataFim=new Date(adm);dataFim.setDate(dataFim.getDate()+fimJanela);
+      const avaliacao=rhExperiencia.find(function(e){return e.pessoa_id===p.id&&e.parcela===parcela;});
+      const st=avaliacao?avaliacao.status:'pendente';
+      const feita=['avaliado','homologado','reprovado'].includes(st);
+      if(feita&&diasAdm>fimJanela)return; // já avaliada e fora da janela -> não lista
+      const diasUteis=calcDiasUteisRestantes(dataFim.toISOString().split('T')[0]);
+      const vencida=!feita&&diasAdm>fimJanela; // prazo passou e não foi avaliada -> permanece
+      const urgente=!feita&&(vencida||diasUteis<=5);
+      const stInfo=STATUS_EXP[st]||STATUS_EXP.pendente;
+      out.push({p:p,parcela:parcela,dataFim:dataFim,diasUteis:diasUteis,vencida:vencida,urgente:urgente,feita:feita,avaliacao:avaliacao,st:st,stInfo:stInfo});
+    });
+  });
+  return out;
+}
 function rRHExperiencia(){
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
   const isRH = ['admin','adm','rh'].includes(profile?.role||'');
   const isGestor = profile?.role==='gestor';
 
-  // Coletar colaboradores CLT com experiência em andamento ou pendente
-  const pessoasCLT = pessoas.filter(function(p){
-    return p.tipo_contrato==='clt' && p.data_admissao && p.tipo_pessoa==='funcionario' && p.ativo!==false;
-  });
-
-  // Para cada pessoa CLT, verificar o período atual
-  const linhas = [];
-  pessoasCLT.forEach(function(p){
-    const adm = new Date(p.data_admissao+'T00:00:00');
-    const diasAdm = Math.floor((hoje-adm)/(1000*60*60*24));
-    if(diasAdm >= 90) return; // experiência já concluída
-
-    const parcela = diasAdm < 45 ? 1 : 2;
-    const dataFim = new Date(adm);
-    dataFim.setDate(dataFim.getDate() + (parcela===1?44:89));
-
-    // Buscar avaliação existente
-    const avaliacao = rhExperiencia.find(function(e){
-      return e.pessoa_id===p.id && e.parcela===parcela;
-    });
-
-    const diasUteis = calcDiasUteisRestantes(dataFim.toISOString().split('T')[0]);
-    const urgente = diasUteis <= 5;
-    const st = avaliacao ? avaliacao.status : 'pendente';
-    const stInfo = STATUS_EXP[st]||STATUS_EXP.pendente;
-
-    // Filtro por gestor
-    if(isGestor && !isRH && !souGestorDe(p)) return;
-
-    linhas.push({p, parcela, dataFim, diasUteis, urgente, avaliacao, st, stInfo});
-  });
+  // Regra 45+45: pendência permanece até ser avaliada (mesmo vencida / após 90 dias)
+  let linhas = expPendentesLista();
+  if(isGestor && !isRH) linhas = linhas.filter(function(l){ return souGestorDe(l.p); });
 
   // Alertas
-  const urgentes = linhas.filter(function(l){ return l.urgente && l.st==='pendente'; });
+  const vencidas = linhas.filter(function(l){ return l.vencida; });
+  const urgentes = linhas.filter(function(l){ return l.urgente && !l.vencida; });
 
   let alertaHtml = '';
+  if(vencidas.length){
+    alertaHtml += '<div style="background:var(--red-bg);border:1px solid var(--red-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">';
+    alertaHtml += '<div style="font-size:13px;font-weight:700;color:var(--red-text);margin-bottom:8px">⛔ '+vencidas.length+' avaliação(ões) VENCIDA(S) — avaliar imediatamente</div>';
+    vencidas.forEach(function(l){
+      alertaHtml += '<div style="font-size:12px;color:var(--red-text);margin-bottom:3px">· <strong>'+l.p.nome+'</strong> — '+l.parcela+'º período venceu em '+l.dataFim.toLocaleDateString('pt-BR')+'</div>';
+    });
+    alertaHtml += '</div>';
+  }
   if(urgentes.length){
-    alertaHtml = '<div style="background:var(--red-bg);border:1px solid var(--red-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">';
+    alertaHtml += '<div style="background:var(--red-bg);border:1px solid var(--red-text);border-radius:10px;padding:14px 16px;margin-bottom:16px">';
     alertaHtml += '<div style="font-size:13px;font-weight:700;color:var(--red-text);margin-bottom:8px">🚨 '+urgentes.length+' avaliação(ões) vencem em até 5 dias úteis</div>';
     urgentes.forEach(function(l){
       alertaHtml += '<div style="font-size:12px;color:var(--red-text);margin-bottom:3px">· <strong>'+l.p.nome+'</strong> — '+l.parcela+'º período vence em '+l.dataFim.toLocaleDateString('pt-BR')+' ('+l.diasUteis+' dia(s) útil/úteis)</div>';
@@ -9776,18 +9786,19 @@ function rRHExperiencia(){
   // Grid
   let rows = '';
   if(!linhas.length){
-    rows = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">Nenhum colaborador CLT em período de experiência.</td></tr>';
+    rows = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">Nenhuma avaliação de experiência pendente.</td></tr>';
   } else {
     linhas.forEach(function(l){
-      const rowBg = l.urgente && l.st==='pendente' ? 'background:rgba(220,38,38,0.07)' :
-                    l.diasUteis<=10 && l.st==='pendente' ? 'background:rgba(234,179,8,0.07)' : '';
+      const rowBg = l.vencida ? 'background:rgba(220,38,38,0.12)' :
+                    (l.urgente && !l.feita) ? 'background:rgba(220,38,38,0.07)' :
+                    (l.diasUteis<=10 && !l.feita) ? 'background:rgba(234,179,8,0.07)' : '';
       const _eid=l.p.id; const _ep=l.parcela;
       rows += '<tr style="border-top:1px solid var(--border);cursor:pointer;'+rowBg+'" id="exp-row-'+_eid+'-'+_ep+'">';
       rows += '<td style="padding:10px 12px"><div style="font-weight:600;font-size:13px">'+l.p.nome+'</div>';
       rows += '<div style="font-size:11px;color:var(--text3)">'+( l.p.departamento||'—')+' · '+(l.p.cargo||'—')+'</div></td>';
       rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2);text-align:center">'+l.parcela+'º</td>';
       rows += '<td style="padding:10px 12px;font-size:12px;color:var(--text2)">'+l.dataFim.toLocaleDateString('pt-BR')+'</td>';
-      rows += '<td style="padding:10px 12px;font-size:12px;font-weight:'+(l.urgente?'700':'400')+';color:'+(l.urgente?'var(--red-text)':'var(--text2)')+'">'+l.diasUteis+'d úteis</td>';
+      rows += '<td style="padding:10px 12px;font-size:12px;font-weight:'+(l.urgente?'700':'400')+';color:'+(l.urgente?'var(--red-text)':'var(--text2)')+'">'+(l.vencida?'VENCIDA':l.diasUteis+'d úteis')+'</td>';
       rows += '<td style="padding:10px 12px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+l.stInfo.cor+';color:'+l.stInfo.txt+';font-weight:600">'+l.stInfo.label+'</span></td>';
       const perfExp = l.avaliacao&&l.avaliacao.total ? getPerformanceLabel(l.avaliacao.total) : null;
       rows += '<td style="padding:10px 12px">'
@@ -9795,7 +9806,7 @@ function rRHExperiencia(){
         +(l.avaliacao?.conclusao==='reprovado'?' <span style="font-size:10px;color:var(--red-text)">❌</span>':'')
         +'</td>';
       rows += '<td style="padding:10px 12px;text-align:right">';
-      rows += '<button class="btn btn-sm btn-primary" id="exp-btn-'+_eid+'-'+_ep+'">Avaliar</button>';
+      rows += '<button class="btn btn-sm btn-primary" id="exp-btn-'+_eid+'-'+_ep+'">'+(l.feita?'Ver':'Avaliar')+'</button>';
       rows += '</td></tr>';
     });
   }
@@ -9803,7 +9814,7 @@ function rRHExperiencia(){
   // Montar o HTML
   const _html = '<div>'
     + alertaHtml
-    + '<div style="font-size:14px;font-weight:600;margin-bottom:12px">'+linhas.length+' colaborador'+(linhas.length!==1?'es':'')+' em período de experiência</div>'
+    + '<div style="font-size:14px;font-weight:600;margin-bottom:12px">'+linhas.length+' avaliação'+(linhas.length!==1?'ões':'')+' de experiência a tratar</div>'
     + '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:auto">'
     + '<table style="width:100%;border-collapse:collapse;min-width:700px">'
     + '<thead><tr style="background:var(--bg2)">'
