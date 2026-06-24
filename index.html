@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.412 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.413 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.412';
+const APP_VERSION='v1.0.413';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -3719,6 +3719,12 @@ async function openTabelaTarifaria(id=null){
       <div class="fg"><label class="fl">Faturamento mínimo</label>
         <input class="fi" id="tt-fat-minimo" value="${t?t.cond_fat_minimo||'':''}" placeholder="Ex: 10000 ou R$10.000,00">
       </div>
+      <div class="fg"><label class="fl">PIS (%)</label>
+        <input class="fi" id="tt-pis" value="${t?.pis_aliquota||''}" placeholder="Ex: 0,65 (só se aplicável)">
+      </div>
+      <div class="fg"><label class="fl">COFINS (%)</label>
+        <input class="fi" id="tt-cofins" value="${t?.cofins_aliquota||''}" placeholder="Ex: 3 (só se aplicável)">
+      </div>
       <div class="fg"><label class="fl">Prazo de pagamento</label>
         <input class="fi" id="tt-prazo-pag" value="${t?t.prazo_pagamento||'':''}" placeholder="Ex: 30 dias, D+5...">
       </div>
@@ -3973,6 +3979,8 @@ async function saveTabelaTarifaria(){
     cond_faturamento:getV('tt-cond-fat')||'Quinzenal',
     cond_fat_minimo:getV('tt-fat-minimo')||null,
     iss_incluso:ge('tt-iss')?.value==='sim',
+    pis_aliquota:_fatPct(getV('tt-pis'))||null,
+    cofins_aliquota:_fatPct(getV('tt-cofins'))||null,
     ativo:ge('tt-ativo')?.checked!==false,
   };
 
@@ -4035,13 +4043,9 @@ function getFatNumero(){
   return 'FT'+String(max+1).padStart(4,'0')+'/'+ano;
 }
 
-function rFaturamento(){
+function fatRowHTML(f,i){
   const role=profile?.role||'vendedor';
   const isGestor=['gestor','admin','adm'].includes(role);
-  const pendAprov=faturamento.filter(f=>f.status==='aguardando').length;
-  const totalAutorizado=faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
-
-  const rows=faturamento.map((f,i)=>{
     const cli=clientes.find(c=>c.id===f.cliente_id);
     const st=FAT_STATUS[f.status]||FAT_STATUS.rascunho;
     return`<div class="li" style="cursor:pointer" onclick="openFaturaEditor('${f.id}')">
@@ -4079,7 +4083,14 @@ function rFaturamento(){
         </div>
       </div>
     </div>`;
-  }).join('');
+}
+function rFaturamento(){
+  const role=profile?.role||'vendedor';
+  const isGestor=['gestor','admin','adm'].includes(role);
+  const pendAprov=faturamento.filter(f=>f.status==='aguardando').length;
+  const totalAutorizado=faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
+
+  const rows=faturamento.map((f,i)=>fatRowHTML(f,i)).join('');
 
   return`
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
@@ -4115,16 +4126,7 @@ function filterFaturamento(q){
   });
   const el=ge('fat-list');if(!el)return;
   if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
-  el.innerHTML=f.map((f,i)=>{
-    const cli=clientes.find(c=>c.id===f.cliente_id);
-    const st=FAT_STATUS[f.status]||FAT_STATUS.rascunho;
-    return`<div class="li" style="cursor:pointer" onclick="openFaturaEditor('${f.id}')">
-      <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">${f.numero_fatura||'—'}</div>
-      <div class="linfo"><div class="lname">${cli?.nome||'—'}</div>
-      <div class="lsub">${f.periodo_inicio?fmtDate(f.periodo_inicio)+' → '+fmtDate(f.periodo_fim):''} ${f.total?'· '+fmtV(f.total):''}</div></div>
-      <div class="lright"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:${st.bg};color:${st.color}">${st.label}</span></div>
-    </div>`;
-  }).join('');
+  el.innerHTML=f.map((f,i)=>fatRowHTML(f,i)).join('');
 }
 
 // Editor de fatura em overlay
@@ -4396,9 +4398,12 @@ function _imprimirFatura(f,contatoResp){
 
   let linhas=[];
   try{linhas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
-  const subtotal=linhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
-  const issVal=issIncluso?0:subtotal*0.02;
-  const total=subtotal+issVal;
+  const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
+  const _imp=fatImpostosCalc(subtotalNF,_tabF,issIncluso);
+  const subtotal=subtotalNF;
+  const total=_imp.bruto+subtotalND;
 
   const fmtBRL=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   const fmtDt=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'';
@@ -4507,8 +4512,9 @@ function _imprimirFatura(f,contatoResp){
       <tbody>${linhasHTML}</tbody>
     </table>
     <div class="totals">
-      <div class="total-row"><span style="color:#666">Subtotal:</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(subtotal)}</span></div>
-      ${!issIncluso?`<div class="total-row"><span style="color:#666">ISS (2%):</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(issVal)}</span></div>`:''}
+      <div class="total-row"><span style="color:#666">Subtotal serviços:</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(subtotal)}</span></div>
+      ${fatImpostoLinhas(_imp).map(function(x){return '<div class="total-row"><span style="color:#666">'+x.label+':</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(x.value)+'</span></div>';}).join('')}
+      ${subtotalND>0?('<div class="total-row"><span style="color:#666">Nota de Débito (s/ imposto):</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(subtotalND)+'</span></div>'):''}
       <div class="total-row total-final"><span>TOTAL:</span><span style="min-width:110px;text-align:right">${fmtBRL(total)}</span></div>
     </div>
   </div>
@@ -4696,9 +4702,12 @@ async function confirmarEnvioEmail(id){
   const cli=clientes.find(c=>c.id===f.cliente_id);
   let linhas=[];
   try{linhas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
-  const subtotal=linhas.reduce((s,l)=>s+Number(l.subtotal||0),0);
-  const issVal=f.iss_incluso?0:subtotal*0.02;
-  const total=subtotal+issVal;
+  const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
+  const _imp=fatImpostosCalc(subtotalNF,_tabF,f.iss_incluso);
+  const subtotal=subtotalNF;
+  const total=_imp.bruto+subtotalND;
   const fmtBRL=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2});
   const fmtDt=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'';
 
@@ -4737,8 +4746,9 @@ async function confirmarEnvioEmail(id){
         ${linhasHTML}
       </table>
       <div style="text-align:right;font-size:13px">
-        <div>Subtotal: <strong>${fmtBRL(subtotal)}</strong></div>
-        ${!f.iss_incluso?`<div>ISS (2%): <strong>${fmtBRL(issVal)}</strong></div>`:''}
+        <div>Subtotal serviços: <strong>${fmtBRL(subtotal)}</strong></div>
+        ${fatImpostoLinhas(_imp).map(function(x){return '<div>'+x.label+': <strong>'+fmtBRL(x.value)+'</strong></div>';}).join('')}
+        ${subtotalND>0?('<div>Nota de Débito (s/ imposto): <strong>'+fmtBRL(subtotalND)+'</strong></div>'):''}
         <div style="font-size:16px;color:#1e5f82;font-weight:700;margin-top:6px;border-top:2px solid #1e5f82;padding-top:6px">TOTAL: ${fmtBRL(total)}</div>
       </div>
       <div style="margin-top:16px;padding:12px;background:#f0f7ff;border-radius:8px;font-size:12px;color:#1e5f82">
@@ -5024,6 +5034,27 @@ function addLinhaFatura(){
   renderLinhasFatura();
 }
 
+function _fatPct(x){var s=String(x==null?'':x).replace('%','').replace(',','.').trim();var n=parseFloat(s);return isNaN(n)?0:n;}
+function fmtPct(p){return Number(p).toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:2});}
+function fatImpostosCalc(baseNF,tabela,issIncluso){
+  baseNF=Number(baseNF||0);
+  var issPct=2;                                   // ISS 2% para todos os clientes
+  var pisPct=_fatPct(tabela&&tabela.pis_aliquota);
+  var cofPct=_fatPct(tabela&&tabela.cofins_aliquota);
+  var somaDec=(issPct+pisPct+cofPct)/100;
+  var bruto=baseNF;
+  if(!issIncluso && somaDec>0 && somaDec<1){bruto=baseNF/(1-somaDec);}   // por dentro (gross-up)
+  var ref=issIncluso?baseNF:bruto;                // base de calculo de cada imposto
+  var iss=ref*issPct/100, pis=ref*pisPct/100, cof=ref*cofPct/100;
+  return {issPct:issPct,pisPct:pisPct,cofPct:cofPct,base:baseNF,bruto:bruto,iss:iss,pis:pis,cofins:cof,totalImpostos:iss+pis+cof,issIncluso:!!issIncluso};
+}
+function fatImpostoLinhas(imp){
+  var tag=imp.issIncluso?' (incluso)':'';
+  var r=[{label:'ISS ('+fmtPct(imp.issPct)+'%)'+tag,value:imp.iss}];
+  if(imp.pisPct>0) r.push({label:'PIS ('+fmtPct(imp.pisPct)+'%)'+tag,value:imp.pis});
+  if(imp.cofPct>0) r.push({label:'COFINS ('+fmtPct(imp.cofPct)+'%)'+tag,value:imp.cofins});
+  return r;
+}
 function recalcFatura(){
   // Separa linhas normais (NF) das de Nota de Débito
   const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
@@ -5045,9 +5076,10 @@ function recalcFatura(){
   }
 
   const subtotal=subtotalLinhas+complemento;       // base NF
-  const issVal=issIncluso?0:subtotal*0.02;          // ISS só sobre NF
-  const totalNF=subtotal+issVal;
+  const _imp=fatImpostosCalc(subtotal,tabela,issIncluso);
+  const totalNF=_imp.bruto;                         // NF c/ impostos por dentro
   const total=totalNF+subtotalND;                   // total geral = NF + ND (ND sem imposto)
+  window._fatImpostos=_imp;
 
   // Expor para PDFs e salvamento
   window._fatComplemento=complemento;
@@ -5072,10 +5104,7 @@ function recalcFatura(){
         <span style="color:var(--text2)">Subtotal (c/ mínimo):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
       </div>`:''}
-      ${!issIncluso?`<div style="display:flex;gap:40px;font-size:13px">
-        <span style="color:var(--text2)">ISS (2%):</span>
-        <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(issVal)}</span>
-      </div>`:''}
+      ${fatImpostoLinhas(_imp).map(function(x){return '<div style="display:flex;gap:40px;font-size:13px"><span style="color:var(--text2)">'+x.label+':</span><span style="font-weight:600;min-width:120px;text-align:right">'+fmtV(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?`<div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">Nota de Débito (s/ imposto):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalND)}</span>
@@ -5131,8 +5160,9 @@ async function salvarFatura(status){
   const complemento=window._fatComplemento||0;
   const subtotal=subtotalNF+complemento;            // base NF
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
-  const issVal=issIncluso?0:subtotal*0.02;          // ISS só sobre NF
-  const total=subtotal+issVal+subtotalND;           // total geral = NF + ISS + ND
+  const _tabFat=tabelasTarifarias.find(t=>t.id===(getFatV('fat-tabela')||null));
+  const _imp=fatImpostosCalc(subtotal,_tabFat,issIncluso);
+  const total=_imp.bruto+subtotalND;                // total geral = NF (impostos por dentro) + ND
   // Adiciona linha de complemento nas linhas a salvar
   const linhasParaSalvar=[...fatLinhas];
   if(complemento>0){
@@ -5147,6 +5177,14 @@ async function salvarFatura(status){
       is_complemento:true,
     });
   }
+  // Rateio dos impostos por linha NF (proporcional ao subtotal) — relatório/DRE
+  const _baseRat=subtotal>0?subtotal:0;
+  linhasParaSalvar.forEach(function(l){
+    if(l.nota_debito){l.imposto_iss=0;l.imposto_pis=0;l.imposto_cofins=0;l.imposto_total=0;return;}
+    const _sh=_baseRat>0?(Number(l.subtotal||0)/_baseRat):0;
+    l.imposto_iss=_imp.iss*_sh;l.imposto_pis=_imp.pis*_sh;l.imposto_cofins=_imp.cofins*_sh;
+    l.imposto_total=l.imposto_iss+l.imposto_pis+l.imposto_cofins;
+  });
   const num=getFatV('fat-num');
 
   // Gera número da Nota de Débito ao aprovar/emitir, se houver linhas ND e ainda não tiver número
@@ -5181,8 +5219,8 @@ async function salvarFatura(status){
     periodo_inicio:getFatV('fat-ini'),
     periodo_fim:getFatV('fat-fim'),
     data_emissao:getFatV('fat-emissao'),
-    linhas:JSON.stringify(fatLinhas),
-    subtotal, iss_incluso:issIncluso, iss_valor:issVal, total,
+    linhas:JSON.stringify(linhasParaSalvar),
+    subtotal, iss_incluso:issIncluso, iss_valor:_imp.iss, pis_valor:_imp.pis, cofins_valor:_imp.cofins, impostos_total:_imp.totalImpostos, valor_bruto:_imp.bruto, total,
     observacoes:getFatV('fat-obs'),
     status,
   };
