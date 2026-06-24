@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.399 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.400 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.399';
+const APP_VERSION='v1.0.400';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -22405,12 +22405,17 @@ async function wmsFinalizarUnitizacao(){
       resultado:'ok',auditoria_status:'ok',observacao:N+' pallet(s) unitizado(s)',
     });
     if(confRes)wmsConferencias=[Array.isArray(confRes)?confRes[0]:confRes,...wmsConferencias];
-    // registra leituras da unitização (pallet=1, fração=N) a partir das TAREFAS REAIS do pedido
+    // registra leituras da unitização POR PALLET (pallet=1 linha · fração=1 linha por volume), vinculadas ao pallet
     const confRow3=confRes?(Array.isArray(confRes)?confRes[0]:confRes):null;
-    const tarefasPed=wmsTarefasSeparacao.filter(t=>t.pedido_id===p.id);
-    const itensLeitura=tarefasPed.map(t=>({sku:t.sku,descricao:t.descricao,produto_id:t.produto_id,tipo_volume:t.tipo_volume,quantidade:t.quantidade}));
     const modoUnit=(window._wmsConfModo==='bipe')?'bipe':'manual';
-    await wmsRegistrarLeituras('unitizacao',itensLeitura,{pedido_id:p.id,conferencia_id:confRow3?.id,unit_id:p.unit_id,modo:modoUnit});
+    for(const pl of pallets){
+      const itensLeitura=[];
+      wmsPalletItens.filter(pi=>pi.pallet_id===pl.id).forEach(pi=>{
+        const m=wmsMultiploDe(pi.produto_id,pi.sku,p.cliente_id);
+        wmsCalcTarefas(+pi.quantidade||0,m).forEach(t=>itensLeitura.push({sku:pi.sku,descricao:pi.descricao,produto_id:pi.produto_id,tipo_volume:t.tipo_volume,quantidade:t.quantidade}));
+      });
+      if(itensLeitura.length)await wmsRegistrarLeituras('unitizacao',itensLeitura,{pedido_id:p.id,conferencia_id:confRow3?.id,unit_id:p.unit_id,modo:modoUnit,pallet_id:pl.id});
+    }
     // etiquetas de embarque (uma por pallet, com vol X/N)
     for(const pl of pallets){
       const its=wmsPalletItens.filter(pi=>pi.pallet_id===pl.id);
@@ -23266,6 +23271,20 @@ function wmsTrackBusca(v){
   const p=wmsPedidos.find(x=>x.company_id===cid && String(x.numero_pedido||'').replace(/\D/g,'').includes(v));
   if(p){wmsTrackPedidoSel=p.id;render();}
 }
+// Leituras de unitização de um pallet — fonte: wms_leituras (pallet_id); fallback: reconstrói dos itens (pallets antigos)
+function wmsUnitLeiturasDoPallet(pl,pedido){
+  const stored=wmsLeituras.filter(l=>l.etapa==='unitizacao'&&l.pallet_id===pl.id&&!l.estornada).sort((a,b)=>(a.sequencia||0)-(b.sequencia||0));
+  if(stored.length)return stored;
+  const linhas=[];let seq=0;
+  wmsPalletItens.filter(pi=>pi.pallet_id===pl.id).forEach(pi=>{
+    const m=wmsMultiploDe(pi.produto_id,pi.sku,pedido?.cliente_id);
+    wmsCalcTarefas(+pi.quantidade||0,m).forEach(t=>{
+      if(t.tipo_volume==='pallet'){seq++;linhas.push({sku:pi.sku,descricao:pi.descricao,tipo_volume:'pallet',sequencia:seq,modo:null,usuario_nome:pl.montado_por_nome,created_at:pl.montado_em});}
+      else {const n=Math.max(0,Math.round(+t.quantidade||0));for(let i=0;i<n;i++){seq++;linhas.push({sku:pi.sku,descricao:pi.descricao,tipo_volume:'fracao',sequencia:seq,modo:null,usuario_nome:pl.montado_por_nome,created_at:pl.montado_em});}}
+    });
+  });
+  return linhas;
+}
 function wmsTrackConteudo(pedidoId){
   const p=wmsPedidos.find(x=>x.id===pedidoId);if(!p)return'';
   const cli=clientes.find(c=>c.id===p.cliente_id);
@@ -23377,29 +23396,49 @@ function wmsTrackConteudo(pedidoId){
     etapaUnit=etapaWrap('#8b5cf6','🏗','Unitização','Pallets montados e o que há dentro de cada um','','','Pedido ainda não unitizado.');
   } else {
     const palletsHtml=pallets.map(pl=>{
-      const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
-      const itHtml=its.map(i=>`<tr style="border-top:1px solid var(--border)">
-        <td style="padding:5px 10px;font-size:11px;font-weight:700">${i.sku}</td>
-        <td style="padding:5px 10px;font-size:11px;color:var(--text2)">${(i.descricao||'').slice(0,34)}</td>
-        <td style="padding:5px 10px;text-align:right;font-size:11px;font-weight:600">${i.quantidade}un</td>
-      </tr>`).join('');
+      const ls=wmsUnitLeiturasDoPallet(pl,p);
+      const lHtml=ls.map((l,i)=>{
+        const tipo=l.tipo_volume==='pallet'
+          ? '<span style="font-size:9px;font-weight:700;color:#8b5cf6;background:#8b5cf622;padding:1px 6px;border-radius:4px">PALLET</span>'
+          : '<span style="font-size:9px;font-weight:700;color:#f59e0b;background:#f59e0b22;padding:1px 6px;border-radius:4px">FRAÇÃO</span>';
+        const modo=l.modo==='bipe'
+          ? '<span style="font-size:9px;color:#3b82f6">📟 bipe</span>'
+          : (l.modo==='manual'?'<span style="font-size:9px;color:var(--text3)">✎ manual</span>':'<span style="font-size:9px;color:var(--text3)">—</span>');
+        return '<tr style="border-top:1px solid var(--border)">'
+          +'<td style="padding:5px 8px;text-align:center;font-size:11px;color:var(--text3);font-weight:600">'+(l.sequencia||(i+1))+'</td>'
+          +'<td style="padding:5px 8px;text-align:center">'+tipo+'</td>'
+          +'<td style="padding:5px 8px;font-size:11px;font-weight:700">'+(l.sku||'—')+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px;color:var(--text2)">'+((l.descricao||'').slice(0,26))+'</td>'
+          +'<td style="padding:5px 8px;text-align:center">'+modo+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px;color:var(--text2)">'+(l.usuario_nome||'—')+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px;color:var(--text3)">'+fmtDt(l.created_at)+'</td>'
+        +'</tr>';
+      }).join('');
       const emb=pl.status==='embarcado';
       const respM=pl.montado_por_nome?(pl.montado_por_nome+' · '+fmtDt(pl.montado_em)):'<span style="color:var(--text3)">—</span>';
-      return `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;background:var(--bg2)">
-          <div style="font-size:12px;font-weight:800">${pl.numero} <span style="font-size:11px;font-weight:600;color:var(--text2)">· volume ${pl.vol_num||'?'}/${N}</span>
-            ${emb?'<span style="font-size:9px;font-weight:700;color:var(--green-text);margin-left:6px">✓ carregado</span>':'<span style="font-size:9px;font-weight:700;color:var(--text3);margin-left:6px">📦 montado</span>'}</div>
-          <div style="font-size:10px;color:var(--text2)">🏗 ${respM}</div>
-        </div>
-        <table style="width:100%;border-collapse:collapse"><tbody>${itHtml}</tbody></table>
-      </div>`;
+      const totL=ls.length?(' · '+ls.length+' leitura'+(ls.length>1?'s':'')):'';
+      const cab='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;background:var(--bg2)">'
+        +'<div style="font-size:12px;font-weight:800">'+pl.numero+' <span style="font-size:11px;font-weight:600;color:var(--text2)">· volume '+(pl.vol_num||'?')+'/'+N+totL+'</span>'
+        +(emb?'<span style="font-size:9px;font-weight:700;color:var(--green-text);margin-left:6px">✓ carregado</span>':'<span style="font-size:9px;font-weight:700;color:var(--text3);margin-left:6px">📦 montado</span>')+'</div>'
+        +'<div style="font-size:10px;color:var(--text2)">🏗 '+respM+'</div></div>';
+      const tabela=ls.length
+        ? '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg)">'
+          +'<th style="padding:5px 8px;text-align:center;font-size:9px;color:var(--text3)">#</th>'
+          +'<th style="padding:5px 8px;text-align:center;font-size:9px;color:var(--text3)">Tipo</th>'
+          +'<th style="padding:5px 8px;text-align:left;font-size:9px;color:var(--text3)">SKU</th>'
+          +'<th style="padding:5px 8px;text-align:left;font-size:9px;color:var(--text3)">Descrição</th>'
+          +'<th style="padding:5px 8px;text-align:center;font-size:9px;color:var(--text3)">Modo</th>'
+          +'<th style="padding:5px 8px;text-align:left;font-size:9px;color:var(--text3)">Usuário</th>'
+          +'<th style="padding:5px 8px;text-align:left;font-size:9px;color:var(--text3)">Hora</th>'
+          +'</tr></thead><tbody>'+lHtml+'</tbody></table>'
+        : '<div style="padding:8px 11px;font-size:10px;color:var(--text3)">Sem leituras registradas.</div>';
+      return '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px">'+cab+tabela+'</div>';
     }).join('');
     etapaUnit=`<div style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
         <span style="width:26px;height:26px;border-radius:50%;background:#8b5cf622;color:#8b5cf6;display:flex;align-items:center;justify-content:center;font-size:13px">🏗</span>
-        <div><div style="font-size:13px;font-weight:700">Unitização</div><div style="font-size:10px;color:var(--text3)">Cada pallet e os produtos colocados dentro — com quem montou</div></div>
-      </div>${palletsHtml}</div>`
-      + leiturasTabela('#8b5cf6','🏗','Leituras da unitização','Cada leitura registrada na montagem (pallet = 1 · fração = 1 por unidade)',['unitizacao'],'Sem leituras de unitização registradas.');
+        <div><div style="font-size:13px;font-weight:700">Unitização</div><div style="font-size:10px;color:var(--text3)">Cada pallet com as leituras da montagem (pallet = 1 · fração = 1 por volume) — quem montou e quando</div></div>
+      </div>${palletsHtml}</div>`;
   }
 
   // ══ ETAPA 4 · EMBARQUE (produto a produto → carregado, seq, quem) ══
@@ -23451,13 +23490,13 @@ function wmsTrackImprimir(pedidoId){
   };
   const sepRows=leiturasRowsPdf(['separacao']);
   const confRows=leiturasRowsPdf(['conf1','conf2']);
-  const unitLeitRows=leiturasRowsPdf(['unitizacao']);
   const unitBlocks=pallets.map(pl=>{
-    const its=wmsPalletItens.filter(x=>x.pallet_id===pl.id);
-    const itRows=its.map(i=>'<tr><td>'+esc(i.sku)+'</td><td>'+esc(i.descricao)+'</td><td style="text-align:right">'+i.quantidade+'un</td></tr>').join('');
+    const ls=wmsUnitLeiturasDoPallet(pl,p);
+    const lRows=ls.map((l,i)=>'<tr><td style="text-align:center">'+(l.sequencia||(i+1))+'</td><td style="text-align:center">'+(l.tipo_volume==='pallet'?'PALLET':'FRAÇÃO')+'</td><td>'+esc(l.sku)+'</td><td>'+esc(l.descricao)+'</td><td style="text-align:center">'+(l.modo==='bipe'?'bipe':(l.modo==='manual'?'manual':'—'))+'</td><td>'+esc(l.usuario_nome||'—')+'</td><td>'+fmtDt(l.created_at)+'</td></tr>').join('');
     const emb=pl.status==='embarcado'?'CARREGADO':'montado';
-    return '<div class="pl"><div class="plh"><b>'+esc(pl.numero)+'</b> · volume '+(pl.vol_num||'?')+'/'+N+' · '+emb+' · montado por '+esc(pl.montado_por_nome||'—')+' ('+fmtDt(pl.montado_em)+')</div>'+
-      '<table class="t2"><tbody>'+itRows+'</tbody></table></div>';
+    const totL=ls.length?(' · '+ls.length+' leitura'+(ls.length>1?'s':'')):'';
+    return '<div class="pl"><div class="plh"><b>'+esc(pl.numero)+'</b> · volume '+(pl.vol_num||'?')+'/'+N+totL+' · '+emb+' · montado por '+esc(pl.montado_por_nome||'—')+' ('+fmtDt(pl.montado_em)+')</div>'+
+      (ls.length?'<table class="t2"><thead><tr><th style="text-align:center">#</th><th style="text-align:center">Tipo</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+lRows+'</tbody></table>':'<div style="padding:6px 9px;color:#888">Sem leituras.</div>')+'</div>';
   }).join('')||'<p style="color:#888">Não unitizado.</p>';
   // embarque
   const embRows=pallets.filter(pl=>pl.status==='embarcado').sort((a,b)=>(a.seq_leitura||0)-(b.seq_leitura||0)).map(pl=>
@@ -23496,7 +23535,6 @@ function wmsTrackImprimir(pedidoId){
     '<div class="sec">1 · Separação</div>'+(sepRows?'<table><thead><tr><th style="text-align:center">#</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+sepRows+'</tbody></table>':'<p style="color:#888;font-size:11px">Sem leituras de separação.</p>')+
     '<div class="sec">2 · Conferência</div>'+(confRows?'<table><thead><tr><th style="text-align:center">#</th><th>Etapa</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+confRows+'</tbody></table>':'<p style="color:#888;font-size:11px">Sem leituras de conferência.</p>')+
     '<div class="sec">3 · Unitização (pallets)</div>'+unitBlocks+
-    (unitLeitRows?'<table style="margin-top:6px"><thead><tr><th style="text-align:center">#</th><th>SKU</th><th>Descrição</th><th style="text-align:center">Tipo</th><th style="text-align:center">Modo</th><th>Usuário</th><th>Hora</th></tr></thead><tbody>'+unitLeitRows+'</tbody></table>':'')+
     '<div class="sec">4 · Embarque (comprovação de carga)</div><table><thead><tr><th>Pallet</th><th style="text-align:center">Volume</th><th style="text-align:center">Seq. leitura</th><th>Embarcado por</th><th>Quando</th></tr></thead><tbody>'+embRows+'</tbody></table>'+
     '<div class="foot">MK LOGÍSTICA LTDA · Documento gerado por VERUS ERP em '+fmtDt(new Date().toISOString())+'</div>'+
     '</body></html>';
