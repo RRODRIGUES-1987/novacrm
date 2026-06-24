@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.397 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.398 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.397';
+const APP_VERSION='v1.0.398';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -22763,14 +22763,11 @@ function wmsAbrirEmbarque(romaneioId){
   const prisma=wmsPrismas.find(pr=>pr.romaneio_id===romaneioId && pr.status==='ocupado');
   const lista=pallets.map(pl=>{
     const emb=pl.status==='embarcado';
-    const acao=emb
-      ?'<span style="font-size:10px;color:var(--text3)">—</span>'
-      :'<button id="emb-btn-'+pl.id+'" class="btn btn-sm" onclick="wmsEmbarqueManual(\''+pl.id+'\')">Confirmar manual</button>';
     return '<tr id="emb-row-'+pl.id+'">'
       +'<td style="padding:6px 8px;font-size:12px">'+pl.numero+'</td>'
       +'<td style="padding:6px 8px;font-size:11px;color:var(--text3)">'+pl.tot_volumes+' vol</td>'
       +'<td style="padding:6px 8px;text-align:center"><span id="emb-ok-'+pl.id+'" style="font-size:14px;color:'+(emb?'var(--green-text)':'var(--text3)')+'">'+(emb?'✓':'○')+'</span></td>'
-      +'<td style="padding:6px 8px;text-align:right">'+acao+'</td>'
+      +'<td id="emb-acao-'+pl.id+'" style="padding:6px 8px;text-align:right">'+wmsEmbAcaoBtn(pl.id,emb)+'</td>'
     +'</tr>';
   }).join('');
   const jaEmb=pallets.filter(pl=>pl.status==='embarcado').length;
@@ -22782,7 +22779,7 @@ function wmsAbrirEmbarque(romaneioId){
       <div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden"><div id="emb-pct-bar" style="height:100%;width:${pct0}%;background:var(--blue-text);border-radius:99px;transition:width .3s"></div></div>
     </div>
     <div style="margin-bottom:12px;padding:11px 13px;background:var(--blue-bg);border-radius:9px">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta de embarque de cada pallet — ou use <b>Confirmar manual</b> na tabela abaixo</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta do pallet e do caminhão</div>
       <input id="emb-bipe" placeholder="Bipe a etiqueta..." autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key==='Enter'){wmsEmbarqueBipe(this.value);this.value='';this.focus();}">
     </div>
     <table style="width:100%;border-collapse:collapse">
@@ -22818,7 +22815,7 @@ async function _wmsEmbarcarPallet(pl,modo){
     modo:modo,resultado:'ok',observacao:(modo==='manual'?'Embarcado manualmente':'Embarcado')+' (seq '+seq+') no romaneio '+(r?.numero||''),
   });
   const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='✓ '+seq;ok.style.color='var(--green-text)';}
-  const btn=ge('emb-btn-'+pl.id);if(btn){btn.outerHTML='<span style="font-size:10px;color:var(--text3)">'+(modo==='manual'?'manual':'bipe')+'</span>';}
+  const acao=ge('emb-acao-'+pl.id);if(acao){acao.innerHTML=wmsEmbAcaoBtn(pl.id,true);}
   wmsEmbAtualizaProgresso();
   return seq;
 }
@@ -22845,6 +22842,33 @@ async function wmsEmbarqueManual(palletId){
     const seq=await _wmsEmbarcarPallet(pl,'manual');
     showToast('Pallet '+pl.numero+' embarcado manualmente (seq '+seq+').','green');
   }catch(e){showToast('Erro: '+e.message,'red');}
+}
+// Conteúdo da coluna Ação no modal de embarque: pendente -> Confirmar manual; embarcado -> Estornar
+function wmsEmbAcaoBtn(id,emb){
+  return emb
+    ?'<button class="btn btn-sm" title="Estornar embarque deste pallet" style="color:var(--red-text)" onclick="wmsEstornarEmbarque(\''+id+'\')">↺</button>'
+    :'<button id="emb-btn-'+id+'" class="btn btn-sm" onclick="wmsEmbarqueManual(\''+id+'\')">Confirmar manual</button>';
+}
+// Estorno do embarque de um pallet — reverte status e apaga o registro da 4ª conferência
+async function wmsEstornarEmbarque(palletId){
+  const pl=wmsPalletsEmbarque.find(x=>x.id===palletId);
+  if(!pl){showToast('Pallet não encontrado.','amber');return;}
+  if(pl.status!=='embarcado'){showToast('Pallet não está embarcado.','blue');return;}
+  if(!confirm('Estornar o embarque do pallet '+pl.numero+'?\n\nO pallet volta a ficar pendente e o registro de embarque será removido.'))return;
+  try{
+    const carimbo={status:'montado',embarcado_por:null,embarcado_por_nome:null,embarcado_em:null,seq_leitura:null};
+    await dbUpdate('wms_pallets_embarque',pl.id,carimbo);
+    Object.assign(pl,carimbo);
+    // apaga o(s) registro(s) da 4ª conferência (embarque) deste pallet
+    const confs=wmsConferencias.filter(cf=>cf.pallet_id===pl.id && cf.tipo===4);
+    for(const cf of confs){await dbDelete('wms_conferencias',cf.id);}
+    wmsConferencias=wmsConferencias.filter(cf=>!(cf.pallet_id===pl.id && cf.tipo===4));
+    // UI: pallet volta a pendente
+    const ok=ge('emb-ok-'+pl.id);if(ok){ok.textContent='○';ok.style.color='var(--text3)';}
+    const acao=ge('emb-acao-'+pl.id);if(acao){acao.innerHTML=wmsEmbAcaoBtn(pl.id,false);}
+    wmsEmbAtualizaProgresso();
+    showToast('Embarque do pallet '+pl.numero+' estornado.','green');
+  }catch(e){showToast('Erro ao estornar: '+e.message,'red');}
 }
 async function wmsFinalizarEmbarque(){
   const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);if(!r){portClose();return;}
