@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.410 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.412 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.410';
+const APP_VERSION='v1.0.412';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -4339,16 +4339,17 @@ async function openFaturaEditor(id=null){
       if(linhasSalvas.length){
         // Mescla: mantém estrutura da tabela mas aplica quantidades salvas
         if(fatLinhas.length){
+          const _pool=linhasSalvas.slice();
+          const _keyFat=x=>[x.servico,x.quadro,x.unidade||'',String(x.preco_unitario||'')].join('§');
           fatLinhas=fatLinhas.map(l=>{
-            const salva=linhasSalvas.find(s=>s.servico===l.servico&&s.quadro===l.quadro);
-            return salva?{...l,quantidade:salva.quantidade,subtotal:Number(salva.subtotal||0)}:l;
+            const _k=_keyFat(l);
+            const _pi=_pool.findIndex(s=>_keyFat(s)===_k);
+            if(_pi<0) return l;
+            const salva=_pool.splice(_pi,1)[0];
+            return {...l,quantidade:salva.quantidade,subtotal:Number(salva.subtotal||0)};
           });
-          // Adiciona linhas manuais que não estão na tabela
-          linhasSalvas.forEach(s=>{
-            if(!fatLinhas.find(l=>l.servico===s.servico&&l.quadro===s.quadro)){
-              fatLinhas.push(s);
-            }
-          });
+          // Linhas manuais que não casaram com a tabela permanecem no pool
+          _pool.forEach(s=>fatLinhas.push(s));
         } else {
           // Se não carregou tabela, usa linhas salvas diretamente
           fatLinhas=linhasSalvas;
@@ -4421,7 +4422,14 @@ function _imprimirFatura(f,contatoResp){
       font-size:80px;font-weight:900;color:rgba(200,50,50,0.12);white-space:nowrap;
       pointer-events:none;z-index:1000;letter-spacing:10px;font-family:Arial">RASCUNHO</div>`:'' ;
 
-  const linhasHTML=linhas.filter(l=>l.servico).map(l=>`
+  const _fatTemLanc=l=>{
+    if(Number(l.subtotal||0)>0) return true;
+    const q=l.quantidade;
+    if(q==null||String(q).trim()===''||String(q).trim()==='0') return false;
+    const qn=parseFloat(String(q).replace(/\./g,'').replace(',','.'));
+    return !isNaN(qn)&&qn>0;
+  };
+  const linhasHTML=linhas.filter(l=>l.servico&&_fatTemLanc(l)).map(l=>`
     <tr>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px">${l.servico}</td>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:center">${l.unidade||''}</td>
@@ -4694,7 +4702,14 @@ async function confirmarEnvioEmail(id){
   const fmtBRL=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2});
   const fmtDt=d=>d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'';
 
-  const linhasHTML=linhas.filter(l=>l.servico).map(l=>`
+  const _fatTemLanc=l=>{
+    if(Number(l.subtotal||0)>0) return true;
+    const q=l.quantidade;
+    if(q==null||String(q).trim()===''||String(q).trim()==='0') return false;
+    const qn=parseFloat(String(q).replace(/\./g,'').replace(',','.'));
+    return !isNaN(qn)&&qn>0;
+  };
+  const linhasHTML=linhas.filter(l=>l.servico&&_fatTemLanc(l)).map(l=>`
     <tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px">${l.servico}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">${l.unidade||''}</td>
