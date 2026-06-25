@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.422 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.423 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.422';
+const APP_VERSION='v1.0.423';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20870,11 +20870,26 @@ function wmsVGQuadro(fluxo,titulo,subsHtml,placeholder){
     +'<div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:14px;font-weight:800">'+titulo+'</div>'+tag+'</div>'
     +'<div style="display:flex;gap:6px">'+subsHtml+'</div></button>';
 }
-/* ===== WMS · Inventario (independente) — Leva 1: menu + importacao ===== */
+/* ===== WMS · Inventario (independente) — Leva: importacao + config + mascara + fichas ===== */
 var invImpCtx={invId:null,tipo:null};
+var invSel=null;          // inventario aberto (detalhe) ou null (lista)
+var invData=null;         // objeto do inventario aberto
+var invMaskSamples=[];    // enderecos de exemplo p/ a mascara
 function invNorm(s){return (s==null?'':String(s)).trim();}
 function invKey(s){return (s==null?'':String(s)).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');}
 function invNum(v){ if(v===''||v==null)return null; if(typeof v==='number')return v; var s=String(v).trim(); if(s.indexOf(',')>=0){s=s.replace(/\./g,'').replace(',','.');} var n=parseFloat(s); return isNaN(n)?null:n; }
+function invSpin(t){return '<div style="padding:30px;text-align:center;color:var(--text3)"><div class="spin" style="width:22px;height:22px;margin:0 auto 10px"></div>'+(t||'Carregando...')+'</div>';}
+async function invFetchAll(table,filter){
+  var all=[],off=0,PAGE=1000;
+  while(true){
+    var part=await dbSelect(table,filter+'&limit='+PAGE+'&offset='+off);
+    all=all.concat(part);
+    if(part.length<PAGE) break;
+    off+=PAGE;
+  }
+  return all;
+}
+/* ---------- parser de planilhas ---------- */
 function invColMap(rows,needle){
   for(var i=0;i<Math.min(rows.length,20);i++){
     var r=rows[i]||[]; var map={}; var found=false;
@@ -20929,17 +20944,144 @@ async function invBulkInsert(table,rows){
     if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
   }
 }
+/* ---------- mascara ---------- */
+function invSlice(end,r){ if(!r||r.length!==2)return null; var i=r[0],f=r[1]; if(!i||!f||end.length<f)return null; return end.substring(i-1,f); }
+function invApplyMask(end,m){
+  end=(end||'');
+  if(!m) return {dep:null,nivel:null,rua:null,posicao:null,tem:false};
+  var dep=invSlice(end,m.dep),niv=invSlice(end,m.nivel),rua=invSlice(end,m.rua),pos=invSlice(end,m.posicao);
+  var defs=[m.dep,m.nivel,m.rua,m.posicao].filter(Boolean), maxF=0;
+  for(var i=0;i<defs.length;i++){ if(defs[i][1]>maxF)maxF=defs[i][1]; }
+  var tem=!!(dep||niv||rua||pos) && (!maxF || end.length>=maxF);
+  return {dep:dep,nivel:niv,rua:rua,posicao:pos,tem:tem};
+}
+function invR(id){ var e=ge(id); var v=e?parseInt(e.value,10):NaN; return isNaN(v)?null:v; }
+function invReadMask(){
+  function fld(a,b){ var i=invR(a),f=invR(b); return (i&&f&&f>=i)?[i,f]:null; }
+  return { dep:fld('msk-dep-i','msk-dep-f'), nivel:fld('msk-niv-i','msk-niv-f'), rua:fld('msk-rua-i','msk-rua-f'), posicao:fld('msk-pos-i','msk-pos-f') };
+}
+function invMaskRuler(end){
+  if(!end) return '<span style="color:var(--text3);font-size:12px">Sem endereco de exemplo (importe os enderecos com Gera Ficha = Sim).</span>';
+  var h='<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">';
+  for(var i=0;i<end.length;i++){
+    h+='<div style="text-align:center"><div style="font-family:monospace;font-weight:700;border:1px solid var(--border);border-radius:4px;width:22px;height:24px;line-height:24px;background:var(--bg2)">'+end[i]+'</div><div style="font-size:9px;color:var(--text3)">'+(i+1)+'</div></div>';
+  }
+  return h+'</div>';
+}
+function invMaskPreview(){
+  var m=invReadMask(); var el=ge('msk-preview'); if(!el) return;
+  var s=invMaskSamples||[];
+  if(!s.length){ el.innerHTML='<span style="color:var(--text3)">Sem enderecos de exemplo.</span>'; return; }
+  var h='';
+  for(var i=0;i<Math.min(s.length,3);i++){
+    var r=invApplyMask(s[i],m);
+    h+='<div style="font-family:monospace;font-size:12px;margin-bottom:3px"><b>'+s[i]+'</b> &rarr; '
+      +'Dep:<b>'+(r.dep||'-')+'</b>  Nivel:<b>'+(r.nivel||'-')+'</b>  Rua:<b>'+(r.rua||'-')+'</b>  Pos:<b>'+(r.posicao||'-')+'</b>'
+      +(r.tem?'':' <span style="color:var(--red-text)">(sem estrutura)</span>')+'</div>';
+  }
+  el.innerHTML=h;
+}
+async function invSaveMask(){
+  var m=invReadMask();
+  if(!m.dep&&!m.nivel&&!m.rua&&!m.posicao){ if(typeof showToast==='function')showToast('Defina ao menos um campo da mascara','amber'); return; }
+  try{ await dbUpdate('inventarios',invSel,{mascara:m}); if(typeof showToast==='function')showToast('Mascara confirmada','green'); invLoad(); }
+  catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+/* ---------- config ---------- */
+async function invSaveConfig(){
+  var modo=ge('cfg-modo')?ge('cfg-modo').value:'ambos';
+  var cega=ge('cfg-cega')?ge('cfg-cega').checked:true;
+  try{ await dbUpdate('inventarios',invSel,{modo_contagem:modo,contagem_cega:cega}); if(typeof showToast==='function')showToast('Configuracao salva','green'); invLoad(); }
+  catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+/* ---------- gerar fichas ---------- */
+async function invGerarFichas(){
+  if(!invData)return;
+  if(!invData.base_count){ if(typeof showToast==='function')showToast('Importe o saldo antes','amber'); return; }
+  if(!invData.end_count){ if(typeof showToast==='function')showToast('Importe os enderecos antes','amber'); return; }
+  if(!invData.mascara){ if(!confirm('Mascara nao configurada — as fichas ficarao SEM estrutura (so Integral/Individual na liberacao). Gerar mesmo assim?')) return; }
+  if(typeof showToast==='function')showToast('Gerando fichas...','blue');
+  try{
+    var ends=await invFetchAll('inventario_enderecos','inventario_id=eq.'+invSel+'&gera_ficha=eq.true&select=endereco');
+    if(!ends.length){ if(typeof showToast==='function')showToast('Nenhum endereco com Gera Ficha = Sim','amber'); return; }
+    var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,qtde_saldo');
+    var agg={};
+    for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!agg[e])agg[e]={n:0,s:0}; agg[e].n++; agg[e].s+=(parseFloat(base[i].qtde_saldo)||0); }
+    var m=invData.mascara||null, fichas=[];
+    for(var j=0;j<ends.length;j++){
+      var end=ends[j].endereco||''; var a=agg[end]||{n:0,s:0}; var mm=invApplyMask(end,m);
+      fichas.push({inventario_id:invSel,endereco:end,dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem_estrutura:mm.tem,qtd_itens:a.n,qtd_sistema_total:a.s,modo:invData.modo_contagem||'ambos',rodada_liberada:0,status:'gerada'});
+    }
+    await sbFetch('DELETE','/rest/v1/inventario_fichas?inventario_id=eq.'+invSel,null,tok,{'Prefer':'return=minimal'});
+    await invBulkInsert('inventario_fichas',fichas);
+    await dbUpdate('inventarios',invSel,{status:'em_contagem',fichas_count:fichas.length});
+    if(typeof showToast==='function')showToast(fichas.length+' fichas geradas','green');
+    invLoad();
+  }catch(e){ if(typeof showToast==='function')showToast('Erro ao gerar fichas: '+(e.message||e),'red'); }
+}
+/* ---------- importacao ---------- */
+function invPickFile(invId,tipo){ invImpCtx={invId:invId,tipo:tipo}; var inp=ge('inv-file'); if(!inp)return; inp.value=''; inp.click(); }
+async function invProcessFile(input){
+  var file=input&&input.files&&input.files[0]; if(!file)return;
+  var ctx=invImpCtx; if(!ctx.invId)return;
+  if(typeof showToast==='function')showToast('Lendo planilha...','blue');
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array'});
+    var ws=wb.Sheets[wb.SheetNames[0]];
+    var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    var parsed=(ctx.tipo==='saldo')?invParseSaldo(rows):invParseEnderecos(rows);
+    if(!parsed.length){ if(typeof showToast==='function')showToast('Nenhuma linha valida (confira o cabecalho)','amber'); return; }
+    var table=(ctx.tipo==='saldo')?'inventario_base':'inventario_enderecos';
+    await sbFetch('DELETE','/rest/v1/'+table+'?inventario_id=eq.'+ctx.invId,null,tok,{'Prefer':'return=minimal'});
+    for(var i=0;i<parsed.length;i++){ parsed[i].inventario_id=ctx.invId; }
+    if(typeof showToast==='function')showToast('Gravando '+parsed.length+' linhas...','blue');
+    await invBulkInsert(table,parsed);
+    var upd=(ctx.tipo==='saldo')?{base_count:parsed.length}:{end_count:parsed.length};
+    await dbUpdate('inventarios',ctx.invId,upd);
+    if(typeof showToast==='function')showToast('Importado: '+parsed.length+' linhas','green');
+    invLoad();
+  }catch(e){ if(typeof showToast==='function')showToast('Erro na importacao: '+(e.message||e),'red'); }
+}
+/* ---------- lista ---------- */
 function rInventario(){
-  return ''
-   + '<div style="display:flex;flex-direction:column;gap:16px">'
-   +   '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-   +     '<div style="font-size:12px;color:var(--text3);max-width:640px">Modulo independente — abra um inventario e importe a <b>base de saldo</b> e os <b>parametros de endereco</b> de qualquer empresa/local. Os enderecos definem quais geram ficha e de quais o saldo pode ser consumido no de-para.</div>'
-   +     '<button class="btn btn-p btn-sm" onclick="invNovoToggle()">+ Novo inventario</button>'
-   +   '</div>'
-   +   '<div id="inv-novo" style="display:none"></div>'
-   +   '<div id="inv-list"><div style="padding:30px;text-align:center;color:var(--text3)"><div class="spin" style="width:22px;height:22px;margin:0 auto 10px"></div>Carregando inventarios...</div></div>'
-   +   '<input type="file" id="inv-file" accept=".xlsx,.xls" style="display:none" onchange="invProcessFile(this)">'
-   + '</div>';
+  return '<div id="inv-root">'+invSpin('Carregando inventarios...')+'</div>'
+    +'<input type="file" id="inv-file" accept=".xlsx,.xls" style="display:none" onchange="invProcessFile(this)">';
+}
+function invOpen(id){ invSel=id; invLoad(); }
+function invBack(){ invSel=null; invData=null; invLoad(); }
+async function invLoad(){
+  var root=ge('inv-root'); if(!root) return;
+  if(invSel){ await invRenderDetail(root); } else { await invRenderList(root); }
+}
+function invStatusBadge(s){
+  return '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;background:var(--bg3);color:var(--text2);padding:3px 9px;border-radius:99px">'+(s||'aberto')+'</span>';
+}
+async function invRenderList(root){
+  try{
+    var invs=await dbSelect('inventarios','id=not.is.null');
+    var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+      +'<div style="font-size:12px;color:var(--text3);max-width:640px">Modulo independente — abra um inventario para importar saldo/enderecos, configurar a mascara e gerar as fichas.</div>'
+      +'<button class="btn btn-p btn-sm" onclick="invNovoToggle()">+ Novo inventario</button></div>'
+      +'<div id="inv-novo" style="display:none;margin-bottom:14px"></div>';
+    if(!invs.length){ root.innerHTML=head+'<div style="padding:30px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px">Nenhum inventario ainda. Clique em "+ Novo inventario".</div>'; return; }
+    var cards='';
+    for(var i=0;i<invs.length;i++){
+      var inv=invs[i]; var loc=inv.local?String(inv.local):'';
+      cards+='<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px">'
+        +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+        +'<div><div style="font-size:15px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+(loc||'sem local')+(inv.empresa_verus?(' - VERUS: '+inv.empresa_verus):'')+(inv.descricao?(' - '+inv.descricao):'')+'</div></div>'
+        +invStatusBadge(inv.status)+'</div>'
+        +'<div style="display:flex;gap:18px;flex-wrap:wrap"><div style="font-size:12px;color:var(--text3)">Saldo: <b style="color:var(--text)">'+(inv.base_count||0)+'</b></div>'
+        +'<div style="font-size:12px;color:var(--text3)">Enderecos: <b style="color:var(--text)">'+(inv.end_count||0)+'</b></div>'
+        +'<div style="font-size:12px;color:var(--text3)">Fichas: <b style="color:var(--text)">'+(inv.fichas_count||0)+'</b></div></div>'
+        +'<div><button class="btn btn-p btn-sm" onclick="invOpen(\''+inv.id+'\')">Abrir</button></div>'
+        +'</div>';
+    }
+    root.innerHTML=head+cards;
+  }catch(e){ root.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro ao carregar: '+(e.message||e)+'</div>'; }
 }
 function invNovoToggle(){
   var el=ge('inv-novo'); if(!el) return;
@@ -20963,7 +21105,7 @@ async function invSalvarNovo(){
   var emp=invNorm(ge('inv-emp')&&ge('inv-emp').value);
   if(!emp){ if(typeof showToast==='function')showToast('Informe a empresa contada','amber'); return; }
   try{
-    await dbInsert('inventarios',{
+    var novo=await dbInsert('inventarios',{
       empresa_contada:emp,
       empresa_verus:invNorm(ge('inv-empv')&&ge('inv-empv').value)||null,
       local:invNorm(ge('inv-loc')&&ge('inv-loc').value)||null,
@@ -20971,91 +21113,77 @@ async function invSalvarNovo(){
       status:'aberto', aberto_por_nome:(profile&&profile.full_name)||null
     });
     if(typeof showToast==='function')showToast('Inventario criado','green');
-    invNovoToggle(); invLoad();
+    if(novo&&novo.id){ invOpen(novo.id); } else { invLoad(); }
   }catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
 }
-function invStatusBadge(s){
-  return '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;background:var(--bg3);color:var(--text2);padding:3px 9px;border-radius:99px">'+(s||'aberto')+'</span>';
-}
-function invCard(inv){
-  var loc=inv.local?String(inv.local):'';
-  var desc=inv.descricao?String(inv.descricao):'';
-  return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px">'
-   +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-   +  '<div><div style="font-size:15px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
-   +    '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+(loc||'sem local')+(desc?(' - '+desc):'')+(inv.empresa_verus?(' - VERUS: '+inv.empresa_verus):'')+(inv.aberto_por_nome?(' - aberto por '+inv.aberto_por_nome):'')+'</div></div>'
-   +  invStatusBadge(inv.status)
-   +'</div>'
-   +'<div style="display:flex;gap:18px;flex-wrap:wrap">'
-   +  '<div style="font-size:12px;color:var(--text3)">Saldo: <b style="color:var(--text)">'+(inv.base_count||0)+'</b> linhas</div>'
-   +  '<div style="font-size:12px;color:var(--text3)">Enderecos: <b style="color:var(--text)">'+(inv.end_count||0)+'</b> linhas</div>'
-   +'</div>'
-   +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
-   +  '<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'saldo\')">Importar Saldo</button>'
-   +  '<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'enderecos\')">Importar Enderecos</button>'
-   +  '<button class="btn btn-sm" onclick="invPreview(\''+inv.id+'\')">Pre-visualizar</button>'
-   +'</div>'
-   +'<div id="inv-prev-'+inv.id+'"></div>'
-   +'</div>';
-}
-async function invLoad(){
-  var list=ge('inv-list'); if(!list) return;
+/* ---------- detalhe ---------- */
+async function invRenderDetail(root){
+  root.innerHTML=invSpin('Abrindo inventario...');
   try{
-    var invs=await dbSelect('inventarios','id=not.is.null');
-    if(!invs.length){
-      list.innerHTML='<div style="padding:30px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px">Nenhum inventario ainda. Clique em "+ Novo inventario".</div>';
-      return;
-    }
-    var html=''; for(var i=0;i<invs.length;i++){ html+=invCard(invs[i]); }
-    list.innerHTML=html;
-  }catch(e){ list.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro ao carregar: '+(e.message||e)+'</div>'; }
+    var arr=await dbSelect('inventarios','id=eq.'+invSel);
+    var inv=arr[0]; if(!inv){ invSel=null; return invRenderList(root); }
+    invData=inv;
+    var sam=await dbSelect('inventario_enderecos','inventario_id=eq.'+invSel+'&gera_ficha=eq.true&limit=4&select=endereco');
+    if(!sam.length) sam=await dbSelect('inventario_base','inventario_id=eq.'+invSel+'&limit=4&select=endereco');
+    invMaskSamples=sam.map(function(x){return x.endereco;}).filter(Boolean);
+    root.innerHTML=invDetailHTML(inv);
+    invMaskPreview();
+  }catch(e){ root.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
-function invPickFile(invId,tipo){
-  invImpCtx={invId:invId,tipo:tipo};
-  var inp=ge('inv-file'); if(!inp) return; inp.value=''; inp.click();
+function invSection(titulo,inner,sub){
+  return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px">'
+    +'<div style="font-size:14px;font-weight:800;margin-bottom:'+(sub?'2px':'12px')+'">'+titulo+'</div>'
+    +(sub?'<div style="font-size:12px;color:var(--text3);margin-bottom:12px">'+sub+'</div>':'')
+    +inner+'</div>';
 }
-async function invProcessFile(input){
-  var file=input&&input.files&&input.files[0]; if(!file) return;
-  var ctx=invImpCtx; if(!ctx.invId){return;}
-  if(typeof showToast==='function')showToast('Lendo planilha...','blue');
-  try{
-    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
-    var buf=await file.arrayBuffer();
-    var wb=XLSX.read(buf,{type:'array'});
-    var ws=wb.Sheets[wb.SheetNames[0]];
-    var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    var parsed=(ctx.tipo==='saldo')?invParseSaldo(rows):invParseEnderecos(rows);
-    if(!parsed.length){ if(typeof showToast==='function')showToast('Nenhuma linha valida (confira o cabecalho da planilha)','amber'); return; }
-    var table=(ctx.tipo==='saldo')?'inventario_base':'inventario_enderecos';
-    await sbFetch('DELETE','/rest/v1/'+table+'?inventario_id=eq.'+ctx.invId,null,tok,{'Prefer':'return=minimal'});
-    for(var i=0;i<parsed.length;i++){ parsed[i].inventario_id=ctx.invId; }
-    if(typeof showToast==='function')showToast('Gravando '+parsed.length+' linhas...','blue');
-    await invBulkInsert(table,parsed);
-    var upd=(ctx.tipo==='saldo')?{base_count:parsed.length}:{end_count:parsed.length};
-    await dbUpdate('inventarios',ctx.invId,upd);
-    if(typeof showToast==='function')showToast('Importado: '+parsed.length+' linhas','green');
-    invLoad();
-  }catch(e){ if(typeof showToast==='function')showToast('Erro na importacao: '+(e.message||e),'red'); }
-}
-function invPrevTable(titulo,cols,rows){
-  var h='<div style="margin-top:8px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">'+titulo+'</div>';
-  if(!rows.length){ return h+'<div style="font-size:12px;color:var(--text3)">- sem dados -</div></div>'; }
-  h+='<div style="overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11px">';
-  h+='<tr style="background:var(--bg2)">'; for(var c=0;c<cols.length;c++)h+='<th style="text-align:left;padding:5px 8px;white-space:nowrap;color:var(--text2)">'+cols[c]+'</th>'; h+='</tr>';
-  for(var i=0;i<rows.length;i++){ h+='<tr style="border-top:1px solid var(--border)">'; for(var c2=0;c2<rows[i].length;c2++){ var v=rows[i][c2]; h+='<td style="padding:5px 8px;white-space:nowrap">'+(v==null?'':String(v))+'</td>'; } h+='</tr>'; }
-  h+='</table></div></div>';
+function invDetailHTML(inv){
+  var mk=inv.mascara||{};
+  var g=function(f,k){return (mk[f]&&mk[f][k]!=null)?mk[f][k]:'';};
+  var modo=inv.modo_contagem||'ambos';
+  var cega=inv.contagem_cega!==false;
+  // header
+  var h='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'
+    +'<button class="btn btn-sm" onclick="invBack()">&larr; Inventarios</button>'
+    +'<div style="font-size:16px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
+    +invStatusBadge(inv.status)+'</div>';
+  // 1) importacoes
+  var imp='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px">'
+    +'<div style="font-size:13px;color:var(--text3)">Saldo: <b style="color:var(--text)">'+(inv.base_count||0)+'</b> linhas</div>'
+    +'<div style="font-size:13px;color:var(--text3)">Enderecos: <b style="color:var(--text)">'+(inv.end_count||0)+'</b> linhas</div></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'saldo\')">Importar Saldo</button>'
+    +'<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'enderecos\')">Importar Enderecos</button></div>';
+  h+=invSection('1. Importacoes',imp,'Importe a base de saldo e os parametros de endereco. Re-importar substitui.');
+  // 2) config
+  var opt=function(v,lbl){return '<option value="'+v+'"'+(modo===v?' selected':'')+'>'+lbl+'</option>';};
+  var cfg='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">'
+    +'<div class="fg" style="min-width:200px"><label class="fl">Modo de contagem</label><select class="fi" id="cfg-modo">'+opt('coletor','Coletor')+opt('papel','Papel')+opt('ambos','Ambos')+'</select></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding-bottom:8px"><input type="checkbox" id="cfg-cega" '+(cega?'checked':'')+' style="width:16px;height:16px;cursor:pointer">Contagem cega (operador nao ve o saldo do sistema)</label>'
+    +'<button class="btn btn-p btn-sm" onclick="invSaveConfig()" style="margin-bottom:1px">Salvar config</button></div>';
+  h+=invSection('2. Configuracao',cfg);
+  // 3) mascara
+  var sample=(invMaskSamples&&invMaskSamples[0])||'';
+  var fldRow=function(lbl,pi,pf,vi,vf){
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:78px;font-size:12px;font-weight:600">'+lbl+'</div>'
+      +'<span style="font-size:11px;color:var(--text3)">de</span><input class="fi" id="'+pi+'" type="number" min="1" value="'+vi+'" oninput="invMaskPreview()" style="width:60px;padding:5px 6px">'
+      +'<span style="font-size:11px;color:var(--text3)">ate</span><input class="fi" id="'+pf+'" type="number" min="1" value="'+vf+'" oninput="invMaskPreview()" style="width:60px;padding:5px 6px"></div>';
+  };
+  var msk=invMaskRuler(sample)
+    +fldRow('Deposito','msk-dep-i','msk-dep-f',g('dep',0),g('dep',1))
+    +fldRow('Nivel','msk-niv-i','msk-niv-f',g('nivel',0),g('nivel',1))
+    +fldRow('Rua','msk-rua-i','msk-rua-f',g('rua',0),g('rua',1))
+    +fldRow('Posicao','msk-pos-i','msk-pos-f',g('posicao',0),g('posicao',1))
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin:10px 0" id="msk-preview"></div>'
+    +'<button class="btn btn-p btn-sm" onclick="invSaveMask()">Confirmar interpretacao</button>'
+    +(inv.mascara?'<span style="font-size:12px;color:var(--green);margin-left:10px">&#10003; mascara salva</span>':'');
+  h+=invSection('3. Mascara de endereco','<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Informe de qual caractere ate qual fica cada campo. A previa mostra o resultado em enderecos reais. Confirme para aplicar a todas as fichas.</div>'+msk);
+  // 4) fichas
+  var fic='<div style="font-size:13px;color:var(--text3);margin-bottom:10px">Fichas geradas: <b style="color:var(--text)">'+(inv.fichas_count||0)+'</b>'
+    +(inv.fichas_count?'  <span style="color:var(--text3)">(uma por endereco com Gera Ficha = Sim)</span>':'')+'</div>'
+    +'<button class="btn btn-p btn-sm" onclick="invGerarFichas()">'+(inv.fichas_count?'Regerar fichas':'Gerar fichas')+'</button>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:10px">Proxima parte: liberacao hierarquica (Integral/Deposito/Rua/Nivel/Individual), quadro gerencial e impressao da ficha em papel.</div>';
+  h+=invSection('4. Fichas',fic,'Gera 1 ficha por endereco (com Gera Ficha = Sim), ja decomposta pela mascara.');
   return h;
-}
-async function invPreview(invId){
-  var el=ge('inv-prev-'+invId); if(!el) return;
-  if(el.innerHTML){ el.innerHTML=''; return; }
-  el.innerHTML='<div style="padding:10px;color:var(--text3);font-size:12px">Carregando previa...</div>';
-  try{
-    var base=await dbSelect('inventario_base','inventario_id=eq.'+invId+'&limit=8');
-    var ends=await dbSelect('inventario_enderecos','inventario_id=eq.'+invId+'&limit=8');
-    el.innerHTML=invPrevTable('Saldo (amostra)',['Endereco','Cod.','Descricao','Ref.','Empenh.','Saldo','UN'],base.map(function(x){return [x.endereco,x.cod_produto,x.desc_produto,x.referencia,x.qtde_empenhada,x.qtde_saldo,x.unidade_medida];}))
-      + invPrevTable('Enderecos (amostra)',['Endereco','Tipo','Consome De/Pa','Gera Ficha'],ends.map(function(x){return [x.endereco,x.tipo,x.pode_consumir_depara?'Sim':'Nao',x.gera_ficha?'Sim':'Nao'];}));
-  }catch(e){ el.innerHTML='<div style="padding:10px;color:var(--red-text);font-size:12px">Erro: '+(e.message||e)+'</div>'; }
 }
 
 /* ===== WMS Visao Geral — Torre de Controle (mock isolado em iframe) ===== */
