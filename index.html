@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.424 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.426 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.424';
+const APP_VERSION='v1.0.426';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21010,7 +21010,7 @@ async function invGerarFichas(){
     var m=invData.mascara||null, fichas=[];
     for(var j=0;j<ends.length;j++){
       var end=ends[j].endereco||''; var a=agg[end]||{n:0,s:0}; var mm=invApplyMask(end,m);
-      fichas.push({inventario_id:invSel,endereco:end,dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem_estrutura:mm.tem,qtd_itens:a.n,qtd_sistema_total:a.s,modo:invData.modo_contagem||'ambos',rodada_liberada:0,status:'gerada'});
+      fichas.push({inventario_id:invSel,endereco:end,dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem_estrutura:mm.tem,qtd_itens:a.n,qtd_sistema_total:a.s,modo:'',rodada_liberada:0,status:'gerada'});
     }
     await sbFetch('DELETE','/rest/v1/inventario_fichas?inventario_id=eq.'+invSel,null,tok,{'Prefer':'return=minimal'});
     await invBulkInsert('inventario_fichas',fichas);
@@ -21047,17 +21047,63 @@ async function invProcessFile(input){
 /* ---------- lista ---------- */
 /* ---------- Parte B: quadro gerencial + liberacao + impressao ---------- */
 var invFichas=[];
+var invTarefas=[];
 async function invLoadQuadro(){
   var box=ge('inv-quadro'); if(!box) return;
   box.innerHTML=invSpin('Carregando fichas...');
   try{
     invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status');
+    invTarefas=await invFetchAll('inventario_tarefas','inventario_id=eq.'+invSel+'&select=rodada,status,contada_em,ficha_id');
     box.innerHTML=invQuadroHTML();
     invRenderQuadroRows();
   }catch(e){ box.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
 function invDistinct(field){ var s={}; for(var i=0;i<invFichas.length;i++){ var v=invFichas[i][field]; if(v)s[v]=1; } return Object.keys(s).sort(); }
+function invProgressHTML(){
+  var F=invFichas||[], T=invTarefas||[];
+  var total=F.length, lib=0, nlib=0, c1=0, lib2=0, c2=0, lib3=0, c3=0, ok=0, div=0;
+  function counted(s){ return s==='contada'||s==='ok'||s==='divergente'||s==='encerrada'||s==='aud_ok'||s==='aud_div'; }
+  for(var i=0;i<F.length;i++){ var f=F[i];
+    if(f.rodada_liberada>0)lib++; else nlib++;
+    if(f.rodada_liberada>=1 && counted(f.status))c1++;
+    if(f.rodada_liberada>=2){ lib2++; if(counted(f.status))c2++; }
+    if(f.rodada_liberada>=3){ lib3++; if(counted(f.status))c3++; }
+    if(f.status==='ok')ok++; if(f.status==='divergente')div++;
+  }
+  var a1=Math.max(0,lib-c1), pct=lib?Math.round(c1/lib*100):0;
+  // velocidade (somente coletor: tarefas com contada_em)
+  var done=[], pend=0;
+  for(var j=0;j<T.length;j++){ if(T[j].status==='contada'&&T[j].contada_em)done.push(new Date(T[j].contada_em).getTime()); else pend++; }
+  var papelLib=0; for(var k=0;k<F.length;k++){ if(F[k].rodada_liberada>0&&F[k].modo==='papel')papelLib++; }
+  var eta='aguardando inicio', ritmo='—';
+  if(done.length>=1){
+    var mn=Math.min.apply(null,done), elapsedH=(Date.now()-mn)/3600000;
+    if(elapsedH>0.01){ var r=done.length/elapsedH; ritmo=r.toFixed(1)+' fichas/h'; if(r>0){ eta=(pend/r).toFixed(1)+' h'; } }
+  }
+  function card(tit,inner,cor){ return '<div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid '+(cor||'var(--border2)')+';border-radius:10px;padding:10px 12px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:6px">'+tit+'</div>'+inner+'</div>'; }
+  function big(v){ return '<span style="font-size:22px;font-weight:800">'+v+'</span>'; }
+  var bar='<div style="height:7px;background:var(--bg3);border-radius:99px;overflow:hidden;margin-top:8px"><div style="height:100%;width:'+pct+'%;background:var(--green)"></div></div>';
+  var c='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +card('Fichas', big(total)+' <span style="font-size:11px;color:var(--text3)">total</span><div style="font-size:11px;color:var(--text3);margin-top:4px">Liberadas '+lib+' &middot; Pendentes '+nlib+'</div>','var(--text3)')
+    +card('1a contagem', big(c1)+' <span style="font-size:11px;color:var(--text3)">/ '+lib+' lib.</span><div style="font-size:11px;color:var(--text3);margin-top:4px">A contar: <b>'+a1+'</b> &middot; '+pct+'%</div>'+bar,'var(--green)')
+    +card('2a contagem', big(c2)+' <span style="font-size:11px;color:var(--text3)">/ '+lib2+'</span><div style="font-size:11px;color:var(--text3);margin-top:4px">A contar: '+Math.max(0,lib2-c2)+'</div>','#e0a23a')
+    +card('Auditoria', big(c3)+' <span style="font-size:11px;color:var(--text3)">/ '+lib3+'</span><div style="font-size:11px;color:var(--text3);margin-top:4px">A contar: '+Math.max(0,lib3-c3)+'</div>','#e0524a')
+    +card('Resultado parcial', '<span style="font-size:18px;font-weight:800;color:var(--green)">'+ok+'</span> <span style="font-size:11px;color:var(--text3)">OK</span> &nbsp; <span style="font-size:18px;font-weight:800;color:#e0524a">'+div+'</span> <span style="font-size:11px;color:var(--text3)">div.</span>','var(--text3)')
+    +card('&#9889; Velocidade (coletor)', '<div style="font-size:13px">Ritmo: <b>'+ritmo+'</b></div><div style="font-size:13px;margin-top:3px">ETA: <b>'+eta+'</b></div>'+(papelLib?'<div style="font-size:10px;color:var(--text3);margin-top:4px">+ '+papelLib+' em papel (sem medicao)</div>':''),'#4d8ff0')
+    +'</div>';
+  var ruas={}; for(var i2=0;i2<F.length;i2++){ var f2=F[i2], rk=f2.rua||'(sem rua)'; if(!ruas[rk])ruas[rk]={t:0,c:0}; ruas[rk].t++; if(f2.rodada_liberada>=1&&counted(f2.status))ruas[rk].c++; }
+  var keys=Object.keys(ruas).sort(), rua='';
+  if(keys.length){
+    rua='<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Progresso por rua</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+    for(var ri=0;ri<keys.length;ri++){ var rr=ruas[keys[ri]], rp=rr.t?Math.round(rr.c/rr.t*100):0;
+      rua+='<div style="min-width:118px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 9px"><div style="font-size:12px;font-weight:700;font-family:monospace">'+keys[ri]+'</div><div style="font-size:10px;color:var(--text3)">'+rr.c+'/'+rr.t+' ('+rp+'%)</div><div style="height:5px;background:var(--bg3);border-radius:99px;overflow:hidden;margin-top:4px"><div style="height:100%;width:'+rp+'%;background:var(--green)"></div></div></div>';
+    }
+    rua+='</div>';
+  }
+  return c+rua;
+}
 function invQuadroHTML(){
+  var defModo=((invData&&invData.modo_contagem)==='papel')?'papel':'coletor';
   var lib=0,pend=0; for(var i=0;i<invFichas.length;i++){ if(invFichas[i].rodada_liberada>0)lib++; else pend++; }
   var optList=function(arr){var o='<option value="">Todos</option>';for(var i=0;i<arr.length;i++)o+='<option>'+arr[i]+'</option>';return o;};
   var pan='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">'
@@ -21066,6 +21112,7 @@ function invQuadroHTML(){
     +'<div class="fg" style="min-width:160px"><label class="fl">Escopo</label><select class="fi" id="lib-escopo" onchange="invLibScope()">'
       +'<option value="integral">Integral (todas)</option><option value="deposito">Por Deposito</option><option value="rua">Por Rua</option><option value="nivel">Por Nivel</option><option value="individual">Individual</option></select></div>'
     +'<div class="fg" id="lib-valor-wrap" style="min-width:160px;display:none"><label class="fl">Valor</label><span id="lib-valor-host"></span></div>'
+    +'<div class="fg" style="min-width:130px"><label class="fl">Liberar para</label><select class="fi" id="lib-modo"><option value="coletor"'+(defModo==='coletor'?' selected':'')+'>Coletor</option><option value="papel"'+(defModo==='papel'?' selected':'')+'>Papel</option></select></div>'
     +'<button class="btn btn-p btn-sm" onclick="invLiberar()">Liberar</button>'
     +'</div></div>';
   var fil='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">'
@@ -21076,7 +21123,8 @@ function invQuadroHTML(){
     +'<div class="fg"><label class="fl">Endereco</label><input class="fi" id="q-end" oninput="invRenderQuadroRows()" placeholder="buscar" style="min-width:120px"></div>'
     +'</div>';
   var cont='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)">Total: <b style="color:var(--text)">'+invFichas.length+'</b> &middot; Liberadas: <b style="color:var(--green)">'+lib+'</b> &middot; Pendentes: <b style="color:var(--text)">'+pend+'</b></div>';
-  return pan+cont+fil+'<div id="q-rows"></div>';
+  var printbar='<div style="margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Imprimir lote (fichas liberadas em papel, filtro atual)</button></div>';
+  return invProgressHTML()+pan+cont+printbar+fil+'<div id="q-rows"></div>';
 }
 function invLibScope(){
   var esc=ge('lib-escopo')?ge('lib-escopo').value:'integral', wrap=ge('lib-valor-wrap'), host=ge('lib-valor-host');
@@ -21089,18 +21137,19 @@ function invLibScope(){
   for(var i=0;i<arr.length;i++)o+='<option>'+arr[i]+'</option>'; o+='</select>';
   host.innerHTML=o;
 }
-function invRenderQuadroRows(){
-  var box=ge('q-rows'); if(!box) return;
+function invQuadroFiltradas(){
   var fd=ge('q-dep')?ge('q-dep').value:'', fr=ge('q-rua')?ge('q-rua').value:'', fn=ge('q-niv')?ge('q-niv').value:'', fs=ge('q-st')?ge('q-st').value:'', fe=ge('q-end')?ge('q-end').value.trim().toUpperCase():'';
-  var rows=invFichas.filter(function(f){
+  return invFichas.filter(function(f){
     if(fd&&f.dep!==fd)return false; if(fr&&f.rua!==fr)return false; if(fn&&f.nivel!==fn)return false;
     if(fs==='lib'&&!(f.rodada_liberada>0))return false; if(fs==='pend'&&f.rodada_liberada>0)return false;
     if(fe&&(f.endereco||'').toUpperCase().indexOf(fe)<0)return false;
     return true;
   });
+}
+function invRenderQuadroRows(){
+  var box=ge('q-rows'); if(!box) return;
+  var rows=invQuadroFiltradas();
   var LIM=300, shown=rows.slice(0,LIM);
-  var modoInv=(invData&&invData.modo_contagem)||'ambos';
-  var podePapel=(modoInv==='papel'||modoInv==='ambos');
   var h='<div style="overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<tr style="background:var(--bg2)"><th style="text-align:left;padding:6px 8px">Endereco</th><th style="padding:6px 8px">Dep</th><th style="padding:6px 8px">Rua</th><th style="padding:6px 8px">Nivel</th><th style="padding:6px 8px">Itens</th><th style="padding:6px 8px">Esperado</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Acoes</th></tr>';
   for(var i=0;i<shown.length;i++){ var f=shown[i];
@@ -21108,7 +21157,7 @@ function invRenderQuadroRows(){
     var st=libd?'<span style="color:var(--green);font-weight:700">Liberada 1a</span>':'<span style="color:var(--text3)">Nao liberada</span>';
     var acoes='';
     if(!libd) acoes+='<button class="btn btn-sm" onclick="invLiberarFicha(\''+f.id+'\')" style="padding:2px 8px">Liberar</button> ';
-    if(libd&&podePapel) acoes+='<button class="btn btn-sm" title="Imprimir ficha (papel)" onclick="invPrintFicha(\''+f.id+'\')" style="padding:2px 9px;font-size:14px">&#128424;</button>';
+    if(libd&&f.modo==='papel') acoes+='<button class="btn btn-sm" title="Imprimir ficha (papel)" onclick="invPrintFicha(\''+f.id+'\')" style="padding:2px 9px;font-size:14px">&#128424;</button>';
     h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px;font-family:monospace">'+(f.endereco||'')+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.dep||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.rua||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.nivel||'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.qtd_itens||0)+'</td><td style="padding:5px 8px;text-align:right">'+(f.qtd_sistema_total||0)+'</td>'
@@ -21137,27 +21186,47 @@ async function invLiberar(){
   var quem=(profile&&profile.full_name)||null;
   try{
     if(typeof showToast==='function')showToast('Liberando...','blue');
-    var body={rodada_liberada:1,status:'liberada',liberada_por:quem,liberada_em:new Date().toISOString()};
+    var modo=ge('lib-modo')?ge('lib-modo').value:'coletor';
+    var body={rodada_liberada:1,status:'liberada',modo:modo,liberada_por:quem,liberada_em:new Date().toISOString()};
     var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?'+filt,body,tok,{'Prefer':'return=representation'});
     if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
     var libs=Array.isArray(r.data)?r.data:[];
     if(!libs.length){ if(typeof showToast==='function')showToast('Nenhuma ficha pendente nesse escopo','amber'); return; }
-    await invCriaTarefas(libs);
-    if(typeof showToast==='function')showToast(libs.length+' fichas liberadas (1a) + tarefas de coletor criadas','green');
+    if(modo==='coletor'){ await invCriaTarefas(libs); }
+    if(typeof showToast==='function')showToast(libs.length+' fichas liberadas (1a) '+(modo==='coletor'?'+ tarefas de coletor':'para impressao em papel'),'green');
     invLoadQuadro();
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao liberar: '+(e.message||e),'red'); }
 }
 async function invLiberarFicha(fid){
   var quem=(profile&&profile.full_name)||null;
+  var modo=ge('lib-modo')?ge('lib-modo').value:'coletor';
   try{
-    var body={rodada_liberada:1,status:'liberada',liberada_por:quem,liberada_em:new Date().toISOString()};
+    var body={rodada_liberada:1,status:'liberada',modo:modo,liberada_por:quem,liberada_em:new Date().toISOString()};
     var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?id=eq.'+fid+'&rodada_liberada=eq.0',body,tok,{'Prefer':'return=representation'});
     if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
     var libs=Array.isArray(r.data)?r.data:[];
-    if(libs.length){ await invCriaTarefas(libs); }
-    if(typeof showToast==='function')showToast('Ficha liberada','green');
+    if(libs.length && modo==='coletor'){ await invCriaTarefas(libs); }
+    if(typeof showToast==='function')showToast('Ficha liberada ('+modo+')','green');
     invLoadQuadro();
   }catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+async function invPrintLote(){
+  var libs=invQuadroFiltradas().filter(function(f){return f.rodada_liberada>0 && f.modo==='papel';});
+  if(!libs.length){ if(typeof showToast==='function')showToast('Nenhuma ficha liberada nos filtros atuais','amber'); return; }
+  libs.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
+  if(typeof showToast==='function')showToast('Preparando '+libs.length+' fichas...','blue');
+  try{
+    var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo');
+    var byEnd={};
+    for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!byEnd[e])byEnd[e]=[]; byEnd[e].push(base[i]); }
+    var cega=invData&&invData.contagem_cega!==false;
+    var html='';
+    for(var j=0;j<libs.length;j++){
+      var f=libs[j]; var prods=byEnd[f.endereco]||[];
+      html+='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,prods,cega)+'</div>';
+    }
+    invPrintHTML(html);
+  }catch(e){ if(typeof showToast==='function')showToast('Erro ao imprimir lote: '+(e.message||e),'red'); }
 }
 function invFichaHTML(f,prods,cega){
   var rows='';
@@ -21289,7 +21358,7 @@ function invSection(titulo,inner,sub){
 function invDetailHTML(inv){
   var mk=inv.mascara||{};
   var g=function(f,k){return (mk[f]&&mk[f][k]!=null)?mk[f][k]:'';};
-  var modo=inv.modo_contagem||'ambos';
+  var modo=inv.modo_contagem||'coletor';
   var cega=inv.contagem_cega!==false;
   // header
   var h='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'
@@ -21307,7 +21376,7 @@ function invDetailHTML(inv){
   // 2) config
   var opt=function(v,lbl){return '<option value="'+v+'"'+(modo===v?' selected':'')+'>'+lbl+'</option>';};
   var cfg='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">'
-    +'<div class="fg" style="min-width:200px"><label class="fl">Modo de contagem</label><select class="fi" id="cfg-modo">'+opt('coletor','Coletor')+opt('papel','Papel')+opt('ambos','Ambos')+'</select></div>'
+    +'<div class="fg" style="min-width:200px"><label class="fl">Modo padrao</label><select class="fi" id="cfg-modo">'+opt('coletor','Coletor')+opt('papel','Papel')+'</select></div>'
     +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding-bottom:8px"><input type="checkbox" id="cfg-cega" '+(cega?'checked':'')+' style="width:16px;height:16px;cursor:pointer">Contagem cega (operador nao ve o saldo do sistema)</label>'
     +'<button class="btn btn-p btn-sm" onclick="invSaveConfig()" style="margin-bottom:1px">Salvar config</button></div>';
   h+=invSection('2. Configuracao',cfg);
