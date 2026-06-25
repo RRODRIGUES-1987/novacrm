@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.426 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.427 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.426';
+const APP_VERSION='v1.0.427';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21048,14 +21048,18 @@ async function invProcessFile(input){
 /* ---------- Parte B: quadro gerencial + liberacao + impressao ---------- */
 var invFichas=[];
 var invTarefas=[];
+var invProdByEnd={};
 async function invLoadQuadro(){
   var box=ge('inv-quadro'); if(!box) return;
   box.innerHTML=invSpin('Carregando fichas...');
   try{
     invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status');
     invTarefas=await invFetchAll('inventario_tarefas','inventario_id=eq.'+invSel+'&select=rodada,status,contada_em,ficha_id');
+    var _b=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto');
+    invProdByEnd={}; for(var _i=0;_i<_b.length;_i++){ var _e=_b[_i].endereco||''; if(!invProdByEnd[_e])invProdByEnd[_e]=[]; if(_b[_i].cod_produto)invProdByEnd[_e].push(_b[_i].cod_produto); }
     box.innerHTML=invQuadroHTML();
     invRenderQuadroRows();
+    var _mb=ge('inv-monit-body'); if(_mb) _mb.innerHTML=invProgressHTML();
   }catch(e){ box.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
 function invDistinct(field){ var s={}; for(var i=0;i<invFichas.length;i++){ var v=invFichas[i][field]; if(v)s[v]=1; } return Object.keys(s).sort(); }
@@ -21124,7 +21128,7 @@ function invQuadroHTML(){
     +'</div>';
   var cont='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)">Total: <b style="color:var(--text)">'+invFichas.length+'</b> &middot; Liberadas: <b style="color:var(--green)">'+lib+'</b> &middot; Pendentes: <b style="color:var(--text)">'+pend+'</b></div>';
   var printbar='<div style="margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Imprimir lote (fichas liberadas em papel, filtro atual)</button></div>';
-  return invProgressHTML()+pan+cont+printbar+fil+'<div id="q-rows"></div>';
+  return pan+cont+printbar+fil+'<div id="q-rows"></div>';
 }
 function invLibScope(){
   var esc=ge('lib-escopo')?ge('lib-escopo').value:'integral', wrap=ge('lib-valor-wrap'), host=ge('lib-valor-host');
@@ -21149,21 +21153,27 @@ function invQuadroFiltradas(){
 function invRenderQuadroRows(){
   var box=ge('q-rows'); if(!box) return;
   var rows=invQuadroFiltradas();
+  rows.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
   var LIM=300, shown=rows.slice(0,LIM);
-  var h='<div style="overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<tr style="background:var(--bg2)"><th style="text-align:left;padding:6px 8px">Endereco</th><th style="padding:6px 8px">Dep</th><th style="padding:6px 8px">Rua</th><th style="padding:6px 8px">Nivel</th><th style="padding:6px 8px">Itens</th><th style="padding:6px 8px">Esperado</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Acoes</th></tr>';
+  var thBg='#e9e9e3';
+  var th=function(lbl,al){return '<th style="position:sticky;top:0;background:'+thBg+';text-align:'+(al||'center')+';padding:7px 8px;font-weight:700;border-bottom:1px solid var(--border2);z-index:1">'+lbl+'</th>';};
+  var h='<div style="max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr>'+th('Endereco','left')+th('Dep')+th('Rua')+th('Nivel')+th('Pos')+th('Produto esperado','left')+th('Itens')+th('Esperado','right')+th('Status')+th('Acoes')+'</tr></thead><tbody>';
   for(var i=0;i<shown.length;i++){ var f=shown[i];
     var libd=f.rodada_liberada>0;
     var st=libd?'<span style="color:var(--green);font-weight:700">Liberada 1a</span>':'<span style="color:var(--text3)">Nao liberada</span>';
     var acoes='';
     if(!libd) acoes+='<button class="btn btn-sm" onclick="invLiberarFicha(\''+f.id+'\')" style="padding:2px 8px">Liberar</button> ';
     if(libd&&f.modo==='papel') acoes+='<button class="btn btn-sm" title="Imprimir ficha (papel)" onclick="invPrintFicha(\''+f.id+'\')" style="padding:2px 9px;font-size:14px">&#128424;</button>';
-    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px;font-family:monospace">'+(f.endereco||'')+'</td>'
+    var zebra=(i%2)?'background:var(--bg2)':'';
+    h+='<tr style="border-top:1px solid var(--border);'+zebra+'"><td style="padding:5px 8px;font-family:monospace">'+(f.endereco||'')+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.dep||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.rua||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.nivel||'-')+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;font-family:monospace">'+(f.posicao||'-')+'</td>'
+      +'<td style="padding:5px 8px;font-family:monospace">'+invProdLabel(f.endereco)+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.qtd_itens||0)+'</td><td style="padding:5px 8px;text-align:right">'+(f.qtd_sistema_total||0)+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+st+'</td><td style="padding:5px 8px;white-space:nowrap">'+acoes+'</td></tr>';
   }
-  h+='</table></div>';
+  h+='</tbody></table></div>';
   if(rows.length>LIM) h+='<div style="font-size:11px;color:var(--text3);margin-top:6px">Mostrando '+LIM+' de '+rows.length+' fichas — use os filtros para refinar.</div>';
   if(!rows.length) h+='<div style="padding:16px;color:var(--text3)">Nenhuma ficha com esses filtros.</div>';
   box.innerHTML=h;
@@ -21355,6 +21365,21 @@ function invSection(titulo,inner,sub){
     +(sub?'<div style="font-size:12px;color:var(--text3);margin-bottom:12px">'+sub+'</div>':'')
     +inner+'</div>';
 }
+function invProdLabel(end){
+  var a=invProdByEnd[end]||[];
+  if(!a.length) return '<span style="color:var(--text3)">&mdash;</span>';
+  if(a.length===1) return a[0];
+  return a[0]+' <span style="color:var(--text3)">+'+(a.length-1)+'</span>';
+}
+function invTab(name){
+  var ti=ge('inv-tab-inv'), tm=ge('inv-tab-monit'), bi=ge('inv-tabbtn-inv'), bm=ge('inv-tabbtn-monit');
+  if(!ti||!tm) return;
+  var on=(name==='monit');
+  ti.style.display=on?'none':''; tm.style.display=on?'':'none';
+  if(bi) bi.className='btn btn-sm'+(on?'':' btn-p');
+  if(bm) bm.className='btn btn-sm'+(on?' btn-p':'');
+  if(on){ var mb=ge('inv-monit-body'); if(mb) mb.innerHTML=(invFichas&&invFichas.length)?invProgressHTML():'<div style="padding:16px;color:var(--text3)">Gere e libere fichas para ver o monitoramento.</div>'; }
+}
 function invDetailHTML(inv){
   var mk=inv.mascara||{};
   var g=function(f,k){return (mk[f]&&mk[f][k]!=null)?mk[f][k]:'';};
@@ -21365,6 +21390,11 @@ function invDetailHTML(inv){
     +'<button class="btn btn-sm" onclick="invBack()">&larr; Inventarios</button>'
     +'<div style="font-size:16px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
     +invStatusBadge(inv.status)+'</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:0">'
+    +'<button id="inv-tabbtn-inv" class="btn btn-sm btn-p" onclick="invTab(\'inv\')">Inventario</button>'
+    +'<button id="inv-tabbtn-monit" class="btn btn-sm" onclick="invTab(\'monit\')">Monitoramento</button>'
+    +'</div>';
+  h+='<div id="inv-tab-inv">';
   // 1) importacoes
   var imp='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px">'
     +'<div style="font-size:13px;color:var(--text3)">Saldo: <b style="color:var(--text)">'+(inv.base_count||0)+'</b> linhas</div>'
@@ -21402,7 +21432,9 @@ function invDetailHTML(inv){
     +'<button class="btn btn-p btn-sm" onclick="invGerarFichas()">'+(inv.fichas_count?'Regerar fichas':'Gerar fichas')+'</button>'
     ;
   h+=invSection('4. Fichas',fic,'Gera 1 ficha por endereco (com Gera Ficha = Sim), ja decomposta pela mascara.');
-  if(inv.fichas_count>0){ h+=invSection('5. Quadro gerencial e liberacao','<div id="inv-quadro">'+invSpin('Carregando fichas...')+'</div>','Libere a 1a contagem (Integral/Deposito/Rua/Nivel/Individual). Ao liberar: habilita a impressao (papel) e gera a tarefa de contagem no coletor.'); }
+  if(inv.fichas_count>0){ h+=invSection('5. Gestao de contagem','<div id="inv-quadro">'+invSpin('Carregando fichas...')+'</div>','Libere a 1a contagem (Integral/Deposito/Rua/Nivel/Individual). Coletor gera tarefa; Papel habilita a impressao.'); }
+  h+='</div>';
+  h+='<div id="inv-tab-monit" style="display:none"><div id="inv-monit-body">'+invSpin('Carregando monitoramento...')+'</div></div>';
   return h;
 }
 
