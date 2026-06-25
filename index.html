@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.413 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.414 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -975,7 +975,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.413';
+const APP_VERSION='v1.0.414';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -4402,6 +4402,8 @@ function _imprimirFatura(f,contatoResp){
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
   const _imp=fatImpostosCalc(subtotalNF,_tabF,issIncluso);
+  const _baseServ=linhas.filter(l=>!l.nota_debito&&!l.is_complemento).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const _minInfo=fatMinInfo(_tabF,_baseServ);
   const subtotal=subtotalNF;
   const total=_imp.bruto+subtotalND;
 
@@ -4513,6 +4515,7 @@ function _imprimirFatura(f,contatoResp){
     </table>
     <div class="totals">
       <div class="total-row"><span style="color:#666">Subtotal serviços:</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(subtotal)}</span></div>
+      ${_minInfo?('<div class="total-row"><span style="color:#999">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+':</span><span style="font-weight:600;min-width:110px;text-align:right;color:#999">'+fmtBRL(_minInfo.valor)+'</span></div>'):''}
       ${fatImpostoLinhas(_imp).map(function(x){return '<div class="total-row"><span style="color:#666">'+x.label+':</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?('<div class="total-row"><span style="color:#666">Nota de Débito (s/ imposto):</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(subtotalND)+'</span></div>'):''}
       <div class="total-row total-final"><span>TOTAL:</span><span style="min-width:110px;text-align:right">${fmtBRL(total)}</span></div>
@@ -4706,6 +4709,8 @@ async function confirmarEnvioEmail(id){
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
   const _imp=fatImpostosCalc(subtotalNF,_tabF,f.iss_incluso);
+  const _baseServ=linhas.filter(l=>!l.nota_debito&&!l.is_complemento).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const _minInfo=fatMinInfo(_tabF,_baseServ);
   const subtotal=subtotalNF;
   const total=_imp.bruto+subtotalND;
   const fmtBRL=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2});
@@ -4747,6 +4752,7 @@ async function confirmarEnvioEmail(id){
       </table>
       <div style="text-align:right;font-size:13px">
         <div>Subtotal serviços: <strong>${fmtBRL(subtotal)}</strong></div>
+        ${_minInfo?('<div style="color:#888">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+': <strong>'+fmtBRL(_minInfo.valor)+'</strong></div>'):''}
         ${fatImpostoLinhas(_imp).map(function(x){return '<div>'+x.label+': <strong>'+fmtBRL(x.value)+'</strong></div>';}).join('')}
         ${subtotalND>0?('<div>Nota de Débito (s/ imposto): <strong>'+fmtBRL(subtotalND)+'</strong></div>'):''}
         <div style="font-size:16px;color:#1e5f82;font-weight:700;margin-top:6px;border-top:2px solid #1e5f82;padding-top:6px">TOTAL: ${fmtBRL(total)}</div>
@@ -5055,6 +5061,14 @@ function fatImpostoLinhas(imp){
   if(imp.cofPct>0) r.push({label:'COFINS ('+fmtPct(imp.cofPct)+'%)'+tag,value:imp.cofins});
   return r;
 }
+function fatMinInfo(tabela,baseServicos){
+  var raw=tabela&&tabela.cond_fat_minimo;
+  if(!raw) return null;
+  var s=String(raw).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.');
+  var v=parseFloat(s)||0;
+  if(v<=0) return null;
+  return {valor:v, atingido:Number(baseServicos||0)>=v};
+}
 function recalcFatura(){
   // Separa linhas normais (NF) das de Nota de Débito
   const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
@@ -5080,6 +5094,7 @@ function recalcFatura(){
   const totalNF=_imp.bruto;                         // NF c/ impostos por dentro
   const total=totalNF+subtotalND;                   // total geral = NF + ND (ND sem imposto)
   window._fatImpostos=_imp;
+  const _minInfo=fatMinInfo(tabela,subtotalNF);
 
   // Expor para PDFs e salvamento
   window._fatComplemento=complemento;
@@ -5104,6 +5119,7 @@ function recalcFatura(){
         <span style="color:var(--text2)">Subtotal (c/ mínimo):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
       </div>`:''}
+      ${_minInfo?('<div style="display:flex;gap:40px;font-size:12px"><span style="color:var(--text3)">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+':</span><span style="min-width:120px;text-align:right;color:var(--text3)">'+fmtV(_minInfo.valor)+'</span></div>'):''}
       ${fatImpostoLinhas(_imp).map(function(x){return '<div style="display:flex;gap:40px;font-size:13px"><span style="color:var(--text2)">'+x.label+':</span><span style="font-weight:600;min-width:120px;text-align:right">'+fmtV(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?`<div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">Nota de Débito (s/ imposto):</span>
