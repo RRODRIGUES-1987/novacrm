@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.437 | Gerado: 2026-06-26 01:34 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.439 | Gerado: 2026-06-26 01:45 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.437';
+const APP_VERSION='v1.0.439';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21057,7 +21057,7 @@ async function invDigitar(id){
     var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
     if(!inv){ invDigFechar(); return; }
     invDig.id=id; invDig.parser=inv.etiqueta_parser||null; invDig.sel=null;
-    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&rodada_liberada=gt.0&select=id,endereco,rodada_liberada,modo,status,folha');
+    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&rodada_liberada=gt.0&select=id,endereco,rodada_liberada,modo,status,folha,ficha_num');
     invDig.fichas=fichas.slice();
     invDig.byEnd={}; invDig.fichas.forEach(function(f){ invDig.byEnd[invNorm(f.endereco)]=f; });
     var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&status=eq.contada&select=ficha_id');
@@ -21083,7 +21083,7 @@ function invDigRender(){
   }
   var f=invDig.sel;
   b.innerHTML=head + invDigFolhaBanner()
-    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3)">Endereco</div><div style="font-size:16px;font-weight:800;font-family:monospace">'+f.endereco+'</div></div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3)">Endereco</div><div style="font-size:16px;font-weight:800;font-family:monospace">'+f.endereco+'</div><div style="font-size:11px;color:var(--text3);margin-top:2px">Ficha N&ordm; '+(f.ficha_num!=null?('0000'+f.ficha_num).slice(-4):'-')+'</div></div>'
     +'<div class="fg" style="margin-bottom:10px"><label class="fl">Etiqueta de produto</label><input class="fi" id="dig-prod" placeholder="Bipe/cole a etiqueta do produto" oninput="invDigProdView()"></div>'
     +'<div id="dig-prod-cod" style="font-size:12px;font-family:monospace;margin-bottom:12px;color:var(--text3)">Codigo: &mdash;</div>'
     +'<div class="fg" style="margin-bottom:14px"><label class="fl">Quantidade contada</label><input class="fi" id="dig-qtd" type="number" min="0" step="any" placeholder="0" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigConfirmar();}"></div>'
@@ -21151,6 +21151,21 @@ function invDigProximaFolha(){
   invDigRender();
 }
 function invDigSair(){ invDig.sel=null; invDig.folhaQueue=[]; invDig.folhaNum=null; invDig.folhaIdx=0; invDigRender(); }
+async function invRegerarFolhas(){
+  var libs=invQuadroFiltradas().filter(function(f){return f.rodada_liberada>0 && f.modo==='papel';});
+  if(!libs.length){ if(typeof showToast==='function')showToast('Nenhuma ficha liberada (papel) no filtro atual','amber'); return; }
+  if(!confirm('Zerar a numeracao de folha de '+libs.length+' fichas (filtro atual)?\n\nUse so se ainda NAO distribuiu o papel — os numeros serao refeitos por pagina no proximo "Gerar folhas".')) return;
+  try{
+    var ids=libs.map(function(f){return f.id;});
+    for(var i=0;i<ids.length;i+=200){
+      var chunk=ids.slice(i,i+200);
+      var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?id=in.('+chunk.join(',')+')',{folha:null},tok,{'Prefer':'return=minimal'});
+      if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
+    }
+    if(typeof showToast==='function')showToast('Numeracao zerada — clique em Gerar folhas para renumerar','green');
+    invLoadQuadro();
+  }catch(e){ if(typeof showToast==='function')showToast('Erro ao zerar: '+(e.message||e),'red'); }
+}
 async function invNumerarNovas(novas,byEnd,cega){
   if(!novas||!novas.length) return;
   var maxF=0; for(var i=0;i<invFichas.length;i++){ var v=parseInt(invFichas[i].folha,10); if(v>maxF)maxF=v; }
@@ -21188,13 +21203,14 @@ async function invGerarFichas(){
   try{
     var ends=await invFetchAll('inventario_enderecos','inventario_id=eq.'+invSel+'&gera_ficha=eq.true&select=endereco');
     if(!ends.length){ if(typeof showToast==='function')showToast('Nenhum endereco com Gera Ficha = Sim','amber'); return; }
+    ends.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
     var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,qtde_saldo');
     var agg={};
     for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!agg[e])agg[e]={n:0,s:0}; agg[e].n++; agg[e].s+=(parseFloat(base[i].qtde_saldo)||0); }
     var m=invData.mascara||null, fichas=[];
     for(var j=0;j<ends.length;j++){
       var end=ends[j].endereco||''; var a=agg[end]||{n:0,s:0}; var mm=invApplyMask(end,m);
-      fichas.push({inventario_id:invSel,endereco:end,dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem_estrutura:mm.tem,qtd_itens:a.n,qtd_sistema_total:a.s,modo:'',rodada_liberada:0,status:'gerada'});
+      fichas.push({inventario_id:invSel,ficha_num:(j+1),endereco:end,dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem_estrutura:mm.tem,qtd_itens:a.n,qtd_sistema_total:a.s,modo:'',rodada_liberada:0,status:'gerada'});
     }
     await sbFetch('DELETE','/rest/v1/inventario_fichas?inventario_id=eq.'+invSel,null,tok,{'Prefer':'return=minimal'});
     await invBulkInsert('inventario_fichas',fichas);
@@ -21237,7 +21253,7 @@ async function invLoadQuadro(){
   var box=ge('inv-quadro'); if(!box) return;
   box.innerHTML=invSpin('Carregando fichas...');
   try{
-    invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status,folha');
+    invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status,folha,ficha_num');
     invTarefas=await invFetchAll('inventario_tarefas','inventario_id=eq.'+invSel+'&select=rodada,status,contada_em,ficha_id');
     var _b=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto');
     invProdByEnd={}; for(var _i=0;_i<_b.length;_i++){ var _e=_b[_i].endereco||''; if(!invProdByEnd[_e])invProdByEnd[_e]=[]; if(_b[_i].cod_produto)invProdByEnd[_e].push(_b[_i].cod_produto); }
@@ -21312,7 +21328,8 @@ function invQuadroHTML(){
     +'<div class="fg"><label class="fl">Endereco</label><input class="fi" id="q-end" oninput="invRenderQuadroRows()" placeholder="buscar" style="min-width:120px"></div>'
     +'</div>';
   var cont='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)">Total: <b style="color:var(--text)">'+invFichas.length+'</b> &middot; Liberadas: <b style="color:var(--green)">'+lib+'</b> &middot; Pendentes: <b style="color:var(--text)">'+pend+'</b></div>';
-  var printbar='<div style="margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Gerar/imprimir folhas (papel, filtro atual)</button></div>';
+  var printbar='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Gerar/imprimir folhas (papel, filtro atual)</button>'
+    +'<button class="btn btn-sm" onclick="invRegerarFolhas()" style="color:var(--red-text)">&#8635; Zerar numeracao (filtro)</button></div>';
   return pan+cont+printbar+fil+'<div id="q-rows"></div>';
 }
 function invLibScope(){
@@ -21343,7 +21360,7 @@ function invRenderQuadroRows(){
   var thBg='#e9e9e3';
   var th=function(lbl,al){return '<th style="position:sticky;top:0;background:'+thBg+';text-align:'+(al||'center')+';padding:7px 8px;font-weight:700;border-bottom:1px solid var(--border2);z-index:1">'+lbl+'</th>';};
   var h='<div style="max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr>'+th('Endereco','left')+th('Folha')+th('Dep')+th('Rua')+th('Nivel')+th('Pos')+th('Produto esperado','left')+th('Itens')+th('Esperado','right')+th('Status')+th('Acoes')+'</tr></thead><tbody>';
+    +'<thead><tr>'+th('Endereco','left')+th('Ficha')+th('Folha')+th('Dep')+th('Rua')+th('Nivel')+th('Pos')+th('Produto esperado','left')+th('Itens')+th('Esperado','right')+th('Status')+th('Acoes')+'</tr></thead><tbody>';
   for(var i=0;i<shown.length;i++){ var f=shown[i];
     var libd=f.rodada_liberada>0;
     var st=libd?'<span style="color:var(--green);font-weight:700">Liberada 1a</span>':'<span style="color:var(--text3)">Nao liberada</span>';
@@ -21352,6 +21369,7 @@ function invRenderQuadroRows(){
     if(libd&&f.modo==='papel') acoes+='<button class="btn btn-sm" title="Imprimir ficha (papel)" onclick="invPrintFicha(\''+f.id+'\')" style="padding:2px 9px;font-size:14px">&#128424;</button>';
     var zebra=(i%2)?'background:var(--bg2)':'';
     h+='<tr style="border-top:1px solid var(--border);'+zebra+'"><td style="padding:5px 8px;font-family:monospace">'+(f.endereco||'')+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;font-family:monospace">'+(f.ficha_num!=null?('0000'+f.ficha_num).slice(-4):'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center;font-weight:700">'+(f.folha||'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.dep||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.rua||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.nivel||'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center;font-family:monospace">'+(f.posicao||'-')+'</td>'
@@ -21440,8 +21458,9 @@ async function invPrintLote(){
 }
 function invFichaHTML(f,prods,cega){
   var emp=(invData&&invData.empresa_contada)||'';
+  var fnum=(f.ficha_num!=null&&f.ficha_num!=='')?('0000'+f.ficha_num).slice(-4):'-';
   var head='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:6px;margin-bottom:10px">'
-    +'<div><div style="font-size:18px;font-weight:800">Ficha de Contagem'+(cega?' <span style="font-size:11px;font-weight:700;color:#b00">(CEGA)</span>':'')+'</div><div style="font-size:12px">'+emp+'</div></div>'
+    +'<div><div style="font-size:18px;font-weight:800">Ficha de Contagem'+(cega?' <span style="font-size:11px;font-weight:700;color:#b00">(CEGA)</span>':'')+'</div><div style="font-size:12px">'+emp+'</div><div style="font-size:11px;color:#333;margin-top:1px">Ficha N&ordm; <b>'+fnum+'</b></div></div>'
     +'<div style="text-align:right;font-size:11px">Endereco<br><span style="font-size:20px;font-weight:800;font-family:monospace">'+(f.endereco||'')+'</span></div></div>';
   var meta='<div style="font-size:11px;color:#444;margin-bottom:10px">Folha: <b>'+(f.folha||'-')+'</b> &nbsp; Dep: '+(f.dep||'-')+' &nbsp; Rua: '+(f.rua||'-')+' &nbsp; Nivel: '+(f.nivel||'-')+' &nbsp; Pos: '+(f.posicao||'-')+' &nbsp;|&nbsp; 1a contagem &nbsp; Operador: _____________ &nbsp; Data: ___/___/____</div>';
   var rows='', th='';
