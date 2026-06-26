@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.435 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.436 | Gerado: 2026-06-26 01:26 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.435';
+const APP_VERSION='v1.0.436';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21044,7 +21044,7 @@ async function invEncerrar(id){
   catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
 }
 /* ---------- digitacao de contagens (Leva 2 inicial) ---------- */
-var invDig={ id:null, parser:null, fichas:[], byEnd:{}, contadas:{}, sel:null };
+var invDig={ id:null, parser:null, fichas:[], byEnd:{}, contadas:{}, sel:null, folhaQueue:[], folhaIdx:0, folhaNum:null };
 async function invDigitar(id){
   var old=document.getElementById('inv-dig-modal'); if(old) old.remove();
   var ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='inv-dig-modal';
@@ -21057,8 +21057,8 @@ async function invDigitar(id){
     var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
     if(!inv){ invDigFechar(); return; }
     invDig.id=id; invDig.parser=inv.etiqueta_parser||null; invDig.sel=null;
-    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&rodada_liberada=gt.0&select=id,endereco,rodada_liberada,modo,status');
-    invDig.fichas=fichas.filter(function(f){ return f.modo!=='papel'; });
+    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&rodada_liberada=gt.0&select=id,endereco,rodada_liberada,modo,status,folha');
+    invDig.fichas=fichas.slice();
     invDig.byEnd={}; invDig.fichas.forEach(function(f){ invDig.byEnd[invNorm(f.endereco)]=f; });
     var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&status=eq.contada&select=ficha_id');
     invDig.contadas={}; tar.forEach(function(t){ invDig.contadas[t.ficha_id]=true; });
@@ -21073,21 +21073,21 @@ function invDigRender(){
   var head='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px"><div style="font-size:12px;color:var(--text3)">'+(p&&(p.end||p.prod)?'Parser de etiquetas ativo':'<span style="color:var(--amber-text)">Sem parser configurado &mdash; lendo etiqueta inteira</span>')+'</div><div style="font-size:13px;font-weight:700">'+ft+' / '+lib+' contadas</div></div>';
   if(!lib){ b.innerHTML=head+'<div style="padding:24px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px">Nenhuma ficha liberada para coletor/digitacao. Libere fichas na aba Fichas (modo Coletor).</div>'; return; }
   if(!invDig.sel){
-    b.innerHTML=head
-      +'<div class="fg" style="margin-bottom:6px"><label class="fl">Etiqueta de endereco</label>'
+    b.innerHTML=head + invDigFolhaInputHTML()
+      +'<div class="fg" style="margin-bottom:6px"><label class="fl">Ou bipe a etiqueta de endereco</label>'
       +'<input class="fi" id="dig-end" placeholder="Bipe/cole a etiqueta do endereco" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigLerEnd();}"></div>'
       +'<button class="btn btn-p btn-sm" onclick="invDigLerEnd()">Ler endereco &rarr;</button>'
       +'<div id="dig-msg" style="font-size:12px;margin-top:8px"></div>';
-    setTimeout(function(){ var e=ge('dig-end'); if(e)e.focus(); },60);
+    setTimeout(function(){ var e=ge('dig-folha'); if(e)e.focus(); },60);
     return;
   }
   var f=invDig.sel;
-  b.innerHTML=head
+  b.innerHTML=head + invDigFolhaBanner()
     +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3)">Endereco</div><div style="font-size:16px;font-weight:800;font-family:monospace">'+f.endereco+'</div></div>'
     +'<div class="fg" style="margin-bottom:10px"><label class="fl">Etiqueta de produto</label><input class="fi" id="dig-prod" placeholder="Bipe/cole a etiqueta do produto" oninput="invDigProdView()"></div>'
     +'<div id="dig-prod-cod" style="font-size:12px;font-family:monospace;margin-bottom:12px;color:var(--text3)">Codigo: &mdash;</div>'
     +'<div class="fg" style="margin-bottom:14px"><label class="fl">Quantidade contada</label><input class="fi" id="dig-qtd" type="number" min="0" step="any" placeholder="0" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigConfirmar();}"></div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" onclick="invDig.sel=null;invDigRender()">Trocar endereco</button><button class="btn btn-p btn-sm" onclick="invDigConfirmar()">Confirmar contagem</button></div>';
+    +'<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" onclick="invDigSair()">Sair</button><button class="btn btn-p btn-sm" onclick="invDigConfirmar()">Confirmar contagem</button></div>';
   setTimeout(function(){ var e=ge('dig-prod'); if(e)e.focus(); },60);
 }
 function invDigLerEnd(){
@@ -21113,10 +21113,63 @@ async function invDigConfirmar(){
   try{
     await dbInsert('inventario_tarefas',{ inventario_id:invDig.id, ficha_id:f.id, endereco:f.endereco, rodada:(f.rodada_liberada||1), status:'contada', operador:(profile&&profile.full_name)||null, criada_por:(profile&&profile.full_name)||null, criada_em:new Date().toISOString(), contada_em:new Date().toISOString(), cod_produto:cod||null, qtd_contada:qtd });
     await dbUpdate('inventario_fichas',f.id,{status:'contada'});
-    invDig.contadas[f.id]=true; invDig.sel=null;
+    invDig.contadas[f.id]=true;
     if(typeof showToast==='function')showToast('Contagem gravada','green');
-    invDigRender();
+    if(invDig.folhaQueue&&invDig.folhaQueue.length){ invDig.folhaIdx++; invDigProximaFolha(); }
+    else { invDig.sel=null; invDigRender(); }
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao gravar: '+(e.message||e),'red'); }
+}
+function invDigFolhaInputHTML(){
+  return '<div class="fg" style="margin-bottom:6px"><label class="fl">Folha (impressa)</label>'
+    +'<input class="fi" id="dig-folha" type="number" min="1" placeholder="No da folha" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigAbrirFolha();}"></div>'
+    +'<button class="btn btn-p btn-sm" onclick="invDigAbrirFolha()">Abrir folha &rarr;</button>'
+    +'<div style="border-top:1px dashed var(--border);margin:14px 0"></div>';
+}
+function invDigFolhaBanner(){
+  if(!invDig.folhaNum) return '';
+  return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 11px;margin-bottom:12px;font-size:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center"><span>Folha '+invDig.folhaNum+'</span><span style="color:var(--text3)">ficha '+(invDig.folhaIdx+1)+' / '+invDig.folhaQueue.length+'</span></div>';
+}
+function invDigAbrirFolha(){
+  var i=ge('dig-folha'); if(!i) return; var n=parseInt(i.value,10);
+  var msg=ge('dig-msg');
+  if(!(n>0)){ if(msg)msg.innerHTML='<span style="color:var(--red-text)">Informe o numero da folha.</span>'; return; }
+  var q=invDig.fichas.filter(function(f){ return parseInt(f.folha,10)===n; });
+  q.sort(function(a,b){ return (a.endereco||'').localeCompare(b.endereco||''); });
+  if(!q.length){ if(msg)msg.innerHTML='<span style="color:var(--red-text)">Folha <b>'+n+'</b> nao tem fichas liberadas.</span>'; return; }
+  invDig.folhaQueue=q; invDig.folhaIdx=0; invDig.folhaNum=n;
+  invDigProximaFolha();
+}
+function invDigProximaFolha(){
+  while(invDig.folhaIdx<invDig.folhaQueue.length && invDig.contadas[invDig.folhaQueue[invDig.folhaIdx].id]) invDig.folhaIdx++;
+  if(invDig.folhaIdx>=invDig.folhaQueue.length){
+    var num=invDig.folhaNum;
+    invDig.folhaQueue=[]; invDig.folhaNum=null; invDig.folhaIdx=0; invDig.sel=null;
+    if(typeof showToast==='function')showToast('Folha '+num+' concluida','green');
+    invDigRender(); return;
+  }
+  invDig.sel=invDig.folhaQueue[invDig.folhaIdx];
+  invDigRender();
+}
+function invDigSair(){ invDig.sel=null; invDig.folhaQueue=[]; invDig.folhaNum=null; invDig.folhaIdx=0; invDigRender(); }
+async function invAtribuirFolhas(libs,fpf){
+  var maxF=0; for(var i=0;i<invFichas.length;i++){ var v=parseInt(invFichas[i].folha,10); if(v>maxF)maxF=v; }
+  var sem=libs.filter(function(f){ return !(parseInt(f.folha,10)>0); });
+  if(!sem.length) return;
+  var atual=maxF, cont=0, byFolha={};
+  for(var k=0;k<sem.length;k++){
+    if(cont===0) atual++;
+    sem[k].folha=atual;
+    (byFolha[atual]=byFolha[atual]||[]).push(sem[k].id);
+    cont++; if(cont>=fpf)cont=0;
+  }
+  var keys=Object.keys(byFolha);
+  for(var j=0;j<keys.length;j++){
+    var ids=byFolha[keys[j]];
+    var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?id=in.('+ids.join(',')+')',{folha:Number(keys[j])},tok,{'Prefer':'return=minimal'});
+    if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
+  }
+  var fmap={}; for(var f1 in byFolha){ for(var x=0;x<byFolha[f1].length;x++) fmap[byFolha[f1][x]]=Number(f1); }
+  for(var m=0;m<invFichas.length;m++){ if(fmap[invFichas[m].id]!=null) invFichas[m].folha=fmap[invFichas[m].id]; }
 }
 /* ---------- gerar fichas ---------- */
 async function invGerarFichas(){
@@ -21177,7 +21230,7 @@ async function invLoadQuadro(){
   var box=ge('inv-quadro'); if(!box) return;
   box.innerHTML=invSpin('Carregando fichas...');
   try{
-    invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status');
+    invFichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status,folha');
     invTarefas=await invFetchAll('inventario_tarefas','inventario_id=eq.'+invSel+'&select=rodada,status,contada_em,ficha_id');
     var _b=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto');
     invProdByEnd={}; for(var _i=0;_i<_b.length;_i++){ var _e=_b[_i].endereco||''; if(!invProdByEnd[_e])invProdByEnd[_e]=[]; if(_b[_i].cod_produto)invProdByEnd[_e].push(_b[_i].cod_produto); }
@@ -21252,7 +21305,10 @@ function invQuadroHTML(){
     +'<div class="fg"><label class="fl">Endereco</label><input class="fi" id="q-end" oninput="invRenderQuadroRows()" placeholder="buscar" style="min-width:120px"></div>'
     +'</div>';
   var cont='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)">Total: <b style="color:var(--text)">'+invFichas.length+'</b> &middot; Liberadas: <b style="color:var(--green)">'+lib+'</b> &middot; Pendentes: <b style="color:var(--text)">'+pend+'</b></div>';
-  var printbar='<div style="margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Imprimir lote (fichas liberadas em papel, filtro atual)</button></div>';
+  var printbar='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">'
+    +'<div class="fg" style="max-width:130px"><label class="fl">Fichas por folha</label><input class="fi" id="inv-fpf" type="number" min="1" step="1" value="1"></div>'
+    +'<button class="btn btn-sm" onclick="invPrintLote()">&#128424; Gerar/imprimir folhas (papel, filtro atual)</button>'
+    +'</div>';
   return pan+cont+printbar+fil+'<div id="q-rows"></div>';
 }
 function invLibScope(){
@@ -21283,7 +21339,7 @@ function invRenderQuadroRows(){
   var thBg='#e9e9e3';
   var th=function(lbl,al){return '<th style="position:sticky;top:0;background:'+thBg+';text-align:'+(al||'center')+';padding:7px 8px;font-weight:700;border-bottom:1px solid var(--border2);z-index:1">'+lbl+'</th>';};
   var h='<div style="max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr>'+th('Endereco','left')+th('Dep')+th('Rua')+th('Nivel')+th('Pos')+th('Produto esperado','left')+th('Itens')+th('Esperado','right')+th('Status')+th('Acoes')+'</tr></thead><tbody>';
+    +'<thead><tr>'+th('Endereco','left')+th('Folha')+th('Dep')+th('Rua')+th('Nivel')+th('Pos')+th('Produto esperado','left')+th('Itens')+th('Esperado','right')+th('Status')+th('Acoes')+'</tr></thead><tbody>';
   for(var i=0;i<shown.length;i++){ var f=shown[i];
     var libd=f.rodada_liberada>0;
     var st=libd?'<span style="color:var(--green);font-weight:700">Liberada 1a</span>':'<span style="color:var(--text3)">Nao liberada</span>';
@@ -21292,6 +21348,7 @@ function invRenderQuadroRows(){
     if(libd&&f.modo==='papel') acoes+='<button class="btn btn-sm" title="Imprimir ficha (papel)" onclick="invPrintFicha(\''+f.id+'\')" style="padding:2px 9px;font-size:14px">&#128424;</button>';
     var zebra=(i%2)?'background:var(--bg2)':'';
     h+='<tr style="border-top:1px solid var(--border);'+zebra+'"><td style="padding:5px 8px;font-family:monospace">'+(f.endereco||'')+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;font-weight:700">'+(f.folha||'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center">'+(f.dep||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.rua||'-')+'</td><td style="padding:5px 8px;text-align:center">'+(f.nivel||'-')+'</td>'
       +'<td style="padding:5px 8px;text-align:center;font-family:monospace">'+(f.posicao||'-')+'</td>'
       +'<td style="padding:5px 8px;font-family:monospace">'+invProdLabel(f.endereco)+'</td>'
@@ -21349,16 +21406,27 @@ async function invPrintLote(){
   var libs=invQuadroFiltradas().filter(function(f){return f.rodada_liberada>0 && f.modo==='papel';});
   if(!libs.length){ if(typeof showToast==='function')showToast('Nenhuma ficha liberada nos filtros atuais','amber'); return; }
   libs.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
+  var fpf=Math.max(1,parseInt((ge('inv-fpf')&&ge('inv-fpf').value)||'1',10)||1);
   if(typeof showToast==='function')showToast('Preparando '+libs.length+' fichas...','blue');
   try{
+    await invAtribuirFolhas(libs,fpf);
     var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo');
     var byEnd={};
     for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!byEnd[e])byEnd[e]=[]; byEnd[e].push(base[i]); }
     var cega=invData&&invData.contagem_cega!==false;
+    var grupos={};
+    for(var g=0;g<libs.length;g++){ var fn=libs[g].folha||0; if(!grupos[fn])grupos[fn]=[]; grupos[fn].push(libs[g]); }
+    var folhas=Object.keys(grupos).map(Number).sort(function(a,b){return a-b;});
     var html='';
-    for(var j=0;j<libs.length;j++){
-      var f=libs[j]; var prods=byEnd[f.endereco]||[];
-      html+='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,prods,cega)+'</div>';
+    for(var fi=0;fi<folhas.length;fi++){
+      var num=folhas[fi], fis=grupos[num];
+      var faixa=(fis[0].endereco||'')+(fis.length>1?(' a '+(fis[fis.length-1].endereco||'')):'');
+      html+='<div style="'+(fi>0?'page-break-before:always;':'')+'">';
+      html+='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px;font-family:Arial,sans-serif"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
+      for(var j=0;j<fis.length;j++){ var f=fis[j]; var prods=byEnd[f.endereco]||[];
+        html+='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,prods,cega)+'</div>';
+      }
+      html+='</div>';
     }
     invPrintHTML(html);
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao imprimir lote: '+(e.message||e),'red'); }
@@ -21368,7 +21436,7 @@ function invFichaHTML(f,prods,cega){
   var head='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:6px;margin-bottom:10px">'
     +'<div><div style="font-size:18px;font-weight:800">Ficha de Contagem'+(cega?' <span style="font-size:11px;font-weight:700;color:#b00">(CEGA)</span>':'')+'</div><div style="font-size:12px">'+emp+'</div></div>'
     +'<div style="text-align:right;font-size:11px">Endereco<br><span style="font-size:20px;font-weight:800;font-family:monospace">'+(f.endereco||'')+'</span></div></div>';
-  var meta='<div style="font-size:11px;color:#444;margin-bottom:10px">Dep: '+(f.dep||'-')+' &nbsp; Rua: '+(f.rua||'-')+' &nbsp; Nivel: '+(f.nivel||'-')+' &nbsp; Pos: '+(f.posicao||'-')+' &nbsp;|&nbsp; 1a contagem &nbsp; Operador: _____________ &nbsp; Data: ___/___/____</div>';
+  var meta='<div style="font-size:11px;color:#444;margin-bottom:10px">Folha: <b>'+(f.folha||'-')+'</b> &nbsp; Dep: '+(f.dep||'-')+' &nbsp; Rua: '+(f.rua||'-')+' &nbsp; Nivel: '+(f.nivel||'-')+' &nbsp; Pos: '+(f.posicao||'-')+' &nbsp;|&nbsp; 1a contagem &nbsp; Operador: _____________ &nbsp; Data: ___/___/____</div>';
   var rows='', th='';
   if(cega){
     if(prods && prods.length){
