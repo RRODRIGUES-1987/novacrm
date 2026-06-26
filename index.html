@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.436 | Gerado: 2026-06-26 01:26 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.437 | Gerado: 2026-06-26 01:34 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.436';
+const APP_VERSION='v1.0.437';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21151,24 +21151,31 @@ function invDigProximaFolha(){
   invDigRender();
 }
 function invDigSair(){ invDig.sel=null; invDig.folhaQueue=[]; invDig.folhaNum=null; invDig.folhaIdx=0; invDigRender(); }
-async function invAtribuirFolhas(libs,fpf){
+async function invNumerarNovas(novas,byEnd,cega){
+  if(!novas||!novas.length) return;
   var maxF=0; for(var i=0;i<invFichas.length;i++){ var v=parseInt(invFichas[i].folha,10); if(v>maxF)maxF=v; }
-  var sem=libs.filter(function(f){ return !(parseInt(f.folha,10)>0); });
-  if(!sem.length) return;
-  var atual=maxF, cont=0, byFolha={};
-  for(var k=0;k<sem.length;k++){
-    if(cont===0) atual++;
-    sem[k].folha=atual;
-    (byFolha[atual]=byFolha[atual]||[]).push(sem[k].id);
-    cont++; if(cont>=fpf)cont=0;
+  // medicao: monta cada ficha numa caixa invisivel com a MESMA largura da impressao e mede a altura
+  var meas=document.createElement('div');
+  meas.style.cssText='position:fixed;left:-10000px;top:0;width:720px;visibility:hidden;font-family:Arial,sans-serif';
+  document.body.appendChild(meas);
+  var PAGE=940, HEADER=36; // orcamento de altura por folha (A4) e cabecalho "Folha N"
+  var folha=maxF, cur=PAGE+1, assign=[]; // cur>PAGE forca abrir a 1a folha
+  for(var k=0;k<novas.length;k++){
+    var f=novas[k];
+    meas.innerHTML='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,byEnd[f.endereco]||[],cega)+'</div>';
+    var h=(meas.firstChild&&meas.firstChild.offsetHeight)||130;
+    if(cur+h>PAGE){ folha++; cur=HEADER; } // nao cabe -> nova folha
+    f.folha=folha; assign.push({id:f.id,folha:folha}); cur+=h;
   }
+  document.body.removeChild(meas);
+  // persiste agrupado por numero de folha
+  var byFolha={}; for(var a=0;a<assign.length;a++){ (byFolha[assign[a].folha]=byFolha[assign[a].folha]||[]).push(assign[a].id); }
   var keys=Object.keys(byFolha);
   for(var j=0;j<keys.length;j++){
-    var ids=byFolha[keys[j]];
-    var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?id=in.('+ids.join(',')+')',{folha:Number(keys[j])},tok,{'Prefer':'return=minimal'});
+    var r=await sbFetch('PATCH','/rest/v1/inventario_fichas?id=in.('+byFolha[keys[j]].join(',')+')',{folha:Number(keys[j])},tok,{'Prefer':'return=minimal'});
     if(!r.ok) throw new Error((r.data&&(r.data.message||r.data.hint))||('HTTP '+r.status));
   }
-  var fmap={}; for(var f1 in byFolha){ for(var x=0;x<byFolha[f1].length;x++) fmap[byFolha[f1][x]]=Number(f1); }
+  var fmap={}; for(var b=0;b<assign.length;b++){ fmap[assign[b].id]=assign[b].folha; }
   for(var m=0;m<invFichas.length;m++){ if(fmap[invFichas[m].id]!=null) invFichas[m].folha=fmap[invFichas[m].id]; }
 }
 /* ---------- gerar fichas ---------- */
@@ -21305,10 +21312,7 @@ function invQuadroHTML(){
     +'<div class="fg"><label class="fl">Endereco</label><input class="fi" id="q-end" oninput="invRenderQuadroRows()" placeholder="buscar" style="min-width:120px"></div>'
     +'</div>';
   var cont='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text3)">Total: <b style="color:var(--text)">'+invFichas.length+'</b> &middot; Liberadas: <b style="color:var(--green)">'+lib+'</b> &middot; Pendentes: <b style="color:var(--text)">'+pend+'</b></div>';
-  var printbar='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">'
-    +'<div class="fg" style="max-width:130px"><label class="fl">Fichas por folha</label><input class="fi" id="inv-fpf" type="number" min="1" step="1" value="1"></div>'
-    +'<button class="btn btn-sm" onclick="invPrintLote()">&#128424; Gerar/imprimir folhas (papel, filtro atual)</button>'
-    +'</div>';
+  var printbar='<div style="margin-bottom:10px"><button class="btn btn-sm" onclick="invPrintLote()">&#128424; Gerar/imprimir folhas (papel, filtro atual)</button></div>';
   return pan+cont+printbar+fil+'<div id="q-rows"></div>';
 }
 function invLibScope(){
@@ -21406,23 +21410,26 @@ async function invPrintLote(){
   var libs=invQuadroFiltradas().filter(function(f){return f.rodada_liberada>0 && f.modo==='papel';});
   if(!libs.length){ if(typeof showToast==='function')showToast('Nenhuma ficha liberada nos filtros atuais','amber'); return; }
   libs.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
-  var fpf=Math.max(1,parseInt((ge('inv-fpf')&&ge('inv-fpf').value)||'1',10)||1);
   if(typeof showToast==='function')showToast('Preparando '+libs.length+' fichas...','blue');
   try{
-    await invAtribuirFolhas(libs,fpf);
     var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo');
     var byEnd={};
     for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!byEnd[e])byEnd[e]=[]; byEnd[e].push(base[i]); }
     var cega=invData&&invData.contagem_cega!==false;
+    // numera as fichas ainda sem folha (por pagina fisica) e grava
+    var novas=libs.filter(function(f){ return !(parseInt(f.folha,10)>0); });
+    if(novas.length) await invNumerarNovas(novas,byEnd,cega);
+    // agrupa por folha (todas ja numeradas) e imprime, 1 folha por pagina
     var grupos={};
     for(var g=0;g<libs.length;g++){ var fn=libs[g].folha||0; if(!grupos[fn])grupos[fn]=[]; grupos[fn].push(libs[g]); }
     var folhas=Object.keys(grupos).map(Number).sort(function(a,b){return a-b;});
-    var html='';
+    var sty='<style>@page{margin:12mm} body{width:720px;margin:0 auto;font-family:Arial,sans-serif}</style>';
+    var html=sty;
     for(var fi=0;fi<folhas.length;fi++){
       var num=folhas[fi], fis=grupos[num];
       var faixa=(fis[0].endereco||'')+(fis.length>1?(' a '+(fis[fis.length-1].endereco||'')):'');
       html+='<div style="'+(fi>0?'page-break-before:always;':'')+'">';
-      html+='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px;font-family:Arial,sans-serif"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
+      html+='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
       for(var j=0;j<fis.length;j++){ var f=fis[j]; var prods=byEnd[f.endereco]||[];
         html+='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,prods,cega)+'</div>';
       }
