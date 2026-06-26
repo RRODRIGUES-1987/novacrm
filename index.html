@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.441 | Gerado: 2026-06-26 12:00 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.442 | Gerado: 2026-06-26 12:15 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.441';
+const APP_VERSION='v1.0.442';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20903,6 +20903,9 @@ function invColMap(rows,needle){
 function invParseSaldo(rows){
   var cm=invColMap(rows,'endereco'); if(!cm) return [];
   var m=cm.map, out=[];
+  // tipo da embalagem: aceita varios nomes de coluna (UA / Embalagem / Desc. UA ...)
+  var embCands=['tipoembalagem','tipodeembalagem','embalagem','descricaoua','descua','tipoua','ua'];
+  var embCol=null; for(var e=0;e<embCands.length;e++){ if(m[embCands[e]]!=null){ embCol=m[embCands[e]]; break; } }
   for(var i=cm.hi+1;i<rows.length;i++){
     var r=rows[i]||[];
     var endRaw=invNorm(r[m['endereco']]);
@@ -20916,7 +20919,8 @@ function invParseSaldo(rows){
       qtde_saldo: invNum(r[m['qtdesaldo']]),
       endereco: endRaw.toUpperCase(),
       endereco_raw: endRaw,
-      unidade_medida: invNorm(r[m['unidademedida']])||null
+      unidade_medida: invNorm(r[m['unidademedida']])||null,
+      tipo_embalagem: embCol!=null?(invNorm(r[embCol])||null):null
     });
   }
   return out;
@@ -21161,11 +21165,13 @@ async function invNumerarNovas(novas,byEnd,cega){
   // PAGE = altura util por folha, calibrada para a pagina A4 impressa (body 720px, @page 12mm):
   // cabem 3 fichas de linha unica por pagina, exatamente como sai no PDF. HEADER reserva o
   // cabecalho "Folha N" no topo da pagina.
-  var PAGE=860, HEADER=40;
+  // Com operador/data movidos para o cabecalho da folha, a ficha ficou mais enxuta.
+  // HEADER reserva o cabecalho da folha (agora 2 linhas: "Folha N" + operador/data).
+  var PAGE=820, HEADER=46;
   var folha=maxF, cur=PAGE+1, assign=[]; // cur>PAGE forca abrir a 1a folha
   for(var k=0;k<novas.length;k++){
     var f=novas[k];
-    meas.innerHTML='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,byEnd[f.endereco]||[],cega)+'</div>';
+    meas.innerHTML='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:8px;margin-bottom:8px">'+invFichaHTML(f,byEnd[f.endereco]||[],cega)+'</div>';
     var box=meas.firstChild;
     // altura REAL de fluxo = offsetHeight + margin-bottom. O offsetHeight sozinho ignora a
     // margem e fazia a estimativa caber 1 ficha a mais do que cabe de fato na pagina fisica.
@@ -21421,7 +21427,7 @@ async function invPrintLote(){
   libs.sort(function(a,b){return (a.endereco||'').localeCompare(b.endereco||'');});
   if(typeof showToast==='function')showToast('Preparando '+libs.length+' fichas...','blue');
   try{
-    var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo');
+    var base=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&select=endereco,cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo,tipo_embalagem');
     var byEnd={};
     for(var i=0;i<base.length;i++){ var e=base[i].endereco||''; if(!byEnd[e])byEnd[e]=[]; byEnd[e].push(base[i]); }
     var cega=invData&&invData.contagem_cega!==false;
@@ -21437,14 +21443,16 @@ async function invPrintLote(){
       +'table.folha:last-of-type{page-break-after:auto}'
       +'table.folha thead{display:table-header-group}'
       +'table.folha>thead>tr>td,table.folha>tbody>tr>td{padding:0;border:0}'
-      +'.folha-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px}'
-      +'.folha-ficha{page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px}'
+      +'.folha-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:6px}'
+      +'.folha-sub{font-size:11px;color:#333;margin-bottom:10px}'
+      +'.folha-ficha{page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:8px;margin-bottom:8px}'
       +'</style>';
     var html=sty;
     for(var fi=0;fi<folhas.length;fi++){
       var num=folhas[fi], fis=grupos[num];
       var faixa=(fis[0].endereco||'')+(fis.length>1?(' a '+(fis[fis.length-1].endereco||'')):'');
-      var head='<div class="folha-head"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
+      var head='<div class="folha-head"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>'
+        +'<div class="folha-sub">1a contagem &nbsp;&middot;&nbsp; Operador: _____________________ &nbsp;&middot;&nbsp; Data: ___/___/____</div>';
       var corpo='';
       for(var j=0;j<fis.length;j++){ var f=fis[j]; var prods=byEnd[f.endereco]||[];
         corpo+='<div class="folha-ficha">'+invFichaHTML(f,prods,cega)+'</div>';
@@ -21456,36 +21464,40 @@ async function invPrintLote(){
     invPrintHTML(html);
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao imprimir lote: '+(e.message||e),'red'); }
 }
-function invFichaHTML(f,prods,cega){
+function invFichaHTML(f,prods,cega,solo){
   var emp=(invData&&invData.empresa_contada)||'';
   var fnum=(f.ficha_num!=null&&f.ficha_num!=='')?('0000'+f.ficha_num).slice(-4):'-';
-  var head='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:6px;margin-bottom:10px">'
-    +'<div><div style="font-size:18px;font-weight:800">Ficha de Contagem'+(cega?' <span style="font-size:11px;font-weight:700;color:#b00">(CEGA)</span>':'')+'</div><div style="font-size:12px">'+emp+'</div><div style="font-size:11px;color:#333;margin-top:1px">Ficha N&ordm; <b>'+fnum+'</b></div></div>'
-    +'<div style="text-align:right;font-size:11px">Endereco<br><span style="font-size:20px;font-weight:800;font-family:monospace">'+(f.endereco||'')+'</span></div></div>';
-  var meta='<div style="font-size:11px;color:#444;margin-bottom:10px">Folha: <b>'+(f.folha||'-')+'</b> &nbsp; Dep: '+(f.dep||'-')+' &nbsp; Rua: '+(f.rua||'-')+' &nbsp; Nivel: '+(f.nivel||'-')+' &nbsp; Pos: '+(f.posicao||'-')+' &nbsp;|&nbsp; 1a contagem &nbsp; Operador: _____________ &nbsp; Data: ___/___/____</div>';
+  var head='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:7px">'
+    +'<div><div style="font-size:16px;font-weight:800">Ficha de Contagem'+(cega?' <span style="font-size:10px;font-weight:700;color:#b00">(CEGA)</span>':'')+'</div><div style="font-size:11px">'+emp+'</div><div style="font-size:11px;color:#333;margin-top:1px">Ficha N&ordm; <b>'+fnum+'</b></div></div>'
+    +'<div style="text-align:right;font-size:11px">Endereco<br><span style="font-size:19px;font-weight:800;font-family:monospace">'+(f.endereco||'')+'</span></div></div>';
+  var dim='Dep: '+(f.dep||'-')+' &nbsp; Rua: '+(f.rua||'-')+' &nbsp; Nivel: '+(f.nivel||'-')+' &nbsp; Pos: '+(f.posicao||'-');
+  // operador/data so aparecem na ficha avulsa (solo). No lote ficam no cabecalho da folha (uma vez).
+  var meta=solo
+    ? '<div style="font-size:11px;color:#444;margin-bottom:8px">Folha: <b>'+(f.folha||'-')+'</b> &nbsp; '+dim+' &nbsp;|&nbsp; 1a contagem &nbsp; Operador: _____________ &nbsp; Data: ___/___/____</div>'
+    : '<div style="font-size:11px;color:#444;margin-bottom:6px">'+dim+'</div>';
   var rows='', th='';
   if(cega){
     if(prods && prods.length){
       for(var i=0;i<prods.length;i++){ var p=prods[i];
-        rows+='<tr><td style="height:24px;font-family:monospace">'+(p.cod_produto||'')+'</td><td>&nbsp;</td></tr>';
-        rows+='<tr><td style="height:24px">&nbsp;</td><td>&nbsp;</td></tr>';
+        rows+='<tr><td style="height:22px;font-family:monospace">'+(p.cod_produto||'')+'</td><td style="font-size:10px">'+(p.tipo_embalagem||'')+'</td><td>&nbsp;</td></tr>';
+        rows+='<tr><td style="height:18px">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
       }
     } else {
-      rows+='<tr><td style="height:24px">&nbsp;</td><td>&nbsp;</td></tr><tr><td style="height:24px">&nbsp;</td><td>&nbsp;</td></tr>';
+      rows+='<tr><td style="height:22px">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td style="height:18px">&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
     }
-    th='<tr style="background:#eee"><th style="text-align:left;width:70%">Codigo do produto</th><th style="width:30%">Qtd contada</th></tr>';
+    th='<tr style="background:#eee"><th style="text-align:left;width:50%">Codigo do produto</th><th style="text-align:left;width:22%">Embalagem</th><th style="width:28%">Qtd contada</th></tr>';
   } else {
     for(var i=0;i<prods.length;i++){ var p=prods[i];
-      rows+='<tr><td>'+(p.cod_produto||'')+'</td><td>'+(p.desc_produto||'')+'</td><td>'+(p.referencia||'')+'</td><td style="text-align:center">'+(p.unidade_medida||'')+'</td>'
+      rows+='<tr><td>'+(p.cod_produto||'')+'</td><td>'+(p.desc_produto||'')+'</td><td>'+(p.referencia||'')+'</td><td style="text-align:center">'+(p.unidade_medida||'')+'</td><td style="text-align:center">'+(p.tipo_embalagem||'')+'</td>'
         +'<td style="text-align:right">'+(p.qtde_saldo==null?'':p.qtde_saldo)+'</td>'
-        +'<td style="width:90px">&nbsp;</td></tr>';
+        +'<td style="width:80px">&nbsp;</td></tr>';
     }
-    if(!prods.length){ rows='<tr><td colspan="6" style="text-align:center;color:#777;padding:10px">Endereco sem saldo no sistema</td></tr>'; }
-    th='<tr style="background:#eee"><th style="text-align:left">Cod.</th><th style="text-align:left">Descricao</th><th style="text-align:left">Ref.</th><th>UN</th><th>Qtd sistema</th><th>Contagem</th></tr>';
+    if(!prods.length){ rows='<tr><td colspan="7" style="text-align:center;color:#777;padding:10px">Endereco sem saldo no sistema</td></tr>'; }
+    th='<tr style="background:#eee"><th style="text-align:left">Cod.</th><th style="text-align:left">Descricao</th><th style="text-align:left">Ref.</th><th>UN</th><th>Emb.</th><th>Qtd sistema</th><th>Contagem</th></tr>';
   }
-  return '<div style="font-family:Arial,sans-serif;padding:14px;color:#000">'+head+meta
-    +'<table style="width:100%;border-collapse:collapse;font-size:11px" border="1" cellpadding="4">'+th+rows+'</table>'
-    +'<div style="margin-top:14px;font-size:10px;color:#666">'+(cega?'Contagem cega — confira o codigo esperado; se o produto for outro, anote na linha abaixo. Preencha a Qtd contada.':'')+' &nbsp; VERUS ERP</div></div>';
+  return '<div style="font-family:Arial,sans-serif;padding:10px;color:#000">'+head+meta
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px" border="1" cellpadding="3">'+th+rows+'</table>'
+    +'<div style="margin-top:8px;font-size:10px;color:#666">'+(cega?'Contagem cega — confira o codigo esperado; se o produto for outro, anote na linha abaixo. Preencha a Qtd contada.':'')+' &nbsp; VERUS ERP</div></div>';
 }
 function invPrintHTML(html){
   var ifr=document.getElementById('inv-print-frame');
@@ -21498,9 +21510,9 @@ async function invPrintFicha(fid){
   try{
     var fa=await dbSelect('inventario_fichas','id=eq.'+fid);
     var f=fa[0]; if(!f){ if(typeof showToast==='function')showToast('Ficha nao encontrada','amber'); return; }
-    var prods=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&endereco=eq.'+encodeURIComponent(f.endereco)+'&select=cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo');
+    var prods=await invFetchAll('inventario_base','inventario_id=eq.'+invSel+'&endereco=eq.'+encodeURIComponent(f.endereco)+'&select=cod_produto,desc_produto,referencia,unidade_medida,qtde_saldo,tipo_embalagem');
     var cega=invData&&invData.contagem_cega!==false;
-    invPrintHTML(invFichaHTML(f,prods,cega));
+    invPrintHTML(invFichaHTML(f,prods,cega,true));
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao imprimir: '+(e.message||e),'red'); }
 }
 
@@ -25244,5 +25256,3 @@ function unitLabel(){
 </script>
 </body>
 </html>
-
-                                                                            
