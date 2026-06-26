@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.433 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.434 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.433';
+const APP_VERSION='v1.0.434';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20873,6 +20873,7 @@ function wmsVGQuadro(fluxo,titulo,subsHtml,placeholder){
 /* ===== WMS · Inventario (independente) — Leva: importacao + config + mascara + fichas ===== */
 var invImpCtx={invId:null,tipo:null};
 var invSel=null;          // inventario aberto (detalhe) ou null (lista)
+var invListCache=[];      // cache da lista p/ filtro de busca
 var invData=null;         // objeto do inventario aberto
 var invMaskSamples=[];    // enderecos de exemplo p/ a mascara
 function invNorm(s){return (s==null?'':String(s)).trim();}
@@ -21290,11 +21291,29 @@ function rInventario(){
   return '<div id="inv-root">'+invSpin('Carregando inventarios...')+'</div>'
     +'<input type="file" id="inv-file" accept=".xlsx,.xls" style="display:none" onchange="invProcessFile(this)">';
 }
-function invOpen(id){ invSel=id; invLoad(); }
-function invBack(){ invSel=null; invData=null; invLoad(); }
+function invOpen(id){
+  invSel=id;
+  var old=document.getElementById('inv-detail-modal'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.className='modal-overlay'; ov.id='inv-detail-modal';
+  ov.innerHTML='<div class="modal" style="max-width:1000px;width:96%">'
+    +'<div class="modal-hdr" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px;position:sticky;top:0;background:var(--bg);z-index:1"><span>Inventario</span>'
+    +'<button onclick="invBack()" title="Fechar (Esc)" style="background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--text3);padding:0 4px">&times;</button></div>'
+    +'<div style="padding:18px" id="inv-detail-body">'+invSpin('Abrindo inventario...')+'</div></div>';
+  document.body.appendChild(ov);
+  invRenderDetail();
+}
+function invBack(){
+  var ov=document.getElementById('inv-detail-modal'); if(ov) ov.remove();
+  invSel=null; invData=null;
+  var r=ge('inv-root'); if(r) invRenderList(r);
+}
 async function invLoad(){
-  var root=ge('inv-root'); if(!root) return;
-  if(invSel){ await invRenderDetail(root); } else { await invRenderList(root); }
+  var modal=document.getElementById('inv-detail-modal');
+  if(invSel && modal){ await invRenderDetail(); return; }
+  if(modal) modal.remove();
+  invSel=null;
+  var root=ge('inv-root'); if(root) await invRenderList(root);
 }
 function invStatusBadge(s){
   return '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;background:var(--bg3);color:var(--text2);padding:3px 9px;border-radius:99px">'+(s||'aberto')+'</span>';
@@ -21302,27 +21321,44 @@ function invStatusBadge(s){
 async function invRenderList(root){
   try{
     var invs=await dbSelect('inventarios','id=not.is.null');
-    var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
-      +'<div style="font-size:12px;color:var(--text3);max-width:640px">Modulo independente — abra um inventario para importar saldo/enderecos, configurar a mascara e gerar as fichas.</div>'
+    invListCache=invs;
+    var head='<div class="sechdr"><div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input placeholder="Buscar inventario..." oninput="invFilterList(this.value)"></div>'
       +'<button class="btn btn-p btn-sm" onclick="invNovoToggle()">+ Novo inventario</button></div>'
-      +'<div id="inv-novo" style="display:none;margin-bottom:14px"></div>';
-    if(!invs.length){ root.innerHTML=head+'<div style="padding:30px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px">Nenhum inventario ainda. Clique em "+ Novo inventario".</div>'; return; }
-    var cards='';
-    for(var i=0;i<invs.length;i++){
-      var inv=invs[i]; var loc=inv.local?String(inv.local):'';
-      cards+='<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px">'
-        +'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-        +'<div>'+(inv.numero?'<div style="font-size:11px;font-weight:700;color:var(--accent);font-family:monospace;margin-bottom:2px">'+inv.numero+'</div>':'')+'<div style="font-size:15px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
-        +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+(loc||'sem local')+(inv.empresa_verus?(' - VERUS: '+inv.empresa_verus):'')+(inv.descricao?(' - '+inv.descricao):'')+'</div></div>'
-        +invStatusBadge(inv.status)+'</div>'
-        +'<div style="display:flex;gap:18px;flex-wrap:wrap"><div style="font-size:12px;color:var(--text3)">Saldo: <b style="color:var(--text)">'+(inv.base_count||0)+'</b></div>'
-        +'<div style="font-size:12px;color:var(--text3)">Enderecos: <b style="color:var(--text)">'+(inv.end_count||0)+'</b></div>'
-        +'<div style="font-size:12px;color:var(--text3)">Fichas: <b style="color:var(--text)">'+(inv.fichas_count||0)+'</b></div></div>'
-        +'<div><button class="btn btn-p btn-sm" onclick="invOpen(\''+inv.id+'\')">Abrir</button></div>'
-        +'</div>';
-    }
-    root.innerHTML=head+cards;
+      +'<div id="inv-novo" style="display:none;margin-bottom:14px"></div>'
+      +'<div id="inv-list">'+invListRows(invs)+'</div>';
+    root.innerHTML=head;
   }catch(e){ root.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro ao carregar: '+(e.message||e)+'</div>'; }
+}
+function invListRows(invs){
+  if(!invs||!invs.length) return '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><p>Nenhum inventario ainda. Clique em "+ Novo inventario".</p></div>';
+  var out='';
+  for(var i=0;i<invs.length;i++){
+    var inv=invs[i];
+    var nm=inv.empresa_contada||'-';
+    var subBits=[];
+    if(inv.local) subBits.push(inv.local);
+    if(inv.empresa_verus) subBits.push('VERUS: '+inv.empresa_verus);
+    if(inv.descricao) subBits.push(inv.descricao);
+    var meta='Saldo '+(inv.base_count||0)+' &middot; End '+(inv.end_count||0)+' &middot; Fichas '+(inv.fichas_count||0);
+    out+='<div class="li" onclick="invOpen(\''+inv.id+'\')">'
+      +'<div class="av '+AVC[i%5]+'">'+ini(nm==='-'?'?':nm)+'</div>'
+      +'<div class="linfo"><div class="lname">'+(inv.numero?'<span style="font-family:monospace;color:var(--accent);font-weight:700;margin-right:6px">'+inv.numero+'</span>':'')+nm+'</div>'
+      +'<div class="lsub" style="white-space:normal">'+(subBits.length?subBits.join(' &middot; ')+' &middot; ':'')+'<span style="color:var(--text3)">'+meta+'</span></div></div>'
+      +'<div class="lright">'+invStatusBadge(inv.status)+'</div>'
+      +'</div>';
+  }
+  return out;
+}
+function invFilterList(q){
+  q=(q||'').toLowerCase();
+  var f=(invListCache||[]).filter(function(inv){
+    return (inv.empresa_contada||'').toLowerCase().indexOf(q)>=0
+      || (inv.numero||'').toLowerCase().indexOf(q)>=0
+      || (inv.local||'').toLowerCase().indexOf(q)>=0
+      || (inv.empresa_verus||'').toLowerCase().indexOf(q)>=0
+      || (inv.descricao||'').toLowerCase().indexOf(q)>=0;
+  });
+  var el=ge('inv-list'); if(el) el.innerHTML=invListRows(f);
 }
 function invNovoToggle(){
   var el=ge('inv-novo'); if(!el) return;
@@ -21366,19 +21402,20 @@ async function invSalvarNovo(){
   }catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
 }
 /* ---------- detalhe ---------- */
-async function invRenderDetail(root){
-  root.innerHTML=invSpin('Abrindo inventario...');
+async function invRenderDetail(){
+  var body=ge('inv-detail-body'); if(!body) return;
+  body.innerHTML=invSpin('Abrindo inventario...');
   try{
     var arr=await dbSelect('inventarios','id=eq.'+invSel);
-    var inv=arr[0]; if(!inv){ invSel=null; return invRenderList(root); }
+    var inv=arr[0]; if(!inv){ invBack(); return; }
     invData=inv;
     var sam=await dbSelect('inventario_enderecos','inventario_id=eq.'+invSel+'&gera_ficha=eq.true&limit=4&select=endereco');
     if(!sam.length) sam=await dbSelect('inventario_base','inventario_id=eq.'+invSel+'&limit=4&select=endereco');
     invMaskSamples=sam.map(function(x){return x.endereco;}).filter(Boolean);
-    root.innerHTML=invDetailHTML(inv);
+    body.innerHTML=invDetailHTML(inv);
     invMaskPreview();
     if(inv.fichas_count>0) invLoadQuadro();
-  }catch(e){ root.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
+  }catch(e){ body.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
 function invSection(titulo,inner,sub){
   return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px">'
@@ -21418,8 +21455,8 @@ function invDetailHTML(inv){
       +'<span style="font-size:11px;color:var(--text3)">ate</span><input class="fi" id="'+pf+'" type="number" min="1" value="'+vf+'" oninput="invMaskPreview()" style="width:56px;padding:5px 6px"></div>';
   };
   // header
-  var h='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">'
-    +'<button class="btn btn-sm" onclick="invBack()">&larr; Inventarios</button>'
+  var h='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'
+    +'<div class="av '+AVC[0]+'" style="width:30px;height:30px;font-size:11px">'+ini((inv.empresa_contada||'?'))+'</div>'
     +'<div style="font-size:16px;font-weight:800">'+(inv.empresa_contada||'-')+'</div>'
     +(inv.numero?'<span style="font-size:12px;font-weight:700;color:var(--accent);font-family:monospace">'+inv.numero+'</span>':'')
     +invStatusBadge(inv.status)+'</div>';
