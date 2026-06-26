@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.434 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.435 | Gerado: 2026-06-21 21:05 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.434';
+const APP_VERSION='v1.0.435';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -20874,6 +20874,7 @@ function wmsVGQuadro(fluxo,titulo,subsHtml,placeholder){
 var invImpCtx={invId:null,tipo:null};
 var invSel=null;          // inventario aberto (detalhe) ou null (lista)
 var invListCache=[];      // cache da lista p/ filtro de busca
+var invProdSamples=[];    // exemplos de cod_produto p/ previa do parser
 var invData=null;         // objeto do inventario aberto
 var invMaskSamples=[];    // enderecos de exemplo p/ a mascara
 function invNorm(s){return (s==null?'':String(s)).trim();}
@@ -20994,6 +20995,128 @@ async function invSaveConfig(){
   var cega=ge('cfg-cega')?ge('cfg-cega').checked:true;
   try{ await dbUpdate('inventarios',invSel,{modo_contagem:modo,contagem_cega:cega}); if(typeof showToast==='function')showToast('Configuracao salva','green'); invLoad(); }
   catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+/* ---------- parser de etiquetas (posicao fixa) ---------- */
+function invReadEtiq(){
+  function fld(a,b){ var i=invR(a),f=invR(b); return (i&&f&&f>=i)?[i,f]:null; }
+  return { end:fld('eti-end-i','eti-end-f'), prod:fld('eti-prod-i','eti-prod-f') };
+}
+function invParseEnd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invNorm(label); if(!m||!m.end) return v; var s=invSlice(v,m.end); return s?invNorm(s):v; }
+function invParseProd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invNorm(label); if(!m||!m.prod) return v; var s=invSlice(v,m.prod); return s?invNorm(s):v; }
+function invEtiqProdRuler(){
+  var t=ge('eti-prod-test'); var s=t?invNorm(t.value):''; var box=ge('eti-prod-ruler'); if(box) box.innerHTML=s?invMaskRuler(s):'<span style="color:var(--text3);font-size:12px">Cole/bipe uma etiqueta de produto para ver as posicoes.</span>';
+  invEtiqPreview();
+}
+function invEtiqPreview(){
+  var m=invReadEtiq();
+  var ee=ge('eti-end-prev');
+  if(ee){
+    var t=ge('eti-end-test'); var test=t?invNorm(t.value):'';
+    var arr=test?[test]:(invMaskSamples||[]); var h='';
+    if(!arr.length) h='<span style="color:var(--text3)">Sem exemplos de endereco.</span>';
+    else for(var i=0;i<Math.min(arr.length,3);i++){ var r=m.end?invSlice(arr[i],m.end):arr[i]; h+='<div style="font-family:monospace;font-size:12px;margin-bottom:3px"><b>'+arr[i]+'</b> &rarr; '+(r?'<b style="color:var(--green-text)">'+invNorm(r)+'</b>':'<span style="color:var(--red-text)">-</span>')+'</div>'; }
+    ee.innerHTML=h;
+  }
+  var ep=ge('eti-prod-prev');
+  if(ep){
+    var t2=ge('eti-prod-test'); var test2=t2?invNorm(t2.value):'';
+    var arr2=test2?[test2]:(invProdSamples||[]); var h2='';
+    if(!arr2.length) h2='<span style="color:var(--text3)">Cole uma etiqueta de teste acima (ou importe o saldo).</span>';
+    else for(var j=0;j<Math.min(arr2.length,3);j++){ var rp=m.prod?invSlice(arr2[j],m.prod):arr2[j]; h2+='<div style="font-family:monospace;font-size:12px;margin-bottom:3px"><b>'+arr2[j]+'</b> &rarr; '+(rp?'<b style="color:var(--green-text)">'+invNorm(rp)+'</b>':'<span style="color:var(--red-text)">-</span>')+'</div>'; }
+    ep.innerHTML=h2;
+  }
+}
+async function invSaveEtiq(){
+  var m=invReadEtiq();
+  if(!m.end&&!m.prod){ if(typeof showToast==='function')showToast('Defina ao menos um intervalo (endereco ou produto)','amber'); return; }
+  try{ await dbUpdate('inventarios',invSel,{etiqueta_parser:m}); if(invData)invData.etiqueta_parser=m; if(typeof showToast==='function')showToast('Leitura de etiquetas salva','green'); invLoad(); }
+  catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+/* ---------- acoes da linha: cancelar / encerrar ---------- */
+async function invCancelar(id){
+  if(!confirm('Cancelar este inventario? O status ficara como CANCELADO.')) return;
+  try{ await dbUpdate('inventarios',id,{status:'cancelado'}); if(typeof showToast==='function')showToast('Inventario cancelado','amber'); var r=ge('inv-root'); if(r) invRenderList(r); }
+  catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+async function invEncerrar(id){
+  if(!confirm('Encerrar este inventario?\n(O termo de faltas/sobras e o de-para completo entram na proxima leva.)')) return;
+  try{ await dbUpdate('inventarios',id,{status:'encerrado'}); if(typeof showToast==='function')showToast('Inventario encerrado','green'); var r=ge('inv-root'); if(r) invRenderList(r); }
+  catch(e){ if(typeof showToast==='function')showToast('Erro: '+(e.message||e),'red'); }
+}
+/* ---------- digitacao de contagens (Leva 2 inicial) ---------- */
+var invDig={ id:null, parser:null, fichas:[], byEnd:{}, contadas:{}, sel:null };
+async function invDigitar(id){
+  var old=document.getElementById('inv-dig-modal'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='inv-dig-modal';
+  ov.innerHTML='<div class="modal" style="max-width:680px;width:96%">'
+    +'<div class="modal-hdr" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:14px;position:sticky;top:0;background:var(--bg);z-index:1"><span>Digitar contagens</span>'
+    +'<button onclick="invDigFechar()" title="Fechar (Esc)" style="background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--text3);padding:0 4px">&times;</button></div>'
+    +'<div style="padding:18px" id="inv-dig-body">'+invSpin('Carregando...')+'</div></div>';
+  document.body.appendChild(ov);
+  try{
+    var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
+    if(!inv){ invDigFechar(); return; }
+    invDig.id=id; invDig.parser=inv.etiqueta_parser||null; invDig.sel=null;
+    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&rodada_liberada=gt.0&select=id,endereco,rodada_liberada,modo,status');
+    invDig.fichas=fichas.filter(function(f){ return f.modo!=='papel'; });
+    invDig.byEnd={}; invDig.fichas.forEach(function(f){ invDig.byEnd[invNorm(f.endereco)]=f; });
+    var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&status=eq.contada&select=ficha_id');
+    invDig.contadas={}; tar.forEach(function(t){ invDig.contadas[t.ficha_id]=true; });
+    invDigRender();
+  }catch(e){ var b=ge('inv-dig-body'); if(b)b.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
+}
+function invDigFechar(){ var ov=document.getElementById('inv-dig-modal'); if(ov)ov.remove(); }
+function invDigRender(){
+  var b=ge('inv-dig-body'); if(!b) return;
+  var lib=invDig.fichas.length, ft=0; invDig.fichas.forEach(function(f){ if(invDig.contadas[f.id])ft++; });
+  var p=invDig.parser;
+  var head='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px"><div style="font-size:12px;color:var(--text3)">'+(p&&(p.end||p.prod)?'Parser de etiquetas ativo':'<span style="color:var(--amber-text)">Sem parser configurado &mdash; lendo etiqueta inteira</span>')+'</div><div style="font-size:13px;font-weight:700">'+ft+' / '+lib+' contadas</div></div>';
+  if(!lib){ b.innerHTML=head+'<div style="padding:24px;text-align:center;color:var(--text3);border:1px dashed var(--border2);border-radius:12px">Nenhuma ficha liberada para coletor/digitacao. Libere fichas na aba Fichas (modo Coletor).</div>'; return; }
+  if(!invDig.sel){
+    b.innerHTML=head
+      +'<div class="fg" style="margin-bottom:6px"><label class="fl">Etiqueta de endereco</label>'
+      +'<input class="fi" id="dig-end" placeholder="Bipe/cole a etiqueta do endereco" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigLerEnd();}"></div>'
+      +'<button class="btn btn-p btn-sm" onclick="invDigLerEnd()">Ler endereco &rarr;</button>'
+      +'<div id="dig-msg" style="font-size:12px;margin-top:8px"></div>';
+    setTimeout(function(){ var e=ge('dig-end'); if(e)e.focus(); },60);
+    return;
+  }
+  var f=invDig.sel;
+  b.innerHTML=head
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3)">Endereco</div><div style="font-size:16px;font-weight:800;font-family:monospace">'+f.endereco+'</div></div>'
+    +'<div class="fg" style="margin-bottom:10px"><label class="fl">Etiqueta de produto</label><input class="fi" id="dig-prod" placeholder="Bipe/cole a etiqueta do produto" oninput="invDigProdView()"></div>'
+    +'<div id="dig-prod-cod" style="font-size:12px;font-family:monospace;margin-bottom:12px;color:var(--text3)">Codigo: &mdash;</div>'
+    +'<div class="fg" style="margin-bottom:14px"><label class="fl">Quantidade contada</label><input class="fi" id="dig-qtd" type="number" min="0" step="any" placeholder="0" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invDigConfirmar();}"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" onclick="invDig.sel=null;invDigRender()">Trocar endereco</button><button class="btn btn-p btn-sm" onclick="invDigConfirmar()">Confirmar contagem</button></div>';
+  setTimeout(function(){ var e=ge('dig-prod'); if(e)e.focus(); },60);
+}
+function invDigLerEnd(){
+  var i=ge('dig-end'); if(!i) return; var code=invParseEnd(i.value,invDig.parser);
+  var msg=ge('dig-msg');
+  if(!code){ if(msg)msg.innerHTML='<span style="color:var(--red-text)">Etiqueta vazia.</span>'; return; }
+  var f=invDig.byEnd[code];
+  if(!f){ if(msg)msg.innerHTML='<span style="color:var(--red-text)">Endereco <b>'+code+'</b> nao esta entre as fichas liberadas.</span>'; return; }
+  if(invDig.contadas[f.id] && !confirm('Endereco '+code+' ja foi contado. Contar de novo?')) return;
+  invDig.sel=f; invDigRender();
+}
+function invDigProdView(){
+  var i=ge('dig-prod'); var c=ge('dig-prod-cod'); if(!i||!c) return;
+  var cod=invParseProd(i.value,invDig.parser);
+  c.innerHTML='Codigo: '+(cod?'<b style="color:var(--green-text)">'+cod+'</b>':'&mdash;');
+}
+async function invDigConfirmar(){
+  var f=invDig.sel; if(!f) return;
+  var prodI=ge('dig-prod'), qtdI=ge('dig-qtd');
+  var cod=prodI?invParseProd(prodI.value,invDig.parser):'';
+  var qtd=qtdI?parseFloat(qtdI.value):NaN;
+  if(isNaN(qtd)){ if(typeof showToast==='function')showToast('Informe a quantidade','amber'); return; }
+  try{
+    await dbInsert('inventario_tarefas',{ inventario_id:invDig.id, ficha_id:f.id, endereco:f.endereco, rodada:(f.rodada_liberada||1), status:'contada', operador:(profile&&profile.full_name)||null, criada_por:(profile&&profile.full_name)||null, criada_em:new Date().toISOString(), contada_em:new Date().toISOString(), cod_produto:cod||null, qtd_contada:qtd });
+    await dbUpdate('inventario_fichas',f.id,{status:'contada'});
+    invDig.contadas[f.id]=true; invDig.sel=null;
+    if(typeof showToast==='function')showToast('Contagem gravada','green');
+    invDigRender();
+  }catch(e){ if(typeof showToast==='function')showToast('Erro ao gravar: '+(e.message||e),'red'); }
 }
 /* ---------- gerar fichas ---------- */
 async function invGerarFichas(){
@@ -21344,7 +21467,12 @@ function invListRows(invs){
       +'<div class="av '+AVC[i%5]+'">'+ini(nm==='-'?'?':nm)+'</div>'
       +'<div class="linfo"><div class="lname">'+(inv.numero?'<span style="font-family:monospace;color:var(--accent);font-weight:700;margin-right:6px">'+inv.numero+'</span>':'')+nm+'</div>'
       +'<div class="lsub" style="white-space:normal">'+(subBits.length?subBits.join(' &middot; ')+' &middot; ':'')+'<span style="color:var(--text3)">'+meta+'</span></div></div>'
-      +'<div class="lright">'+invStatusBadge(inv.status)+'</div>'
+      +'<div class="lright">'+invStatusBadge(inv.status)
+      +'<div style="display:flex;gap:4px;margin-top:6px">'
+        +'<button class="btn btn-sm" title="Digitar contagens" onclick="event.stopPropagation();invDigitar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px">Digitar</button>'
+        +'<button class="btn btn-sm" title="Encerrar" onclick="event.stopPropagation();invEncerrar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px">Encerrar</button>'
+        +'<button class="btn btn-sm" title="Cancelar" onclick="event.stopPropagation();invCancelar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px;color:var(--red-text)">Cancelar</button>'
+      +'</div></div>'
       +'</div>';
   }
   return out;
@@ -21412,8 +21540,9 @@ async function invRenderDetail(){
     var sam=await dbSelect('inventario_enderecos','inventario_id=eq.'+invSel+'&gera_ficha=eq.true&limit=4&select=endereco');
     if(!sam.length) sam=await dbSelect('inventario_base','inventario_id=eq.'+invSel+'&limit=4&select=endereco');
     invMaskSamples=sam.map(function(x){return x.endereco;}).filter(Boolean);
+    try{ var ps=await dbSelect('inventario_base','inventario_id=eq.'+invSel+'&select=cod_produto&limit=5'); invProdSamples=ps.map(function(x){return x.cod_produto;}).filter(Boolean); }catch(_e){ invProdSamples=[]; }
     body.innerHTML=invDetailHTML(inv);
-    invMaskPreview();
+    invMaskPreview(); invEtiqPreview();
     if(inv.fichas_count>0) invLoadQuadro();
   }catch(e){ body.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
@@ -21435,12 +21564,13 @@ function invDTab(tab){
     if(p) p.style.display=(t===tab)?'':'none';
     if(b){ b.style.borderBottomColor=(t===tab)?'var(--accent)':'transparent'; b.style.color=(t===tab)?'var(--accent)':'var(--text2)'; b.style.fontWeight=(t===tab)?'700':'500'; }
   });
-  if(tab==='import') invMaskPreview();
+  if(tab==='import'){ invMaskPreview(); invEtiqProdRuler(); }
   if(tab==='monit'){ var mb=ge('inv-monit-body'); if(mb) mb.innerHTML=(invFichas&&invFichas.length)?invProgressHTML():'<div style="padding:16px;color:var(--text3)">Gere e libere fichas para ver o monitoramento.</div>'; }
 }
 function invDetailHTML(inv){
   var mk=inv.mascara||{};
   var g=function(f,k){return (mk[f]&&mk[f][k]!=null)?mk[f][k]:'';};
+  var epv=function(f,k){var e=inv.etiqueta_parser||{};return (e[f]&&e[f][k]!=null)?e[f][k]:'';};
   var modo=inv.modo_contagem||'coletor';
   var cega=inv.contagem_cega!==false;
   var opt=function(v,lbl){return '<option value="'+v+'"'+(modo===v?' selected':'')+'>'+lbl+'</option>';};
@@ -21503,6 +21633,21 @@ function invDetailHTML(inv){
     +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin:10px 0" id="msk-preview"></div>'
     +'<button class="btn btn-p btn-sm" onclick="invSaveMask()">Confirmar interpretacao</button>'
     +(inv.mascara?'<span style="font-size:12px;color:var(--green);margin-left:10px">&#10003; mascara salva</span>':'')
+    +'<div style="height:20px;border-top:1px solid var(--border);margin-top:18px"></div>'
+    +sub('Leitura de etiquetas (coletor)')
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Igual a mascara: informe de qual caractere ate qual fica o CODIGO dentro da etiqueta lida. Endereco usa enderecos reais; produto usa uma etiqueta de teste.</div>'
+    +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Etiqueta de endereco</div>'
+    +invMaskRuler(sample)
+    +'<div class="fg" style="margin-bottom:8px"><label class="fl" style="font-size:11px">Testar com etiqueta real</label><input class="fi" id="eti-end-test" placeholder="cole/bipe uma etiqueta de endereco" oninput="invEtiqPreview()" style="max-width:320px"></div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:72px;font-size:12px;font-weight:600">Codigo</div><span style="font-size:11px;color:var(--text3)">de</span><input class="fi" id="eti-end-i" type="number" min="1" value="'+epv('end',0)+'" oninput="invEtiqPreview()" style="width:56px;padding:5px 6px"><span style="font-size:11px;color:var(--text3)">ate</span><input class="fi" id="eti-end-f" type="number" min="1" value="'+epv('end',1)+'" oninput="invEtiqPreview()" style="width:56px;padding:5px 6px"></div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0 18px" id="eti-end-prev"></div>'
+    +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Etiqueta de produto / pallet</div>'
+    +'<div class="fg" style="margin-bottom:8px"><label class="fl" style="font-size:11px">Testar com etiqueta real</label><input class="fi" id="eti-prod-test" placeholder="cole/bipe uma etiqueta de produto" oninput="invEtiqProdRuler()" style="max-width:320px"></div>'
+    +'<div id="eti-prod-ruler" style="margin-bottom:6px"></div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:72px;font-size:12px;font-weight:600">Codigo</div><span style="font-size:11px;color:var(--text3)">de</span><input class="fi" id="eti-prod-i" type="number" min="1" value="'+epv('prod',0)+'" oninput="invEtiqPreview()" style="width:56px;padding:5px 6px"><span style="font-size:11px;color:var(--text3)">ate</span><input class="fi" id="eti-prod-f" type="number" min="1" value="'+epv('prod',1)+'" oninput="invEtiqPreview()" style="width:56px;padding:5px 6px"></div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin:6px 0 12px" id="eti-prod-prev"></div>'
+    +'<button class="btn btn-p btn-sm" onclick="invSaveEtiq()">Salvar leitura de etiquetas</button>'
+    +(inv.etiqueta_parser?'<span style="font-size:12px;color:var(--green);margin-left:10px">&#10003; salvo</span>':'')
   );
   // ===== FICHAS (gerar + gestao de contagem) =====
   var fichas=card(
