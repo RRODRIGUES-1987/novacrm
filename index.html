@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.440 | Gerado: 2026-06-26 01:47 | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.441 | Gerado: 2026-06-26 12:00 | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -980,7 +980,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.440';
+const APP_VERSION='v1.0.441';
 
 // ── Hard refresh automático: detecta nova versão publicada e recarrega ──
 let _verCheckEmAndamento=false, _verJaRecarregou=false;
@@ -21158,12 +21158,19 @@ async function invNumerarNovas(novas,byEnd,cega){
   var meas=document.createElement('div');
   meas.style.cssText='position:fixed;left:-10000px;top:0;width:720px;visibility:hidden;font-family:Arial,sans-serif';
   document.body.appendChild(meas);
-  var PAGE=940, HEADER=36; // orcamento de altura por folha (A4) e cabecalho "Folha N"
+  // PAGE = altura util por folha, calibrada para a pagina A4 impressa (body 720px, @page 12mm):
+  // cabem 3 fichas de linha unica por pagina, exatamente como sai no PDF. HEADER reserva o
+  // cabecalho "Folha N" no topo da pagina.
+  var PAGE=860, HEADER=40;
   var folha=maxF, cur=PAGE+1, assign=[]; // cur>PAGE forca abrir a 1a folha
   for(var k=0;k<novas.length;k++){
     var f=novas[k];
     meas.innerHTML='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,byEnd[f.endereco]||[],cega)+'</div>';
-    var h=(meas.firstChild&&meas.firstChild.offsetHeight)||130;
+    var box=meas.firstChild;
+    // altura REAL de fluxo = offsetHeight + margin-bottom. O offsetHeight sozinho ignora a
+    // margem e fazia a estimativa caber 1 ficha a mais do que cabe de fato na pagina fisica.
+    var mb=box?parseFloat(getComputedStyle(box).marginBottom||'0'):0; if(isNaN(mb))mb=0;
+    var h=((box&&box.offsetHeight)||130)+mb;
     if(cur+h>PAGE){ folha++; cur=HEADER; } // nao cabe -> nova folha
     f.folha=folha; assign.push({id:f.id,folha:folha}); cur+=h;
   }
@@ -21425,17 +21432,26 @@ async function invPrintLote(){
     var grupos={};
     for(var g=0;g<libs.length;g++){ var fn=libs[g].folha||0; if(!grupos[fn])grupos[fn]=[]; grupos[fn].push(libs[g]); }
     var folhas=Object.keys(grupos).map(Number).sort(function(a,b){return a-b;});
-    var sty='<style>@page{margin:12mm} body{width:720px;margin:0 auto;font-family:Arial,sans-serif}</style>';
+    var sty='<style>@page{margin:12mm} body{width:720px;margin:0 auto;font-family:Arial,sans-serif}'
+      +'table.folha{width:100%;border-collapse:collapse;page-break-after:always}'
+      +'table.folha:last-of-type{page-break-after:auto}'
+      +'table.folha thead{display:table-header-group}'
+      +'table.folha>thead>tr>td,table.folha>tbody>tr>td{padding:0;border:0}'
+      +'.folha-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px}'
+      +'.folha-ficha{page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px}'
+      +'</style>';
     var html=sty;
     for(var fi=0;fi<folhas.length;fi++){
       var num=folhas[fi], fis=grupos[num];
       var faixa=(fis[0].endereco||'')+(fis.length>1?(' a '+(fis[fis.length-1].endereco||'')):'');
-      html+='<div style="'+(fi>0?'page-break-before:always;':'')+'">';
-      html+='<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #000;padding-bottom:4px;margin-bottom:10px"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
+      var head='<div class="folha-head"><span style="font-size:15px;font-weight:800">Folha '+num+'</span><span style="font-size:12px;font-family:monospace">'+faixa+'</span></div>';
+      var corpo='';
       for(var j=0;j<fis.length;j++){ var f=fis[j]; var prods=byEnd[f.endereco]||[];
-        html+='<div style="page-break-inside:avoid;border-bottom:1px dashed #999;padding-bottom:12px;margin-bottom:12px">'+invFichaHTML(f,prods,cega)+'</div>';
+        corpo+='<div class="folha-ficha">'+invFichaHTML(f,prods,cega)+'</div>';
       }
-      html+='</div>';
+      // thead com display:table-header-group repete o cabecalho "Folha N" em cada pagina
+      // que esta folha ocupar (rede de seguranca para fichas muito altas).
+      html+='<table class="folha"><thead><tr><td>'+head+'</td></tr></thead><tbody><tr><td>'+corpo+'</td></tr></tbody></table>';
     }
     invPrintHTML(html);
   }catch(e){ if(typeof showToast==='function')showToast('Erro ao imprimir lote: '+(e.message||e),'red'); }
@@ -25228,3 +25244,5 @@ function unitLabel(){
 </script>
 </body>
 </html>
+
+                                                                            
