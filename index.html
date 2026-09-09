@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.878 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.879 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1243,7 +1243,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.878';
+const APP_VERSION='v1.0.879';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15163,6 +15163,62 @@ function cpKpi(label,val,sub,valColor,subColor,click){
     +'<div style="font-size:11px;color:'+subColor+';margin-top:4px">'+sub+'</div></div>';
 }
 
+// NF normalizada: sem pontuação e sem zeros à esquerda.
+// Resolve o caso "583956" x "0583956", que parecia NF diferente.
+function cpNfNorm(v){
+  var t=String(v==null?'':v).replace(/[^0-9A-Za-z]/g,'').toUpperCase().replace(/^0+/,'');
+  return t;
+}
+// Possíveis duplicidades já na base, pelo mesmo critério da trava
+function cpDuplicidades(){
+  var m={},out=[];
+  (contasPagar||[]).forEach(function(x){
+    if(x.status==='cancelado')return;
+    var nf=cpNfNorm(x.nf_numero); if(!nf)return;
+    var k=[x.fornecedor_id||x.fornecedor_nome||'',nf,x.vencimento||'',x.unit_id||''].join('|');
+    (m[k]=m[k]||[]).push(x);
+  });
+  Object.keys(m).forEach(function(k){ if(m[k].length>1)out.push(m[k]); });
+  return out.sort(function(a,b){
+    return (b.reduce(function(t,x){return t+Number(x.valor||0);},0))
+         - (a.reduce(function(t,x){return t+Number(x.valor||0);},0));});
+}
+function cpDuplicidadesModal(){
+  var gr=cpDuplicidades();
+  var m=document.createElement('div');m.className='modal-overlay';m.id='cp-dup-modal';
+  var corpo;
+  if(!gr.length){
+    corpo='<div style="padding:18px;text-align:center;color:var(--text3);font-size:13px">Nenhuma duplicidade encontrada.<br><span style="font-size:11.5px">Critério: mesmo beneficiário, mesma NF, mesmo vencimento e mesma unidade.</span></div>';
+  }else{
+    corpo='<div style="font-size:12px;color:var(--text2);margin-bottom:10px">'
+      +'<b>'+gr.length+' caso(s)</b> com o mesmo beneficiário, a mesma NF e o mesmo vencimento. '
+      +'Parcelamento (mesma NF em vencimentos diferentes) não entra aqui.</div>'
+      +'<div style="max-height:52vh;overflow:auto">'
+      +gr.map(function(g){
+        var soma=g.reduce(function(t,x){return t+Number(x.valor||0);},0);
+        return '<div style="border:1px solid #f5b5b5;background:#fff6f6;border-radius:9px;padding:10px 12px;margin-bottom:8px">'
+          +'<div style="font-weight:700;font-size:13px;color:#8a1c1c">'+wEsc(g[0].fornecedor_nome||'')+'</div>'
+          +'<div style="font-size:11.5px;color:var(--text2);margin-bottom:6px">NF '+wEsc(g[0].nf_numero||'—')
+          +' · venc. '+new Date(g[0].vencimento+'T00:00').toLocaleDateString('pt-BR')
+          +' · <b>'+g.length+' títulos</b> somando '+fmtV(soma)+'</div>'
+          +g.map(function(x){
+            var st={pendente:'em aberto',pago:'PAGO',pago_atraso:'PAGO em atraso'}[x.status]||x.status;
+            return '<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-top:1px solid #f0d5d5">'
+              +'<span style="flex:1">'+wEsc(x.descricao||x.categoria||'')+'</span>'
+              +'<b>'+fmtV(x.valor)+'</b>'
+              +'<span style="font-size:10.5px;padding:2px 8px;border-radius:20px;background:'+(x.status==='pendente'?'#eef0f3':'#dcfce7')+';color:'+(x.status==='pendente'?'#555':'#166534')+'">'+st+'</span>'
+              +'</div>';
+          }).join('')+'</div>';
+      }).join('')+'</div>';
+  }
+  m.innerHTML='<div class="modal" style="max-width:640px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Possíveis duplicidades</div>'
+    +corpo
+    +'<div style="display:flex;justify-content:flex-end;margin-top:14px">'
+    +'<button class="btn" onclick="document.getElementById(\'cp-dup-modal\').remove()">Fechar</button></div></div>';
+  document.body.appendChild(m);
+}
+
 function rContasPagar(){
   var nPend=cpFilaAprov().length;
   var lblAp='Aprova\u00e7\u00f5es'+(nPend?' <span style="background:#854d0e;color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px">'+nPend+'</span>':'');
@@ -15515,6 +15571,10 @@ function rCPLista(){
   h+='<select class="fi" onchange="cpLisSetMes(this.value)" style="width:auto">'+meses+'</select>';
   h+='<select class="fi" onchange="cpLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
   h+='<button onclick="novoTituloCP()" style="padding:8px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Novo título</button>';
+  var _nDup=(typeof cpDuplicidades==='function')?cpDuplicidades().length:0;
+  h+='<button onclick="cpDuplicidadesModal()" title="Mesmo beneficiário, mesma NF e mesmo vencimento" style="padding:8px 14px;border:1px solid '
+    +(_nDup?'#f5b5b5':'var(--border)')+';border-radius:8px;background:'+(_nDup?'#fff6f6':'#fff')+';color:'+(_nDup?'#8a1c1c':'var(--text2)')
+    +';cursor:pointer;font-size:13px;margin-left:8px">⚠ Duplicidades'+(_nDup?(' ('+_nDup+')'):'')+'</button>';
   h+='</div>';
   h+='<div id="cp-lis-box"></div>';
   return h;
@@ -16169,6 +16229,30 @@ async function salvarTituloCP(novo){
   var compV=ge('cp-comp')?ge('cp-comp').value:'';
   var comp=compV?(compV+'-01'):(venc.slice(0,8)+'01');
   var uid=(profile&&profile.id)||null;
+  // ── guarda contra lançamento em duplicidade ──────────────────────
+  // Chave: beneficiário + NF normalizada + vencimento + unidade.
+  // Parcelamento (mesma NF, vencimentos diferentes) passa livre —
+  // travar isso viraria ruído e a operação aprenderia a ignorar.
+  var _nfIn=cpNfNorm(ge('cp-nf')?ge('cp-nf').value:'');
+  if(!cpEditId&&_nfIn){
+    var gemeo=(contasPagar||[]).find(function(x){
+      return x.fornecedor_id===fid
+          && String(x.unit_id||'')===String(unitSel||'')
+          && (x.vencimento||'')===venc
+          && cpNfNorm(x.nf_numero)===_nfIn
+          && x.status!=='cancelado';
+    });
+    if(gemeo){
+      var _st={pendente:'em aberto',pago:'PAGO',pago_atraso:'PAGO em atraso'}[gemeo.status]||gemeo.status;
+      if(!confirm('⚠ POSSÍVEL DUPLICIDADE\n\n'
+        +'Já existe um título com o mesmo beneficiário, a mesma NF e o mesmo vencimento:\n\n'
+        +'  '+(gemeo.fornecedor_nome||'')+'\n'
+        +'  NF '+(gemeo.nf_numero||'—')+'  ·  venc. '+new Date(gemeo.vencimento+'T00:00').toLocaleDateString('pt-BR')+'\n'
+        +'  '+fmtV(gemeo.valor)+'  ·  '+_st+'\n\n'
+        +'Se for parcela, mude o vencimento. Confirma mesmo assim?'))return;
+    }
+  }
+
   var comum={company_id:company?company.id:null,unit_id:unitSel,fornecedor_id:fid,fornecedor_nome:forn?forn.nome:'',
     grupo:ge('cp-grupo')?ge('cp-grupo').value:'Despesas',agrupamento:bloco?bloco.nome:'',categoria:conta?conta.nome:'',
     dfc_conta_id:contaId,forma_pagamento:ge('cp-forma')?ge('cp-forma').value:'',nf_numero:ge('cp-nf')?ge('cp-nf').value:'',
