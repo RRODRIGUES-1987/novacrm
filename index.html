@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.880 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.881 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1243,7 +1243,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.880';
+const APP_VERSION='v1.0.881';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2399,6 +2399,18 @@ function rCadastros(){
 function rCadastrosList(){
   const list = cadastrosTab==='clientes'?clientes : cadastrosTab==='fornecedores'?fornecedores : pessoas;
   const label = cadastrosTab==='clientes'?'cliente' : cadastrosTab==='fornecedores'?'beneficiário' : 'pessoa';
+  // Faixa de promoções sem registro (só na aba de pessoas)
+  let _faixaDiv='';
+  if(cadastrosTab==='pessoas' && typeof rhDivergencias==='function'){
+    try{
+      const _nd=rhDivergencias().length;
+      if(_nd)_faixaDiv='<div onclick="rhDivergenciasModal()" style="cursor:pointer;background:#fff8e1;border:1px solid #f0d68a;border-radius:10px;padding:10px 13px;margin-bottom:12px;display:flex;align-items:center;gap:9px">'
+        +'<span style="font-size:16px">⚠</span>'
+        +'<div style="flex:1;font-size:12.5px;color:#664d03"><b>'+_nd+' promoção(ões) sem registro no histórico.</b> '
+        +'O cargo do cadastro não bate com o vínculo vigente.</div>'
+        +'<span style="font-size:11.5px;color:#8a6d00;text-decoration:underline">ver quem</span></div>';
+    }catch(e){}
+  }
 
   const rows = list.map((r,i)=>{
     const tipo = r.tipo==='fisica'?'F':'J';
@@ -2438,6 +2450,7 @@ function rCadastrosList(){
     </div>
     <button class="btn btn-p btn-sm" onclick="openCadastro('${cadastrosTab}')">+ Novo ${label}</button>
   </div>
+  ${_faixaDiv}
   <div id="cad-list">
     ${rows||`<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor">${emptyIcon}</svg><p>Nenhum ${label} cadastrado</p></div>`}
   </div>`;
@@ -3380,6 +3393,17 @@ function rHistVinculos(pessoaId){
     .sort((a,b)=>(b.data_inicio||'')<(a.data_inicio||'')?1:-1);
   const pode=['admin','adm','rh'].includes(profile?.role||'');
   let vh='<div id="hist-vinculos-sec" style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">';
+  // Selo de divergência: o cargo do cadastro tem que bater com o vínculo
+  // vigente. Quando não bate, houve promoção que não virou registro.
+  const _dv=rhDivergenciaPessoa(pessoaId);
+  if(_dv){
+    vh+='<div style="background:#fff8e1;border:1px solid #f0d68a;border-radius:10px;padding:11px 13px;margin-bottom:12px">'
+      +'<div style="font-size:12.5px;color:#664d03"><b>⚠ Promoção sem registro.</b> '
+      +'O cadastro diz <b>'+(_dv.cargoCadastro||'—')+'</b>, mas o histórico ainda mostra <b>'+(_dv.cargoHistorico||'—')+'</b>'
+      +(_dv.desde?(' aberto desde '+new Date(_dv.desde+'T00:00').toLocaleDateString('pt-BR')):'')+'.</div>'
+      +(pode?('<div style="font-size:11.5px;color:#8a6d00;margin-top:5px">Use <b>Editar trajetória</b> para informar a data em que a mudança aconteceu — o vínculo anterior é encerrado sozinho.</div>'):'')
+      +'</div>';
+  }
   vh+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
   vh+='<div style="font-size:13px;font-weight:600;color:#0A2540">📋 Histórico de funções</div>';
   if(pode)vh+='<button class="btn btn-p btn-sm" onclick="trajetoriaModal(\''+pessoaId+'\')">✏ Editar trajetória</button>';
@@ -3685,6 +3709,53 @@ function cadFuncaoPreencheSalario(){
     if(confirm("A função tem salário base de R$ "+Number(f.salario_base).toLocaleString("pt-BR",{minimumFractionDigits:2})+". Deseja substituir o salário atual?"))campo.value=f.salario_base;
   }
 }
+// ── Divergência entre o cargo do cadastro e o vínculo vigente ────────
+// Retorna null quando está tudo certo (ou quando não há dado suficiente).
+function rhDivergenciaPessoa(pessoaId){
+  const p=(pessoas||[]).find(x=>x.id===pessoaId);
+  if(!p||!p.funcao_id)return null;
+  const vig=(historicoProfissional||[])
+    .filter(h=>h.pessoa_id===pessoaId&&h.data_inicio&&h.funcao_id&&!h.data_fim)
+    .sort((a,b)=>(a.data_inicio||'')<(b.data_inicio||'')?1:-1)[0];
+  if(!vig)return null;                       // sem trajetória: outro problema
+  if(String(vig.funcao_id)===String(p.funcao_id))return null;
+  const fC=(rhFuncoes||[]).find(f=>f.id===p.funcao_id);
+  const fH=(rhFuncoes||[]).find(f=>f.id===vig.funcao_id);
+  return {pessoaId:pessoaId,nome:p.nome,
+          cargoCadastro:(fC&&fC.funcao)||p.cargo||null,
+          cargoHistorico:(fH&&fH.funcao)||vig.cargo_novo||null,
+          desde:vig.data_inicio||null};
+}
+function rhDivergencias(){
+  return (pessoas||[])
+    .filter(p=>!/^DEMO /i.test(p.nome||''))
+    .map(p=>rhDivergenciaPessoa(p.id))
+    .filter(Boolean)
+    .sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||'')));
+}
+function rhDivergenciasModal(){
+  const lista=rhDivergencias();
+  const m=document.createElement('div');m.className='modal-overlay';m.id='rh-div-modal';
+  let corpo;
+  if(!lista.length){
+    corpo='<div style="padding:18px;text-align:center;color:var(--text3);font-size:13px">Nenhuma divergência. Cadastro e histórico batem para todos.</div>';
+  }else{
+    corpo='<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Colaboradores cujo cargo no cadastro não bate com o vínculo vigente no histórico — promoções que não viraram registro.</div>'
+      +'<div style="max-height:52vh;overflow:auto">'
+      +lista.map(d=>'<div style="border:1px solid #f0d68a;background:#fffdf5;border-radius:9px;padding:10px 12px;margin-bottom:7px">'
+        +'<div style="font-weight:700;font-size:13px">'+wEsc(d.nome||'')+'</div>'
+        +'<div style="font-size:11.5px;color:#8a6d00;margin-top:2px">cadastro: <b>'+wEsc(d.cargoCadastro||'—')+'</b> · histórico: <b>'+wEsc(d.cargoHistorico||'—')+'</b>'
+        +(d.desde?(' desde '+new Date(d.desde+'T00:00').toLocaleDateString('pt-BR')):'')+'</div></div>').join('')
+      +'</div>';
+  }
+  m.innerHTML='<div class="modal" style="max-width:560px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Promoções sem registro</div>'
+    +corpo
+    +'<div style="display:flex;justify-content:flex-end;margin-top:14px">'
+    +'<button class="btn" onclick="document.getElementById(\'rh-div-modal\').remove()">Fechar</button></div></div>';
+  document.body.appendChild(m);
+}
+
 async function _criaVinculoFuncao(pessoaId,funcaoId,inicio,dataFim,salario,motivo,atualizaPessoa){
   if(!pessoaId||!funcaoId||!inicio)return null;
   const fn=rhFuncoes.find(f=>f.id===funcaoId);
