@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.867 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.869 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1242,7 +1242,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.867';
+const APP_VERSION='v1.0.869';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -41057,8 +41057,8 @@ function ecomColMap(header){
     var n=ecomNorm(h);
     if(m.numero_pedido==null && /(^|\b)(pedido|nº pedido|n pedido|numero( do)? pedido|order)/.test(n) && !/interno/.test(n)) m.numero_pedido=i;
     else if(m.destinatario_ref==null && /(ref|codigo|cod|id).*(cliente|comprador)|cliente.*(ref|id|codigo)/.test(n)) m.destinatario_ref=i;
-    else if(m.destinatario_nome==null && /(cliente|destinatario|comprador|nome)/.test(n)) m.destinatario_nome=i;
-    if(m.tracking==null && /(tracking|rastreio)/.test(n)) m.tracking=i;
+    else if(m.destinatario_nome==null && /(cliente|destinatario|comprador|nome|recipient|buyer|customer)/.test(n)) m.destinatario_nome=i;
+    if(m.tracking==null && /(tracking|rastreio|tracking number|awb)/.test(n)) m.tracking=i;
     if(m.destinatario_doc==null && /(cpf|cnpj|documento|doc)/.test(n)) m.destinatario_doc=i;
     if(m.cep==null && /cep/.test(n)) m.cep=i;
     if(m.endereco==null && /(endereco|logradouro|rua)/.test(n)) m.endereco=i;
@@ -41067,9 +41067,12 @@ function ecomColMap(header){
     if(m.transportadora==null && /(transportadora|transporte|frete|carrier|logistica)/.test(n)) m.transportadora=i;
     if(m.canal==null && /(canal|marketplace|origem|loja)/.test(n)) m.canal=i;
     if(m.previsao_coleta==null && /(coleta|previsao)/.test(n)) m.previsao_coleta=i;
-    if(m.sku==null && /(^sku$|codigo (do )?produto|cod prod)/.test(n)) m.sku=i;
+    // SKU: 'seller sku' (Shopee) tem prioridade sobre 'sku id', que é o
+    // id interno do marketplace e costuma vir vazio.
+    if(/^seller sku$|^sku do vendedor$/.test(n)) m.sku=i;
+    else if(m.sku==null && /(^sku$|codigo (do )?produto|cod prod|^sku id$)/.test(n)) m.sku=i;
     if(m.ean==null && /(ean|gtin|codigo de barras|barcode)/.test(n)) m.ean=i;
-    if(m.descricao==null && /(produto|descricao|item|titulo)/.test(n)) m.descricao=i;
+    if(m.descricao==null && /(produto|descricao|item|titulo|product name|product|item name)/.test(n)) m.descricao=i;
     if(m.qtd==null && /(qtd|quant|qty)/.test(n)) m.qtd=i;
   });
   return m;
@@ -41086,7 +41089,7 @@ function ecomParseRows(raw){
   if(!raw||raw.length<2){ showToast('Planilha vazia ou sem cabeçalho','red'); ecomImportRows=null; return; }
   var header=raw[0], map=ecomColMap(header);
   if(map.numero_pedido==null && map.descricao==null){ showToast('Não reconheci colunas de pedido/produto no cabeçalho','red'); ecomImportRows=null; return; }
-  var byPed={}, order=[], totalItens=0, autoseq=0;
+  var byPed={}, order=[], totalItens=0, autoseq=0, kitsFaltP={};
   for(var r=1;r<raw.length;r++){
     var row=raw[r]; if(!row||row.every(function(c){return String(c==null?'':c).trim()==='';})) continue;
     var np=ecomCel(row,map,'numero_pedido'); if(!np){ np='(sem-nº-'+(++autoseq)+')'; }
@@ -41100,9 +41103,24 @@ function ecomParseRows(raw){
     var q=ecomN(ecomCel(row,map,'qtd')); if(!q)q=1;
     var desc=ecomCel(row,map,'descricao'), sku=ecomCel(row,map,'sku'), ean=ecomCel(row,map,'ean');
     if(!desc && !sku && !ean) continue;
-    byPed[np].itens.push({sku:sku,ean:ean,descricao:desc||sku||ean,qtd:q});
-    totalItens++;
+    // KIT também explode quando vem de planilha (antes só o PDF fazia)
+    var comps=sku?ecomKitComp(String(sku).toUpperCase()):null;
+    if(comps){
+      comps.forEach(function(cp){
+        var cs=String(cp.sku||'').toUpperCase();
+        var pr=ecomProdutos.find(function(x){return String(x.sku||'').toUpperCase()===cs;});
+        byPed[np].itens.push({sku:cs,ean:(pr&&pr.ean)||'',descricao:(pr&&pr.descricao)||cs,
+                              qtd:q*(ecomN(cp.qtd)||1),kit_sku:String(sku).toUpperCase()});
+        totalItens++;
+      });
+    }else{
+      if(sku&&/^KIT/i.test(sku))kitsFaltP[String(sku).toUpperCase()]=1;
+      byPed[np].itens.push({sku:sku,ean:ean,descricao:desc||sku||ean,qtd:q});
+      totalItens++;
+    }
   }
+  var faltP=Object.keys(kitsFaltP);
+  if(faltP.length)showToast('Kit(s) sem composição cadastrada: '+faltP.join(', ')+' — importados como produto único','amber');
   ecomImportRows={pedidos:order.map(function(k){return byPed[k];}),totalItens:totalItens};
 }
 async function ecomImportConfirm(){
@@ -43684,15 +43702,18 @@ function ecomEtiqPanel(){
 var ECOM_TRANSP={
   'TOTAL':{nome:'TOTAL EXPRESS', box:'BOX 1', cor:'#1d4ed8', bg:'#dbeafe'},
   'JT'   :{nome:'J&T EXPRESS',   box:'BOX 2', cor:'#b91c1c', bg:'#fee2e2'},
+  'CORREIOS':{nome:'CORREIOS',   box:'BOX 3', cor:'#047857', bg:'#d1fae5'},
   '?'    :{nome:'SEM TRANSPORTADORA', box:'BOX —', cor:'#6b7280', bg:'#f3f4f6'}
 };
 // Identifica a transportadora a partir do texto da etiqueta (ou dos codigos lidos)
-function ecomTranspDetect(txt,trk,jt){
+function ecomTranspDetect(txt,trk,jt,cor){
   var t=String(txt||'').toUpperCase();
   if(trk) return 'TOTAL';                       // TXAQ...tx = Total Express
   if(jt)  return 'JT';                          // "Pedido: 9998..." = J&T
+  if(cor) return 'CORREIOS';                    // AD/AP...BR = Correios (Shopee)
   if(t.indexOf('TOTAL')>=0 && t.indexOf('EXPRESS')>=0) return 'TOTAL';
   if(t.indexOf('J&T')>=0 || t.indexOf('JET EXPRESS')>=0) return 'JT';
+  if(t.indexOf('SEDEX')>=0 || t.indexOf('CORREIOS')>=0 || /\bPAC\b/.test(t)) return 'CORREIOS';
   return '?';
 }
 // Normaliza o valor gravado em ecom_pedidos.transportadora de volta para a chave
@@ -43717,8 +43738,12 @@ function ecomNfeParse(xml){
   var ent=xml.match(/<entrega>[\s\S]*?<\/entrega>/), des=xml.match(/<dest>[\s\S]*?<\/dest>/);
   var nome=ent?ecomNfeTag(ent[0],'xNome'):(des?ecomNfeTag(des[0],'xNome'):'');
   var blocoEnd=ent?ent[0]:(des?des[0]:'');
-  // Order ID: xPed vem truncado em 15 chars; pega o mais longo encontrado
-  var peds=(xml.match(/<xPed>(\d+)<\/xPed>/g)||[]).map(function(t){return t.replace(/\D/g,'');});
+  // Order ID: xPed vem truncado em 15 chars; pega o mais longo encontrado.
+  // Aceita ALFANUMÉRICO — a Shopee usa IDs como 260906A5GWQFVU; só o
+  // TikTok é puramente numérico (585...).
+  var peds=(xml.match(/<xPed>([^<]+)<\/xPed>/g)||[]).map(function(t){
+    return t.replace(/<\/?xPed>/g,'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+  });
   var oid=''; peds.forEach(function(p){ if(p.length>oid.length) oid=p; });
   var itens=[];
   (xml.match(/<det nItem="\d+">[\s\S]*?<\/det>/g)||[]).forEach(function(d){
@@ -43793,8 +43818,10 @@ async function ecomNfeImportFiles(input){
       var ped=null;
       if(nf.order_id){
         ped=ecomPedidos.find(function(p){
-          var np=String(p.numero_pedido||''); if(!np)return false;
-          return np===nf.order_id || np.indexOf(nf.order_id)===0 || nf.order_id.indexOf(np)===0;
+          var np=String(p.numero_pedido||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+          if(!np)return false;
+          var oi=String(nf.order_id||'').toUpperCase();
+          return np===oi || np.indexOf(oi)===0 || oi.indexOf(np)===0;
         });
       }
       if(!ped){
@@ -43971,10 +43998,18 @@ async function ecomEtiqImportFile(input){
       var txt=tc.items.map(function(it){return it.str;}).join(' ');
       var flat=txt.replace(/\s+/g,'');
       var oid=(flat.match(/585\d{15}/)||[])[0]||'';
+      // Shopee: "ID pedido: 260906A5GWQFVU" — 6 dígitos + 8 alfanuméricos
+      if(!oid){
+        var shp=txt.replace(/\s+/g,' ').match(/ID\s*pedido:?\s*([A-Z0-9]{10,20})/i);
+        if(shp)oid=String(shp[1]).toUpperCase();
+        else{ var shp2=flat.match(/\b\d{6}[A-Z0-9]{8}\b/); if(shp2)oid=String(shp2[0]).toUpperCase(); }
+      }
       var trk=(flat.match(/TXAQ\w+?tx/i)||[])[0]||'';
       // J&T: nao imprime Order ID; o codigo de barras da caixa e o "Pedido: 9998..."
       var jt=((flat.match(/Pedido:?(\d{12,})/i)||[])[1])||'';
-      var tKey=ecomTranspDetect(txt,trk,jt);
+      // Correios (Shopee): AD895838638BR / AP471549556BR
+      var cor=((txt.match(/(?:^|[^A-Z0-9])([A-Z]{2}\d{9}BR)(?:[^A-Z0-9]|$)/i)||[])[1])||'';
+      var tKey=ecomTranspDetect(txt,trk,jt,cor);
       var tNome=ECOM_TRANSP[tKey].nome;
       // chave da NF-e impressa no rodape da etiqueta (44 digitos)
       // busca no texto COM espacos: no achatado os digitos grudam e a janela de 44 escorrega
@@ -43983,7 +44018,14 @@ async function ecomEtiqImportFile(input){
       var ped=null, hits=[], viaTxt='';
 
       // (a) Order ID impresso na etiqueta
-      if(oid){ ped=ecomPedidos.find(function(p){ return String(p.numero_pedido)===oid; }); if(ped)viaTxt='order id'; }
+      if(oid){
+        var oidN=String(oid).replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+        ped=ecomPedidos.find(function(p){
+          var np=String(p.numero_pedido||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+          return np&&(np===oidN||np.indexOf(oidN)===0||oidN.indexOf(np)===0);
+        });
+        if(ped)viaTxt='order id';
+      }
 
       // (b) chave da NF-e -> ecom_nfe -> pedido  (exato: resolve cliente com 2 pedidos)
       if(!ped && chNfe){
@@ -44001,8 +44043,8 @@ async function ecomEtiqImportFile(input){
       }
 
       // (c) tracking da transportadora ja gravado no pedido
-      if(!ped && (trk||jt)){
-        var cod=String(trk||jt).toLowerCase();
+      if(!ped && (trk||jt||cor)){
+        var cod=String(trk||jt||cor).toLowerCase();
         ped=ecomPedidos.find(function(p){ return p.tracking && String(p.tracking).toLowerCase()===cod; });
         if(ped) viaTxt='tracking';
       }
