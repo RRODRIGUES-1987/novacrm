@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.873 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.874 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1243,7 +1243,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.873';
+const APP_VERSION='v1.0.874';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -44238,11 +44238,28 @@ async function ecomEtiqImportFile(input){
         var vp=page.getViewport({scale:3});
         var cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height;
         await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
-        if(_regioes.length>1){
-          // recorta o quadrante (canvas cresce de cima p/ baixo; PDF, de baixo p/ cima)
-          var sc=vp.width/_pw;
-          var cx=Math.round(_rg.x0*sc), cw=Math.round((_rg.x1-_rg.x0)*sc);
-          var cy=Math.round((_ph-_rg.y1)*sc), ch=Math.round((_rg.y1-_rg.y0)*sc);
+        // Recorta no CONTEÚDO, não na folha: a etiqueta costuma ocupar só
+        // parte de uma A4 e a margem branca fazia a impressão sair reduzida.
+        var sc=vp.width/_pw, marg=10*sc;                     // 10pt de folga
+        var bx0=_rg.x1, bx1=_rg.x0, by0=_rg.y1, by1=_rg.y0;  // bbox do texto
+        _itensRg.forEach(function(it){
+          var tx=(it.transform&&it.transform[4])||0, ty=(it.transform&&it.transform[5])||0;
+          var w=it.width||0, h=it.height||8;
+          if(tx<bx0)bx0=tx; if(tx+w>bx1)bx1=tx+w;
+          if(ty<by0)by0=ty; if(ty+h>by1)by1=ty+h;
+        });
+        var temBox=(bx1>bx0&&by1>by0);
+        var cx,cy,cw,ch;
+        if(temBox){
+          cx=Math.max(0,Math.round(bx0*sc-marg));
+          cw=Math.min(cv.width-cx,Math.round((bx1-bx0)*sc+2*marg));
+          cy=Math.max(0,Math.round((_ph-by1)*sc-marg));
+          ch=Math.min(cv.height-cy,Math.round((by1-by0)*sc+2*marg));
+        }else{
+          cx=Math.round(_rg.x0*sc); cw=Math.round((_rg.x1-_rg.x0)*sc);
+          cy=Math.round((_ph-_rg.y1)*sc); ch=Math.round((_rg.y1-_rg.y0)*sc);
+        }
+        if(cw>20&&ch>20){
           var cv2=document.createElement('canvas'); cv2.width=cw; cv2.height=ch;
           cv2.getContext('2d').drawImage(cv,cx,cy,cw,ch,0,0,cw,ch);
           img=cv2.toDataURL('image/png');
