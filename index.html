@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.877 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.878 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1243,7 +1243,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.877';
+const APP_VERSION='v1.0.878';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36827,6 +36827,71 @@ async function pkfAssociar(endId,produtoId){
     render();
   }catch(err){showToast('Erro: '+(err.message||err),'red');}
 }
+// ── importação de lista endereço → produto ──────────────────────────
+var _pkfImp=null;
+async function pkfGabarito(){
+  var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.aoa_to_sheet([['Endereco','SKU'],
+    ['M201AA01','501.25.3'],['M201AA02','501.25.3'],['M201AB15','546.32.3']]);
+  XLSX.utils.book_append_sheet(wb,ws,'Picking');
+  XLSX.writeFile(wb,'GABARITO_picking_fixo.xlsx');
+}
+async function pkfImportar(input){
+  var file=input.files&&input.files[0]; if(!file)return; input.value='';
+  var el=ge('pkf-imp'); if(el)el.innerHTML='<div style="padding:10px;color:var(--text2);font-size:12px">Lendo planilha…</div>';
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+    var raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+    if(raw.length<2)throw new Error('Planilha vazia.');
+    var norm=function(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();};
+    var hdr=raw[0].map(norm);
+    var iE=hdr.findIndex(function(h){return /endereco|posicao|codigo do endereco/.test(h);});
+    var iS=hdr.findIndex(function(h){return /sku|codigo do produto|cod produto|produto/.test(h);});
+    if(iE<0||iS<0)throw new Error('Preciso das colunas Endereco e SKU no cabeçalho.');
+    var cliId=_pkf.cli||rgaCli();
+    var prods=(wmsProdutos||[]).filter(function(p){return !cliId||p.cliente_id===cliId;});
+    var porSku={}; prods.forEach(function(p){porSku[String(p.sku||'').toUpperCase()]=p;});
+    var porEnd={}; (wmsEnderecos||[]).forEach(function(e){porEnd[String(e.codigo||'').toUpperCase()]=e;});
+    var ok=[],err=[];
+    for(var r=1;r<raw.length;r++){
+      var cE=String(raw[r][iE]||'').trim().toUpperCase();
+      var cS=String(raw[r][iS]||'').trim().toUpperCase();
+      if(!cE&&!cS)continue;
+      var e=porEnd[cE], pr=porSku[cS];
+      if(!e){ err.push('linha '+(r+1)+': endereço '+cE+' não existe'); continue; }
+      if(!pr){ err.push('linha '+(r+1)+': SKU '+cS+' não existe neste depositante'); continue; }
+      if(e.is_picking!==true) err.push('linha '+(r+1)+': '+cE+' não está marcado como picking (será marcado)');
+      ok.push({endId:e.id,codigo:cE,prodId:pr.id,sku:cS});
+    }
+    _pkfImp={ok:ok,err:err};
+    render();
+  }catch(e){
+    _pkfImp=null;
+    var el2=ge('pkf-imp');
+    if(el2)el2.innerHTML='<div style="background:#fdecec;border:1px solid #f5b5b5;color:#8a1c1c;border-radius:8px;padding:10px 12px;font-size:12px">'+String(e.message||e)+'</div>';
+  }
+}
+async function pkfImpAplicar(){
+  if(!_pkfImp||!_pkfImp.ok.length)return;
+  if(!confirm('Aplicar '+_pkfImp.ok.length+' associação(ões) de picking?'))return;
+  var n=0,er=0;
+  for(var i=0;i<_pkfImp.ok.length;i++){
+    var it=_pkfImp.ok[i];
+    try{
+      await dbUpdate('wms_enderecos',it.endId,{produto_id:it.prodId,is_picking:true});
+      var e=(wmsEnderecos||[]).find(function(x){return x.id===it.endId;});
+      if(e){e.produto_id=it.prodId;e.is_picking=true;}
+      n++;
+    }catch(x){er++;}
+  }
+  _pkfImp=null;
+  showToast(n+' posição(ões) associada(s)'+(er?(' · '+er+' com erro'):'')+'.',er?'amber':'green');
+  render();
+}
+function pkfImpCancelar(){_pkfImp=null;render();}
+
 function rWmsPickingFixo(){
   var cliId=_pkf.cli||rgaCli();
   var prods=(wmsProdutos||[]).filter(function(p){return !cliId||p.cliente_id===cliId;})
@@ -36854,6 +36919,21 @@ function rWmsPickingFixo(){
     +'<div><label class="fl">Buscar endereço ou SKU</label><input class="fi" style="width:230px" value="'+wEsc(_pkf.busca)+'" onchange="pkfSet(\'busca\',this.value)"></div>'
     +'<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text2);padding-bottom:8px"><input type="checkbox"'+(_pkf.soVazios?' checked':'')+' onchange="pkfSet(\'soVazios\',this.checked)"> só sem produto</label>'
     +'<div style="margin-left:auto;font-size:12px;color:var(--text2);padding-bottom:8px"><b>'+comProd+'</b> de <b>'+totalPk+'</b> posições de picking associadas</div></div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:12px">'
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    +'<div style="font-size:12.5px;color:var(--text2);flex:1;min-width:220px">Tem a lista pronta? Suba uma planilha com <b>Endereco</b> e <b>SKU</b> — grava tudo de uma vez. <span style="color:var(--blue-text);text-decoration:underline;cursor:pointer" onclick="pkfGabarito()">⬇ gabarito</span></div>'
+    +'<button class="btn btn-sm" onclick="ge(\'pkf-file\').click()">📎 Importar lista</button>'
+    +'<input type="file" id="pkf-file" accept=".xlsx,.xls" style="display:none" onchange="pkfImportar(this)"></div>'
+    +'<div id="pkf-imp">'+(_pkfImp?(
+        '<div style="margin-top:10px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+        +'<div style="font-size:12.5px"><b>'+_pkfImp.ok.length+'</b> associação(ões) prontas'
+        +(_pkfImp.err.length?(' · <span style="color:#8a6d00">'+_pkfImp.err.length+' aviso(s)</span>'):'')+'</div>'
+        +(_pkfImp.err.length?('<ul style="margin:6px 0 0 18px;padding:0;font-size:11.5px;color:#8a6d00">'
+            +_pkfImp.err.slice(0,6).map(function(x){return '<li>'+wEsc(x)+'</li>';}).join('')
+            +(_pkfImp.err.length>6?('<li>… e mais '+(_pkfImp.err.length-6)+'</li>'):'')+'</ul>'):'')
+        +'<div style="display:flex;gap:8px;margin-top:10px">'
+        +'<button class="btn btn-p btn-sm" onclick="pkfImpAplicar()">Aplicar</button>'
+        +'<button class="btn btn-sm" onclick="pkfImpCancelar()">Cancelar</button></div></div>'):'')+'</div></div>'
     +(totalPk===0
       ? '<div style="padding:22px;text-align:center;color:var(--text3);font-size:13px;background:#fff;border:1px solid var(--border);border-radius:12px">Nenhum endereço marcado como picking. Rode o bloco opcional do SQL v866 para marcar o nível 01.</div>'
       : '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff"><table class="tgtbl" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th class="nos" style="width:160px">Endereço</th><th class="nos">Produto (picking fixo)</th></tr></thead><tbody>'
