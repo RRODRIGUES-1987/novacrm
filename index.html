@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.896 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.898 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.896';
+const APP_VERSION='v1.0.898';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -26681,14 +26681,15 @@ async function wmsConfConfirmar(listaId){
 const COLETOR_FUNCS={
   separar:{key:'separar',label:'Separar',icon:'📦',desc:'Separar pedidos por bipe',abrir:'coletorSepListas'},
   conferir:{key:'conferir',label:'Conferir',icon:'✅',desc:'Conferir pedidos separados',abrir:'coletorConfListas'},
-  embarcar:{key:'embarcar',label:'Embarcar',icon:'🚚',desc:'Conferência de embarque — bipar pallets na doca',abrir:'coletorEmbListas'}
-  // futuro: inventario:{...}, mover/enderecar (empilhadeira):{...}
+  embarcar:{key:'embarcar',label:'Embarcar',icon:'🚚',desc:'Conferência de embarque — bipar pallets na doca',abrir:'coletorEmbListas'},
+  inventario:{key:'inventario',label:'Inventário',icon:'📋',desc:'Contar bipando endereço e produto',abrir:'coletorInvListas'}
+  // futuro: mover/enderecar (empilhadeira):{...}
 };
 const COLETOR_ROLES={
-  coletor:['separar','conferir','embarcar'],
+  coletor:['separar','conferir','embarcar','inventario'],
   separador:['separar'],
-  conferente:['conferir','embarcar']
-  // futuro: inventario:['inventario'], empilhadeira:['mover','enderecar']
+  conferente:['conferir','embarcar','inventario']
+  // futuro: empilhadeira:['mover','enderecar']
 };
 function coletorRole(role){return !!COLETOR_ROLES[role];}
 function coletorFuncs(role){return (COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean);}
@@ -26881,6 +26882,44 @@ function coletorScanBox(){
     +'</div>'
     +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>'
     +'</div>';
+}
+
+// ── INVENTÁRIO (contagem bipada) ──
+function coletorInvListas(){
+  _colScanHandler=null;
+  var cid=company?.id;
+  coletorShow('Inventário','coletorHome()',invSpin('Carregando inventários…'));
+  dbSelect('inventarios','company_id=eq.'+cid+'&status=in.(aberto,em_contagem)&order=numero.desc').then(function(invs){
+    if(!invs||!invs.length){
+      coletorShow('Inventário','coletorHome()','<div style="padding:24px;text-align:center;color:var(--text3)">Nenhum inventário aberto.</div>');return;
+    }
+    var cards=invs.map(function(v){
+      return '<button onclick="coletorInvAbrir(&apos;'+v.id+'&apos;)" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
+        +'<div style="font-size:16px;font-weight:800;color:var(--text)">'+(v.numero||'')+' · '+(v.empresa_contada||'')+'</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px">'+(v.local||'')+(v.descricao?(' · '+v.descricao):'')+'</div>'
+        +'<div style="font-size:11px;color:var(--text3);margin-top:4px">'+(v.fichas_count||0)+' fichas'+(v.contagem_cega!==false?' · contagem cega':'')+'</div>'
+        +'</button>';}).join('');
+    coletorShow('Inventário','coletorHome()','<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Escolha o inventário:</div>'+cards);
+  }).catch(function(e){coletorShow('Inventário','coletorHome()','<div style="color:var(--red-text)">Erro: '+(e.message||e)+'</div>');});
+}
+async function coletorInvAbrir(id){
+  coletorShow('Inventário','coletorInvListas()',invSpin('Abrindo…'));
+  try{
+    await invColCarregar(id);      // mesma carga do modal de mesa
+    invCol.portal=true;
+    coletorInvRender();
+  }catch(e){coletorShow('Inventário','coletorInvListas()','<div style="color:var(--red-text)">Erro: '+(e.message||e)+'</div>');}
+}
+function coletorInvRender(){
+  var titulo=(invCol.inv&&invCol.inv.numero)||'Inventário';
+  // o único campo de bipe do portal lê endereço OU produto conforme o passo
+  _colScanHandler=function(raw){
+    if(!invCol.end){ invColLerEndCode(raw); }
+    else{ invColProdCode(raw); var q=ge('col-qtd'); if(q)q.focus(); }
+  };
+  coletorShow(titulo,'coletorInvListas()',coletorScanBox()+invColBodyHTML());
+  var i=ge('col-scan'); if(i){i.placeholder=invCol.end?'Bipe o pallet ou o produto…':'Bipe o endereço…';}
+  if(!invCol.end){ setTimeout(function(){var e=ge('col-scan');if(e)e.focus();},60); }
 }
 
 // ── SEPARAR ──
@@ -27668,22 +27707,13 @@ function invDigFechar(){ var ov=document.getElementById('inv-dig-modal'); if(ov)
 var invCol={id:null,inv:null,parser:null,mask:null,cega:true,rodada:1,
             baseByEnd:{},catalog:[],fichaByEnd:{},contadosEnd:{},
             end:null,itens:[],prodAtual:null};
-async function invColetor(id){
-  var old=document.getElementById('inv-col-modal'); if(old)old.remove();
-  var ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='inv-col-modal';
-  ov.innerHTML='<div class="modal" style="max-width:520px;width:96%;padding:0;overflow:hidden">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:#0A2540;color:#fff">'
-    +'<div><div style="font-size:11px;opacity:.75;letter-spacing:.5px">COLETOR · INVENTÁRIO</div><div id="inv-col-titulo" style="font-weight:700;font-size:14px">…</div></div>'
-    +'<button onclick="invColFechar()" title="Fechar" style="background:none;border:none;cursor:pointer;font-size:24px;line-height:1;color:#fff;opacity:.8;padding:0 4px">&times;</button></div>'
-    +'<div id="inv-col-body" style="padding:16px">'+invSpin('Carregando…')+'</div></div>';
-  document.body.appendChild(ov);
-  try{
+// Carga compartilhada: usada pelo modal de mesa e pelo portal do celular
+async function invColCarregar(id){
     var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
-    if(!inv){invColFechar();return;}
+    if(!inv)throw new Error('Inventário não encontrado');
     invCol.id=id; invCol.inv=inv; invCol.parser=inv.etiqueta_parser||null; invCol.mask=inv.mascara||null;
-    invCol.cega=(inv.contagem_cega!==false); invCol.rodada=1;
+    invCol.cega=(inv.contagem_cega!==false); invCol.rodada=1; invCol.portal=false;
     invCol.end=null; invCol.itens=[]; invCol.prodAtual=null;
-    var t=ge('inv-col-titulo'); if(t)t.textContent=(inv.numero||'')+' · '+(inv.empresa_contada||'');
     // base importada, agrupada por endereço
     var base=await invFetchAll('inventario_base','inventario_id=eq.'+id+'&select=endereco,cod_produto,qtde_saldo,tipo_embalagem,desc_produto');
     invCol.baseByEnd={}; invCol.catalog=[]; var seen={};
@@ -27701,28 +27731,52 @@ async function invColetor(id){
     invCol.fichaByEnd={}; fichas.forEach(function(f){invCol.fichaByEnd[invNorm(f.endereco)]=f;});
     var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&rodada=eq.'+invCol.rodada+'&qtd_contada=not.is.null&select=endereco');
     invCol.contadosEnd={}; tar.forEach(function(x){invCol.contadosEnd[invNorm(x.endereco)]=1;});
+}
+// Modal de mesa (mantido): mesma lógica, dentro de um modal
+async function invColetor(id){
+  var old=document.getElementById('inv-col-modal'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='inv-col-modal';
+  ov.innerHTML='<div class="modal" style="max-width:520px;width:96%;padding:0;overflow:hidden">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:#0A2540;color:#fff">'
+    +'<div><div style="font-size:11px;opacity:.75;letter-spacing:.5px">COLETOR · INVENTÁRIO</div><div id="inv-col-titulo" style="font-weight:700;font-size:14px">…</div></div>'
+    +'<button onclick="invColFechar()" title="Fechar" style="background:none;border:none;cursor:pointer;font-size:24px;line-height:1;color:#fff;opacity:.8;padding:0 4px">&times;</button></div>'
+    +'<div id="inv-col-body" style="padding:16px">'+invSpin('Carregando…')+'</div></div>';
+  document.body.appendChild(ov);
+  try{
+    await invColCarregar(id);
+    var t=ge('inv-col-titulo'); if(t)t.textContent=(invCol.inv.numero||'')+' · '+(invCol.inv.empresa_contada||'');
     invColRender();
   }catch(e){var b=ge('inv-col-body');if(b)b.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>';}
 }
 function invColFechar(){var ov=document.getElementById('inv-col-modal');if(ov)ov.remove();}
 function invColProgresso(){
-  var total=Object.keys(invCol.baseByEnd).length, feitos=Object.keys(invCol.contadosEnd).length;
-  return '<div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text3);margin-bottom:10px">'
-    +'<span>'+feitos+' de '+total+' endereços contados'+(invCol.cega?' · <b>cega</b>':'')+'</span>'
-    +'<span>'+(total?Math.floor(feitos/total*100):0)+'%</span></div>';
+  // Com fichas geradas, o universo é o das fichas (1 por endereço);
+  // sem fichas, cai na base importada.
+  var nF=Object.keys(invCol.fichaByEnd).length;
+  var total=nF||Object.keys(invCol.baseByEnd).length, feitos=Object.keys(invCol.contadosEnd).length;
+  var pct=total?Math.floor(feitos/total*100):0;
+  return '<div style="margin-bottom:10px">'
+    +'<div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text3);margin-bottom:4px">'
+    +'<span>'+feitos+' de '+total+(nF?' fichas':' endereços')+' contadas'+(invCol.cega?' · <b>cega</b>':'')+'</span><span>'+pct+'%</span></div>'
+    +'<div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#0A2540"></div></div></div>';
 }
 function invColRender(){
+  if(invCol.portal){ coletorInvRender(); return; }
   var b=ge('inv-col-body'); if(!b)return;
+  b.innerHTML=invColBodyHTML();
+  setTimeout(function(){var e=ge(invCol.end?'col-prod':'col-end');if(e)e.focus();},60);
+}
+function invColBodyHTML(){
   if(!invCol.end){
     // ── passo 1 · endereço ──
-    b.innerHTML=invColProgresso()
-      +'<div style="font-size:13px;font-weight:600;color:#0A2540;margin-bottom:6px">Bipe o endereço</div>'
-      +'<input class="fi" id="col-end" autocomplete="off" placeholder="etiqueta do endereço" style="font-size:18px;padding:12px;text-align:center;letter-spacing:1px" '
-      +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();invColLerEnd();}">'
-      +'<div id="col-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>'
-      +'<div style="font-size:11px;color:var(--text3);margin-top:12px">Sem etiqueta? Digite o código do endereço e Enter.</div>';
-    setTimeout(function(){var e=ge('col-end');if(e)e.focus();},60);
-    return;
+    return invColProgresso()
+      +(invCol.portal
+        ?'<div style="padding:22px 10px;text-align:center;color:var(--text3);font-size:14px">Bipe a etiqueta do <b>endereço</b> para começar.</div>'
+        :('<div style="font-size:13px;font-weight:600;color:#0A2540;margin-bottom:6px">Bipe o endereço</div>'
+          +'<input class="fi" id="col-end" autocomplete="off" placeholder="etiqueta do endereço" style="font-size:18px;padding:12px;text-align:center;letter-spacing:1px" '
+          +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();invColLerEnd();}">'
+          +'<div style="font-size:11px;color:var(--text3);margin-top:12px">Sem etiqueta? Digite o código do endereço e Enter.</div>'))
+      +'<div id="col-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>';
   }
   // ── passo 2 · produtos deste endereço ──
   var esperado=invCol.baseByEnd[invCol.end]||[];
@@ -27740,16 +27794,19 @@ function invColRender(){
       +invCol.itens.map(function(x,i){return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#eaf5ee;border:1px solid #cfe3d6;border-radius:7px;margin-top:4px;font-size:12.5px"><span><b>'+(x.cod||'(zerado)')+'</b>'+(x.desc?' <span style="color:var(--text3)">'+String(x.desc).slice(0,28)+'</span>':'')+'</span><span><b>'+x.qtd+'</b> <span onclick="invColRemover('+i+')" style="cursor:pointer;color:#9b1c1c;margin-left:8px">✕</span></span></div>';}).join(''))
     :'';
   var pa=invCol.prodAtual;
-  b.innerHTML=invColProgresso()
+  var campoProd=invCol.portal
+    ?''
+    :('<div style="font-size:12px;font-weight:600;color:#0A2540;margin-bottom:4px">Bipe o pallet ou o produto</div>'
+      +'<input class="fi" id="col-prod" autocomplete="off" placeholder="etiqueta do produto" style="font-size:15px;padding:10px" '
+      +'oninput="invColProdView()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var q=ge(\'col-qtd\');if(q)q.focus();}">');
+  return invColProgresso()
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
     +'<div><div style="font-size:11px;color:var(--text3)">ENDEREÇO</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+invCol.end+'</div></div>'
     +'<button class="btn btn-sm" onclick="invColVoltar()">← trocar</button></div>'
     +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin-bottom:10px">'+espHtml+'</div>'
     +(invCol.itens.length?'':'<button class="btn" style="width:100%;margin-bottom:10px;border-color:#d9a400;color:#7a5c00;background:#fff8e1" onclick="invColZerar()">⭘ Endereço vazio — zerar</button>')
-    +'<div style="font-size:12px;font-weight:600;color:#0A2540;margin-bottom:4px">Bipe o pallet ou o produto</div>'
-    +'<input class="fi" id="col-prod" autocomplete="off" placeholder="etiqueta do produto" style="font-size:15px;padding:10px" '
-    +'oninput="invColProdView()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var q=ge(\'col-qtd\');if(q)q.focus();}">'
-    +'<div id="col-prod-info" style="font-size:12px;margin:5px 0 8px;min-height:18px">'+(pa?('<b style="color:var(--green-text)">'+pa.cod+'</b> '+String(pa.desc||'').slice(0,40)):'')+'</div>'
+    +campoProd
+    +'<div id="col-prod-info" style="font-size:12px;margin:5px 0 8px;min-height:18px">'+(pa?('<b style="color:var(--green-text)">'+pa.cod+'</b> '+String(pa.desc||'').slice(0,40)):(invCol.portal?'<span style="color:var(--text3)">Bipe o pallet ou o produto no campo acima.</span>':''))+'</div>'
     +'<div style="display:flex;gap:8px;align-items:center">'
     +'<input class="fi" id="col-qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade" style="font-size:18px;padding:10px;text-align:center;flex:1" '
     +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();invColAdicionar();}">'
@@ -27757,16 +27814,21 @@ function invColRender(){
     +lidos
     +'<div id="col-msg2" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
     +'<button class="btn btn-p" style="width:100%;margin-top:12px;padding:13px;font-size:14px" '+(invCol.itens.length?'':'disabled style="opacity:.4;width:100%;margin-top:12px;padding:13px"')+' onclick="invColConfirmar()">✓ Confirmar e próximo endereço</button>';
-  setTimeout(function(){var e=ge('col-prod');if(e)e.focus();},60);
 }
 function invColLerEnd(){
-  var i=ge('col-end'), msg=ge('col-msg'); if(!i)return;
-  var code=invParseEnd(i.value,invCol.parser)||invNorm(i.value);
+  var i=ge('col-end'); if(!i)return;
+  invColLerEndCode(i.value);
+}
+function invColLerEndCode(raw){
+  var msg=ge('col-msg'), i=ge('col-end');
+  var code=invParseEnd(raw,invCol.parser)||invNorm(raw);
   if(!code){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Etiqueta vazia.</span>';return;}
   code=invNorm(code);
   if(invCol.contadosEnd[code]){
-    if(msg)msg.innerHTML='<span style="color:var(--amber-text)">Endereço <b>'+code+'</b> já foi contado nesta rodada. Para recontar, exclua a contagem no monitor.</span>';
-    i.value=''; return;
+    var av='Endereço <b>'+code+'</b> já foi contado nesta rodada. Para recontar, exclua a contagem no monitor.';
+    if(msg)msg.innerHTML='<span style="color:var(--amber-text)">'+av+'</span>';
+    if(invCol.portal&&typeof showToast==='function')showToast(code+' já contado nesta rodada','amber');
+    if(i)i.value=''; return;
   }
   if(!invCol.baseByEnd[code]){
     // fora da base: pode ser posição vazia não listada ou achado — segue, avisando
@@ -27777,8 +27839,12 @@ function invColLerEnd(){
 }
 function invColVoltar(){ invCol.end=null; invCol.itens=[]; invCol.prodAtual=null; invColRender(); }
 function invColProdView(){
-  var i=ge('col-prod'), info=ge('col-prod-info'); if(!i||!info)return;
-  var cod=invParseProd(i.value,invCol.parser)||invNorm(i.value);
+  var i=ge('col-prod'); if(!i)return;
+  invColProdCode(i.value);
+}
+function invColProdCode(raw){
+  var info=ge('col-prod-info'); if(!info)return;
+  var cod=invParseProd(raw,invCol.parser)||invNorm(raw);
   if(!cod){info.innerHTML='';invCol.prodAtual=null;return;}
   var c=null; for(var k=0;k<invCol.catalog.length;k++)if(invCol.catalog[k].cod===cod){c=invCol.catalog[k];break;}
   invCol.prodAtual={cod:cod,desc:c?c.desc:''};
@@ -27786,7 +27852,7 @@ function invColProdView(){
 }
 function invColAdicionar(){
   var pi=ge('col-prod'), qi=ge('col-qtd'), msg=ge('col-msg2');
-  var cod=pi?(invParseProd(pi.value,invCol.parser)||invNorm(pi.value)):'';
+  var cod=pi?(invParseProd(pi.value,invCol.parser)||invNorm(pi.value)):(invCol.prodAtual?invCol.prodAtual.cod:'');
   var qtd=qi?parseFloat(qi.value):NaN;
   if(!cod){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Bipe o produto primeiro.</span>';if(pi)pi.focus();return;}
   if(isNaN(qtd)||qtd<0){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Informe a quantidade.</span>';if(qi)qi.focus();return;}
