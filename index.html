@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.887 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.889 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.887';
+const APP_VERSION='v1.0.889';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -25826,17 +25826,65 @@ function wmsRotaTipo(clienteId){
 // sequência (ordem_rota), gerada pelo Toolbox conforme a estratégia que
 // a operação escolheu. Sem sequência gravada, cai no rua/posição/nível
 // de sempre — nada quebra em quem ainda não gerou.
+// Índice rua|posição|nível → sequência de rota.
+// O endereço da tarefa costuma vir IMPORTADO da planilha do cliente
+// (texto, sem vínculo com o cadastro), então o casamento não pode ser
+// por id: é pela coordenada física.
+function _rotaChave(rua,pos,niv){
+  var n=function(v){var x=parseInt(String(v==null?'':v).replace(/\D/g,''),10);return isNaN(x)?-1:x;};
+  return String(rua==null?'':rua).toUpperCase().trim()+'|'+n(pos)+'|'+n(niv);
+}
+function wmsRotaIndex(){
+  if(window._wmsRotaIdx)return window._wmsRotaIdx;
+  var m={};
+  (wmsEnderecos||[]).forEach(function(e){
+    if(e.ordem_rota==null)return;
+    m[_rotaChave(e.rua,e.posicao,e.nivel)]=e.ordem_rota;
+    // sem nível informado na tarefa: guarda a menor sequência da coluna
+    var k2=_rotaChave(e.rua,e.posicao,null);
+    if(m[k2]==null||e.ordem_rota<m[k2])m[k2]=e.ordem_rota;
+  });
+  window._wmsRotaIdx=m;
+  return m;
+}
+function wmsRotaIndexReset(){window._wmsRotaIdx=null;window._wmsRuasCache=null;}
 function wmsRotaKey(t,clienteId){
   const e=t.end||{rua:t.endereco_rua,posicao:t.endereco_posicao,nivel:t.endereco_nivel};
   const pad=v=>String(v==null||v===''?'~':v).toUpperCase().replace(/\d+/g,n=>n.padStart(4,'0'));
   var seq=(e&&e.ordem_rota!=null)?e.ordem_rota:null;
-  if(seq==null&&e&&e.id){
-    var ec=(wmsEnderecos||[]).find(function(x){return x.id===e.id;});
-    if(ec&&ec.ordem_rota!=null)seq=ec.ordem_rota;
+  if(seq==null){
+    var idx=wmsRotaIndex();
+    var v=idx[_rotaChave(e.rua,e.posicao,e.nivel)];
+    if(v==null)v=idx[_rotaChave(e.rua,e.posicao,null)];
+    if(v!=null)seq=v;
   }
   if(seq!=null)
     return (t.frente==='alta'?'1':'0')+'|'+String(seq).padStart(6,'0');
-  return (t.frente==='alta'?'1':'0')+'|'+pad(e.rua)+'|'+pad(e.posicao)+'|'+pad(e.nivel);
+  // Sem sequência gravada — caso de hoje, em que o endereço vem
+  // importado da planilha e não há estoque controlado no VERUS.
+  // A serpentina é calculada na hora, pela própria letra da rua:
+  // AA=0, AB=1, AC=2… rua de índice ímpar percorre ao contrário.
+  var rua=String(e.rua==null?'':e.rua).toUpperCase().trim();
+  var posOrd=pad(e.posicao);
+  var cid=clienteId||t.cliente_id||null;
+  if(rua&&wmsRotaTipo(cid)==='serpentina'&&wmsRuaRank(rua)%2===1){
+    var np=parseInt(String(e.posicao==null?'':e.posicao).replace(/\D/g,''),10);
+    posOrd=isNaN(np)?'~':String(99999-np).padStart(5,'0');
+  }
+  return (t.frente==='alta'?'1':'0')+'|'+pad(rua)+'|'+posOrd+'|'+pad(e.nivel);
+}
+// Posição da rua na ordem de caminhada, direto do código dela.
+// Letras: AA=0, AB=1 … AM=12 (base 26). Números: o próprio valor.
+// Não depende do cadastro de endereços — funciona com endereço importado.
+function wmsRuaRank(rua){
+  var r=String(rua||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!r)return 0;
+  if(/^\d+$/.test(r))return parseInt(r,10);
+  var letras=r.replace(/\d/g,'');
+  if(!letras)return 0;
+  var n=0;
+  for(var i=0;i<letras.length;i++)n=n*26+(letras.charCodeAt(i)-65);
+  return n;
 }
 function wmsEndTxt(t){
   const r=t.endereco_rua,p=t.endereco_posicao,n=t.endereco_nivel;
@@ -37378,6 +37426,7 @@ async function seqAplicar(){
     var pb=ge('seq-prog'); if(pb)pb.textContent=_seqR.prog+'%';
   }
   _seqR.rodando=false;_seqR.previa=null;
+  if(typeof wmsRotaIndexReset==='function')wmsRotaIndexReset();
   showToast(ok+' endereço(s) com sequência gravada'+(er?(' · '+er+' com erro'):'')+'.',er?'amber':'green');
   render();
 }
