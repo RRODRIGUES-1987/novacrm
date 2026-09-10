@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.891 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.893 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.891';
+const APP_VERSION='v1.0.893';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15218,33 +15218,47 @@ function crProxDiaUtil(iso){
 // vence no dia 10 do terceiro mês; depois disso, no dia 20.
 // SEM parâmetro configurado: cai no cálculo bruto (emissão + prazo em
 // dias), exatamente como hoje — nada muda para quem não usa.
-function crVencPorRegra(clienteId,dataEmissao,prazoDiasFallback){
+// Prazo de pagamento em dias — vem da PROPOSTA do cliente (obrigatório lá).
+function crPrazoDiasCliente(clienteId){
+  var t=(tabelasTarifarias||[]).find(function(x){
+    return x.cliente_id===clienteId && x.status!=='pendente';});
+  var d=parseInt(t&&t.cond_prazo_pagamento_dias,10);
+  return isNaN(d)?null:d;
+}
+// Vencimento = emissão + prazo da proposta. Se o cliente tiver regra de
+// DIAS CERTOS, o resultado é deslocado para o dia de corte correspondente
+// — o corte é decidido pelo DIA DA EMISSÃO, que é o que o faturamento
+// controla. Sem regra, devolve o cálculo bruto, sem deslocamento.
+function crVencPorRegra(clienteId,dataEmissao){
   if(!dataEmissao)return null;
+  var prazo=crPrazoDiasCliente(clienteId);
+  if(prazo==null)return null;                   // sem prazo na proposta
+  var emi=new Date(String(dataEmissao).slice(0,10)+'T00:00');
+  if(isNaN(emi))return null;
+  var bruto=new Date(emi.getTime()); bruto.setDate(bruto.getDate()+prazo);
   var c=(clientes||[]).find(function(x){return x.id===clienteId;});
   var regra=c&&c.cr_venc_regra?String(c.cr_venc_regra).trim():'';
-  var base=new Date(String(dataEmissao).slice(0,10)+'T00:00');
-  if(isNaN(base))return null;
-  if(!regra){
-    var dias=parseInt(prazoDiasFallback,10);
-    if(!dias)return null;
-    base.setDate(base.getDate()+dias);
-    return base.toISOString().slice(0,10);     // bruto, sem deslocamento
-  }
-  var meses=parseInt(c.cr_venc_meses,10); if(isNaN(meses))meses=0;
-  var diaEmi=base.getDate(), diaVenc=null;
+  if(!regra)return bruto.toISOString().slice(0,10);
+  // Dias certos de vencimento do cliente (ex.: 10 e 20).
+  // Aceita "10|20" e também o formato "corte:dia" (11:10|31:20).
+  var dias=[];
   regra.split('|').forEach(function(par){
-    if(diaVenc!=null)return;
-    var kv=par.split(':');
-    var corte=parseInt(kv[0],10), dv=parseInt(kv[1],10);
-    if(!isNaN(corte)&&!isNaN(dv)&&diaEmi<=corte)diaVenc=dv;
+    var t=String(par).split(':');
+    var d=parseInt(t.length>1?t[1]:t[0],10);
+    if(!isNaN(d)&&d>=1&&d<=31&&dias.indexOf(d)<0)dias.push(d);
   });
-  if(diaVenc==null){                            // depois do último corte
-    var ult=regra.split('|').pop().split(':');
-    diaVenc=parseInt(ult[1],10);
-    if(isNaN(diaVenc))return null;
+  if(!dias.length)return bruto.toISOString().slice(0,10);
+  dias.sort(function(a,b){return a-b;});
+  // O deslocamento é SEMPRE PARA A FRENTE: nunca encurta o prazo
+  // contratual. Do vencimento bruto, vai para o próximo dia certo.
+  for(var add=0;add<=2;add++){
+    var ano=bruto.getFullYear(), mes=bruto.getMonth()+add;
+    for(var i=0;i<dias.length;i++){
+      var cand=new Date(ano,mes,dias[i]);
+      if(cand>bruto)return cand.toISOString().slice(0,10);
+    }
   }
-  var alvo=new Date(base.getFullYear(),base.getMonth()+meses,diaVenc);
-  return alvo.toISOString().slice(0,10);
+  return bruto.toISOString().slice(0,10);
 }
 
 function crDataStr(cr){
@@ -33037,12 +33051,11 @@ function wmsCliTabSaida(c){
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <div><label class="fl">Cortes · dia de vencimento</label>
           <input class="fi" id="cr-venc-regra" style="width:200px" placeholder="ex.: 11:10|31:20" value="${(c.cr_venc_regra||'').replace(/"/g,'&quot;')}"></div>
-        <div><label class="fl">Meses à frente</label>
-          <input class="fi" id="cr-venc-meses" type="number" style="width:110px" value="${c.cr_venc_meses==null?'':c.cr_venc_meses}"></div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:5px">
         <b>11:10|31:20</b> = emitida até o dia 11 vence no dia 10; do 12 em diante, no dia 20.
-        Em branco, o sistema usa o prazo em dias da proposta, sem deslocamento.
+        O prazo em dias vem da <b>proposta</b>; esta regra só desloca o resultado
+        para o dia certo. Em branco, vale o prazo puro.
       </div>
     </div>
 
@@ -33197,8 +33210,6 @@ async function wmsSalvarParamCliente(clienteId){
   var _rt=document.querySelector('input[name="cli-rota"]:checked');
   dados.wms_rota_tipo=_rt?_rt.value:'sequencial';
   dados.cr_venc_regra=(ge('cr-venc-regra')?.value||'').trim()||null;
-  var _vm=ge('cr-venc-meses')?.value;
-  dados.cr_venc_meses=(_vm===''||_vm==null)?null:parseInt(_vm,10);
   // aba Saída: conferências
   ['wms_conf_1','wms_conf_2','wms_conf_3','wms_conf_4'].forEach(campo=>{
     const cb=ge(campo);if(cb)dados[campo]=cb.checked;
