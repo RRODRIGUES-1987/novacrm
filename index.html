@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.890 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.891 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.890';
+const APP_VERSION='v1.0.891';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15174,6 +15174,79 @@ function crValorEfetivo(cr){
   if(['pago','pago_atraso'].includes(cr.status)&&cr.valor_pago!=null&&Number(cr.valor_pago)>0)return Number(cr.valor_pago);
   return Number(cr.valor||0);
 }
+// ── DIAS ÚTEIS E FERIADOS ────────────────────────────────────────────
+// Título que cai em sábado, domingo ou feriado não tem coluna no dia a
+// dia — some da grade e só aparece no Total. Na vida real ele é pago no
+// próximo dia útil, então é lá que ele deve aparecer.
+function crPascoa(ano){
+  var a=ano%19,b=Math.floor(ano/100),c=ano%100,d=Math.floor(b/4),e=b%4,
+      f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,
+      i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),
+      mes=Math.floor((h+l-7*m+114)/31),dia=((h+l-7*m+114)%31)+1;
+  return new Date(ano,mes-1,dia);
+}
+function crFeriados(ano){
+  if(!window._crFer)window._crFer={};
+  if(window._crFer[ano])return window._crFer[ano];
+  var f={},add=function(d){f[d.toISOString().slice(0,10)]=1;};
+  [[0,1],[3,21],[4,1],[8,7],[9,12],[10,2],[10,15],[10,20],[11,25]]
+    .forEach(function(x){add(new Date(ano,x[0],x[1]));});
+  var pa=crPascoa(ano), dia=86400000;
+  add(new Date(pa.getTime()-48*dia));   // carnaval (segunda)
+  add(new Date(pa.getTime()-47*dia));   // carnaval (terça)
+  add(new Date(pa.getTime()-2*dia));    // sexta-feira santa
+  add(new Date(pa.getTime()+60*dia));   // corpus christi
+  window._crFer[ano]=f;
+  return f;
+}
+function crEhDiaUtil(d){
+  var w=d.getDay(); if(w===0||w===6)return false;
+  return !crFeriados(d.getFullYear())[d.toISOString().slice(0,10)];
+}
+// Rola a data para o próximo dia útil (não altera o vencimento gravado)
+function crProxDiaUtil(iso){
+  if(!iso)return iso;
+  var d=new Date(iso+'T00:00'); if(isNaN(d))return iso;
+  var g=0;
+  while(!crEhDiaUtil(d)&&g<10){d.setDate(d.getDate()+1);g++;}
+  return d.toISOString().slice(0,10);
+}
+
+// ── VENCIMENTO POR REGRA DO CLIENTE ─────────────────────────────────
+// Parâmetro no cliente: pares "corte:dia" separados por | e os meses à
+// frente. Ex.: Unilever "11:10|31:20" com 3 meses — emitida até o dia 11
+// vence no dia 10 do terceiro mês; depois disso, no dia 20.
+// SEM parâmetro configurado: cai no cálculo bruto (emissão + prazo em
+// dias), exatamente como hoje — nada muda para quem não usa.
+function crVencPorRegra(clienteId,dataEmissao,prazoDiasFallback){
+  if(!dataEmissao)return null;
+  var c=(clientes||[]).find(function(x){return x.id===clienteId;});
+  var regra=c&&c.cr_venc_regra?String(c.cr_venc_regra).trim():'';
+  var base=new Date(String(dataEmissao).slice(0,10)+'T00:00');
+  if(isNaN(base))return null;
+  if(!regra){
+    var dias=parseInt(prazoDiasFallback,10);
+    if(!dias)return null;
+    base.setDate(base.getDate()+dias);
+    return base.toISOString().slice(0,10);     // bruto, sem deslocamento
+  }
+  var meses=parseInt(c.cr_venc_meses,10); if(isNaN(meses))meses=0;
+  var diaEmi=base.getDate(), diaVenc=null;
+  regra.split('|').forEach(function(par){
+    if(diaVenc!=null)return;
+    var kv=par.split(':');
+    var corte=parseInt(kv[0],10), dv=parseInt(kv[1],10);
+    if(!isNaN(corte)&&!isNaN(dv)&&diaEmi<=corte)diaVenc=dv;
+  });
+  if(diaVenc==null){                            // depois do último corte
+    var ult=regra.split('|').pop().split(':');
+    diaVenc=parseInt(ult[1],10);
+    if(isNaN(diaVenc))return null;
+  }
+  var alvo=new Date(base.getFullYear(),base.getMonth()+meses,diaVenc);
+  return alvo.toISOString().slice(0,10);
+}
+
 function crDataStr(cr){
   if(crEixo==='competencia') return cr.competencia||cr.vencimento||'';
   return cr.data_pagamento||cr.vencimento||'';
@@ -17498,7 +17571,11 @@ function renderCRMatrix(){
       <td style="position:sticky;left:0;padding:8px 14px;font-weight:600;border-right:2px solid var(--border);white-space:nowrap;background:${ri%2===0?'var(--bg)':'var(--bg2)'};z-index:1;font-size:12px">${cli.nome}</td>`;
 
     colunas.forEach(col=>{
-      const crsNaCol=crCli.filter(cr=>{const ds=crDataStr(cr);return ds&&col.dias.some(d=>d.toISOString().slice(0,10)===ds);});
+      const crsNaCol=crCli.filter(cr=>{
+        var ds=crDataStr(cr); if(!ds)return false;
+        ds=crProxDiaUtil(ds);          // fim de semana/feriado → próximo dia útil
+        return col.dias.some(d=>d.toISOString().slice(0,10)===ds);
+      });
       const valorCol=crsNaCol.reduce((s,cr)=>s+crValorEfetivo(cr),0);
       totaisColunas[col.key]=(totaisColunas[col.key]||0)+valorCol;
 
@@ -32956,6 +33033,20 @@ function wmsCliTabSaida(c){
     </div>
 
     <div style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px">
+      <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:6px">Vencimento por regra (financeiro)</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div><label class="fl">Cortes · dia de vencimento</label>
+          <input class="fi" id="cr-venc-regra" style="width:200px" placeholder="ex.: 11:10|31:20" value="${(c.cr_venc_regra||'').replace(/"/g,'&quot;')}"></div>
+        <div><label class="fl">Meses à frente</label>
+          <input class="fi" id="cr-venc-meses" type="number" style="width:110px" value="${c.cr_venc_meses==null?'':c.cr_venc_meses}"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:5px">
+        <b>11:10|31:20</b> = emitida até o dia 11 vence no dia 10; do 12 em diante, no dia 20.
+        Em branco, o sistema usa o prazo em dias da proposta, sem deslocamento.
+      </div>
+    </div>
+
+    <div style="margin-top:12px;padding:11px 13px;background:var(--bg2);border-radius:9px">
       <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:6px">Rota de separação</div>
       <div style="display:flex;gap:14px;flex-wrap:wrap">
         <label style="display:flex;gap:6px;align-items:flex-start;cursor:pointer;flex:1;min-width:220px">
@@ -33105,6 +33196,9 @@ async function wmsSalvarParamCliente(clienteId){
   dados.regime_operacao=_rg?_rg.value:'armazem_geral';
   var _rt=document.querySelector('input[name="cli-rota"]:checked');
   dados.wms_rota_tipo=_rt?_rt.value:'sequencial';
+  dados.cr_venc_regra=(ge('cr-venc-regra')?.value||'').trim()||null;
+  var _vm=ge('cr-venc-meses')?.value;
+  dados.cr_venc_meses=(_vm===''||_vm==null)?null:parseInt(_vm,10);
   // aba Saída: conferências
   ['wms_conf_1','wms_conf_2','wms_conf_3','wms_conf_4'].forEach(campo=>{
     const cb=ge(campo);if(cb)dados[campo]=cb.checked;
