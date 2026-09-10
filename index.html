@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.893 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.895 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.893';
+const APP_VERSION='v1.0.895';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -26308,10 +26308,32 @@ function wmsRomDaLista(l){
   return null;
 }
 // Capa do romaneio (placa de totem) como conteúdo pdfMake — 1 página A4
+// Sequencial do romaneio, para o número gigante da capa e do totem.
+// Formatos aceitos: "ROM-0043/2026" → 0043 · "ROM-0043" → 0043
+// Sem prefixo, usa o primeiro bloco de dígitos; nunca o ano no fim.
+function wmsNumRomaneio(numero){
+  var t=String(numero||'').trim();
+  if(!t)return '';
+  var m=t.match(/ROM[^0-9]*(\d+)/i);            // depois do prefixo ROM
+  if(m)return m[1];
+  m=t.match(/(\d+)\s*\/\s*\d{2,4}\s*$/);       // "0043/2026"
+  if(m)return m[1];
+  m=t.match(/(\d+)/);                            // primeiro bloco
+  return m?m[1]:t;
+}
+// Corpo do número da capa: cabe sempre na largura útil da folha (547pt).
+// Dígito bold ocupa ~0,62 do corpo; deixo 10pt de folga de cada lado.
+function _capaFonte(txt){
+  var n=Math.max(1,String(txt||'').length);
+  var cabe=Math.floor(527/(n*0.62));
+  return Math.max(28,Math.min(128,cabe));
+}
 async function wmsCapaRomaneioPdf(rom){
   const cli=(clientes||[]).find(c=>c.id===rom.cliente_id);
   const peds=(wmsPedidos||[]).filter(p=>p.romaneio_id===rom.id);
-  const numG=(String(rom.numero||'').match(/(\d{3,})\s*$/)||[,String(rom.numero||'')])[1];
+  // Número do romaneio: "ROM-0043/2026" → 0043. A regex antiga pegava
+  // dígitos no FIM da string e trazia o ANO (2026) na capa.
+  const numG=wmsNumRomaneio(rom.numero);
   let qr=null; try{ qr=await wmsQrDataUrl('ROM|'+rom.id); }catch(e){}
   const info=[];
   if(rom.destino)info.push({text:rom.destino+'\n',bold:true,color:'#0A2540'});
@@ -26327,7 +26349,9 @@ async function wmsCapaRomaneioPdf(rom){
     ]},
     {canvas:[{type:'line',x1:0,y1:0,x2:547,y2:0,lineWidth:2.5,lineColor:'#0A2540'}],margin:[0,6,0,0]},
     {text:'R O M A N E I O',fontSize:15,color:'#666',alignment:'center',margin:[0,52,0,0]},
-    {text:String(numG),fontSize:128,bold:true,color:'#0A2540',alignment:'center',margin:[0,0,0,26]},
+    // O corpo do número se ajusta ao comprimento: com 128pt fixo, número
+    // de 7 dígitos ou mais estourava a largura da folha e cortava.
+    {text:String(numG),fontSize:_capaFonte(String(numG)),bold:true,color:'#0A2540',alignment:'center',margin:[0,0,0,26]},
     {columns:[ qr?{image:qr,width:105}:{width:0,text:''},
       {width:'*',fontSize:12,lineHeight:1.55,margin:[qr?16:0,4,0,0],text:info.length?info:' '} ]},
     {text:'PEDIDOS DESTA CARGA',fontSize:9,color:'#666',margin:[0,28,0,2]},
@@ -31425,7 +31449,7 @@ function wmsPlacaHtml(rom){
   const esc=v=>(v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const cli=(clientes||[]).find(c=>c.id===rom.cliente_id);
   const peds=(wmsPedidos||[]).filter(p=>p.romaneio_id===rom.id);
-  const numGrande=(String(rom.numero||'').match(/(\d{3,})\s*$/)||[,String(rom.numero||'')])[1];
+  const numGrande=wmsNumRomaneio(rom.numero);   // "ROM-0043/2026" → 0043
   let qr='';
   try{
     const tmp=document.createElement('div');
