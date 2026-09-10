@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.895 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.896 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.895';
+const APP_VERSION='v1.0.896';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -27661,6 +27661,191 @@ async function invDigitar(id){
   }catch(e){ var b=ge('inv-dig-body'); if(b)b.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
 }
 function invDigFechar(){ var ov=document.getElementById('inv-dig-modal'); if(ov)ov.remove(); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   INVENTÁRIO · COLETOR — contagem bipada, sem ficha impressa
+   ═══════════════════════════════════════════════════════════════════ */
+var invCol={id:null,inv:null,parser:null,mask:null,cega:true,rodada:1,
+            baseByEnd:{},catalog:[],fichaByEnd:{},contadosEnd:{},
+            end:null,itens:[],prodAtual:null};
+async function invColetor(id){
+  var old=document.getElementById('inv-col-modal'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='inv-col-modal';
+  ov.innerHTML='<div class="modal" style="max-width:520px;width:96%;padding:0;overflow:hidden">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:#0A2540;color:#fff">'
+    +'<div><div style="font-size:11px;opacity:.75;letter-spacing:.5px">COLETOR · INVENTÁRIO</div><div id="inv-col-titulo" style="font-weight:700;font-size:14px">…</div></div>'
+    +'<button onclick="invColFechar()" title="Fechar" style="background:none;border:none;cursor:pointer;font-size:24px;line-height:1;color:#fff;opacity:.8;padding:0 4px">&times;</button></div>'
+    +'<div id="inv-col-body" style="padding:16px">'+invSpin('Carregando…')+'</div></div>';
+  document.body.appendChild(ov);
+  try{
+    var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
+    if(!inv){invColFechar();return;}
+    invCol.id=id; invCol.inv=inv; invCol.parser=inv.etiqueta_parser||null; invCol.mask=inv.mascara||null;
+    invCol.cega=(inv.contagem_cega!==false); invCol.rodada=1;
+    invCol.end=null; invCol.itens=[]; invCol.prodAtual=null;
+    var t=ge('inv-col-titulo'); if(t)t.textContent=(inv.numero||'')+' · '+(inv.empresa_contada||'');
+    // base importada, agrupada por endereço
+    var base=await invFetchAll('inventario_base','inventario_id=eq.'+id+'&select=endereco,cod_produto,qtde_saldo,tipo_embalagem,desc_produto');
+    invCol.baseByEnd={}; invCol.catalog=[]; var seen={};
+    base.forEach(function(b){
+      var e=invNorm(b.endereco); if(!e)return;
+      (invCol.baseByEnd[e]=invCol.baseByEnd[e]||[]);
+      var cod=b.cod_produto||'', ex=null, arrE=invCol.baseByEnd[e];
+      for(var k=0;k<arrE.length;k++)if(arrE[k].cod===cod){ex=arrE[k];break;}
+      if(ex)ex.saldo+=(parseFloat(b.qtde_saldo)||0);
+      else arrE.push({cod:cod,desc:b.desc_produto||'',emb:b.tipo_embalagem||'',saldo:(parseFloat(b.qtde_saldo)||0)});
+      if(cod&&!seen[cod]){seen[cod]=1;invCol.catalog.push({cod:cod,desc:b.desc_produto||''});}
+    });
+    // fichas e contagens já existentes (para não contar duas vezes)
+    var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&select=id,endereco,rodada_liberada,status');
+    invCol.fichaByEnd={}; fichas.forEach(function(f){invCol.fichaByEnd[invNorm(f.endereco)]=f;});
+    var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&rodada=eq.'+invCol.rodada+'&qtd_contada=not.is.null&select=endereco');
+    invCol.contadosEnd={}; tar.forEach(function(x){invCol.contadosEnd[invNorm(x.endereco)]=1;});
+    invColRender();
+  }catch(e){var b=ge('inv-col-body');if(b)b.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>';}
+}
+function invColFechar(){var ov=document.getElementById('inv-col-modal');if(ov)ov.remove();}
+function invColProgresso(){
+  var total=Object.keys(invCol.baseByEnd).length, feitos=Object.keys(invCol.contadosEnd).length;
+  return '<div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text3);margin-bottom:10px">'
+    +'<span>'+feitos+' de '+total+' endereços contados'+(invCol.cega?' · <b>cega</b>':'')+'</span>'
+    +'<span>'+(total?Math.floor(feitos/total*100):0)+'%</span></div>';
+}
+function invColRender(){
+  var b=ge('inv-col-body'); if(!b)return;
+  if(!invCol.end){
+    // ── passo 1 · endereço ──
+    b.innerHTML=invColProgresso()
+      +'<div style="font-size:13px;font-weight:600;color:#0A2540;margin-bottom:6px">Bipe o endereço</div>'
+      +'<input class="fi" id="col-end" autocomplete="off" placeholder="etiqueta do endereço" style="font-size:18px;padding:12px;text-align:center;letter-spacing:1px" '
+      +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();invColLerEnd();}">'
+      +'<div id="col-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-top:12px">Sem etiqueta? Digite o código do endereço e Enter.</div>';
+    setTimeout(function(){var e=ge('col-end');if(e)e.focus();},60);
+    return;
+  }
+  // ── passo 2 · produtos deste endereço ──
+  var esperado=invCol.baseByEnd[invCol.end]||[];
+  var espHtml='';
+  if(!invCol.cega){
+    espHtml=esperado.length
+      ?('<div style="font-size:11px;color:var(--text3);margin-bottom:4px">No sistema:</div>'
+        +esperado.map(function(x){return '<div style="font-size:12px;display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--border2)"><span><b>'+x.cod+'</b> <span style="color:var(--text3)">'+String(x.desc||'').slice(0,34)+'</span></span><span>'+x.saldo+(x.emb?' '+x.emb:'')+'</span></div>';}).join(''))
+      :'<div style="font-size:12px;color:var(--text3)">Endereço sem saldo no sistema.</div>';
+  }else{
+    espHtml='<div style="font-size:11px;color:var(--text3)">Contagem cega — o saldo do sistema não é mostrado.</div>';
+  }
+  var lidos=invCol.itens.length
+    ?('<div style="margin-top:12px;font-size:11px;color:var(--text3)">Contado nesta posição:</div>'
+      +invCol.itens.map(function(x,i){return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#eaf5ee;border:1px solid #cfe3d6;border-radius:7px;margin-top:4px;font-size:12.5px"><span><b>'+(x.cod||'(zerado)')+'</b>'+(x.desc?' <span style="color:var(--text3)">'+String(x.desc).slice(0,28)+'</span>':'')+'</span><span><b>'+x.qtd+'</b> <span onclick="invColRemover('+i+')" style="cursor:pointer;color:#9b1c1c;margin-left:8px">✕</span></span></div>';}).join(''))
+    :'';
+  var pa=invCol.prodAtual;
+  b.innerHTML=invColProgresso()
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    +'<div><div style="font-size:11px;color:var(--text3)">ENDEREÇO</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+invCol.end+'</div></div>'
+    +'<button class="btn btn-sm" onclick="invColVoltar()">← trocar</button></div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin-bottom:10px">'+espHtml+'</div>'
+    +(invCol.itens.length?'':'<button class="btn" style="width:100%;margin-bottom:10px;border-color:#d9a400;color:#7a5c00;background:#fff8e1" onclick="invColZerar()">⭘ Endereço vazio — zerar</button>')
+    +'<div style="font-size:12px;font-weight:600;color:#0A2540;margin-bottom:4px">Bipe o pallet ou o produto</div>'
+    +'<input class="fi" id="col-prod" autocomplete="off" placeholder="etiqueta do produto" style="font-size:15px;padding:10px" '
+    +'oninput="invColProdView()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var q=ge(\'col-qtd\');if(q)q.focus();}">'
+    +'<div id="col-prod-info" style="font-size:12px;margin:5px 0 8px;min-height:18px">'+(pa?('<b style="color:var(--green-text)">'+pa.cod+'</b> '+String(pa.desc||'').slice(0,40)):'')+'</div>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<input class="fi" id="col-qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade" style="font-size:18px;padding:10px;text-align:center;flex:1" '
+    +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();invColAdicionar();}">'
+    +'<button class="btn btn-p" style="padding:12px 16px" onclick="invColAdicionar()">+ Adicionar</button></div>'
+    +lidos
+    +'<div id="col-msg2" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
+    +'<button class="btn btn-p" style="width:100%;margin-top:12px;padding:13px;font-size:14px" '+(invCol.itens.length?'':'disabled style="opacity:.4;width:100%;margin-top:12px;padding:13px"')+' onclick="invColConfirmar()">✓ Confirmar e próximo endereço</button>';
+  setTimeout(function(){var e=ge('col-prod');if(e)e.focus();},60);
+}
+function invColLerEnd(){
+  var i=ge('col-end'), msg=ge('col-msg'); if(!i)return;
+  var code=invParseEnd(i.value,invCol.parser)||invNorm(i.value);
+  if(!code){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Etiqueta vazia.</span>';return;}
+  code=invNorm(code);
+  if(invCol.contadosEnd[code]){
+    if(msg)msg.innerHTML='<span style="color:var(--amber-text)">Endereço <b>'+code+'</b> já foi contado nesta rodada. Para recontar, exclua a contagem no monitor.</span>';
+    i.value=''; return;
+  }
+  if(!invCol.baseByEnd[code]){
+    // fora da base: pode ser posição vazia não listada ou achado — segue, avisando
+    if(msg)msg.innerHTML='<span style="color:var(--amber-text)">Endereço <b>'+code+'</b> não está na base importada — será gravado como achado.</span>';
+  }
+  invCol.end=code; invCol.itens=[]; invCol.prodAtual=null;
+  invColRender();
+}
+function invColVoltar(){ invCol.end=null; invCol.itens=[]; invCol.prodAtual=null; invColRender(); }
+function invColProdView(){
+  var i=ge('col-prod'), info=ge('col-prod-info'); if(!i||!info)return;
+  var cod=invParseProd(i.value,invCol.parser)||invNorm(i.value);
+  if(!cod){info.innerHTML='';invCol.prodAtual=null;return;}
+  var c=null; for(var k=0;k<invCol.catalog.length;k++)if(invCol.catalog[k].cod===cod){c=invCol.catalog[k];break;}
+  invCol.prodAtual={cod:cod,desc:c?c.desc:''};
+  info.innerHTML='<b style="color:'+(c?'var(--green-text)':'var(--amber-text)')+'">'+cod+'</b> '+(c?String(c.desc).slice(0,40):'<span style="color:var(--amber-text)">não está na base — será gravado assim mesmo</span>');
+}
+function invColAdicionar(){
+  var pi=ge('col-prod'), qi=ge('col-qtd'), msg=ge('col-msg2');
+  var cod=pi?(invParseProd(pi.value,invCol.parser)||invNorm(pi.value)):'';
+  var qtd=qi?parseFloat(qi.value):NaN;
+  if(!cod){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Bipe o produto primeiro.</span>';if(pi)pi.focus();return;}
+  if(isNaN(qtd)||qtd<0){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Informe a quantidade.</span>';if(qi)qi.focus();return;}
+  var desc=''; for(var k=0;k<invCol.catalog.length;k++)if(invCol.catalog[k].cod===cod){desc=invCol.catalog[k].desc;break;}
+  // mesmo produto bipado de novo na mesma posição → soma
+  var ex=null; for(var j=0;j<invCol.itens.length;j++)if(invCol.itens[j].cod===cod){ex=invCol.itens[j];break;}
+  if(ex)ex.qtd+=qtd; else invCol.itens.push({cod:cod,desc:desc,qtd:qtd});
+  invCol.prodAtual=null; invColRender();
+}
+function invColRemover(i){ invCol.itens.splice(i,1); invColRender(); }
+function invColZerar(){ invCol.itens=[{cod:'',desc:'',qtd:0}]; invColRender(); }
+async function invColConfirmar(){
+  var end=invCol.end; if(!end||!invCol.itens.length)return;
+  var msg=ge('col-msg2');
+  try{
+    // 1) ficha do endereço: usa a existente ou cria na hora (modo coletor)
+    var f=invCol.fichaByEnd[end];
+    if(!f){
+      var m=invApplyMask(end,invCol.mask);
+      var esp=invCol.baseByEnd[end]||[];
+      var saldo=0; esp.forEach(function(x){saldo+=(parseFloat(x.saldo)||0);});
+      var nova={inventario_id:invCol.id,endereco:end,dep:m.dep,nivel:m.nivel,rua:m.rua,posicao:m.posicao,
+                tem_estrutura:m.tem,qtd_itens:esp.length,qtd_sistema_total:saldo,
+                modo:'coletor',rodada_liberada:invCol.rodada,status:'contada'};
+      var r=await dbInsert('inventario_fichas',nova);
+      f=Array.isArray(r)?r[0]:r; invCol.fichaByEnd[end]=f;
+    }else if((f.rodada_liberada||0)<invCol.rodada){
+      await dbUpdate('inventario_fichas',f.id,{rodada_liberada:invCol.rodada});
+    }
+    // 2) trava: uma contagem válida por rodada
+    var chk=await sbFetch('GET','/rest/v1/inventario_tarefas?inventario_id=eq.'+invCol.id+'&endereco=eq.'+encodeURIComponent(end)+'&rodada=eq.'+invCol.rodada+'&qtd_contada=not.is.null&select=id&limit=1');
+    if(chk.ok&&Array.isArray(chk.data)&&chk.data.length){
+      if(msg)msg.innerHTML='<span style="color:var(--amber-text)">Já existe contagem deste endereço nesta rodada.</span>';
+      invCol.contadosEnd[end]=1; invColVoltar(); return;
+    }
+    // 3) tarefas (uma por produto; zerado = uma linha com qtd 0)
+    var quem=(profile&&profile.full_name)||null, now=new Date().toISOString();
+    var batch=invCol.itens.map(function(x){return {inventario_id:invCol.id,ficha_id:f.id,endereco:end,rodada:invCol.rodada,
+      status:'contada',operador:quem,criada_por:quem,criada_em:now,contada_em:now,contada_por:(cu&&cu.id)||null,
+      cod_produto:x.cod||null,qtd_contada:x.qtd,origem:'coletor'};});
+    await invBulkInsert('inventario_tarefas',batch);
+    await dbUpdate('inventario_fichas',f.id,{status:'contada'});
+    invCol.contadosEnd[end]=1;
+    if(typeof showToast==='function')showToast(end+' gravado ('+invCol.itens.length+' item(ns))','green');
+    invColVoltar();
+  }catch(e){
+    // 'origem' pode não existir na tabela: tenta de novo sem ela
+    if(String(e&&e.message||'').indexOf('origem')>=0){
+      try{
+        var b2=invCol.itens.map(function(x){return {inventario_id:invCol.id,ficha_id:invCol.fichaByEnd[end].id,endereco:end,rodada:invCol.rodada,
+          status:'contada',operador:(profile&&profile.full_name)||null,contada_em:new Date().toISOString(),cod_produto:x.cod||null,qtd_contada:x.qtd};});
+        await invBulkInsert('inventario_tarefas',b2);
+        await dbUpdate('inventario_fichas',invCol.fichaByEnd[end].id,{status:'contada'});
+        invCol.contadosEnd[end]=1; showToast(end+' gravado','green'); invColVoltar(); return;
+      }catch(e2){ if(msg)msg.innerHTML='<span style="color:var(--red-text)">Erro ao gravar: '+(e2.message||e2)+'</span>'; return; }
+    }
+    if(msg)msg.innerHTML='<span style="color:var(--red-text)">Erro ao gravar: '+(e.message||e)+'</span>';
+  }
+}
 function invDigRender(){
   var b=ge('inv-dig-body'); if(!b) return;
   var lib=invDig.fichas.length, ft=0; invDig.fichas.forEach(function(f){ if(invDig.contadas[f.id])ft++; });
@@ -28944,6 +29129,7 @@ function invListRows(invs){
       +'<div class="lsub" style="white-space:normal">'+(subBits.length?subBits.join(' &middot; ')+' &middot; ':'')+'<span style="color:var(--text3)">'+meta+'</span></div></div>'
       +'<div class="lright">'+invStatusBadge(inv.status)
       +'<div style="display:flex;gap:4px;margin-top:6px">'
+        +'<button class="btn btn-sm" title="Contar bipando (coletor)" onclick="event.stopPropagation();invColetor(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px;margin-right:4px">&#128241; Coletor</button>'
         +'<button class="btn btn-sm" title="Digitar contagens" onclick="event.stopPropagation();invDigitar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px">Digitar</button>'
         +(inv.status==='encerrado'
             ? '<button class="btn btn-sm" title="Documentos do encerramento" onclick="event.stopPropagation();invEncerrar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px">Documentos</button>'
