@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.911 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.912 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.911';
+const APP_VERSION='v1.0.912';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -28137,9 +28137,27 @@ async function invBulkInsert(table,rows){
   }
 }
 /* ---------- mascara ---------- */
-function invSlice(end,r){ if(!r||r.length!==2)return null; var i=r[0],f=r[1]; if(!i||!f||end.length<f)return null; return end.substring(i-1,f); }
+// ── AI do GS1 na etiqueta ────────────────────────────────────────────
+// Os leitores entregam o Application Identifier junto com o dado:
+// 9502 = endereço · 9501 = produto (AIs de uso interno). Também pode vir
+// o ]C1 ou ]d2 do modo AIM. Tudo isso é envelope, não é o código —
+// precisa sair ANTES da máscara, senão o corte pega a posição errada.
+var INV_AI={'9502':'end','9501':'prod'};
+function invTiraAI(label){
+  var v=invNorm(label).replace(/^\]\w\d/,'');            // ]C1 / ]d2
+  var m=v.match(/^\((\d{4})\)(.+)$/);                     // (9502)XXXX
+  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
+  m=v.match(/^(\d{4})(.+)$/);                             // 9502XXXX
+  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
+  return {tipo:null,valor:v,ai:null};
+}
+// Qual etiqueta foi lida, quando o AI diz: 'end' | 'prod' | null
+function invTipoEtiqueta(label){ return invTiraAI(label).tipo; }
+function invSlice(end,r){ if(!r||r.length!==2)return null;
+  end=(typeof invTiraAI==='function')?invTiraAI(end).valor:String(end||'');
+  var i=r[0],f=r[1]; if(!i||!f||end.length<f)return null; return end.substring(i-1,f); }
 function invApplyMask(end,m){
-  end=(end||'');
+  end=(typeof invTiraAI==='function')?invTiraAI(end).valor:String(end||'');
   if(!m) return {dep:null,nivel:null,rua:null,posicao:null,tem:false};
   var dep=invSlice(end,m.dep),niv=invSlice(end,m.nivel),rua=invSlice(end,m.rua),pos=invSlice(end,m.posicao);
   var defs=[m.dep,m.nivel,m.rua,m.posicao].filter(Boolean), maxF=0;
@@ -28153,6 +28171,7 @@ function invReadMask(){
   return { dep:fld('msk-dep-i','msk-dep-f'), nivel:fld('msk-niv-i','msk-niv-f'), rua:fld('msk-rua-i','msk-rua-f'), posicao:fld('msk-pos-i','msk-pos-f') };
 }
 function invMaskRuler(end){
+  end=(typeof invTiraAI==='function')?invTiraAI(end).valor:end;   // sem o AI do leitor
   if(!end) return '<span style="color:var(--text3);font-size:12px">Sem endereco de exemplo (importe os enderecos com Gera Ficha = Sim).</span>';
   var h='<div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">';
   for(var i=0;i<end.length;i++){
@@ -28191,22 +28210,6 @@ function invReadEtiq(){
   function fld(a,b){ var i=invR(a),f=invR(b); return (i&&f&&f>=i)?[i,f]:null; }
   return { end:fld('eti-end-i','eti-end-f'), prod:fld('eti-prod-i','eti-prod-f') };
 }
-// ── AI do GS1 na etiqueta ────────────────────────────────────────────
-// Os leitores entregam o Application Identifier junto com o dado:
-// 9502 = endereço · 9501 = produto (AIs de uso interno). Também pode vir
-// o ]C1 ou ]d2 do modo AIM. Tudo isso é envelope, não é o código —
-// precisa sair ANTES da máscara, senão o corte pega a posição errada.
-var INV_AI={'9502':'end','9501':'prod'};
-function invTiraAI(label){
-  var v=invNorm(label).replace(/^\]\w\d/,'');            // ]C1 / ]d2
-  var m=v.match(/^\((\d{4})\)(.+)$/);                     // (9502)XXXX
-  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
-  m=v.match(/^(\d{4})(.+)$/);                             // 9502XXXX
-  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
-  return {tipo:null,valor:v,ai:null};
-}
-// Qual etiqueta foi lida, quando o AI diz: 'end' | 'prod' | null
-function invTipoEtiqueta(label){ return invTiraAI(label).tipo; }
 function invParseEnd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invTiraAI(label).valor; if(!m||!m.end) return v; var s=invSlice(v,m.end); return s?invNorm(s):v; }
 function invParseProd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invTiraAI(label).valor; if(!m||!m.prod) return v; var s=invSlice(v,m.prod); return s?invNorm(s):v; }
 function invEtiqProdRuler(){
@@ -28225,7 +28228,7 @@ function invEtiqPreview(){
   }
   var ep=ge('eti-prod-prev');
   if(ep){
-    var t2=ge('eti-prod-test'); var test2=t2?invNorm(t2.value):'';
+    var t2=ge('eti-prod-test'); var test2=t2?invTiraAI(t2.value).valor:'';
     var arr2=test2?[test2]:(invProdSamples||[]); var h2='';
     if(!arr2.length) h2='<span style="color:var(--text3)">Cole uma etiqueta de teste acima (ou importe o saldo).</span>';
     else for(var j=0;j<Math.min(arr2.length,3);j++){ var rp=m.prod?invSlice(arr2[j],m.prod):arr2[j]; h2+='<div style="font-family:monospace;font-size:12px;margin-bottom:3px"><b>'+arr2[j]+'</b> &rarr; '+(rp?'<b style="color:var(--green-text)">'+invNorm(rp)+'</b>':'<span style="color:var(--red-text)">-</span>')+'</div>'; }
