@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.909 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.911 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.909';
+const APP_VERSION='v1.0.911';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -20607,7 +20607,14 @@ document.addEventListener('keydown',e=>{
     if(ge('pdf-viewer-bg')?.classList.contains('open'))closePdfViewer();
     else if(ge('mbg')?.classList.contains('open'))closeModal();
   }
-  if(e.key==='Enter'&&ge('vlogin')&&ge('vlogin').style.display!=='none')doLogin();
+  // Enter só faz login quando a tela de login está REALMENTE visível e
+  // ninguém está logado. Antes, bastava o elemento existir — e o Enter do
+  // leitor Bluetooth refazia o login a cada bipe ("carregando dados...").
+  if(e.key==='Enter'){
+    var _vl=ge('vlogin');
+    var _visivel=_vl && _vl.offsetParent!==null && getComputedStyle(_vl).display!=='none';
+    if(_visivel && !cu) doLogin();
+  }
 });
 
 if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});}).catch(function(){});if(window.caches&&caches.keys){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k);});}).catch(function(){});}}
@@ -27496,8 +27503,12 @@ function coletorInvRender(){
   var titulo=(invCol.inv&&invCol.inv.numero)||'Inventário';
   // o único campo de bipe do portal lê endereço OU produto conforme o passo
   _colScanHandler=function(raw){
-    if(!invCol.end){ invColLerEndCode(raw); }
-    else{ invColProdCode(raw); var q=ge('col-qtd'); if(q)q.focus(); }
+    // o AI da etiqueta manda: 9502 é endereço, 9501 é produto.
+    // Sem AI, vale o passo em que a tela está.
+    var tp=invTipoEtiqueta(raw);
+    if(tp==='end'||(!tp&&!invCol.end)){ invColLerEndCode(raw); return; }
+    if(!invCol.end){ showToast('Bipe primeiro a etiqueta do endereço.','amber'); return; }
+    invColProdCode(raw); var q=ge('col-qtd'); if(q)q.focus();
   };
   coletorShow(titulo,'coletorInvListas()',coletorScanBox()+invColBodyHTML());
   var i=ge('col-scan'); if(i){i.placeholder=invCol.end?'Bipe o pallet ou o produto…':'Bipe o endereço…';}
@@ -28180,17 +28191,33 @@ function invReadEtiq(){
   function fld(a,b){ var i=invR(a),f=invR(b); return (i&&f&&f>=i)?[i,f]:null; }
   return { end:fld('eti-end-i','eti-end-f'), prod:fld('eti-prod-i','eti-prod-f') };
 }
-function invParseEnd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invNorm(label); if(!m||!m.end) return v; var s=invSlice(v,m.end); return s?invNorm(s):v; }
-function invParseProd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invNorm(label); if(!m||!m.prod) return v; var s=invSlice(v,m.prod); return s?invNorm(s):v; }
+// ── AI do GS1 na etiqueta ────────────────────────────────────────────
+// Os leitores entregam o Application Identifier junto com o dado:
+// 9502 = endereço · 9501 = produto (AIs de uso interno). Também pode vir
+// o ]C1 ou ]d2 do modo AIM. Tudo isso é envelope, não é o código —
+// precisa sair ANTES da máscara, senão o corte pega a posição errada.
+var INV_AI={'9502':'end','9501':'prod'};
+function invTiraAI(label){
+  var v=invNorm(label).replace(/^\]\w\d/,'');            // ]C1 / ]d2
+  var m=v.match(/^\((\d{4})\)(.+)$/);                     // (9502)XXXX
+  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
+  m=v.match(/^(\d{4})(.+)$/);                             // 9502XXXX
+  if(m&&INV_AI[m[1]])return {tipo:INV_AI[m[1]],valor:invNorm(m[2]),ai:m[1]};
+  return {tipo:null,valor:v,ai:null};
+}
+// Qual etiqueta foi lida, quando o AI diz: 'end' | 'prod' | null
+function invTipoEtiqueta(label){ return invTiraAI(label).tipo; }
+function invParseEnd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invTiraAI(label).valor; if(!m||!m.end) return v; var s=invSlice(v,m.end); return s?invNorm(s):v; }
+function invParseProd(label,m){ m=m||(invData&&invData.etiqueta_parser); var v=invTiraAI(label).valor; if(!m||!m.prod) return v; var s=invSlice(v,m.prod); return s?invNorm(s):v; }
 function invEtiqProdRuler(){
-  var t=ge('eti-prod-test'); var s=t?invNorm(t.value):''; var box=ge('eti-prod-ruler'); if(box) box.innerHTML=s?invMaskRuler(s):'<span style="color:var(--text3);font-size:12px">Cole/bipe uma etiqueta de produto para ver as posicoes.</span>';
+  var t=ge('eti-prod-test'); var s=t?invTiraAI(t.value).valor:''; var box=ge('eti-prod-ruler'); if(box) box.innerHTML=s?invMaskRuler(s):'<span style="color:var(--text3);font-size:12px">Cole/bipe uma etiqueta de produto para ver as posicoes.</span>';
   invEtiqPreview();
 }
 function invEtiqPreview(){
   var m=invReadEtiq();
   var ee=ge('eti-end-prev');
   if(ee){
-    var t=ge('eti-end-test'); var test=t?invNorm(t.value):'';
+    var t=ge('eti-end-test'); var test=t?invTiraAI(t.value).valor:'';
     var arr=test?[test]:(invMaskSamples||[]); var h='';
     if(!arr.length) h='<span style="color:var(--text3)">Sem exemplos de endereco.</span>';
     else for(var i=0;i<Math.min(arr.length,3);i++){ var r=m.end?invSlice(arr[i],m.end):arr[i]; h+='<div style="font-family:monospace;font-size:12px;margin-bottom:3px"><b>'+arr[i]+'</b> &rarr; '+(r?'<b style="color:var(--green-text)">'+invNorm(r)+'</b>':'<span style="color:var(--red-text)">-</span>')+'</div>'; }
