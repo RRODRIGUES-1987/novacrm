@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.904 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.905 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -872,6 +872,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span>Editor de Relatórios</span>
         </button>
+        <button class="navitem sub" id="nav-asm" onclick="asmAbrir()" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          <span>Assistente <span style="font-size:9px;opacity:.6">VOZ</span></span>
+        </button>
         <button class="navitem sub" id="nav-admin-assistente" onclick="pg('admin-assistente')" style="display:none">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span>Assistente <span style="font-size:9px;opacity:.6">DEMO</span></span>
@@ -1249,7 +1253,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.904';
+const APP_VERSION='v1.0.905';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1765,6 +1769,7 @@ async function loadPermissoes(){
   // Fica ANTES dos returns antecipados de portaria e admin — senao
   // justamente o admin (que sai cedo) nunca veria o botao.
   // A tela tambem se recusa a renderizar para qualquer outro (rAssist).
+  var _asNavM=ge('nav-asm'); if(_asNavM)_asNavM.style.display=asLiberado()?'':'none';
   var _asNav=ge('nav-admin-assistente');
   if(_asNav)_asNav.style.display=asLiberado()?'':'none';
 
@@ -5291,13 +5296,13 @@ async function asChamarAPI(msgs){
   if(!r.ok)throw new Error((d&&d.error&&d.error.message)||('HTTP '+r.status));
   return d;
 }
-async function asPerguntar(){
+async function asPerguntar(txtDireto){
   if(asBusy)return;
-  const inp=ge('as-inp');
-  const txt=(inp?.value||'').trim();
+  const inp=ge('as-inp')||ge('asm-inp');
+  const txt=String(txtDireto!=null?txtDireto:(inp?.value||'')).trim();
   if(!txt)return;
   if(asMotor==='api' && !asKey){showToast('Cole a chave da API ou volte para o motor Local','amber');return;}
-  inp.value='';
+  if(inp)inp.value='';
   asBusy=true;
   asMsgs.push({role:'user',content:txt});
   asPintar();
@@ -5352,7 +5357,86 @@ function asTexto(m){
   return m.content.filter(b=>b.type==='text').map(b=>b.text).join('\n');
 }
 function asHora(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+// ═══════════════════════════════════════════════════════════════════
+//  ASSISTENTE · TELA DE CELULAR COM VOZ
+//  Mesmo motor, mesmas funções — só a casca: balões, microfone, fala.
+// ═══════════════════════════════════════════════════════════════════
+var _asmAberto=false, _asmRec=null, _asmOuvindo=false, _asmFalar=true, _asmUltFalado=-1;
+function asmAbrir(){
+  if(!asLiberado()){showToast('Assistente restrito nesta versão.','amber');return;}
+  _asmAberto=true;
+  var old=document.getElementById('asm-modal'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='asm-modal';
+  ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#0A2540;display:flex;flex-direction:column';
+  ov.innerHTML=
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;color:#fff;padding-top:max(14px,env(safe-area-inset-top))">'
+    +'<div><div style="font-size:11px;opacity:.7;letter-spacing:.6px">VERUS</div><div style="font-size:16px;font-weight:700">Assistente</div></div>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<button onclick="asmToggleFala()" id="asm-fala-btn" title="Ler as respostas em voz alta" style="background:rgba(255,255,255,.12);border:none;color:#fff;border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer">🔊 voz</button>'
+    +'<button onclick="asmFechar()" style="background:none;border:none;color:#fff;font-size:26px;line-height:1;cursor:pointer;opacity:.85">&times;</button></div></div>'
+    +'<div id="asm-msgs" style="flex:1;overflow:auto;background:#f3f5f8;padding:14px 12px;border-radius:18px 18px 0 0"></div>'
+    +'<div style="background:#fff;padding:10px 12px;padding-bottom:max(12px,env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;border-top:1px solid #e2e5e9">'
+    +'<button onclick="asmMic()" id="asm-mic" title="Falar" style="flex:none;width:52px;height:52px;border-radius:50%;border:none;background:#0A2540;color:#fff;font-size:22px;cursor:pointer">🎤</button>'
+    +'<input id="asm-inp" placeholder="Pergunte… ou toque no microfone" autocomplete="off" style="flex:1;font-size:16px;padding:14px;border:1px solid #e2e5e9;border-radius:26px;outline:none" onkeydown="if(event.key===\'Enter\'){event.preventDefault();asPerguntar();}">'
+    +'<button onclick="asPerguntar()" style="flex:none;width:52px;height:52px;border-radius:50%;border:none;background:#1e5f82;color:#fff;font-size:20px;cursor:pointer">➤</button></div>';
+  document.body.appendChild(ov);
+  if(!asMsgs.length){
+    asMsgs.push({role:'assistant',content:[{type:'text',text:asSaudacaoHora()+(asNome1()?(', '+asNome1()):'')+'. Pode perguntar — por texto ou pelo microfone.\n\nExemplos: "quanto temos a receber?", "o que está vencido?", "como fica o caixa em 30 dias?", "quantos pallets da Usiquímica?"'}]});
+  }
+  _asmUltFalado=asMsgs.length-1;      // não lê a saudação
+  asPintar();
+  setTimeout(function(){var i=ge('asm-inp');if(i)i.focus();},80);
+}
+function asmFechar(){ _asmAberto=false; asmPararFala(); if(_asmRec){try{_asmRec.stop();}catch(e){}} var m=document.getElementById('asm-modal'); if(m)m.remove(); }
+function asmToggleFala(){ _asmFalar=!_asmFalar; var b=ge('asm-fala-btn'); if(b)b.textContent=_asmFalar?'🔊 voz':'🔇 mudo'; if(!_asmFalar)asmPararFala(); }
+function asmPararFala(){ try{ if(window.speechSynthesis)window.speechSynthesis.cancel(); }catch(e){} }
+function asmFalar(texto){
+  if(!_asmFalar||!window.speechSynthesis)return;
+  asmPararFala();
+  var limpo=String(texto||'').replace(/[•⚠➤🔊🎤]/g,'').replace(/R\$\s?/g,'').replace(/\s+/g,' ').trim();
+  var u=new SpeechSynthesisUtterance(limpo); u.lang='pt-BR'; u.rate=1.02;
+  var vozes=window.speechSynthesis.getVoices()||[];
+  var pt=vozes.find(function(v){return /pt[-_]BR/i.test(v.lang)&&/luciana|felipe|francisca|google/i.test(v.name);})||vozes.find(function(v){return /pt[-_]BR/i.test(v.lang);});
+  if(pt)u.voice=pt;
+  window.speechSynthesis.speak(u);
+}
+function asmMic(){
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){showToast('Este navegador não tem reconhecimento de voz. Use o microfone do teclado.','amber');var i=ge('asm-inp');if(i)i.focus();return;}
+  if(_asmOuvindo){try{_asmRec.stop();}catch(e){}return;}
+  asmPararFala();
+  var rec=new SR(); _asmRec=rec;
+  rec.lang='pt-BR'; rec.interimResults=true; rec.maxAlternatives=1; rec.continuous=false;
+  var btn=ge('asm-mic'), inp=ge('asm-inp');
+  rec.onstart=function(){_asmOuvindo=true;if(btn){btn.style.background='#c2410c';btn.textContent='●';}if(inp)inp.placeholder='Ouvindo…';};
+  rec.onresult=function(ev){
+    var t='';for(var i=ev.resultIndex;i<ev.results.length;i++)t+=ev.results[i][0].transcript;
+    if(inp)inp.value=t;
+    if(ev.results[ev.results.length-1].isFinal){ try{rec.stop();}catch(e){} setTimeout(function(){asPerguntar(t);},120); }
+  };
+  rec.onerror=function(ev){ if(ev.error!=='aborted'&&ev.error!=='no-speech')showToast('Voz: '+ev.error,'amber'); };
+  rec.onend=function(){_asmOuvindo=false;if(btn){btn.style.background='#0A2540';btn.textContent='🎤';}if(inp)inp.placeholder='Pergunte… ou toque no microfone';};
+  try{rec.start();}catch(e){showToast('Não consegui abrir o microfone.','amber');}
+}
+function asmPintar(ferramentaEmUso){
+  var box=ge('asm-msgs'); if(!box)return;
+  var h='';
+  asMsgs.forEach(function(m){
+    var t=asTexto(m); if(!t)return;
+    var eu=(m.role==='user');
+    h+='<div style="display:flex;justify-content:'+(eu?'flex-end':'flex-start')+';margin-bottom:10px">'
+      +'<div style="max-width:84%;padding:11px 14px;border-radius:18px;'+(eu?'border-bottom-right-radius:6px;background:#0A2540;color:#fff':'border-bottom-left-radius:6px;background:#fff;color:#111;border:1px solid #e2e5e9')+';font-size:15px;line-height:1.45;white-space:pre-wrap">'+wEsc(t)+'</div></div>';
+  });
+  if(asBusy)h+='<div style="display:flex;justify-content:flex-start;margin-bottom:10px"><div style="padding:11px 16px;border-radius:18px;background:#fff;border:1px solid #e2e5e9;color:#888;font-size:14px">'+(ferramentaEmUso?('consultando '+ferramentaEmUso+'…'):'…')+'</div></div>';
+  box.innerHTML=h; box.scrollTop=box.scrollHeight;
+  // fala a última resposta do assistente, uma vez só
+  if(!asBusy){
+    var idx=asMsgs.length-1;
+    if(idx>_asmUltFalado&&asMsgs[idx]&&asMsgs[idx].role==='assistant'){ _asmUltFalado=idx; asmFalar(asTexto(asMsgs[idx])); }
+  }
+}
 function asPintar(ferramentaEmUso){
+  if(_asmAberto){ asmPintar(ferramentaEmUso); }
   const box=ge('as-chat');
   if(!box)return;
   let h='';
