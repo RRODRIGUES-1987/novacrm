@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.902 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.904 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.902';
+const APP_VERSION='v1.0.904';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4857,6 +4857,89 @@ const AS_TOOLS=[
       return {encontrado:true,clientes:arr.map(c=>({nome:c.nome,cnpj:c.cpf_cnpj||null,
         cidade:c.cidade||null,estado:c.estado||null,ativo:c.ativo!==false}))};
     }
+  },
+  // ── FINANCEIRO E ESTOQUE (v1.0.904) — a "graça dos acionistas" ──
+  {
+    name:'contas_receber_aberto',
+    description:'Títulos a receber em aberto: total, vencido x a vencer, e por cliente. Use para "quanto temos a receber", "quem nos deve", "o que está vencido", "quanto a Unilever deve".',
+    input_schema:{type:'object',properties:{
+      cliente:{type:'string',description:'Nome ou parte do nome do cliente. Omita para o total.'},
+      apenas_vencidos:{type:'boolean'},
+      dias:{type:'integer',description:'Só o que vence nos próximos N dias.'}
+    }},
+    run:async(a)=>{
+      const cid=asCid(), hoje=asHoje().toISOString().slice(0,10);
+      let arr=(contasReceber||[]).filter(x=>x.company_id===cid&&!['pago','pago_atraso','cancelado'].includes(x.status));
+      if(a&&a.cliente){const q=String(a.cliente).toLowerCase();arr=arr.filter(x=>String(x.cliente_nome||'').toLowerCase().includes(q));}
+      if(a&&a.apenas_vencidos)arr=arr.filter(x=>(x.vencimento||'')<hoje);
+      if(a&&a.dias){const lim=new Date(asHoje().getTime()+a.dias*86400000).toISOString().slice(0,10);arr=arr.filter(x=>(x.vencimento||'')<=lim);}
+      const som=l=>l.reduce((t,x)=>t+asNum(x.valor),0);
+      const venc=arr.filter(x=>(x.vencimento||'')<hoje), avenc=arr.filter(x=>(x.vencimento||'')>=hoje);
+      const porCli={}; arr.forEach(x=>{const k=x.cliente_nome||'—';porCli[k]=(porCli[k]||0)+asNum(x.valor);});
+      const top=Object.keys(porCli).map(k=>({cliente:k,valor:porCli[k]})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+      return {titulos:arr.length,total:som(arr),vencido:som(venc),vencidos_qtd:venc.length,a_vencer:som(avenc),por_cliente:top,filtro_cliente:(a&&a.cliente)||null};
+    }
+  },
+  {
+    name:'contas_pagar_aberto',
+    description:'Títulos a pagar em aberto: total, vencido x a vencer, e por beneficiário. Use para "quanto temos a pagar", "o que vence essa semana", "quanto devemos para X".',
+    input_schema:{type:'object',properties:{
+      beneficiario:{type:'string'},
+      apenas_vencidos:{type:'boolean'},
+      dias:{type:'integer',description:'Só o que vence nos próximos N dias.'}
+    }},
+    run:async(a)=>{
+      const cid=asCid(), hoje=asHoje().toISOString().slice(0,10);
+      let arr=(contasPagar||[]).filter(x=>x.company_id===cid&&x.status==='pendente');
+      if(a&&a.beneficiario){const q=String(a.beneficiario).toLowerCase();arr=arr.filter(x=>String(x.fornecedor_nome||'').toLowerCase().includes(q));}
+      if(a&&a.apenas_vencidos)arr=arr.filter(x=>(x.vencimento||'')<hoje);
+      if(a&&a.dias){const lim=new Date(asHoje().getTime()+a.dias*86400000).toISOString().slice(0,10);arr=arr.filter(x=>(x.vencimento||'')<=lim);}
+      const som=l=>l.reduce((t,x)=>t+asNum(x.valor),0);
+      const venc=arr.filter(x=>(x.vencimento||'')<hoje), avenc=arr.filter(x=>(x.vencimento||'')>=hoje);
+      const por={}; arr.forEach(x=>{const k=x.fornecedor_nome||'—';por[k]=(por[k]||0)+asNum(x.valor);});
+      const top=Object.keys(por).map(k=>({beneficiario:k,valor:por[k]})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+      return {titulos:arr.length,total:som(arr),vencido:som(venc),vencidos_qtd:venc.length,a_vencer:som(avenc),por_beneficiario:top};
+    }
+  },
+  {
+    name:'caixa_projetado',
+    description:'Receber menos pagar nos próximos N dias (só títulos em aberto). Use para "como fica o caixa", "saldo projetado", "vamos fechar o mês".',
+    input_schema:{type:'object',properties:{ dias:{type:'integer',description:'Horizonte em dias. Padrão 30.'} }},
+    run:async(a)=>{
+      const cid=asCid(), n=(a&&a.dias)||30;
+      const lim=new Date(asHoje().getTime()+n*86400000).toISOString().slice(0,10);
+      const som=l=>l.reduce((t,x)=>t+asNum(x.valor),0);
+      const rec=(contasReceber||[]).filter(x=>x.company_id===cid&&!['pago','pago_atraso','cancelado'].includes(x.status)&&(x.vencimento||'')<=lim);
+      const pag=(contasPagar||[]).filter(x=>x.company_id===cid&&x.status==='pendente'&&(x.vencimento||'')<=lim);
+      return {dias:n,a_receber:som(rec),a_pagar:som(pag),saldo:som(rec)-som(pag),titulos_receber:rec.length,titulos_pagar:pag.length};
+    }
+  },
+  {
+    name:'estoque_posicao',
+    description:'Posição de estoque do WMS: pallets e unidades por depositante, e por produto se informado. Use para "quantos pallets da Usiquimica", "tem Bloody Mary em estoque", "posição de estoque".',
+    input_schema:{type:'object',properties:{
+      depositante:{type:'string',description:'Nome ou parte.'},
+      produto:{type:'string',description:'SKU ou parte da descrição.'}
+    }},
+    run:async(a)=>{
+      const cid=asCid();
+      let pal=(wmsPallets||[]).filter(p=>p.company_id===cid&&p.status!=='expedido'&&p.status!=='cancelado');
+      let cliIds=null;
+      if(a&&a.depositante){const q=String(a.depositante).toLowerCase();
+        cliIds=new Set((clientes||[]).filter(c=>String(c.nome||'').toLowerCase().includes(q)).map(c=>c.id));
+        pal=pal.filter(p=>cliIds.has(p.cliente_id));}
+      const palIds=new Set(pal.map(p=>p.id));
+      let itens=(wmsPalletItens||[]).filter(i=>palIds.has(i.pallet_id));
+      if(a&&a.produto){const q=String(a.produto).toLowerCase();
+        const prodIds=new Set((wmsProdutos||[]).filter(pr=>String(pr.sku||'').toLowerCase().includes(q)||String(pr.descricao||'').toLowerCase().includes(q)).map(pr=>pr.id));
+        itens=itens.filter(i=>prodIds.has(i.produto_id));}
+      const un=itens.reduce((t,i)=>t+asNum(i.quantidade||i.qtd),0);
+      const porDep={}; pal.forEach(p=>{const c=(clientes||[]).find(x=>x.id===p.cliente_id);const k=(c&&c.nome)||'—';porDep[k]=(porDep[k]||0)+1;});
+      const porProd={}; itens.forEach(i=>{const pr=(wmsProdutos||[]).find(x=>x.id===i.produto_id);const k=pr?(pr.sku+' '+String(pr.descricao||'').slice(0,30)):'—';porProd[k]=(porProd[k]||0)+asNum(i.quantidade||i.qtd);});
+      const topProd=Object.keys(porProd).map(k=>({produto:k,unidades:porProd[k]})).sort((a,b)=>b.unidades-a.unidades).slice(0,8);
+      const palComItem=new Set(itens.map(i=>i.pallet_id)).size;
+      return {pallets:(a&&a.produto)?palComItem:pal.length,unidades:un,por_depositante:Object.keys(porDep).map(k=>({depositante:k,pallets:porDep[k]})).sort((a,b)=>b.pallets-a.pallets),por_produto:topProd,filtro:{depositante:(a&&a.depositante)||null,produto:(a&&a.produto)||null}};
+    }
   }
 ];
 
@@ -4931,7 +5014,23 @@ function asIntent(txt){
     const n=asNomeDepois(txt);
     return {tool:'tarefas_da_equipe',args:{responsavel:n||undefined,apenas_atrasadas:/atras|venc/.test(t)}};
   }
-  if(/fatur|receita|faturamos|faturou|a receber|cobran/.test(t)){
+  if(/caixa|saldo projetad|fluxo/.test(t)){
+    const dm=t.match(/(\d+)\s*dias/); return {tool:'caixa_projetado',args:{dias:dm?parseInt(dm[1]):30}};
+  }
+  if(/a receber|nos deve|devendo|receb[ií]vel|em aberto.*(cliente|receber)|inadimpl/.test(t)){
+    const n=asNomeDepois(txt); const dm=t.match(/(\d+)\s*dias/);
+    return {tool:'contas_receber_aberto',args:{cliente:n||undefined,apenas_vencidos:/vencid|atras|inadimpl/.test(t),dias:dm?parseInt(dm[1]):undefined}};
+  }
+  if(/a pagar|devemos|pagar|contas? a pagar|fornecedor.*(aberto|pagar)/.test(t)&&!/fatur/.test(t)){
+    const n=asNomeDepois(txt); const dm=t.match(/(\d+)\s*dias/);
+    return {tool:'contas_pagar_aberto',args:{beneficiario:n||undefined,apenas_vencidos:/vencid|atras/.test(t),dias:dm?parseInt(dm[1]):(/semana/.test(t)?7:undefined)}};
+  }
+  if(/estoque|pallet|palete|posi[cç][aã]o de estoque|tem .* em estoque|quantos? .* (temos|tem)/.test(t)){
+    const n=asNomeDepois(txt);
+    const dep=(clientes||[]).find(c=>n&&String(c.nome||'').toLowerCase().includes(n.toLowerCase()));
+    return {tool:'estoque_posicao',args:dep?{depositante:n}:(n?{produto:n}:{})};
+  }
+  if(/fatur|receita|faturamos|faturou|cobran/.test(t)){
     const m=asMes(t);
     const args=m?{de:m.de,ate:m.ate}:{};
     if(/vencid|atras/.test(t))                       args.situacao='vencidas';
@@ -4956,6 +5055,32 @@ function asIntent(txt){
 function asPlural(n,um,varios){ return n+' '+(n===1?um:varios); }
 function asRespostaLocal(tool,d){
   if(d && d.erro) return 'Não consegui consultar: '+d.erro;
+  if(tool==='contas_receber_aberto'){
+    if(!d.titulos) return d.filtro_cliente?('Nada em aberto de '+d.filtro_cliente+'.'):'Nada em aberto a receber.';
+    let r=(d.filtro_cliente?(d.filtro_cliente+' deve '):'A receber em aberto: ')+asBRL(d.total)+' em '+asPlural(d.titulos,'título','títulos')+'.';
+    if(d.vencido>0) r+='\n\n⚠ Vencido: '+asBRL(d.vencido)+' ('+asPlural(d.vencidos_qtd,'título','títulos')+'). A vencer: '+asBRL(d.a_vencer)+'.';
+    if(!d.filtro_cliente&&d.por_cliente&&d.por_cliente.length) r+='\n\nMaiores:\n'+d.por_cliente.slice(0,5).map(x=>'• '+x.cliente+' — '+asBRL(x.valor)).join('\n');
+    return r;
+  }
+  if(tool==='contas_pagar_aberto'){
+    if(!d.titulos) return 'Nada em aberto a pagar.';
+    let r='A pagar em aberto: '+asBRL(d.total)+' em '+asPlural(d.titulos,'título','títulos')+'.';
+    if(d.vencido>0) r+='\n\n⚠ Vencido: '+asBRL(d.vencido)+'. A vencer: '+asBRL(d.a_vencer)+'.';
+    if(d.por_beneficiario&&d.por_beneficiario.length) r+='\n\nMaiores:\n'+d.por_beneficiario.slice(0,5).map(x=>'• '+x.beneficiario+' — '+asBRL(x.valor)).join('\n');
+    return r;
+  }
+  if(tool==='caixa_projetado'){
+    const sinal=d.saldo>=0?'positivo':'negativo';
+    return 'Próximos '+d.dias+' dias: a receber '+asBRL(d.a_receber)+' e a pagar '+asBRL(d.a_pagar)+'.\n\nSaldo projetado '+sinal+': '+asBRL(d.saldo)+'.';
+  }
+  if(tool==='estoque_posicao'){
+    const f=d.filtro||{};
+    if(!d.pallets&&!d.unidades) return 'Não encontrei estoque'+(f.depositante?(' de '+f.depositante):'')+(f.produto?(' para "'+f.produto+'"'):'')+'.';
+    let r=asPlural(d.pallets,'pallet','pallets')+(d.unidades?(' · '+d.unidades.toLocaleString('pt-BR')+' unidades'):'')+(f.depositante?(' de '+f.depositante):'')+(f.produto?(' de "'+f.produto+'"'):'')+'.';
+    if(!f.depositante&&d.por_depositante&&d.por_depositante.length>1) r+='\n\nPor depositante:\n'+d.por_depositante.slice(0,6).map(x=>'• '+x.depositante+' — '+asPlural(x.pallets,'pallet','pallets')).join('\n');
+    if(f.depositante&&!f.produto&&d.por_produto&&d.por_produto.length) r+='\n\nMaiores volumes:\n'+d.por_produto.slice(0,5).map(x=>'• '+x.produto+' — '+x.unidades.toLocaleString('pt-BR')).join('\n');
+    return r;
+  }
   if(tool==='patio_agora'){
     const onde=d.unidade&&d.unidade!=='todas as unidades'?(' em '+d.unidade):'';
     if(!d.veiculos_no_patio) return 'Pátio'+onde+' está vazio agora.';
@@ -37582,6 +37707,17 @@ async function rgaSalvar(){
     _rga.edit=null; showToast('Regra salva.','green'); render();
   }catch(err){ showToast('Erro ao salvar: '+(err.message||err),'red'); }
 }
+// Liga/desliga sem apagar: "por uns dias não quero receber nessa zona".
+async function rgaToggleAtivo(id){
+  var r=(wmsRegrasArm||[]).find(function(x){return x.id===id;}); if(!r)return;
+  var novo=(r.ativo===false);
+  try{
+    await dbUpdate('wms_regras_armazenagem',id,{ativo:novo});
+    r.ativo=novo;
+    showToast('Regra "'+r.nome+'" '+(novo?'ativada':'desativada')+'.',novo?'green':'amber');
+    render();
+  }catch(e){showToast('Erro: '+(e.message||e),'red');}
+}
 async function rgaExcluir(id){
   if(!confirm('Excluir esta regra? As faixas e atribuições vão junto.'))return;
   try{
@@ -37646,7 +37782,7 @@ function rWmsRegrasArm(){
     +'<div><label class="fl">Depositante</label><select class="fi" style="width:280px" onchange="rgaSetCli(this.value)">'+opts+'</select></div>'
     +'<button class="btn btn-p" onclick="rgaNova()">+ Nova regra</button></div>'
     +'<div style="font-size:12px;color:var(--text2);margin-bottom:12px">O endereçamento tenta a regra de <b>maior peso</b>; sem vaga, desce para a próxima. Deixe uma regra de peso baixo cobrindo o armazém todo para o pallet nunca ficar sem destino. Peso, altura e capacidade do endereço mandam sempre por cima.</div>'
-    +(lista.length?('<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff"><table class="tgtbl" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th class="nos" style="width:60px">Peso</th><th class="nos">Regra</th><th class="nos">Faixas</th><th class="nos">Aplica-se a</th><th class="nos" style="width:100px"></th></tr></thead><tbody>'
+    +(lista.length?('<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff"><table class="tgtbl" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th class="nos" style="width:60px">Peso</th><th class="nos">Regra</th><th class="nos">Faixas</th><th class="nos">Aplica-se a</th><th class="nos" style="width:190px"></th></tr></thead><tbody>'
       +lista.map(function(r){
         var fx=(wmsRegraFaixas||[]).filter(function(f){return f.regra_id===r.id;});
         var al=(wmsRegraItens||[]).filter(function(x){return x.regra_id===r.id;});
@@ -37658,8 +37794,11 @@ function rWmsRegrasArm(){
           +'<td><b>'+wEsc(r.nome||'')+'</b>'+(r.ativo===false?' <span style="font-size:10px;color:var(--text3)">(inativa)</span>':'')+'</td>'
           +'<td style="font-size:11.5px;color:var(--text2)">'+(fx.length?fx.map(rgaFaixaTxt).join('<br>'):'armazém todo')+'</td>'
           +'<td style="font-size:11.5px">'+alvo+'</td>'
-          +'<td><span onclick="rgaEditar(\''+r.id+'\')" style="cursor:pointer;font-size:11.5px;color:var(--blue-text)">editar</span> · '
-          +'<span onclick="rgaExcluir(\''+r.id+'\')" style="cursor:pointer;font-size:11.5px;color:#9b1c1c">excluir</span></td></tr>';
+          +'<td style="white-space:nowrap">'
+          +'<button class="btn btn-sm" title="'+(r.ativo===false?'Ativar':'Desativar temporariamente — a regra some da cascata, mas fica cadastrada')+'" onclick="rgaToggleAtivo(\''+r.id+'\')" style="padding:4px 9px;margin-right:4px">'+(r.ativo===false?'▶ Ativar':'⏸ Desativar')+'</button>'
+          +'<button class="btn btn-sm" title="Editar" onclick="rgaEditar(\''+r.id+'\')" style="padding:4px 9px;margin-right:4px">✏</button>'
+          +'<button class="btn btn-sm" title="Excluir" onclick="rgaExcluir(\''+r.id+'\')" style="padding:4px 9px;color:#9b1c1c">🗑</button>'
+          +'</td></tr>';
       }).join('')+'</tbody></table></div>')
       :'<div style="padding:26px;text-align:center;color:var(--text3);font-size:13px;background:#fff;border:1px solid var(--border);border-radius:12px">Nenhuma regra cadastrada. Sem regras, o endereçamento usa o armazém todo (comportamento de sempre).</div>')
     +'</div>';
