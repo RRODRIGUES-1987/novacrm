@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.899 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.900 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.899';
+const APP_VERSION='v1.0.900';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -28600,6 +28600,7 @@ async function invEncerrarAbrir(){
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">'
         +'<button class="btn btn-sm" onclick="invEncTermo()">&#128196; Termo (PDF)</button>'
         +'<button class="btn btn-sm" onclick="invEncDePara()">&#128209; Caderno de inventario (Excel)</button>'
+        +'<button class="btn btn-sm btn-p" onclick="invEncResultado()">&#9989; Resultado (planilha de saldo apurada)</button>'
       +'</div>'
       +footer
     +'</div></div>';
@@ -28671,6 +28672,64 @@ async function invEncDePara(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data2), 'Resumo dos itens');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data3), 'Fichas e acoes');
   XLSX.writeFile(wb, 'CadernoInventario_'+invEncNum()+'.xlsx');
+}
+// ── RESULTADO · planilha no MESMO layout da entrada, com o apontamento ──
+// Endereço · Cód. Produto · Saldo Total (sistema) · Contado · Situação · Encontrado
+// Situação: BATEU · DIVERGÊNCIA · VAZIO OK · SOBRA (produto não previsto)
+//           · FALTA (previsto e não encontrado) · NÃO CONTADO
+async function invEncResultado(){
+  var ctx=invEncCtx; if(!ctx)return;
+  if(typeof showToast==='function')showToast('Gerando planilha de resultado...','blue');
+  var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+  var fmt=function(n){return (n==null||n==='')?'':Math.round(Number(n)*1000)/1000;};
+  // agrupa por endereço para montar o "encontrado no local"
+  var porEnd={};
+  ctx.rows.forEach(function(r){
+    var e=r.endereco||''; (porEnd[e]=porEnd[e]||[]).push(r);
+  });
+  var linhas=[];
+  Object.keys(porEnd).sort().forEach(function(e){
+    var rs=porEnd[e];
+    // o que foi de fato encontrado nesta posição (apurado > 0)
+    var achou=rs.filter(function(r){return r.apurado!=null&&Number(r.apurado)>0;})
+                .map(function(r){return (r.cod||'?')+' x'+fmt(r.apurado);}).join(' + ');
+    var contou=rs.some(function(r){return r.apurado!=null;});
+    rs.forEach(function(r){
+      var sis=Number(r.sistema||0), apu=(r.apurado==null?null:Number(r.apurado));
+      var sit;
+      if(!contou)sit='NÃO CONTADO';
+      else if(!r.cod&&sis===0)sit=(apu===0||apu==null)?'VAZIO OK':'SOBRA';
+      else if(apu==null)sit='NÃO CONTADO';
+      else if(Math.abs(apu-sis)<0.001)sit='BATEU';
+      else if(sis===0&&apu>0)sit='SOBRA';
+      else if(sis>0&&apu===0)sit='FALTA';
+      else sit='DIVERGÊNCIA';
+      linhas.push({
+        'Endereço':e,
+        'Cód. Produto':(r.cod||''),
+        'Saldo Total':fmt(sis),
+        'Contado':(apu==null?'':fmt(apu)),
+        'Situação':sit,
+        'Encontrado no local':(sit==='BATEU'||sit==='VAZIO OK'||sit==='NÃO CONTADO')?'':(achou||'vazio')
+      });
+    });
+  });
+  var tot=linhas.length, bateu=linhas.filter(function(l){return l['Situação']==='BATEU'||l['Situação']==='VAZIO OK';}).length;
+  var resumo=[
+    {'Indicador':'Linhas','Valor':tot},
+    {'Indicador':'Bateram (inclui vazio ok)','Valor':bateu},
+    {'Indicador':'Divergências','Valor':linhas.filter(function(l){return l['Situação']==='DIVERGÊNCIA';}).length},
+    {'Indicador':'Faltas','Valor':linhas.filter(function(l){return l['Situação']==='FALTA';}).length},
+    {'Indicador':'Sobras','Valor':linhas.filter(function(l){return l['Situação']==='SOBRA';}).length},
+    {'Indicador':'Não contados','Valor':linhas.filter(function(l){return l['Situação']==='NÃO CONTADO';}).length},
+    {'Indicador':'Acuracidade (%)','Valor':tot?Math.round(bateu/tot*1000)/10:0}
+  ];
+  var wb=XLSX.utils.book_new();
+  var ws=XLSX.utils.json_to_sheet(linhas);
+  ws['!cols']=[{wch:12},{wch:14},{wch:12},{wch:10},{wch:14},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws,'Resultado');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(resumo),'Resumo');
+  XLSX.writeFile(wb,'Resultado_'+invEncNum()+'.xlsx');
 }
 async function invEncFaltasSobras(){
   var ctx=invEncCtx; if(!ctx)return; if(typeof showToast==='function')showToast('Gerando faltas e sobras...','blue');
