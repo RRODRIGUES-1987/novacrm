@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.900 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.901 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1249,7 +1249,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.900';
+const APP_VERSION='v1.0.901';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15358,6 +15358,123 @@ function cpDuplicidades(){
     return (b.reduce(function(t,x){return t+Number(x.valor||0);},0))
          - (a.reduce(function(t,x){return t+Number(x.valor||0);},0));});
 }
+// ═══════════════════════════════════════════════════════════════════
+//  CONTAS A PAGAR · RECLASSIFICAÇÃO CONTÁBIL EM LOTE
+//  Filtra → marca → escolhe a conta nova → aplica com rastro.
+//  Substitui o UPDATE na mão, com trilha de auditoria.
+// ═══════════════════════════════════════════════════════════════════
+var _cpRc={busca:'',forn:'',conta:'',status:'',de:'',ate:'',sel:{}};
+function cpRcSet(k,v){_cpRc[k]=v;cpRcRender();}
+function cpRcLista(){
+  var cid=company?.id;
+  var l=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status!=='cancelado';});
+  if(_cpRc.forn)l=l.filter(function(x){return x.fornecedor_id===_cpRc.forn;});
+  if(_cpRc.conta)l=l.filter(function(x){return String(x.dfc_conta_id||'')===_cpRc.conta;});
+  if(_cpRc.status)l=l.filter(function(x){return x.status===_cpRc.status;});
+  if(_cpRc.de)l=l.filter(function(x){return (x.vencimento||'')>=_cpRc.de;});
+  if(_cpRc.ate)l=l.filter(function(x){return (x.vencimento||'')<=_cpRc.ate;});
+  if(_cpRc.busca){var q=_cpRc.busca.toLowerCase();
+    l=l.filter(function(x){return [x.fornecedor_nome,x.descricao,x.nf_numero,x.categoria,x.agrupamento].join(' ').toLowerCase().indexOf(q)>=0;});}
+  return l.sort(function(a,b){return String(a.vencimento||'').localeCompare(String(b.vencimento||''));});
+}
+function cpRcToggle(id){if(_cpRc.sel[id])delete _cpRc.sel[id];else _cpRc.sel[id]=1;cpRcRender();}
+function cpRcTodos(){cpRcLista().forEach(function(x){_cpRc.sel[x.id]=1;});cpRcRender();}
+function cpRcLimpar(){_cpRc.sel={};cpRcRender();}
+function cpRcFillContas(){
+  var bid=ge('rc-bloco')?ge('rc-bloco').value:'', sc=ge('rc-conta'); if(!sc)return;
+  var lista=(dfcContas||[]).filter(function(c){return c.bloco_id===bid&&c.ativo!==false;}).sort(function(a,b){return (a.ordem||0)-(b.ordem||0);});
+  sc.innerHTML='<option value="">Selecione…</option>'+lista.map(function(c){return '<option value="'+c.id+'">'+wEsc(c.nome)+'</option>';}).join('');
+}
+function cpRcModal(){
+  var ov=document.createElement('div');ov.className='modal-overlay';ov.id='cp-rc-modal';
+  ov.innerHTML='<div class="modal" style="max-width:980px;width:96%"><div id="cp-rc-body"></div></div>';
+  document.body.appendChild(ov); cpRcRender();
+}
+function cpRcFechar(){var m=document.getElementById('cp-rc-modal');if(m)m.remove();_cpRc.sel={};}
+function cpRcRender(){
+  var b=ge('cp-rc-body'); if(!b)return;
+  var cid=company?.id;
+  var lista=cpRcLista();
+  var ids=Object.keys(_cpRc.sel).filter(function(k){return _cpRc.sel[k];});
+  var selRows=(contasPagar||[]).filter(function(x){return _cpRc.sel[x.id];});
+  var totSel=selRows.reduce(function(t,x){return t+Number(x.valor||0);},0);
+  var forns={};(contasPagar||[]).forEach(function(x){if(x.company_id===cid&&x.fornecedor_id)forns[x.fornecedor_id]=x.fornecedor_nome||'';});
+  var optForn='<option value="">todos</option>'+Object.keys(forns).sort(function(a,b){return forns[a].localeCompare(forns[b]);})
+    .map(function(id){return '<option value="'+id+'"'+(_cpRc.forn===id?' selected':'')+'>'+wEsc(forns[id])+'</option>';}).join('');
+  var contasUso={};(contasPagar||[]).forEach(function(x){if(x.company_id===cid&&x.dfc_conta_id)contasUso[x.dfc_conta_id]=1;});
+  var optConta='<option value="">todas</option>'+(dfcContas||[]).filter(function(c){return contasUso[c.id];})
+    .sort(function(a,b){return String(a.nome).localeCompare(String(b.nome));})
+    .map(function(c){var bl=(dfcBlocos||[]).find(function(x){return x.id===c.bloco_id;});
+      return '<option value="'+c.id+'"'+(_cpRc.conta===c.id?' selected':'')+'>'+wEsc((bl?bl.nome+' › ':'')+c.nome)+'</option>';}).join('');
+  var blocosOpt=(dfcBlocos||[]).filter(function(x){return x.ativo!==false;}).sort(function(a,b){return (a.ordem||0)-(b.ordem||0);})
+    .map(function(x){return '<option value="'+x.id+'">'+wEsc(x.nome)+'</option>';}).join('');
+  b.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    +'<div style="font-size:15px;font-weight:700">Reclassificar contas contábeis</div>'
+    +'<button class="btn btn-sm" onclick="cpRcFechar()">Fechar</button></div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:12px">Filtre, marque os títulos e escolha a conta nova. Cada aplicação grava o rastro (de → para, quem, quando).</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">'
+    +'<div><label class="fl">Beneficiário</label><select class="fi" style="width:220px" onchange="cpRcSet(\'forn\',this.value)">'+optForn+'</select></div>'
+    +'<div><label class="fl">Conta atual</label><select class="fi" style="width:240px" onchange="cpRcSet(\'conta\',this.value)">'+optConta+'</select></div>'
+    +'<div><label class="fl">Status</label><select class="fi" style="width:120px" onchange="cpRcSet(\'status\',this.value)"><option value="">todos</option>'
+      +['pendente','pago','pago_atraso'].map(function(st){return '<option value="'+st+'"'+(_cpRc.status===st?' selected':'')+'>'+st+'</option>';}).join('')+'</select></div>'
+    +'<div><label class="fl">Venc. de</label><input class="fi" type="date" style="width:140px" value="'+_cpRc.de+'" onchange="cpRcSet(\'de\',this.value)"></div>'
+    +'<div><label class="fl">até</label><input class="fi" type="date" style="width:140px" value="'+_cpRc.ate+'" onchange="cpRcSet(\'ate\',this.value)"></div>'
+    +'<div style="flex:1;min-width:160px"><label class="fl">Buscar</label><input class="fi" value="'+wEsc(_cpRc.busca)+'" placeholder="descrição, NF…" onchange="cpRcSet(\'busca\',this.value)"></div>'
+    +'<button class="btn btn-sm" onclick="cpRcTodos()">Marcar os '+lista.length+'</button>'
+    +'<button class="btn btn-sm" onclick="cpRcLimpar()">Limpar</button></div>'
+    +'<div style="max-height:34vh;overflow:auto;border:1px solid var(--border);border-radius:10px;background:#fff">'
+    +'<table class="tgtbl" style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr>'
+    +'<th class="nos" style="width:34px"></th><th class="nos" style="width:86px">Venc.</th><th class="nos">Beneficiário</th><th class="nos">Descrição</th>'
+    +'<th class="nos" style="width:200px">Conta atual</th><th class="nos" style="width:100px;text-align:right">Valor</th><th class="nos" style="width:80px">Status</th></tr></thead><tbody>'
+    +lista.slice(0,400).map(function(x){
+      var on=!!_cpRc.sel[x.id];
+      return '<tr'+(on?' style="background:var(--blue-bg)"':'')+'>'
+        +'<td><input type="checkbox"'+(on?' checked':'')+' onchange="cpRcToggle(\''+x.id+'\')" style="width:15px;height:15px;cursor:pointer"></td>'
+        +'<td>'+(x.vencimento?new Date(x.vencimento+'T00:00').toLocaleDateString('pt-BR'):'')+'</td>'
+        +'<td>'+wEsc(x.fornecedor_nome||'')+'</td>'
+        +'<td style="color:var(--text2)">'+wEsc(String(x.descricao||'').slice(0,44))+(x.nf_numero?' <span style="color:var(--text3)">NF '+wEsc(x.nf_numero)+'</span>':'')+'</td>'
+        +'<td style="font-size:11px">'+wEsc((x.agrupamento||'')+' › '+(x.categoria||''))+'</td>'
+        +'<td style="text-align:right">'+fmtV(x.valor)+'</td>'
+        +'<td><span style="font-size:10px;padding:2px 7px;border-radius:20px;background:'+(x.status==='pendente'?'#eef0f3':'#dcfce7')+'">'+x.status+'</span></td></tr>';
+    }).join('')+'</tbody></table>'+(lista.length>400?'<div style="padding:6px 10px;font-size:11px;color:var(--text3)">Mostrando 400 de '+lista.length+' — refine o filtro.</div>':'')+'</div>'
+    +'<div style="margin-top:12px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px">'
+    +'<div style="font-size:12.5px;margin-bottom:8px"><b>'+ids.length+'</b> título(s) marcado(s) · '+fmtV(totSel)+'</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+    +'<div><label class="fl">Grupo</label><select class="fi" id="rc-grupo" style="width:150px"><option value="Despesas">Despesas</option><option value="Receitas">Receitas</option><option value="Acionista">Acionista</option></select></div>'
+    +'<div><label class="fl">Bloco (DFC) novo</label><select class="fi" id="rc-bloco" style="width:220px" onchange="cpRcFillContas()"><option value="">Selecione…</option>'+blocosOpt+'</select></div>'
+    +'<div><label class="fl">Conta (DFC) nova</label><select class="fi" id="rc-conta" style="width:240px"><option value="">Selecione o bloco</option></select></div>'
+    +'<div style="flex:1;min-width:200px"><label class="fl">Motivo</label><input class="fi" id="rc-motivo" placeholder="ex.: lançado na conta errada na migração"></div>'
+    +'<button class="btn btn-p" onclick="cpRcAplicar()"'+(ids.length?'':' disabled style="opacity:.4"')+'>Aplicar em '+ids.length+'</button></div></div>';
+}
+async function cpRcAplicar(){
+  var ids=Object.keys(_cpRc.sel).filter(function(k){return _cpRc.sel[k];});
+  if(!ids.length)return;
+  var contaId=ge('rc-conta')?ge('rc-conta').value:'', blocoId=ge('rc-bloco')?ge('rc-bloco').value:'';
+  var grupo=ge('rc-grupo')?ge('rc-grupo').value:'Despesas', motivo=(ge('rc-motivo')?ge('rc-motivo').value:'').trim();
+  if(!contaId){showToast('Escolha a conta nova.','amber');return;}
+  if(!motivo){showToast('Informe o motivo — ele vai para o rastro.','amber');return;}
+  var conta=(dfcContas||[]).find(function(c){return c.id===contaId;});
+  var bloco=(dfcBlocos||[]).find(function(x){return x.id===blocoId;});
+  if(!confirm('Reclassificar '+ids.length+' título(s) para\n\n  '+grupo+' › '+(bloco?bloco.nome:'')+' › '+(conta?conta.nome:'')+'\n\nEssa ação fica registrada com seu nome.'))return;
+  var cid=company?.id, lote=(crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now());
+  var ok=0,err=0;
+  for(var i=0;i<ids.length;i++){
+    var x=(contasPagar||[]).find(function(y){return y.id===ids[i];}); if(!x)continue;
+    var patch={grupo:grupo,agrupamento:bloco?bloco.nome:'',categoria:conta?conta.nome:'',dfc_conta_id:contaId};
+    try{
+      await dbUpdate('contas_pagar',x.id,patch);
+      try{ await dbInsert('contas_pagar_reclass',{company_id:cid,cp_id:x.id,lote_id:lote,
+        de_conta_id:x.dfc_conta_id||null,de_grupo:x.grupo||null,de_agrupamento:x.agrupamento||null,de_categoria:x.categoria||null,
+        para_conta_id:contaId,para_grupo:grupo,para_agrupamento:patch.agrupamento,para_categoria:patch.categoria,
+        motivo:motivo,usuario_id:cu?.id||null,usuario_nome:(profile&&profile.full_name)||cu?.email||null}); }catch(e2){console.warn('rastro',e2);}
+      Object.assign(x,patch); ok++;
+    }catch(e){err++;}
+  }
+  _cpRc.sel={};
+  showToast(ok+' título(s) reclassificado(s)'+(err?(' · '+err+' com erro'):'')+'.',err?'amber':'green');
+  cpRcRender(); if(curPage==='contas-pagar')render();
+}
+
 function cpDuplicidadesModal(){
   var gr=cpDuplicidades();
   var m=document.createElement('div');m.className='modal-overlay';m.id='cp-dup-modal';
@@ -15747,6 +15864,7 @@ function rCPLista(){
   h+='<select class="fi" onchange="cpLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
   h+='<button onclick="novoTituloCP()" style="padding:8px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Novo título</button>';
   var _nDup=(typeof cpDuplicidades==='function')?cpDuplicidades().length:0;
+  h+='<button onclick="cpRcModal()" title="Trocar a conta contábil de vários títulos de uma vez, com rastro" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text2);cursor:pointer;font-size:13px;margin-left:8px">🔀 Reclassificar</button>';
   h+='<button onclick="cpDuplicidadesModal()" title="Mesmo beneficiário, mesma NF e mesmo vencimento" style="padding:8px 14px;border:1px solid '
     +(_nDup?'#f5b5b5':'var(--border)')+';border-radius:8px;background:'+(_nDup?'#fff6f6':'#fff')+';color:'+(_nDup?'#8a1c1c':'var(--text2)')
     +';cursor:pointer;font-size:13px;margin-left:8px">⚠ Duplicidades'+(_nDup?(' ('+_nDup+')'):'')+'</button>';
