@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.915 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.916 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.915';
+const APP_VERSION='v1.0.916';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -22316,7 +22316,7 @@ function rPortariaPainel(){
     <div style="font-size:12px;color:var(--text2);margin-top:2px">${titulo}</div></div>`;
   const liDentro=(nome,sub,quando)=>`<div class="li" style="cursor:default"><div class="av av1" style="font-size:11px">${ini(nome||'?')}</div><div class="linfo"><div class="lname">${nome||'—'}</div><div class="lsub">${sub}</div></div><div class="lright"><div style="font-size:11px;color:var(--text3)">${quando?'desde '+quando:''}</div></div></div>`;
   let html=`<div style="margin-bottom:16px"><div style="font-size:18px;font-weight:700">Portaria — Painel</div><div style="font-size:12px;color:var(--text3);margin-top:2px;text-transform:capitalize">${unitLabel()} · ${new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}</div></div>`;
-  html+=`<div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-p btn-sm" onclick="wmsChegadaModal()">🚚 Registrar chegada</button><button class="btn btn-p btn-sm" onclick="wmsPrismaPlacaModal()">🔗 Associar prisma à placa</button><button class="btn btn-p btn-sm" onclick="wmsValidarSaidaModal()">📤 Validar saída de carga</button></div>`;
+  html+=`<div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="wmsSaidaModal()" style="border-color:var(--green);color:var(--green-text)">🏁 Registrar saída (termo)</button><button class="btn btn-p btn-sm" onclick="wmsChegadaModal()">🚚 Registrar chegada</button><button class="btn btn-p btn-sm" onclick="wmsPrismaPlacaModal()">🔗 Associar prisma à placa</button><button class="btn btn-p btn-sm" onclick="wmsValidarSaidaModal()">📤 Validar saída de carga</button></div>`;
   html+=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">
     ${card('No local agora',colabDentro.length+visitDentro.length,'var(--green)',"pg('portaria-entradas')")}
     ${card('Veículos em uso',frotaUso.length,'var(--amber-text)',"pg('portaria-entradas')")}
@@ -30328,6 +30328,8 @@ function wmsEntProcessaXml(xml){
   var entregaEl=xml.getElementsByTagName('entrega')[0];
   var entregaCnpj=_soDigitos(entregaEl?_xmlText(entregaEl,'CNPJ'):'');
   var destNome=dest?_xmlText(dest,'xNome'):'';
+  var infAdicEl=xml.getElementsByTagName('infAdic')[0];
+  var infCpl=infAdicEl?_xmlText(infAdicEl,'infCpl'):'';
 
   // CASCATA: emitente → destinatário → entrega.
   // Emitente casou  = remessa direta (o próprio cliente manda a carga).
@@ -30384,7 +30386,7 @@ function wmsEntProcessaXml(xml){
       produto_id:match?match.id:'', casado:!!match, via:via});
   }
   _entImport={emitNome:emitNome,emitCnpj:emitCnpj,destCnpj:destCnpj,destNome:destNome,
-    entregaCnpj:entregaCnpj,origemDep:origemDep,tipoChegada:tipoChegada,
+    entregaCnpj:entregaCnpj,infCpl:infCpl,origemDep:origemDep,tipoChegada:tipoChegada,
     fornNome:fornNome,fornCnpj:fornCnpj,
     nNF:nNF,serie:serie,natOp:natOp,dhEmi:dhEmi,chave:chave,dep:dep||null,unidadeGuess:unidadeGuess,itens:itens};
   _entImportAberto=true;
@@ -30401,7 +30403,9 @@ function wmsRegimeDep(dep){
 function wmsEhArmazemGeral(dep){return wmsRegimeDep(dep)==='armazem_geral';}
 // Campos que a entrada herda do XML — usados no import avulso e no lote
 function wmsEntCamposDoXml(I){
-  var o={tipo_chegada:I.tipoChegada||'remessa_direta',doc_chave:I.chave||null};
+  var o={tipo_chegada:I.tipoChegada||'remessa_direta',doc_chave:I.chave||null,
+         nf_numero:I.nNF||null,dest_cnpj:I.destCnpj||null,dest_nome:I.destNome||null,
+         entrega_cnpj:I.entregaCnpj||null,obs_fiscal:I.infCpl||null};
   if(I.tipoChegada==='compra_terceiro'){
     o.fornecedor_nome=I.fornNome||null; o.fornecedor_cnpj=I.fornCnpj||null;
   }
@@ -31814,6 +31818,7 @@ async function wmsConfEntEncerrar(){
     try{
       if(d && d.status!=='conferido'){ await dbUpdate('wms_entradas',d.id,{status:'conferido'}); d.status='conferido'; }
       await wmsConfEntAtualizaStatus();
+      try{ await wmsTermoEmitir(d); }catch(eT){ console.warn('termo',eT); }
       showToast('Conferência encerrada — documento conferido.','green');
       portClose(); render();
     }catch(e){showToast('Erro ao encerrar: '+(e.message||e),'red');}
@@ -31889,7 +31894,7 @@ function rWmsEntradas_i(){
       +'<td style="padding:9px 11px">'+esc(depNome(e.depositante_id))+'</td>'
       +'<td style="padding:9px 11px;font-size:13px;color:var(--text2)">'+esc(e.remetente||'—')+'</td>'
       +'<td style="padding:9px 11px;font-size:13px">'+esc(e.data_prevista||'—')+'</td>'
-      +'<td style="padding:9px 11px">'+entStatusBadge(e.status)+'</td>'
+      +'<td style="padding:9px 11px">'+entStatusBadge(e.status)+(e.status==='previsto'?' <button class="btn btn-sm" title="Agendar veículo e imprimir o cartão de embarque" onclick="event.stopPropagation();wmsAgendarVeiculo(\''+e.id+'\')" style="padding:2px 7px;font-size:10.5px;margin-left:6px">🎫 Agendar</button>':'')+'</td>'
       +'<td style="padding:9px 11px;text-align:right;font-size:12px;color:var(--text3)">'+esc(e.ref_documento||'')+'</td>'
       +'</tr>';
   }).join('');
@@ -34028,7 +34033,7 @@ function wmsCliTabSaida(c){
           <span style="font-size:12px;color:var(--text2)"><b>Armazém geral</b><br><span style="font-size:11px;color:var(--text3)">Controle fiscal: o recebimento exige <b>NF de cobertura</b>.</span></span></label>
         <label style="display:flex;gap:6px;align-items:flex-start;cursor:pointer;flex:1;min-width:220px">
           <input type="radio" name="cli-regime" value="logistica" ${c.regime_operacao==='logistica'?'checked':''} style="margin-top:3px">
-          <span style="font-size:12px;color:var(--text2)"><b>Operação logística</b><br><span style="font-size:11px;color:var(--text3)">Sem cobertura: pedido de entrada × pedido de saída.</span></span></label>
+          <span style="font-size:12px;color:var(--text2)"><b>Filial</b> <span style="font-size:10px;color:var(--text3)">(operação logística)</span><br><span style="font-size:11px;color:var(--text3)">Sem controle fiscal: nada é consistido na chegada; pedido de entrada × pedido de saída.</span></span></label>
       </div>
     </div>
 
@@ -37281,7 +37286,17 @@ function wmsChegadaModal(){
         <div><label class="fl">Placa cavalo *</label><input class="fi" id="chg-cavalo" style="text-transform:uppercase" autocomplete="off"></div>
         <div><label class="fl">Placa carreta</label><input class="fi" id="chg-carreta" style="text-transform:uppercase" autocomplete="off"></div>
       </div>
-      <div><label class="fl">Nº de agendamento</label><input class="fi" id="chg-agendamento" placeholder="Se houver" autocomplete="off"></div>
+      <div style="border:1.5px dashed var(--blue-text);border-radius:9px;padding:10px 12px;background:var(--blue-bg)">
+        <label class="fl" style="color:var(--blue-text)">Veio agendado? Bipe o cartão de embarque</label>
+        <input class="fi" id="chg-cartao" placeholder="EMB-000123" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();wmsChegadaCartao();}" onchange="wmsChegadaCartao()">
+        <div id="chg-cartao-info" style="font-size:11.5px;margin-top:4px;min-height:14px"></div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px">
+        <label class="fl">Notas fiscais — bipe a chave ou digite o número (uma por vez)</label>
+        <input class="fi" id="chg-nf" placeholder="chave de 44 dígitos ou nº da NF" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();wmsChegadaAddNf();}">
+        <div id="chg-nf-lista" style="margin-top:6px;display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <div><label class="fl">Nº de agendamento (livre)</label><input class="fi" id="chg-agendamento" placeholder="Se houver" autocomplete="off"></div>
       <div style="border-top:1px solid var(--border);padding-top:10px">
         <label class="fl">Prisma — bipe a etiqueta pra entregar e fechar a chegada *</label>
         <input class="fi" id="chg-prisma" placeholder="Bipe o prisma" autocomplete="off" style="border-color:var(--blue-text)">
@@ -37309,6 +37324,81 @@ function wmsChegadaCnhAlerta(){
   if(val<hoje){ el.innerHTML='<div style="padding:8px 11px;background:var(--red-bg);color:var(--red-text);border-radius:7px;font-size:12px;font-weight:600">⚠ CNH vencida em '+val.toLocaleDateString('pt-BR')+'.</div>'; }
   else{ const dias=Math.round((val-hoje)/86400000); el.innerHTML = dias<=30 ? '<div style="padding:8px 11px;background:var(--amber-bg);color:var(--amber-text);border-radius:7px;font-size:12px">CNH vence em '+dias+' dia(s).</div>' : ''; }
 }
+// ── NOTAS DO VEÍCULO na chegada ──────────────────────────────────────
+var _chgNfs=[];   // [{chave, numero, entrada, cliente_id, previsto, alerta}]
+function wmsChegadaAddNf(){
+  var i=ge('chg-nf'); if(!i)return;
+  var raw=wmsLeituraLimpa(i.value||'').replace(/\D+$/,'').trim(); if(!raw){return;}
+  var chave=null, numero=null;
+  var dig=raw.replace(/\D/g,'');
+  if(dig.length===44){ chave=dig; numero=String(parseInt(dig.substr(25,9),10)); }
+  else numero=raw.replace(/^0+/,'');
+  if(_chgNfs.some(function(x){return (chave&&x.chave===chave)||(!chave&&x.numero===numero);})){ i.value=''; return; }
+  // casa com o documento previsto
+  var ent=(wmsEntradas||[]).find(function(e){
+    if(chave&&e.doc_chave&&String(e.doc_chave).replace(/\D/g,'')===chave)return true;
+    if(numero&&e.nf_numero&&String(e.nf_numero).replace(/^0+/,'')===numero)return true;
+    if(numero&&e.ref_documento&&new RegExp('NF\\s*0*'+numero+'(/|$)').test(String(e.ref_documento)))return true;
+    return false;
+  });
+  var item={chave:chave,numero:numero,entrada:ent||null,cliente_id:ent?ent.depositante_id:null,previsto:!!ent,alerta:null};
+  if(ent)item.alerta=wmsChegadaVerificaDest(ent);
+  _chgNfs.push(item);
+  // cliente vem do documento
+  if(ent&&ent.depositante_id){ var sel=ge('chg-cliente'); if(sel&&!sel.value)sel.value=ent.depositante_id; var rd=document.querySelector('input[name="chg-mov"][value="descarga"]'); if(rd)rd.checked=true; }
+  i.value=''; wmsChegadaNfsRender(); i.focus();
+}
+function wmsChegadaRmNf(ix){ _chgNfs.splice(ix,1); wmsChegadaNfsRender(); }
+function wmsChegadaNfsRender(){
+  var box=ge('chg-nf-lista'); if(!box)return;
+  box.innerHTML=_chgNfs.map(function(x,ix){
+    var cli=(clientes||[]).find(function(c){return c.id===x.cliente_id;});
+    var cor=x.alerta?'#8a6d00':(x.previsto?'var(--green-text)':'var(--text2)');
+    var bg =x.alerta?'#fff8e1':(x.previsto?'#eaf5ee':'var(--bg2)');
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:7px;background:'+bg+';font-size:12px;color:'+cor+'">'
+      +'<span style="flex:1"><b>NF '+(x.numero||'?')+'</b> '
+      +(x.previsto?('· prevista · '+(cli?cli.nome:'')+(x.entrada&&x.entrada.numero_entrada?(' · '+x.entrada.numero_entrada):'')):'· <b>não prevista</b> — entra assim mesmo')
+      +(x.alerta?('<br>⚠ '+x.alerta):'')+'</span>'
+      +'<span onclick="wmsChegadaRmNf('+ix+')" style="cursor:pointer;opacity:.6">✕</span></div>';
+  }).join('');
+}
+// Destinatário deve ser a MKLOG — só para depositante ARMAZÉM GERAL.
+// Filial (regime 'logistica') não consiste nada.
+function wmsChegadaVerificaDest(ent){
+  var cli=(clientes||[]).find(function(c){return c.id===ent.depositante_id;});
+  if(!cli||(cli.regime_operacao||'armazem_geral')!=='armazem_geral')return null;
+  var meus=(userUnits||[]).map(function(u){return String(u.cnpj||'').replace(/\D/g,'');}).filter(Boolean);
+  if(company&&company.cnpj)meus.push(String(company.cnpj).replace(/\D/g,''));
+  var dest=String(ent.dest_cnpj||'').replace(/\D/g,''), entg=String(ent.entrega_cnpj||'').replace(/\D/g,'');
+  if(!dest||meus.indexOf(dest)>=0||meus.indexOf(entg)>=0)return null;
+  var obs=String(ent.obs_fiscal||'').toUpperCase();
+  var nomeEmp=String((company&&company.name)||'MK LOG').toUpperCase().split(' ')[0];
+  if(obs.indexOf(nomeEmp)>=0||obs.indexOf('MK LOG')>=0||obs.indexOf('MKLOG')>=0||obs.indexOf('WALDOMIRO')>=0)return null;
+  return 'Destinatário '+(ent.dest_nome||dest)+' não é a MKLOG e a nota não cita nosso nome/endereço — possível entrega indevida, verificar com o cliente.';
+}
+// ── CARTÃO DE EMBARQUE: veículo agendado ─────────────────────────────
+async function wmsChegadaCartao(){
+  var i=ge('chg-cartao'), info=ge('chg-cartao-info'); if(!i)return;
+  var cod=wmsLeituraLimpa(i.value||'').trim().toUpperCase(); if(!cod)return;
+  var cid=company?.id;
+  var evs=await dbSelect('wms_eventos','company_id=eq.'+cid+'&codigo_cartao=eq.'+encodeURIComponent(cod)+'&status=eq.agendado').catch(function(){return [];});
+  var ev=evs&&evs[0];
+  if(!ev){ if(info)info.innerHTML='<span style="color:var(--red-text)">Cartão '+cod+' não encontrado ou já usado.</span>'; return; }
+  window._chgEventoAgendado=ev;
+  var sel=ge('chg-cliente'); if(sel&&ev.cliente_id)sel.value=ev.cliente_id;
+  var rd=document.querySelector('input[name="chg-mov"][value="'+(ev.movimento||'descarga')+'"]'); if(rd)rd.checked=true;
+  if(ev.transportadora_nome&&ge('chg-transp'))ge('chg-transp').value=ev.transportadora_nome;
+  if(ev.motorista_nome&&ge('chg-mot-nome'))ge('chg-mot-nome').value=ev.motorista_nome;
+  if(ev.motorista_cpf&&ge('chg-cpf'))ge('chg-cpf').value=ev.motorista_cpf;
+  if(ev.placa&&ge('chg-cavalo'))ge('chg-cavalo').value=ev.placa;
+  // notas já vinculadas no agendamento
+  var docs=await dbSelect('wms_evento_docs','evento_id=eq.'+ev.id).catch(function(){return [];});
+  _chgNfs=(docs||[]).map(function(d){var e=(wmsEntradas||[]).find(function(x){return x.id===d.entrada_id;});
+    return {chave:d.nf_chave,numero:d.nf_numero,entrada:e||null,cliente_id:d.cliente_id,previsto:!!e,alerta:e?wmsChegadaVerificaDest(e):null};});
+  wmsChegadaNfsRender();
+  if(info)info.innerHTML='<span style="color:var(--green-text)">✓ Agendamento encontrado — '+(_chgNfs.length?(_chgNfs.length+' nota(s) vinculada(s)'):'sem notas')+'. Confira e bipe o prisma.</span>';
+}
+
 async function wmsChegadaSalvar(){
   const cid=company?.id; if(!cid)return;
   const mov=document.querySelector('input[name="chg-mov"]:checked')?.value||'coleta';
@@ -37354,8 +37444,25 @@ async function wmsChegadaSalvar(){
       patio_id:patioRow?patioRow.id:null,movimento:mov,cliente_id:clienteId,
       transportadora_id:transp?.id||null,motorista_id:mot?.id||null,prisma_id:prisma.id,
       agendamento:agendamento||null,chegada_em:new Date().toISOString(),status:'aberto',owner_id:cu?.id||null};
-    const evSalvo=await dbInsert('wms_eventos',evObj);
-    const evento=Array.isArray(evSalvo)?evSalvo[0]:evSalvo;
+    var evento=null;
+    if(window._chgEventoAgendado){
+      // veículo agendado: o evento já existe, só marca a chegada
+      var agd=window._chgEventoAgendado; delete window._chgEventoAgendado;
+      var upd={patio_id:patioRow?patioRow.id:null,prisma_id:prisma.id,chegada_em:new Date().toISOString(),status:'aberto',
+               transportadora_id:transp?.id||null,motorista_id:mot?.id||null};
+      await dbUpdate('wms_eventos',agd.id,upd); evento=Object.assign(agd,upd);
+    }else{
+      const evSalvo=await dbInsert('wms_eventos',evObj);
+      evento=Array.isArray(evSalvo)?evSalvo[0]:evSalvo;
+      // notas bipadas na portaria
+      for(var k=0;k<_chgNfs.length;k++){
+        var nf=_chgNfs[k];
+        try{ await dbInsert('wms_evento_docs',{company_id:cid,evento_id:evento.id,entrada_id:nf.entrada?nf.entrada.id:null,
+          cliente_id:nf.cliente_id||clienteId||null,nf_chave:nf.chave||null,nf_numero:nf.numero||null,previsto:!!nf.previsto,alerta:nf.alerta||null}); }catch(e){}
+        if(nf.entrada&&nf.entrada.status==='previsto'){ try{ await dbUpdate('wms_entradas',nf.entrada.id,{status:'recebendo'}); nf.entrada.status='recebendo'; }catch(e){} }
+      }
+    }
+    _chgNfs=[];
     if(evento){ wmsEventos=[evento,...wmsEventos]; if(patioRow){ try{ await dbUpdate('wms_patio',patioRow.id,{evento_id:evento.id}); }catch(e){} patioRow.evento_id=evento.id; } }
     // entrega/associa o prisma ao veículo (placa + motorista/cpf pro termo)
     await dbUpdate('wms_prismas_caminhao',prisma.id,{status:'ocupado',placa:cavalo,motorista:motNome,motorista_cpf:cpf});
@@ -37365,6 +37472,43 @@ async function wmsChegadaSalvar(){
     if(curPage==='wms-patio'||curPage==='portaria')render();
   }catch(e){portErr(e.message||'Erro ao registrar chegada.');}
 }
+// ── AGENDAR VEÍCULO: cria o evento 'agendado' e imprime o cartão ─────
+async function wmsAgendarVeiculo(entradaId){
+  var ent=(wmsEntradas||[]).find(function(e){return e.id===entradaId;}); if(!ent)return;
+  var cid=company?.id;
+  var placa=(prompt('Placa do veículo (opcional):')||'').trim().toUpperCase();
+  var quando=(prompt('Data/hora prevista (ex.: 15/09 08:00) — opcional:')||'').trim();
+  try{
+    var seq=((wmsEventos||[]).length+1+Math.floor(Math.random()*9000));
+    var cod='EMB-'+String(seq).padStart(6,'0');
+    var evObj={company_id:cid,unit_id:(typeof currentUnitId==='function'?currentUnitId():null),movimento:'descarga',
+      cliente_id:ent.depositante_id,status:'agendado',codigo_cartao:cod,agendamento:quando||null,placa:placa||null,owner_id:cu?.id||null};
+    var r=await dbInsert('wms_eventos',evObj); var ev=Array.isArray(r)?r[0]:r;
+    await dbInsert('wms_evento_docs',{company_id:cid,evento_id:ev.id,entrada_id:ent.id,cliente_id:ent.depositante_id,
+      nf_chave:ent.doc_chave||null,nf_numero:ent.nf_numero||null,previsto:true});
+    wmsEventos=[ev].concat(wmsEventos||[]);
+    showToast('Agendado. Cartão '+cod,'green');
+    wmsCartaoImprimir(ev,ent);
+  }catch(e){showToast('Erro ao agendar: '+(e.message||e),'red');}
+}
+async function wmsCartaoImprimir(ev,ent){
+  if(typeof pdfMake==='undefined'){alert('PDF ainda carregando.');return;}
+  var cli=(clientes||[]).find(function(c){return c.id===ev.cliente_id;});
+  var qr=null; try{ qr=await wmsQrDataUrl(ev.codigo_cartao); }catch(e){}
+  var c=[
+    {text:(company&&company.name)||'MK LOGÍSTICA',fontSize:12,color:'#666',alignment:'center'},
+    {text:'CARTÃO DE EMBARQUE',fontSize:20,bold:true,color:'#0A2540',alignment:'center',margin:[0,4,0,14]},
+    {text:ev.codigo_cartao,fontSize:56,bold:true,color:'#0A2540',alignment:'center'},
+    qr?{image:qr,width:150,alignment:'center',margin:[0,12,0,12]}:{text:''},
+    {text:[{text:'Depositante: ',bold:true},(cli&&cli.nome)||''],fontSize:12,margin:[0,4,0,2]},
+    {text:[{text:'Documento: ',bold:true},(ent.numero_entrada||'')+(ent.nf_numero?('  ·  NF '+ent.nf_numero):'')],fontSize:12,margin:[0,0,0,2]},
+    {text:[{text:'Previsto: ',bold:true},ev.agendamento||'—'],fontSize:12,margin:[0,0,0,2]},
+    {text:[{text:'Placa: ',bold:true},ev.placa||'—'],fontSize:12,margin:[0,0,0,14]},
+    {text:'Apresente este cartão na portaria. O bipe do código registra a chegada.',fontSize:10,color:'#666',alignment:'center'}
+  ];
+  pdfMake.createPdf({pageSize:'A5',pageMargins:[30,30,30,30],content:c}).open();
+}
+
 function wmsPatioChegadaModal(){
   const cid=company?.id;
   const uid=(typeof activeUnit!=='undefined')?activeUnit:null;
@@ -37443,6 +37587,142 @@ async function wmsPatioChamar(id,docaId){
     showToast('Veículo chamado pra doca.','green');
   }catch(e){portErr('Erro ao chamar: '+(e.message||e));}
 }
+// ═══════════════════════════════════════════════════════════════════
+//  TERMO DE LIBERAÇÃO — nasce quando a conferência do documento fecha.
+//  Vai assinado/carimbado junto com a NF e é bipado na portaria na saída.
+// ═══════════════════════════════════════════════════════════════════
+async function wmsTermoEmitir(ent){
+  if(!ent)return null;
+  var cid=company?.id;
+  // evento do veículo que trouxe este documento
+  var docs=await dbSelect('wms_evento_docs','entrada_id=eq.'+ent.id+'&order=criado_em.desc').catch(function(){return [];});
+  var ev=null;
+  for(var i=0;i<(docs||[]).length&&!ev;i++){
+    var e=(wmsEventos||[]).find(function(x){return x.id===docs[i].evento_id;});
+    if(!e){ var arr=await dbSelect('wms_eventos','id=eq.'+docs[i].evento_id).catch(function(){return [];}); e=arr&&arr[0]; }
+    if(e&&e.status!=='fechado')ev=e;
+  }
+  // já existe termo para este evento? só acrescenta o documento
+  var existente=ev?await dbSelect('wms_termos_liberacao','evento_id=eq.'+ev.id+'&status=eq.emitido').catch(function(){return [];}):[];
+  var lista=[{id:ent.id,numero_entrada:ent.numero_entrada||null,nf:ent.nf_numero||ent.ref_documento||null}];
+  var termo;
+  if(existente&&existente.length){
+    termo=existente[0];
+    var ja=(typeof termo.entradas==='string'?JSON.parse(termo.entradas||'[]'):(termo.entradas||[]));
+    if(!ja.some(function(x){return x.id===ent.id;})){ ja.push(lista[0]); await dbUpdate('wms_termos_liberacao',termo.id,{entradas:ja}); termo.entradas=ja; }
+  }else{
+    var ano=String(new Date().getFullYear()).slice(-2);
+    var qtd=await dbSelect('wms_termos_liberacao','company_id=eq.'+cid+'&select=id').catch(function(){return [];});
+    var numero='TL-'+String((qtd||[]).length+1).padStart(4,'0')+'/'+ano;
+    var prisma=ev&&ev.prisma_id?(wmsPrismas||[]).find(function(p){return p.id===ev.prisma_id;}):null;
+    var r=await dbInsert('wms_termos_liberacao',{company_id:cid,unit_id:ent.unit_id||null,numero:numero,evento_id:ev?ev.id:null,
+      prisma_id:ev?ev.prisma_id:null,placa:(prisma&&prisma.placa)||null,motorista:(prisma&&prisma.motorista)||null,
+      entradas:lista,emitido_por:(profile&&profile.full_name)||cu?.email||null});
+    termo=Array.isArray(r)?r[0]:r;
+    if(ev){ try{ await dbUpdate('wms_eventos',ev.id,{termo_id:termo.id}); ev.termo_id=termo.id; }catch(e){} }
+  }
+  showToast('Termo de liberação '+termo.numero+' emitido.','green');
+  wmsTermoImprimir(termo);
+  return termo;
+}
+async function wmsTermoImprimir(termo){
+  if(typeof pdfMake==='undefined'){alert('PDF ainda carregando.');return;}
+  var qr=null; try{ qr=await wmsQrDataUrl('TL|'+termo.id); }catch(e){}
+  var ents=(typeof termo.entradas==='string'?JSON.parse(termo.entradas||'[]'):(termo.entradas||[]));
+  var c=[
+    {text:(company&&company.name)||'MK LOGÍSTICA',fontSize:11,color:'#666'},
+    {text:'TERMO DE LIBERAÇÃO DE VEÍCULO',fontSize:18,bold:true,color:'#0A2540',margin:[0,2,0,10]},
+    {columns:[
+      {width:'*',stack:[
+        {text:[{text:'Nº ',bold:true},{text:termo.numero,fontSize:22,bold:true,color:'#0A2540'}],margin:[0,0,0,8]},
+        {text:[{text:'Placa: ',bold:true},termo.placa||'—'],fontSize:12,margin:[0,0,0,3]},
+        {text:[{text:'Motorista: ',bold:true},termo.motorista||'—'],fontSize:12,margin:[0,0,0,3]},
+        {text:[{text:'Emitido: ',bold:true},new Date(termo.emitido_em||Date.now()).toLocaleString('pt-BR')+'  por '+(termo.emitido_por||'')],fontSize:10,color:'#555'}
+      ]},
+      qr?{width:130,image:qr}:{width:0,text:''}
+    ]},
+    {text:'DOCUMENTOS CONFERIDOS',fontSize:9,color:'#666',margin:[0,16,0,3]},
+    {table:{widths:['*','*'],body:[[{text:'Entrada',bold:true},{text:'NF / referência',bold:true}]].concat(ents.map(function(x){return [x.numero_entrada||'—',x.nf||'—'];}))},layout:'lightHorizontalLines'},
+    {text:'A conferência dos documentos acima foi concluída. Este termo, assinado e carimbado junto com a NF, deve ser apresentado na portaria: o bipe do código registra a saída e libera o prisma.',fontSize:10,color:'#555',margin:[0,16,0,24]},
+    {columns:[
+      {text:'________________________\nConferente',fontSize:10,alignment:'center'},
+      {text:'________________________\nLiderança',fontSize:10,alignment:'center'},
+      {text:'________________________\nMotorista',fontSize:10,alignment:'center'}
+    ]}
+  ];
+  pdfMake.createPdf({pageSize:'A4',pageMargins:[40,40,40,40],content:c}).open();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SAÍDA NA PORTARIA — bipa o termo, foto do baú, libera o prisma
+// ═══════════════════════════════════════════════════════════════════
+var _saiTermo=null, _saiFoto=null;
+function wmsSaidaModal(){
+  _saiTermo=null; _saiFoto=null;
+  var inner='<div style="display:flex;flex-direction:column;gap:12px">'
+    +'<div><label class="fl">Bipe o termo de liberação (QR) ou digite o número</label>'
+    +'<input class="fi" id="sai-termo" placeholder="TL-0001/26" autocomplete="off" style="border-color:var(--blue-text)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wmsSaidaBipe();}"></div>'
+    +'<div id="sai-info" style="font-size:12.5px;min-height:20px"></div>'
+    +'<div id="sai-foto-wrap" style="display:none">'
+    +'<label class="fl">Foto do baú (obrigatória)</label>'
+    +'<input type="file" id="sai-foto" accept="image/*" capture="environment" onchange="wmsSaidaFoto(this)" style="font-size:12px">'
+    +'<div id="sai-foto-prev" style="margin-top:6px"></div></div>'
+    +'</div>';
+  portModal('Registrar saída de veículo',inner,'wmsSaidaConfirmar()',{saveLabel:'Confirmar saída'});
+  setTimeout(function(){var i=ge('sai-termo');if(i)i.focus();},80);
+}
+async function wmsSaidaBipe(){
+  var i=ge('sai-termo'), info=ge('sai-info'); if(!i)return;
+  var raw=wmsLeituraLimpa(i.value||'').trim(); if(!raw)return;
+  var cid=company?.id, termo=null;
+  var m=raw.match(/^TL\|(.+)$/i);
+  if(m){ var a=await dbSelect('wms_termos_liberacao','id=eq.'+m[1]).catch(function(){return [];}); termo=a&&a[0]; }
+  else { var b=await dbSelect('wms_termos_liberacao','company_id=eq.'+cid+'&numero=eq.'+encodeURIComponent(raw.toUpperCase())).catch(function(){return [];}); termo=b&&b[0]; }
+  if(!termo){ info.innerHTML='<span style="color:var(--red-text)">Termo não encontrado.</span>'; return; }
+  if(termo.status==='baixado'){ info.innerHTML='<span style="color:var(--red-text)">Termo '+termo.numero+' já foi baixado em '+new Date(termo.baixado_em).toLocaleString('pt-BR')+'.</span>'; return; }
+  _saiTermo=termo;
+  var ents=(typeof termo.entradas==='string'?JSON.parse(termo.entradas||'[]'):(termo.entradas||[]));
+  info.innerHTML='<div style="background:#eaf5ee;border:1px solid #cfe3d6;border-radius:8px;padding:9px 11px;color:#166534">'
+    +'✓ <b>'+termo.numero+'</b> · placa <b>'+(termo.placa||'—')+'</b> · '+(termo.motorista||'')+'<br>'
+    +'<span style="font-size:11.5px">'+ents.length+' documento(s) conferido(s) · emitido '+new Date(termo.emitido_em).toLocaleString('pt-BR')+'</span></div>';
+  var w=ge('sai-foto-wrap'); if(w)w.style.display='block';
+}
+function wmsSaidaFoto(input){
+  var f=input.files&&input.files[0]; if(!f)return;
+  var img=new Image(); var url=URL.createObjectURL(f);
+  img.onload=function(){
+    // reduz para caber no banco (≈ 900px, jpeg 0.7)
+    var esc=Math.min(1,900/Math.max(img.width,img.height));
+    var cv=document.createElement('canvas'); cv.width=Math.round(img.width*esc); cv.height=Math.round(img.height*esc);
+    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+    _saiFoto=cv.toDataURL('image/jpeg',0.7); URL.revokeObjectURL(url);
+    var p=ge('sai-foto-prev'); if(p)p.innerHTML='<img src="'+_saiFoto+'" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid var(--border)">';
+  };
+  img.src=url;
+}
+async function wmsSaidaConfirmar(){
+  if(!_saiTermo)return portErr('Bipe o termo de liberação.');
+  if(!_saiFoto)return portErr('Tire a foto do baú antes de confirmar.');
+  portSaving();
+  try{
+    var quem=(profile&&profile.full_name)||cu?.email||null, agora=new Date().toISOString();
+    await dbUpdate('wms_termos_liberacao',_saiTermo.id,{status:'baixado',baixado_em:agora,baixado_por:quem,foto_bau:_saiFoto});
+    if(_saiTermo.evento_id){
+      var ev=(wmsEventos||[]).find(function(x){return x.id===_saiTermo.evento_id;});
+      await dbUpdate('wms_eventos',_saiTermo.evento_id,{status:'fechado',saida_em:agora}).catch(function(){});
+      if(ev){ ev.status='fechado'; ev.saida_em=agora;
+        if(ev.patio_id){ await dbUpdate('wms_patio',ev.patio_id,{status:'finalizado',saida_em:agora}).catch(function(){}); var p=(wmsPatio||[]).find(function(x){return x.id===ev.patio_id;}); if(p)p.status='finalizado'; }
+      }
+    }
+    if(_saiTermo.prisma_id){
+      await dbUpdate('wms_prismas_caminhao',_saiTermo.prisma_id,{status:'livre',placa:null,motorista:null,motorista_cpf:null}).catch(function(){});
+      var pr=(wmsPrismas||[]).find(function(x){return x.id===_saiTermo.prisma_id;}); if(pr){pr.status='livre';pr.placa=null;pr.motorista=null;}
+    }
+    portClose(); showToast('Saída registrada. Prisma liberado.','green');
+    if(curPage==='portaria'||curPage==='wms-patio')render();
+  }catch(e){portErr(e.message||'Erro ao registrar saída.');}
+}
+
 async function wmsPatioLiberar(id){
   const p=wmsPatio.find(x=>x.id===id);if(!p)return;
   if(!confirm('Liberar/finalizar este veículo do pátio?'))return;
