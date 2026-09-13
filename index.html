@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.917 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.918 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.917';
+const APP_VERSION='v1.0.918';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4905,6 +4905,16 @@ const AS_TOOLS=[
         cidade:c.cidade||null,estado:c.estado||null,ativo:c.ativo!==false}))};
     }
   },
+  {
+    name:'avisos_pendentes',
+    description:'Lista os avisos que exigem ação do usuário (aprovações, vencidos, pendências por módulo). Use para "meus avisos", "o que precisa de mim", "pendências", "o que está pendente".',
+    input_schema:{type:'object',properties:{ modulo:{type:'string',description:'Filtra por módulo: Financeiro, Comercial, Compras, RH, WMS, Hermes.'} }},
+    run:async(a)=>{
+      let A=(typeof avisosCalcular==='function')?avisosCalcular():[];
+      if(a&&a.modulo){const q=String(a.modulo).toLowerCase();A=A.filter(x=>x.modulo.toLowerCase().includes(q));}
+      return {total:A.length,avisos:A.map(x=>({modulo:x.modulo,quantidade:x.n,texto:x.texto}))};
+    }
+  },
   // ── FINANCEIRO E ESTOQUE (v1.0.904) — a "graça dos acionistas" ──
   {
     name:'contas_receber_aberto',
@@ -5106,6 +5116,11 @@ function asIntent(txt){
 function asPlural(n,um,varios){ return n+' '+(n===1?um:varios); }
 function asRespostaLocal(tool,d){
   if(d && d.erro) return 'Não consegui consultar: '+d.erro;
+  if(tool==='avisos_pendentes'){
+    if(!d.total) return 'Nada pendente da sua ação. Tudo em dia.';
+    const mods={}; d.avisos.forEach(x=>{(mods[x.modulo]=mods[x.modulo]||[]).push(x.texto);});
+    return asPlural(d.total,'aviso','avisos')+':\n\n'+Object.keys(mods).map(m=>m+': '+mods[m].join('; ')).join('\n');
+  }
   if(tool==='contas_receber_aberto'){
     if(!d.titulos) return d.filtro_cliente?('Nada em aberto de '+d.filtro_cliente+'.'):'Nada em aberto a receber.';
     let r=(d.filtro_cliente?(d.filtro_cliente+' deve '):'A receber em aberto: ')+asBRL(d.total)+' em '+asPlural(d.titulos,'título','títulos')+'.';
@@ -5232,8 +5247,13 @@ function asPergunta(campo,opcoes){
 //  Nada casou → grava em hermes_nao_entendidas para o admin mapear.
 // ═══════════════════════════════════════════════════════════════════
 var hermesMapa=null;
+async function hermesContarNao(){
+  try{ var r=await dbSelect('hermes_nao_entendidas','company_id=eq.'+asCid()+'&tratada=eq.false&select=id'); window._hmNaoCount=(r||[]).length; }catch(e){ window._hmNaoCount=0; }
+  return window._hmNaoCount;
+}
 async function hermesCarregarMapa(force){
   if(hermesMapa&&!force)return hermesMapa;
+  hermesContarNao();
   try{ hermesMapa=await dbSelect('hermes_perguntas','company_id=eq.'+asCid()+'&ativo=eq.true&order=ordem.asc'); }
   catch(e){ hermesMapa=[]; }
   return hermesMapa;
@@ -8091,6 +8111,9 @@ function rDashboardGeral(){
   html += '<div style="font-size:22px;font-weight:700;letter-spacing:-0.3px">'+saudacao+(nome?', '+nome:'')+'! 👋</div>';
   html += '<div style="font-size:13px;color:var(--text3);margin-top:2px;text-transform:capitalize">'+dataStr+'</div>';
   html += '</div>';
+
+  // Avisos — só o que exige ação (fonte única com o Hermes)
+  try{ html += rAvisosHome(); }catch(eA){ console.warn('avisos',eA); }
 
   // Alerta tarifário
   const alerta = podeVerTar ? checkVigenciaAlert() : null;
