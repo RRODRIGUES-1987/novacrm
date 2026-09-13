@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.918 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.920 | Gerado: 2026-09-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.918';
+const APP_VERSION='v1.0.920';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8089,6 +8089,96 @@ function ownerName(owner_id){
 }
 
 // ── DASHBOARD GERAL (em construção) ──
+// ═══════════════════════════════════════════════════════════════════
+//  AVISOS — só o que exige AÇÃO. Fonte única para a home e para o Hermes.
+//  Módulo sem pendência não aparece. Contador informativo não é aviso.
+// ═══════════════════════════════════════════════════════════════════
+
+function avisosCalcular(){
+  var cid=(company&&company.id)||null, hoje=new Date().toISOString().slice(0,10);
+  var em30=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+  var role=(profile&&profile.role)||'', isAdmin=role==='admin';
+  var pode=function(tela){ try{ return isAdmin||canDo(tela,'pode_ver'); }catch(e){ return isAdmin; } };
+  var A=[];
+  var add=function(modulo,n,sing,plur,pag,acao){ if(n>0)A.push({modulo:modulo,n:n,texto:n===1?sing:plur.replace('{n}',n),pg:pag,acao:acao||null}); };
+  var money=function(v){ try{ return fmtV(v); }catch(e){ return 'R$ '+Math.round(v); } };
+
+  try{ if(pode('contas-pagar')){
+    var cpAprov=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status==='pendente'&&(x.aprovacao_status||'')==='pendente';}).length;
+    add('Financeiro',cpAprov,'1 título a pagar aguardando sua aprovação','{n} títulos a pagar aguardando sua aprovação','contas-pagar');
+    var dup=(typeof cpDuplicidades==='function')?cpDuplicidades().length:0;
+    add('Financeiro',dup,'1 possível duplicidade no contas a pagar','{n} possíveis duplicidades no contas a pagar','contas-pagar','cpDuplicidadesModal()');
+  } }catch(e){console.warn('aviso cp',e);}
+
+  try{ if(pode('contas-receber')){
+    var crVenc=(contasReceber||[]).filter(function(x){return x.company_id===cid&&['pago','pago_atraso','cancelado'].indexOf(x.status)<0&&(x.vencimento||'')<hoje;});
+    var tot=crVenc.reduce(function(t,x){return t+Number(x.valor||0);},0);
+    add('Financeiro',crVenc.length,'1 título a receber vencido · '+money(tot),'{n} títulos a receber vencidos · '+money(tot),'contas-receber');
+  } }catch(e){console.warn('aviso cr',e);}
+
+  try{ if(pode('tarifario-padrao')){
+    var prop=(tabelasTarifarias||[]).filter(function(t){return t.status!=='pendente'&&t.vigencia_fim&&t.vigencia_fim>=hoje&&t.vigencia_fim<=em30;}).length;
+    add('Comercial',prop,'1 proposta vence nos próximos 30 dias','{n} propostas vencem nos próximos 30 dias','tarifario-padrao');
+  } }catch(e){console.warn('aviso prop',e);}
+
+  try{ if(pode('compras')){
+    var cot=(comprasCotacoes||[]).filter(function(c){return c.status==='aguardando_aprovacao_cotacao';}).length;
+    var ped=(comprasPedidos||[]).filter(function(c){return c.status==='aguardando_aprovacao_compra';}).length;
+    add('Compras',cot+ped,'1 compra aguardando sua aprovação','{n} compras aguardando sua aprovação','compras');
+  } }catch(e){console.warn('aviso compras',e);}
+
+  try{ if(pode('rh-pessoas')){
+    var dem=(rhDemissoes||[]).filter(function(d){return ['solicitado','aguardando_homologacao'].indexOf(d.status)>=0;}).length;
+    add('RH',dem,'1 demissão aguardando homologação','{n} demissões aguardando homologação','rh-pessoas');
+    var promo=(typeof rhDivergencias==='function')?rhDivergencias().length:0;
+    add('RH',promo,'1 promoção sem registro no histórico','{n} promoções sem registro no histórico','rh-pessoas','rhDivergenciasModal()');
+    var ciclo=(rhCiclos||[]).filter(function(c){return c.status==='aberto';})[0];
+    var rasc=ciclo?(rhAvaliacoes||[]).filter(function(a){return a.ciclo_id===ciclo.id&&a.status==='rascunho';}).length:0;
+    add('RH',rasc,'1 avaliação do ciclo ainda não feita pelo gestor','{n} avaliações do ciclo ainda não feitas pelos gestores','rh-avaliacoes');
+    var expV=(typeof expPendentesLista==='function')?expPendentesLista().filter(function(x){return !x.feita&&x.vencida;}).length:0;
+    add('RH',expV,'1 avaliação de experiência vencida sem registro','{n} avaliações de experiência vencidas sem registro','rh-experiencia');
+  } }catch(e){console.warn('aviso rh',e);}
+
+  try{ if(pode('wms-visao')){
+    var aud=(wmsConferencias||[]).filter(function(c){return c.auditoria_status==='pendente';}).length;
+    add('WMS',aud,'1 conferência aguardando auditoria','{n} conferências aguardando auditoria','wms-aprovacoes');
+    var lim=Date.now()-2*3600000;
+    var pat=(wmsPatio||[]).filter(function(v){return v.status==='aguardando'&&v.chegada_em&&new Date(v.chegada_em).getTime()<lim;}).length;
+    add('WMS',pat,'1 veículo no pátio há mais de 2h sem doca','{n} veículos no pátio há mais de 2h sem doca','wms-patio');
+    var cob=(wmsEntradas||[]).filter(function(e){return e.status_fiscal==='aguardando_cobertura'&&['conferido','endereçado','concluido','concluído'].indexOf(e.status)>=0;}).length;
+    add('WMS',cob,'1 recebimento guardado aguardando NF de cobertura','{n} recebimentos guardados aguardando NF de cobertura','wms-entradas');
+  } }catch(e){console.warn('aviso wms',e);}
+
+  try{ if(typeof asLiberado==='function'&&asLiberado()){
+    add('Hermes',(window._hmNaoCount||0),'1 pergunta que o Hermes não entendeu','{n} perguntas que o Hermes não entendeu','admin-hermes');
+  } }catch(e){}
+  return A;
+}
+function avisosIr(a){ if(!a)return; if(a.acao){ try{ eval(a.acao); }catch(e){ pg(a.pg); } } else pg(a.pg); }
+function rAvisosHome(){
+  var A=[]; try{ A=avisosCalcular(); }catch(e){ console.warn('avisosCalcular',e); return ''; }
+  if(!A.length)return '<div style="background:#eaf5ee;border:1px solid #cfe3d6;border-radius:12px;padding:14px 16px;margin-bottom:18px;font-size:13px;color:#166534">&#10003; Nada pendente da sua ação.</div>';
+  var mods={}; A.forEach(function(a){(mods[a.modulo]=mods[a.modulo]||[]).push(a);});
+  var cor={Financeiro:'#1d4ed8',Comercial:'#7c3aed',Compras:'#b45309',RH:'#0f766e',WMS:'#0A2540',Hermes:'#6d28d9'};
+  window._avisosRef={};
+  var out='<div style="margin-bottom:22px">'
+    +'<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px"><div style="font-size:15px;font-weight:700;color:#0A2540">Precisa da sua ação</div>'
+    +'<div style="font-size:12px;color:var(--text3)">'+A.length+' aviso(s) · clique para ir à tela</div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px">';
+  Object.keys(mods).forEach(function(m){
+    out+='<div style="background:#fff;border:1px solid var(--border);border-left:4px solid '+(cor[m]||'#0A2540')+';border-radius:10px;padding:12px 14px">'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:'+(cor[m]||'#0A2540')+';margin-bottom:8px">'+m.toUpperCase()+'</div>';
+    mods[m].forEach(function(a,i){
+      var k=m+'_'+i; window._avisosRef[k]=a;
+      out+='<div onclick="avisosIr(window._avisosRef[\''+k+'\'])" style="display:flex;gap:9px;align-items:flex-start;padding:7px 8px;border-radius:7px;cursor:pointer;margin-bottom:2px">'
+        +'<span style="flex:none;height:24px;border-radius:12px;background:'+(cor[m]||'#0A2540')+';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 9px">'+a.n+'</span>'
+        +'<span style="font-size:12.5px;color:#111;line-height:1.35">'+a.texto+'</span></div>';
+    });
+    out+='</div>';
+  });
+  return out+'</div></div>';
+}
+
 function rDashboardGeral(){
   const hoje = new Date();
   const role = profile?.role||'';
@@ -16616,10 +16706,22 @@ function ctrlDadosDFC(){
     });
   });
 
-  var res=per.map(function(_,i){return ent[i]-sai[i];});
+  // Investimento e acionista saem da operação: entram só no 2º resultado.
+  var saiOp=per.map(function(){return 0;}), saiFora=per.map(function(){return 0;});
+  Object.keys(blocos).forEach(function(bl){
+    var fora=ctrlForaOperacao(bl);
+    blocos[bl].fora=fora;
+    blocos[bl].vals.forEach(function(v,i){ if(fora)saiFora[i]+=v; else saiOp[i]+=v; });
+  });
+  var resOp=per.map(function(_,i){return ent[i]-saiOp[i];});
+  var res  =per.map(function(_,i){return resOp[i]-saiFora[i];});
   var acum=[],a=0;
   res.forEach(function(r){a+=r;acum.push(a);});
-  return {per:per,ent:ent,sai:sai,res:res,acum:acum,blocos:blocos};
+  return {per:per,ent:ent,sai:sai,saiOp:saiOp,saiFora:saiFora,resOp:resOp,res:res,acum:acum,blocos:blocos};
+}
+// Fora da operação: investimento, imobilizado e retirada de acionista
+function ctrlForaOperacao(nomeBloco){
+  return /investim|imobiliz|acionist|s[oó]cio|distribui[cç][aã]o de lucro/i.test(String(nomeBloco||''));
 }
 
 function rControladoria(){
@@ -16661,17 +16763,17 @@ function ctrlRender(){
   var totR=totE-totS;
 
   var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
-  h+='<div style="display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden">'
-    +[['caixa','Caixa'],['competencia','Compet\u00eancia']].map(function(o){
-      return '<button onclick="ctrlSetEixo(\''+o[0]+'\')" style="padding:6px 14px;border:none;font-size:12px;cursor:pointer;font-weight:600;background:'+(ctrlEixo===o[0]?'#0A2540':'var(--bg)')+';color:'+(ctrlEixo===o[0]?'#fff':'var(--text2)')+'">'+o[1]+'</button>';}).join('')+'</div>';
+  // Fluxo de caixa é sempre por CAIXA — sem seletor de eixo.
+  ctrlEixo='caixa';
+  h+='<span style="font-size:11.5px;color:var(--text3);padding:4px 2px">por <b>caixa</b> · data do pagamento</span>';
   h+='<div style="display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden">'
     +[['dia','Dia'],['semana','Semana'],['quinzena','Quinzena'],['mes','M\u00eas']].map(function(o){
       return '<button onclick="ctrlSetAgrup(\''+o[0]+'\')" style="padding:6px 14px;border:none;font-size:12px;cursor:pointer;font-weight:600;background:'+(ctrlAgrup===o[0]?'#0A2540':'var(--bg)')+';color:'+(ctrlAgrup===o[0]?'#fff':'var(--text2)')+'">'+o[1]+'</button>';}).join('')+'</div>';
   h+='<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
     +'<button class="btn btn-sm" onclick="ctrlSetAno(-1)">&lsaquo;</button>'
     +'<b style="font-size:15px;min-width:52px;text-align:center">'+ctrlAno+'</b>'
-    +'<button class="btn btn-sm" onclick="ctrlSetAno(1)">&rsaquo;</button>'
-    +'<button class="btn btn-sm" onclick="ctrlDFCImprimir()">Imprimir</button></div>';
+    +'<button class="btn btn-sm" onclick="ctrlSetAno(1)">&rsaquo;</button></div>';
+    // sem exportação por ora — a versão relatório vem depois
   h+='</div>';
 
   var kpi=function(l,v,s,c){return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
@@ -16681,7 +16783,7 @@ function ctrlRender(){
   h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
     +kpi('Entradas',fmtV(totE),'recebimentos','#166534')
     +kpi('Sa\u00eddas',fmtV(totS),'pagamentos','#991b1b')
-    +kpi('Resultado',fmtV(totR),totR>=0?'gera\u00e7\u00e3o de caixa':'consumo de caixa',totR>=0?'#166534':'#991b1b')
+    +kpi('Saldo final',fmtV(totR),totR>=0?'gera\u00e7\u00e3o de caixa':'consumo de caixa',totR>=0?'#166534':'#991b1b')
     +'</div>';
 
   // matriz
@@ -16708,7 +16810,7 @@ function ctrlRender(){
     +D.sai.map(function(v){return cel(v,'#991b1b',true);}).join('')
     +cel(totS,'#991b1b',true)+'</div>';
 
-  Object.keys(D.blocos).sort().forEach(function(bl){
+  Object.keys(D.blocos).filter(function(bl){return !D.blocos[bl].fora;}).sort().forEach(function(bl){
     var b=D.blocos[bl];
     var tb=b.vals.reduce(function(s,x){return s+x;},0);
     var ab=!!ctrlAberto[bl];
@@ -16726,9 +16828,33 @@ function ctrlRender(){
     }
   });
 
-  // resultado e acumulado
+  // ── 1º RESULTADO · só a operação ──
+  var totOp=D.resOp.reduce(function(s,x){return s+x;},0);
+  h+='<div style="display:grid;grid-template-columns:'+col+';gap:6px;padding:9px 12px;border-top:2px solid #8fbf9f;background:#eaf5ee">'
+    +'<span style="font-size:12px;font-weight:700;color:#166534">= Saldo operacional</span>'
+    +D.resOp.map(function(v){return cel(v,v>=0?'#166534':'#991b1b',true);}).join('')
+    +cel(totOp,totOp>=0?'#166534':'#991b1b',true)+'</div>';
+  // ── fora da operação · investimentos e acionista ──
+  var totFora=D.saiFora.reduce(function(s,x){return s+x;},0);
+  if(totFora){
+    h+='<div style="display:grid;grid-template-columns:'+col+';gap:6px;padding:7px 12px;background:#f5efe9;border-top:1px solid var(--border)">'
+      +'<span style="font-size:11.5px;font-weight:700;color:#8a3b2a">Investimentos e acionista</span>'
+      +D.saiFora.map(function(v){return cel(v,'#8a3b2a');}).join('')+cel(totFora,'#8a3b2a',true)+'</div>';
+    Object.keys(D.blocos).filter(function(bl){return D.blocos[bl].fora;}).sort().forEach(function(bl){
+      var b=D.blocos[bl], tb=b.vals.reduce(function(s,x){return s+x;},0), ab=!!ctrlAberto[bl];
+      h+='<div onclick="ctrlToggleBloco(\''+String(bl).replace(/'/g,"\\'")+'\')" style="display:grid;grid-template-columns:'+col+';gap:6px;padding:6px 12px;cursor:pointer;border-bottom:1px solid var(--border2)">'
+        +'<span style="font-size:11.5px;padding-left:16px;color:var(--text2)">'+(ab?'▾':'▸')+' '+bl+'</span>'
+        +b.vals.map(function(v){return cel(v);}).join('')+cel(tb,'',true)+'</div>';
+      if(ab)Object.keys(b.contas).sort().forEach(function(ct){
+        var vv=b.contas[ct], tc=vv.reduce(function(s,x){return s+x;},0);
+        h+='<div style="display:grid;grid-template-columns:'+col+';gap:6px;padding:5px 12px;border-bottom:1px solid var(--border2);background:var(--bg2)">'
+          +'<span style="font-size:11px;padding-left:34px;color:var(--text3)">'+ct+'</span>'
+          +vv.map(function(v){return cel(v);}).join('')+cel(tc)+'</div>';});
+    });
+  }
+  // ── 2º RESULTADO · com investimentos e acionista ──
   h+='<div style="display:grid;grid-template-columns:'+col+';gap:6px;padding:9px 12px;border-top:2px solid #0A2540;background:#e8eaed">'
-    +'<span style="font-size:12px;font-weight:700;color:#0A2540">Resultado do per\u00edodo</span>'
+    +'<span style="font-size:12px;font-weight:700;color:#0A2540">= Saldo final</span>'
     +D.res.map(function(v){return cel(v,v>=0?'#166534':'#991b1b',true);}).join('')
     +cel(totR,totR>=0?'#166534':'#991b1b',true)+'</div>';
   h+='<div style="display:grid;grid-template-columns:'+col+';gap:6px;padding:7px 12px;background:var(--bg2)">'
