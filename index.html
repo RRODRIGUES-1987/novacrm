@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.925 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.926 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.925';
+const APP_VERSION='v1.0.926';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -17006,7 +17006,10 @@ function dreSecaoDe(nome){
   var b=(dfcBlocos||[]).find(function(x){return x.nome===nome;});
   if(b&&b.dre_secao)return b.dre_secao;
   if(dreLocalSec[nome])return dreLocalSec[nome];
-  return /pessoal|folha|sal[a\u00e1]ri|encarg|benef|opera|manuten|frota|combust|energia|epi|uniforme|armazen/i.test(String(nome||''))?'custo':'despesa';
+  var n=String(nome||'');
+  if(/irpj|csll|imposto de renda|contribui[c\u00e7][a\u00e3]o social/i.test(n))return 'irpj';
+  if(/comiss/i.test(n))return 'deducao';
+  return /pessoal|folha|sal[a\u00e1]ri|encarg|benef|opera|manuten|frota|combust|energia|epi|uniforme|armazen/i.test(n)?'custo':'despesa';
 }
 
 function dreDados(){
@@ -17032,30 +17035,31 @@ function dreDados(){
       }
     }
   });
-  var recLiq=rec.map(function(v,i){return v-ded[i];});
-
-  var cus={}, des={}, fora={};
+  var cus={}, des={}, dedB={}, irB={}, fora={};
   (contasPagar||[]).forEach(function(cp){
     if((cp.aprovacao_status||'aprovado')==='reprovado')return;
     if(unit&&cp.unit_id&&cp.unit_id!==unit)return;
-    var sc=cp.competencia||cp.vencimento||''; if(!sc||sc.slice(0,4)!==ano)return;
-    var m=parseInt(sc.slice(5,7),10)-1; if(m<0||m>11)return;
-    var v=Number(cp.valor||0);
+    var sc2=cp.competencia||cp.vencimento||''; if(!sc2||sc2.slice(0,4)!==ano)return;
+    var m2=parseInt(sc2.slice(5,7),10)-1; if(m2<0||m2>11)return;
+    var v2=Number(cp.valor||0);
     var bl=cp.agrupamento||'(sem classifica\u00e7\u00e3o)';
     var isFora=(cp.grupo&&cp.grupo!=='Despesas')||ctrlForaOperacao(bl);
-    var dst=isFora?fora:(dreSecaoDe(bl)==='custo'?cus:des);
+    var sec=isFora?null:dreSecaoDe(bl);
+    var dst=isFora?fora:(sec==='custo'?cus:sec==='deducao'?dedB:sec==='irpj'?irB:des);
     if(!dst[bl])dst[bl]=Z();
-    dst[bl][m]+=v;
+    dst[bl][m2]+=v2;
   });
   var soma=function(o){var t=Z();Object.keys(o).forEach(function(k){o[k].forEach(function(v,i){t[i]+=v;});});return t;};
-  var cusT=soma(cus), desT=soma(des), foraT=soma(fora);
+  var cusT=soma(cus), desT=soma(des), dedBT=soma(dedB), irT=soma(irB), foraT=soma(fora);
+  var recLiq=rec.map(function(v,i){return v-ded[i]-dedBT[i];});
   var mb=recLiq.map(function(v,i){return v-cusT[i];});
   var eb=mb.map(function(v,i){return v-desT[i];});
   var depMes=0;
   (dreConfig||[]).forEach(function(c){ if(unit&&c.unit_id&&c.unit_id!==unit)return; depMes+=Number(c.depreciacao_mensal||0); });
   var dep=Z().map(function(_,i){ return (rec[i]||cusT[i]||desT[i])?depMes:0; });
-  var res=eb.map(function(v,i){return v-dep[i];});
-  return {rec:rec,ded:ded,recLiq:recLiq,cus:cus,des:des,cusT:cusT,desT:desT,mb:mb,eb:eb,dep:dep,depMes:depMes,res:res,fora:fora,foraT:foraT,semComp:semComp};
+  var resAI=eb.map(function(v,i){return v-dep[i];});
+  var res=resAI.map(function(v,i){return v-irT[i];});
+  return {rec:rec,ded:ded,dedB:dedB,dedBT:dedBT,recLiq:recLiq,cus:cus,des:des,cusT:cusT,desT:desT,mb:mb,eb:eb,dep:dep,depMes:depMes,resAI:resAI,irB:irB,irT:irT,res:res,fora:fora,foraT:foraT,semComp:semComp};
 }
 
 function dreRender(){
@@ -17083,7 +17087,7 @@ function dreRender(){
     +kpi('Receita l\u00edquida',fmtV(totRL),'ap\u00f3s impostos sobre servi\u00e7o','#166534')
     +kpi('Margem bruta',fmtV(totMB),pR(totMB),totMB>=0?'#166534':'#991b1b')
     +kpi('EBITDA',fmtV(totEB),pR(totEB),totEB>=0?'#0A2540':'#991b1b')
-    +kpi('Resultado',fmtV(totRes),(D.depMes?'':'sem deprecia\u00e7\u00e3o \u2014 ')+pR(totRes),totRes>=0?'#0A2540':'#991b1b')
+    +kpi('Resultado l\u00edquido',fmtV(totRes),(D.depMes?'':'sem deprecia\u00e7\u00e3o \u2014 ')+pR(totRes),totRes>=0?'#0A2540':'#991b1b')
     +'</div>';
 
   // linhas
@@ -17140,6 +17144,7 @@ function dreRender(){
 
   h+=LN('Receita de servi\u00e7os',D.rec,T(D.rec),{bg:'#eef7f1',peso:'700',cor:'#166534',corVal:'#166534'});
   h+=LN('(\u2212) Impostos sobre servi\u00e7o',D.ded.map(function(v){return -v;}),-T(D.ded),{cor:'var(--text2)'});
+  if(T(D.dedBT))h+=blocoLinhas(D.dedB,'__DED','(\u2212) Dedu\u00e7\u00f5es da receita (comiss\u00f5es etc.)','#991b1b','#fdf1f1');
   h+=LN('= Receita l\u00edquida',D.recLiq,totRL,{bg:'#e7f3ec',peso:'700',cor:'#166534',top:'2px solid #8fbf9f'});
 
   h+=blocoLinhas(D.cus,'__CUS','(\u2212) Custos da opera\u00e7\u00e3o','#991b1b','#fdf1f1');
@@ -17152,7 +17157,9 @@ function dreRender(){
 
   h+=LN('(\u2212) Deprecia\u00e7\u00e3o <span onclick="event.stopPropagation();dreDepModal()" style="cursor:pointer;font-size:11px;color:var(--accent);font-weight:600">\u270e editar</span>',
         D.dep.map(function(v){return -v;}),-T(D.dep),{cor:'var(--text2)'});
-  h+=LN('= Resultado',D.res,totRes,{bg:'#0A2540',peso:'700',cor:'#fff',corVal:'#fff',top:'2px solid #0A2540'});
+  h+=LN('= Resultado antes do IR',D.resAI,T(D.resAI),{bg:'#eaf0f7',peso:'700',cor:'#0A2540',top:'2px solid #94a9c4'});
+  if(T(D.irT))h+=blocoLinhas(D.irB,'__IR','(\u2212) IRPJ e CSLL','#991b1b','#fdf1f1');
+  h+=LN('= Resultado l\u00edquido',D.res,totRes,{bg:'#0A2540',peso:'700',cor:'#fff',corVal:'#fff',top:'2px solid #0A2540'});
   h+=LP('Margem l\u00edquida %',D.res,D.recLiq,DRE_REF.ml);
 
   if(T(D.foraT)){
@@ -17197,7 +17204,7 @@ function dreRender(){
 function dreReclassModal(){
   var old=ge('modal-dre-rec'); if(old)old.remove();
   var D=dreDados();
-  var nomes={}; Object.keys(D.cus).forEach(function(k){nomes[k]=1;}); Object.keys(D.des).forEach(function(k){nomes[k]=1;});
+  var nomes={}; [D.cus,D.des,D.dedB,D.irB].forEach(function(o){Object.keys(o).forEach(function(k){nomes[k]=1;});});
   var lista=Object.keys(nomes).sort();
   if(!lista.length){showToast('Nenhum bloco operacional com movimento no ano.','red');return;}
   var linhas=lista.map(function(bl,i){
@@ -17205,15 +17212,17 @@ function dreReclassModal(){
     var noBanco=!!((dfcBlocos||[]).find(function(x){return x.nome===bl;}));
     return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
       +'<div style="flex:1;font-size:13px">'+bl+(noBanco?'':' <span style="font-size:10px;color:var(--text3)">(fora do plano \u2014 ajuste s\u00f3 nesta sess\u00e3o)</span>')+'</div>'
-      +'<select id="dre-rec-'+i+'" class="fi" style="width:130px;padding:5px 8px;font-size:12px">'
+      +'<select id="dre-rec-'+i+'" class="fi" style="width:190px;padding:5px 8px;font-size:12px">'
+      +'<option value="deducao"'+(sec==='deducao'?' selected':'')+'>Dedu\u00e7\u00e3o da receita</option>'
       +'<option value="custo"'+(sec==='custo'?' selected':'')+'>Custo</option>'
       +'<option value="despesa"'+(sec==='despesa'?' selected':'')+'>Despesa</option>'
+      +'<option value="irpj"'+(sec==='irpj'?' selected':'')+'>IRPJ / CSLL</option>'
       +'</select></div>';
   }).join('');
   var html='<div id="modal-dre-rec" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px">'
     +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:82vh;overflow:auto;padding:18px">'
     +'<b style="font-size:15px">Classificar blocos do DRE</b>'
-    +'<div style="font-size:12px;color:var(--text3);margin:4px 0 12px">Define onde cada bloco do plano de contas entra: <b>Custo</b> (acima da margem bruta) ou <b>Despesa</b> (entre a margem e o EBITDA). A escolha fica salva no plano.</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin:4px 0 12px">Onde cada bloco do plano entra: <b>Dedu\u00e7\u00e3o da receita</b> (comiss\u00f5es \u2014 desconta antes da receita l\u00edquida), <b>Custo</b> (acima da margem bruta), <b>Despesa</b> (entre a margem e o EBITDA) ou <b>IRPJ / CSLL</b> (abaixo do resultado antes do IR). A escolha fica salva no plano.</div>'
     +linhas
     +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     +'<button class="btn btn-sm" onclick="ge(\'modal-dre-rec\').remove()">Cancelar</button>'
