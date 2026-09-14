@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.930 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.931 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1298,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.930';
+const APP_VERSION='v1.0.931';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8547,6 +8547,7 @@ function rFatProgramacao(){
   if(isAdmin){
     html += '<div style="display:flex;gap:8px">';
     html += '<button class="btn" onclick="gerarSugestoesProg()">✨ Gerar sugestões</button>';
+    html += '<button class="btn" onclick="fatGerarAbrir()">🧾 Gerar faturas da competência</button>';
     html += '<button class="btn btn-primary" onclick="openFatProgModal()">+ Nova programação</button>';
     html += '</div>';
   }
@@ -8618,6 +8619,240 @@ function rFatProgramacao(){
   }
 
   return html;
+}
+
+// ===== Gerar faturas da competência (lote de rascunhos) =====
+var fgAno=null, fgMes=null, fgEscopo='encerrados';
+
+function fatGerarAbrir(){
+  var hoje=new Date();
+  if(fgAno===null){ // padrão: competência anterior (a que normalmente se fatura)
+    var d=new Date(hoje.getFullYear(),hoje.getMonth()-1,1);
+    fgAno=d.getFullYear(); fgMes=d.getMonth();
+  }
+  var old=ge('modal-fat-gerar'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.id='modal-fat-gerar';
+  ov.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
+  ov.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:1020px;width:100%;max-height:88vh;overflow:auto;padding:22px">'
+    +'<div style="font-size:18px;font-weight:700">Gerar faturas da compet\u00eancia</div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:18px">Abre um rascunho por cliente da programa\u00e7\u00e3o ativa, com as linhas da tabela prontas e as quantidades em branco.</div>'
+    +'<div id="fg-corpo"></div></div>';
+  document.body.appendChild(ov);
+  fatGerarRender();
+}
+function fatGerarFechar(){ var m=ge('modal-fat-gerar'); if(m) m.remove(); }
+function fgSet(campo,v){ if(campo==='ano')fgAno=parseInt(v,10); else if(campo==='mes')fgMes=parseInt(v,10); else fgEscopo=v; fatGerarRender(); }
+
+function fgLastDay(y,m){ return new Date(y,m+1,0).getDate(); }
+function fgISO(y,m,d){ return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); }
+function fgHojeISO(){ var h=new Date(); return fgISO(h.getFullYear(),h.getMonth(),h.getDate()); }
+
+// Períodos ENCERRADOS da competência. Mensal fecha no fim do mês;
+// quinzenal fecha no dia 15 e no último dia.
+function fgPeriodos(per){
+  var y=fgAno,m=fgMes,hoje=fgHojeISO(),ld=fgLastDay(y,m),out=[];
+  if(per==='quinzenal'){
+    out.push({ini:fgISO(y,m,1),fim:fgISO(y,m,15),lbl:'1\u00aa quinzena',q:1});
+    out.push({ini:fgISO(y,m,16),fim:fgISO(y,m,ld),lbl:'2\u00aa quinzena',q:2});
+  } else {
+    out.push({ini:fgISO(y,m,1),fim:fgISO(y,m,ld),lbl:'M\u00eas cheio',q:0});
+  }
+  out=out.filter(function(p){ return p.fim<hoje; });                 // só período encerrado
+  if(fgEscopo==='q1') out=out.filter(function(p){ return p.q!==2; });
+  if(fgEscopo==='q2') out=out.filter(function(p){ return p.q!==1; });
+  return out;
+}
+// dia seguinte ao fim do período
+function fgEmissao(fimISO){
+  var p=fimISO.split('-'), d=new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10));
+  d.setDate(d.getDate()+1);
+  return fgISO(d.getFullYear(),d.getMonth(),d.getDate());
+}
+function fgDias(tab){
+  if(!tab) return null;
+  var raw=tab.prazo_pagamento||tab.cond_prazo_pagamento_dias||'';
+  var n=parseInt(String(raw).replace(/\D/g,''),10);
+  return (n>0&&n<=180)?n:null;
+}
+// Vencimento só vale a partir da aprovação do cliente — tabela pendente/rejeitada
+// não define prazo, então a fatura nasce sem data.
+function fgVencimento(tab,emissaoISO){
+  if(!tab) return null;
+  if(['pendente','rejeitada','inativo'].indexOf(tab.status)>=0) return null;
+  var dias=fgDias(tab); if(!dias) return null;
+  var p=emissaoISO.split('-'), d=new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10));
+  d.setDate(d.getDate()+dias);
+  return {data:fgISO(d.getFullYear(),d.getMonth(),d.getDate()),dias:dias};
+}
+function fgLinhasDaTabela(tab){
+  var tarifas=[];
+  try{ tarifas=Array.isArray(tab.tarifas)?tab.tarifas:JSON.parse(tab.tarifas||'[]'); }catch(e){ tarifas=[]; }
+  var out=[];
+  tarifas.forEach(function(q){
+    (q.itens||[]).filter(function(i){return i.servico;}).forEach(function(it){
+      out.push({
+        quadro:q.quadro||q.nome||'Geral',
+        servico:it.servico,
+        unidade:it.unidade||it.unidade_cobranca||'',
+        preco_unitario:it.valor||'',
+        quantidade:'',                                   // em branco — é o que vamos digitar
+        subtotal:0,
+        tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
+        nota_debito:it.nota_debito===true
+      });
+    });
+  });
+  return out;
+}
+function fgJaExiste(clienteId,ini,fim){
+  return (faturamento||[]).some(function(f){
+    return f.cliente_id===clienteId && f.periodo_inicio===ini && f.periodo_fim===fim
+      && ['cancelado','reprovado'].indexOf(f.status)<0;
+  });
+}
+
+function fgPrevia(){
+  var cid=company?company.id:null, out=[];
+  (fatProgramacao||[]).filter(function(p){ return p.ativo!==false && (!cid||p.company_id===cid); }).forEach(function(p){
+    var cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;});
+    var tab=(tabelasTarifarias||[]).find(function(t){return t.id===p.tabela_id;});
+    var per=(p.periodicidade||'mensal').toLowerCase();
+    fgPeriodos(per).forEach(function(pr){
+      var linhas=tab?fgLinhasDaTabela(tab):[];
+      var emis=fgEmissao(pr.fim);
+      var venc=fgVencimento(tab,emis);
+      var item={prog:p,cli:cli,tab:tab,per:pr,emissao:emis,venc:venc,linhas:linhas,
+                nome:(cli&&cli.nome)||p.cliente_nome||'\u2014'};
+      if(!tab){ item.situacao='pendente'; item.motivo='sem tabela vigente'; }
+      else if(!linhas.length){ item.situacao='pendente'; item.motivo='tabela sem itens'; }
+      else if(fgJaExiste(p.cliente_id,pr.ini,pr.fim)){ item.situacao='pulada'; }
+      else { item.situacao='nova'; }
+      out.push(item);
+    });
+  });
+  return out;
+}
+
+function fatGerarRender(){
+  var box=ge('fg-corpo'); if(!box) return;
+  var M=['Janeiro','Fevereiro','Mar\u00e7o','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var prev=fgPrevia();
+  var novas=prev.filter(function(x){return x.situacao==='nova';});
+  var pul=prev.filter(function(x){return x.situacao==='pulada';});
+  var pend=prev.filter(function(x){return x.situacao==='pendente';});
+  window._fgNovas=novas;
+  var hoje=new Date(), ld=fgLastDay(fgAno,fgMes);
+  var temQuinz=(fatProgramacao||[]).some(function(p){return (p.periodicidade||'')==='quinzenal';});
+  var fechou=fgISO(fgAno,fgMes,ld)<fgHojeISO();
+
+  var anos=[]; for(var a=hoje.getFullYear()-1;a<=hoje.getFullYear()+1;a++)anos.push(a);
+  var h='<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">';
+  h+='<div><div style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Compet\u00eancia</div>'
+    +'<select class="fi" style="width:auto;min-width:150px" onchange="fgSet(\'mes\',this.value)">'+M.map(function(l,i){return '<option value="'+i+'"'+(i===fgMes?' selected':'')+'>'+l+'</option>';}).join('')+'</select></div>';
+  h+='<div><div style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Ano</div>'
+    +'<select class="fi" style="width:auto" onchange="fgSet(\'ano\',this.value)">'+anos.map(function(a){return '<option value="'+a+'"'+(a===fgAno?' selected':'')+'>'+a+'</option>';}).join('')+'</select></div>';
+  if(temQuinz){
+    h+='<div><div style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Per\u00edodos</div>'
+      +'<select class="fi" style="width:auto;min-width:250px" onchange="fgSet(\'escopo\',this.value)">'
+      +'<option value="encerrados"'+(fgEscopo==='encerrados'?' selected':'')+'>Todos os per\u00edodos encerrados</option>'
+      +'<option value="q1"'+(fgEscopo==='q1'?' selected':'')+'>Somente 1\u00aa quinzena (01\u201315)</option>'
+      +'<option value="q2"'+(fgEscopo==='q2'?' selected':'')+'>Somente 2\u00aa quinzena (16\u2013fim)</option>'
+      +'</select></div>';
+  }
+  h+='</div>';
+
+  h+='<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin:10px 0 16px">'
+    +'\ud83d\udcc5 Hoje \u00e9 <b>'+hoje.toLocaleDateString('pt-BR')+'</b>. '
+    +(fechou
+       ? (M[fgMes]+' est\u00e1 encerrado, ent\u00e3o '+(temQuinz?'as <b>duas quinzenas</b> entram para os clientes quinzenais e o ':'o ')+'<b>m\u00eas cheio</b> para os mensais.')
+       : ('<b>'+M[fgMes]+' ainda n\u00e3o fechou</b> \u2014 s\u00f3 entram os per\u00edodos j\u00e1 encerrados at\u00e9 hoje.'))
+    +' Um per\u00edodo s\u00f3 aparece depois do seu \u00faltimo dia.</div>';
+
+  var kpi=function(l,v,c){return '<div style="border:1px solid var(--border);border-radius:10px;padding:11px 13px">'
+    +'<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">'+l+'</div>'
+    +'<div style="font-size:22px;font-weight:700;margin-top:2px;color:'+c+'">'+v+'</div></div>';};
+  h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0">'
+    +kpi('Faturas a criar',novas.length,'#166534')
+    +kpi('J\u00e1 existentes (puladas)',pul.length,'var(--text3)')
+    +kpi('Com pend\u00eancia',pend.length,pend.length?'#b45309':'var(--text3)')
+    +'</div>';
+
+  h+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Pr\u00e9via</div>';
+  if(!prev.length){
+    h+='<div style="padding:18px;text-align:center;color:var(--text3);font-size:12.5px">Nenhum per\u00edodo encerrado para esta compet\u00eancia, ou nenhuma programa\u00e7\u00e3o ativa.</div>';
+  } else {
+    var dBR=function(iso){ if(!iso)return '\u2014'; var p=iso.split('-'); return p[2]+'/'+p[1]; };
+    var badge=function(x){
+      if(x.situacao==='nova')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#e7f3ec;color:#166534">nova</span>';
+      if(x.situacao==='pulada')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--bg3);color:var(--text3)">j\u00e1 existe</span>';
+      return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#fdf7e7;color:#8a6d1a">'+(x.motivo||'pendente')+'</span>';
+    };
+    h+='<div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:42vh">'
+      +'<table style="width:100%;border-collapse:collapse"><thead><tr>'
+      +['Cliente','Tabela','Per\u00edodo','Emiss\u00e3o','Vencimento','Linhas','Situa\u00e7\u00e3o'].map(function(t){
+        return '<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;text-align:left;white-space:nowrap">'+t+'</th>';}).join('')
+      +'</tr></thead><tbody>';
+    prev.forEach(function(x){
+      h+='<tr>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)">'+x.nome+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)'+(x.tab?'':';color:#b45309')+'">'+(x.tab?(x.tab.nome||'\u2014'):'\u2014 sem tabela vigente \u2014')+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'+dBR(x.per.ini)+' \u2013 '+dBR(x.per.fim)+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'+dBR(x.emissao)+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'
+          +(x.venc?(dBR(x.venc.data)+' <span style="font-size:10px;color:#166534">('+x.venc.dias+'d)</span>'):'<span style="color:var(--text3)">em branco</span>')+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)">'+(x.linhas.length||'\u2014')+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)">'+badge(x)+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+
+  h+='<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:14px;line-height:1.6">'
+    +'<b>Vencimento em branco</b> \u2014 o prazo vem da proposta e s\u00f3 vale a partir da aprova\u00e7\u00e3o do cliente; sem aprova\u00e7\u00e3o, a fatura nasce sem data.<br>'
+    +'<b>Faturamento m\u00ednimo</b> \u2014 n\u00e3o entra agora: o complemento \u00e9 calculado depois, quando as quantidades forem gravadas.<br>'
+    +'<b>Duplicidade</b> \u2014 cliente que j\u00e1 tem fatura no mesmo per\u00edodo \u00e9 pulado; pode rodar de novo sem risco.</div>';
+
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">'
+    +'<button class="btn" onclick="fatGerarFechar()">Cancelar</button>'
+    +'<button class="btn btn-primary" id="fg-btn-criar"'+(novas.length?'':' disabled style="opacity:.5;cursor:not-allowed"')+' onclick="fatGerarExecutar()">Criar '+novas.length+' rascunho'+(novas.length===1?'':'s')+'</button>'
+    +'</div>';
+  box.innerHTML=h;
+}
+
+async function fatGerarExecutar(){
+  var novas=window._fgNovas||[]; if(!novas.length) return;
+  var btn=ge('fg-btn-criar'); if(btn){ btn.disabled=true; btn.textContent='Criando\u2026'; }
+  var cid=company?company.id:null;
+  var ok=0, erros=0;
+  // numeração sequencial local (getFatNumero lê o maior já existente)
+  for(var i=0;i<novas.length;i++){
+    var x=novas[i];
+    try{
+      var obj={
+        owner_id:(cu&&cu.id)||null, company_id:cid, unit_id:(company&&company.unit_id)||null,
+        numero_fatura:getFatNumero(),
+        cliente_id:x.prog.cliente_id, cliente_nome:x.nome,
+        tabela_id:x.prog.tabela_id||null,
+        tipo_documento:'fatura',
+        responsavel_id:x.prog.responsavel||null,
+        periodicidade:(x.prog.periodicidade||'mensal'),
+        periodo_inicio:x.per.ini, periodo_fim:x.per.fim,
+        data_emissao:x.emissao,
+        vencimento_dias:x.venc?x.venc.dias:null,
+        linhas:JSON.stringify(x.linhas),
+        subtotal:0, total:0,
+        status:'rascunho'
+      };
+      var res=await dbInsert('faturamento',obj);
+      if(res){ faturamento.unshift(res); ok++; } else erros++;
+    }catch(e){ console.warn('gerar fatura',e); erros++; }
+  }
+  fatGerarFechar();
+  if(typeof showToast==='function')
+    showToast(ok+' rascunho(s) criado(s)'+(erros?' \u00b7 '+erros+' com erro':''), erros?'amber':'green');
+  if(curPage==='faturamento'){ var c=ge('content'); if(c) c.innerHTML=rFaturamento(); }
+  else pg('faturamento');
 }
 
 function gerarSugestoesProg(){
