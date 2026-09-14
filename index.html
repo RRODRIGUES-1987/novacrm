@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.927 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.929 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.927';
+const APP_VERSION='v1.0.929';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -17380,10 +17380,23 @@ function rentToggleNc(){rentNcAb=!rentNcAb;rentRender();}
 function rentFamiliaDe(servico){
   var k=String(servico||'').trim().toLowerCase();
   if(rentServClass&&rentServClass[k])return rentServClass[k].familia;
-  if(/posi[c\u00e7]|armazen|estadia|estocag|m\u00b2|m2/.test(k))return 'armazenagem';
-  if(/moviment|entrada|sa[i\u00ed]da|recebiment|expedi|carregament|descarga|handling|cross|separa[c\u00e7]|picking|pallet/.test(k))return 'movimentacao';
-  if(/complemento|d[e\u00e9]bito|reembolso|repasse|avulso|hora extra|etiquet|filme|stretch|paletiza|unitiza|invent[a\u00e1]rio|seguro|frete/.test(k))return 'acessorio';
+  if(/posi[c\u00e7]|armazen|estadia|estocag|gris|advalorem|ad valorem|seguro/.test(k))return 'armazenagem';
+  if(/moviment|entrada|sa[i\u00ed]da|recebiment|expedi|carregament|descarga|handling|cross|separa[c\u00e7]|picking|paletiza|unitiza/.test(k))return 'movimentacao';
+  if(/complemento|d[e\u00e9]bito|reembolso|repasse|avulso|hora extra|etiquet|filme|stretch|invent[a\u00e1]rio|frete|retrabalho/.test(k))return 'acessorio';
   return null; // não classificado — aparece no aviso até alguém classificar
+}
+// A quantidade da linha só é DRIVER quando a unidade de cobrança mede pallet/posição.
+// Percentual, "Valor em estoque", "Folha", "Carretas", ND e complemento não medem
+// ocupação nem movimentação — entram só como receita, e o custo desses clientes
+// é rateado pelo mix de receita.
+function rentTemDriver(l){
+  if(l.nota_debito||l.is_complemento)return false;
+  if(String(l.tipo||'')==='percentual')return false;
+  var u=String(l.unidade||'').trim().toLowerCase();
+  if(!u)return false;
+  if(/valor em estoque|folha|carreta|ve[i\u00ed]culo|hora|m\u00b2|m2|mensal|fixo|verba/.test(u))return false;
+  if(/pallet|palete|posi[c\u00e7]|pl[t]?\b|volume separado|caixa|un\b|unidade|etiqueta/.test(u))return true;
+  return false;
 }
 function rentCompetenciaFat(f){
   var cr=(contasReceber||[]).find(function(x){return x.fatura_id===f.id&&x.competencia;});
@@ -17394,6 +17407,7 @@ function rentCompetenciaFat(f){
 function rentDados(){
   var ano=String(ctrlAno), unit=activeUnit;
   var noPer=function(ym){ if(!ym||ym.slice(0,4)!==ano)return false; return rentModo==='ano'||(parseInt(ym.slice(5,7),10)-1)===rentMes; };
+  var chave=function(nome){ return String(nome||'\u2014').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(ltda|s\/a|sa|me|epp|eireli|industrial|industria|com[e\u00e9]rcio|comercio|do brasil|brasil)\b/g,'').replace(/[^a-z0-9]/g,''); };
   var C={}, servDist={}, ncTot=0, recArm=0, recMov=0;
   (faturamento||[]).forEach(function(f){
     if(['cancelado','reprovado'].indexOf(f.status)>=0)return;
@@ -17401,8 +17415,8 @@ function rentDados(){
     var ym=rentCompetenciaFat(f); if(!noPer(ym))return;
     var m=parseInt(ym.slice(5,7),10)-1;
     var lin; try{ lin=typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ lin=[]; }
-    var key=f.cliente_id||f.cliente_nome||'\u2014';
-    var c=C[key]=C[key]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,nc:0,posMes:{},mov:0};
+    var k=chave(f.cliente_nome)||'\u2014';
+    var c=C[k]=C[k]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,nc:0,posMes:{},mov:0,recComDriver:0};
     var subNF=lin.filter(function(l){return !l.nota_debito;}).reduce(function(t,l){return t+Number(l.subtotal||0);},0);
     var impTot=Number(f.impostos_total||0);
     lin.forEach(function(l){
@@ -17411,10 +17425,11 @@ function rentDados(){
       var rl=sub-imp;
       var fam=(l.nota_debito||l.is_complemento)?'acessorio':rentFamiliaDe(l.servico);
       var lbl=String(l.servico||'').trim();
-      if(lbl&&!l.is_complemento){ var sd=servDist[lbl]=servDist[lbl]||{rl:0,fam:fam}; sd.rl+=rl; sd.fam=fam; }
+      if(lbl&&!l.is_complemento){ var sd=servDist[lbl]=servDist[lbl]||{rl:0,fam:fam,un:String(l.unidade||'')}; sd.rl+=rl; sd.fam=fam; }
       c.rec+=rl;
-      if(fam==='armazenagem'){ c.recArm+=rl; recArm+=rl; c.posMes[m]=(c.posMes[m]||0)+Number(l.quantidade||0); }
-      else if(fam==='movimentacao'){ c.recMov+=rl; recMov+=rl; c.mov+=Number(l.quantidade||0); }
+      var drv=rentTemDriver(l);
+      if(fam==='armazenagem'){ c.recArm+=rl; recArm+=rl; if(drv){ c.posMes[m]=(c.posMes[m]||0)+Number(l.quantidade||0); c.recComDriver+=rl; } }
+      else if(fam==='movimentacao'){ c.recMov+=rl; recMov+=rl; if(drv){ c.mov+=Number(l.quantidade||0); c.recComDriver+=rl; } }
       else if(fam==='acessorio'){ c.recAcc+=rl; }
       else { c.nc+=rl; ncTot+=rl; }
     });
@@ -17423,7 +17438,6 @@ function rentDados(){
     var pm=C[k].posMes, ms=Object.keys(pm);
     C[k].pos=ms.length?ms.reduce(function(t,mm){return t+pm[mm];},0)/ms.length:0;   // média dos picos = ocupação média
   });
-  var posTot=0,movTot=0; Object.keys(C).forEach(function(k){posTot+=C[k].pos;movTot+=C[k].mov;});
   var D=dreDados(); // mesma régua do DRE (competência, activeUnit, ctrlAno)
   var sum=function(a){return a.reduce(function(t,x){return t+x;},0);};
   var custoOp=rentModo==='ano'?sum(D.cusT):D.cusT[rentMes];
@@ -17432,17 +17446,40 @@ function rentDados(){
   var depTot =rentModo==='ano'?sum(D.dep):D.dep[rentMes];
   var shareArm=rentSplitArm!=null?rentSplitArm:((recArm+recMov)>0?recArm/(recArm+recMov):0.5);
   var poolArm=custoOp*shareArm, poolMov=custoOp*(1-shareArm);
-  var lista=Object.keys(C).map(function(k){
-    var c=C[k];
-    c.custoArm=posTot>0?poolArm*c.pos/posTot:0;
-    c.custoMov=movTot>0?poolMov*c.mov/movTot:0;
+
+  var lista=Object.keys(C).map(function(k){return C[k];}).filter(function(c){return c.rec||c.pos||c.mov;});
+  // Passada 1 — quem tem driver medido consome o pool na proporção do driver,
+  // limitado à fatia de receita que esse pool deve cobrir (evita que poucos
+  // clientes medidos absorvam o custo de toda a carteira).
+  var posTot=0,movTot=0,recArmDrv=0,recMovDrv=0;
+  lista.forEach(function(c){ posTot+=c.pos; movTot+=c.mov; });
+  lista.forEach(function(c){
+    if(c.pos>0)recArmDrv+=c.recArm;
+    if(c.mov>0)recMovDrv+=c.recMov;
+  });
+  var fatArm=recArm>0?recArmDrv/recArm:0, fatMov=recMov>0?recMovDrv/recMov:0;
+  var poolArmDrv=poolArm*fatArm, poolMovDrv=poolMov*fatMov;
+  lista.forEach(function(c){
+    c.custoArm=(posTot>0&&c.pos>0)?poolArmDrv*c.pos/posTot:0;
+    c.custoMov=(movTot>0&&c.mov>0)?poolMovDrv*c.mov/movTot:0;
+    c.medido=(c.pos>0||c.mov>0);
+  });
+  // Passada 2 — o que sobrou dos pools vai pelo MIX DE RECEITA de quem não tem driver
+  var restArm=poolArm-poolArmDrv, restMov=poolMov-poolMovDrv;
+  var baseArm=0, baseMov=0;
+  lista.forEach(function(c){ if(!(c.pos>0))baseArm+=c.recArm; if(!(c.mov>0))baseMov+=c.recMov; });
+  lista.forEach(function(c){
+    if(!(c.pos>0)&&baseArm>0)c.custoArm+=restArm*c.recArm/baseArm;
+    if(!(c.mov>0)&&baseMov>0)c.custoMov+=restMov*c.recMov/baseMov;
     c.margem=c.rec-c.custoArm-c.custoMov;
     c.margemP=c.rec>0?c.margem/c.rec:null;
-    return c;
-  }).filter(function(c){return c.rec||c.pos||c.mov;});
+  });
   lista.sort(function(a,b){return (b.margemP==null?-1e9:b.margemP)-(a.margemP==null?-1e9:a.margemP);});
+  var recTot=lista.reduce(function(t,c){return t+c.rec;},0);
+  var recDrv=lista.reduce(function(t,c){return t+c.recComDriver;},0);
   return {lista:lista,posTot:posTot,movTot:movTot,custoOp:custoOp,poolArm:poolArm,poolMov:poolMov,shareArm:shareArm,
-          despTot:despTot,irTot:irTot,depTot:depTot,ncTot:ncTot,servDist:servDist,recArm:recArm,recMov:recMov};
+          despTot:despTot,irTot:irTot,depTot:depTot,ncTot:ncTot,servDist:servDist,recArm:recArm,recMov:recMov,
+          cobertura:recTot>0?recDrv/recTot:0};
 }
 
 function rentRender(){
@@ -17454,6 +17491,7 @@ function rentRender(){
   var mgTot=recTot-aloTot;
   var pcts=D.lista.filter(function(c){return c.margemP!=null;});
   var amp=pcts.length?(pcts[0].margemP*100).toFixed(0)+'% \u2192 '+(pcts[pcts.length-1].margemP*100).toFixed(0)+'%':'\u2014';
+  var _ampNota=pcts.length?('Amplitude das margens: '+amp+'.'):'';
 
   var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
   h+='<div style="display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden">'
@@ -17476,7 +17514,7 @@ function rentRender(){
     +kpi('Receita l\u00edquida',fmtV(recTot),D.lista.length+' cliente(s) faturado(s)','#166534')
     +kpi('Custo operacional alocado',fmtV(aloTot),'blocos "Custo" do DRE','#991b1b')
     +kpi('Margem de contribui\u00e7\u00e3o',fmtV(mgTot),(recTot?(mgTot/recTot*100).toFixed(1).replace('.',',')+'% da receita l\u00edq.':''),mgTot>=0?'#166534':'#991b1b')
-    +kpi('Amplitude',amp,'melhor \u2192 pior cliente','#0A2540')
+    +kpi('Cobertura dos drivers',(D.cobertura*100).toFixed(0)+'%',(D.cobertura>=0.6?'da receita com driver medido':'baixa \u2014 maioria rateada pelo mix'),D.cobertura>=0.6?'#166534':'#b45309')
     +'</div>';
 
   var fN=function(v){ if(!v)return '\u2014'; var t=Math.abs(v).toLocaleString('pt-BR',{maximumFractionDigits:0}); return v<0?('('+t+')'):t; };
@@ -17499,7 +17537,7 @@ function rentRender(){
     var barra=mp!=null&&mp>0?'<span style="display:inline-block;height:8px;border-radius:4px;background:#166534;vertical-align:middle;margin-left:6px;width:'+Math.max(4,Math.round(mp/maxP*70))+'px"></span>':'';
     h+='<tr>'
       +'<td style="padding:7px 8px;text-align:center;color:var(--text3);font-weight:700">'+(i+1)+'</td>'
-      +'<td style="padding:7px 10px;font-weight:600">'+c.nome+'</td>'
+      +'<td style="padding:7px 10px;font-weight:600">'+c.nome+(c.medido?'':' <span title="sem driver na fatura \u2014 custo rateado pelo mix de receita" style="font-size:10px;color:#b45309;font-weight:700">~est.</span>')+'</td>'
       +'<td style="padding:7px 10px;text-align:right">'+fN(c.rec)+'</td>'
       +'<td style="padding:7px 10px;text-align:right">'+fQ(c.pos)+'</td>'
       +'<td style="padding:7px 10px;text-align:right">'+fQ(c.mov)+'</td>'
@@ -17515,7 +17553,8 @@ function rentRender(){
   h+='<div style="margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text2)">'
     +'<b>Fora do rateio (n\u00e3o alocados por cliente):</b> Despesas ADM/comercial '+fmtV(D.despTot)+' \u00b7 IRPJ/CSLL '+fmtV(D.irTot)+(D.depTot?' \u00b7 Deprecia\u00e7\u00e3o '+fmtV(D.depTot):'')+'. '
     +'A margem de contribui\u00e7\u00e3o total ('+fmtV(mgTot)+') precisa cobrir esses blocos para chegar ao resultado do DRE.<br>'
-    +'Servi\u00e7os acess\u00f3rios e ND: receita inclu\u00edda, sem custo alocado (margem cheia).</div>';
+    +'Servi\u00e7os acess\u00f3rios e ND: receita inclu\u00edda, sem custo alocado (margem cheia).<br>'
+    +'<b>~est.</b> = fatura sem driver medido (mensalidade fechada, percentual sobre estoque etc.) \u2014 custo rateado pelo mix de receita entre armazenagem e movimenta\u00e7\u00e3o do pr\u00f3prio cliente.</div>';
 
   if(D.ncTot>0){
     var ncs=Object.keys(D.servDist).filter(function(k){return !D.servDist[k].fam;});
@@ -17525,7 +17564,7 @@ function rentRender(){
     if(rentNcAb){ h+='<div style="padding:0 12px 10px;font-size:12px;color:#8a6d1a">'+ncs.map(function(k){return '\u2022 '+k;}).join('<br>')+'</div>'; }
     h+='</div>';
   }
-  h+='<div style="font-size:11px;color:var(--text3);margin-top:8px">Drivers vindos das quantidades faturadas \u2014 quando o WMS estiver implantado full, passam a ser medidos e a fatura vira confer\u00eancia.</div>';
+  h+='<div style="font-size:11px;color:var(--text3);margin-top:8px">'+_ampNota+' Drivers vindos das quantidades faturadas \u2014 quando o WMS estiver implantado full, passam a ser medidos e a fatura vira confer\u00eancia.</div>';
   el.innerHTML=h;
 }
 
@@ -17547,7 +17586,7 @@ function rentClassModal(){
   var linhas=lista.map(function(sv,i){
     var fam=D.servDist[sv].fam;
     return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
-      +'<div style="flex:1;font-size:12.5px">'+sv+(fam?'':' <span style="font-size:10px;color:#b45309;font-weight:700">n\u00e3o classificado</span>')+'</div>'
+      +'<div style="flex:1;font-size:12.5px">'+sv+(D.servDist[sv].un?' <span style="font-size:10px;color:var(--text3)">un: '+D.servDist[sv].un+'</span>':'')+(fam?'':' <span style="font-size:10px;color:#b45309;font-weight:700">n\u00e3o classificado</span>')+'</div>'
       +'<select id="rent-cls-'+i+'" class="fi" style="width:160px;padding:5px 8px;font-size:12px">'
       +'<option value=""'+(!fam?' selected':'')+'>\u2014 escolher \u2014</option>'
       +'<option value="armazenagem"'+(fam==='armazenagem'?' selected':'')+'>Armazenagem</option>'
@@ -17608,7 +17647,7 @@ function rentImprimir(){
     +'<div class="hd"><div><div class="emp">'+emp+'</div><div class="sub">'+un+' \u00b7 '+per+' \u00b7 compet\u00eancia da fatura</div></div>'
     +'<div class="sub" style="text-align:right">Rentabilidade por cliente<br>margem de contribui\u00e7\u00e3o \u00b7 valores em R$</div></div>'
     +'<table><thead><tr><th>#</th><th>Cliente</th><th>Receita l\u00edq.</th><th>Posi\u00e7\u00f5es</th><th>Pallets mov.</th><th>Custo armaz.</th><th>Custo mov.</th><th>Margem R$</th><th>Margem %</th></tr></thead><tbody>'+corpo+'</tbody></table>'
-    +'<div class="ft">Split do custo operacional: Armazenagem '+(D.shareArm*100).toFixed(0)+'% \u00b7 Movimenta\u00e7\u00e3o '+((1-D.shareArm)*100).toFixed(0)+'%. Fora do rateio: Despesas '+f(D.despTot)+' \u00b7 IRPJ/CSLL '+f(D.irTot)+'. Drivers sintetizados das faturas.</div>'
+    +'<div class="ft">Cobertura dos drivers: '+(D.cobertura*100).toFixed(0)+'% da receita. Split do custo operacional: Armazenagem '+(D.shareArm*100).toFixed(0)+'% \u00b7 Movimenta\u00e7\u00e3o '+((1-D.shareArm)*100).toFixed(0)+'%. Fora do rateio: Despesas '+f(D.despTot)+' \u00b7 IRPJ/CSLL '+f(D.irTot)+'. Drivers sintetizados das faturas.</div>'
     +'</body></html>';
   Array.prototype.slice.call(document.querySelectorAll('iframe[id^="rent-print"]')).forEach(function(x){x.remove();});
   var ifr=document.createElement('iframe'); ifr.id='rent-print-'+Date.now();
@@ -29751,8 +29790,73 @@ async function invLoadQuadro(){
     }
     box.innerHTML=invQuadroHTML();
     invRenderQuadroRows();
-    var _mb=ge('inv-monit-body'); if(_mb) _mb.innerHTML=invProgressHTML();
   }catch(e){ box.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro: '+(e.message||e)+'</div>'; }
+}
+// ===== Monitoramento (tela propria, aberta pela linha da lista) =====
+var invMonId=null, invMonTimer=null, invMonEm=null, invMonBusy=false;
+function invMonitorAbrir(id){
+  invMonId=id;
+  var inv=(invListCache||[]).find(function(x){return x.id===id;})||{};
+  var old=document.getElementById('inv-monitor-modal'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.className='modal-overlay'; ov.id='inv-monitor-modal';
+  ov.innerHTML='<div class="modal" style="max-width:1200px;width:95%">'
+    +'<div class="modal-hdr" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:1">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<span style="font-weight:700;font-size:14px">Monitoramento</span>'
+      +(inv.numero?'<span style="font-size:12px;font-family:monospace;color:var(--accent);font-weight:700">'+inv.numero+'</span>':'')
+      +'<span style="font-size:12px;color:var(--text2)">'+(inv.empresa_contada||'')+'</span>'
+    +'</div>'
+    +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<span id="inv-mon-stamp" style="font-size:11px;color:var(--text3)">\u2014</span>'
+      +'<button class="btn btn-sm" id="inv-mon-btn" onclick="invMonitorRefresh(true)" title="Atualizar agora">&#8635; Atualizar</button>'
+      +'<button onclick="invMonitorFechar()" title="Fechar (Esc)" style="background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--text3);padding:0 4px">&times;</button>'
+    +'</div></div>'
+    +'<div style="padding:18px" id="inv-mon-body">'+invSpin('Carregando monitoramento...')+'</div></div>';
+  document.body.appendChild(ov);
+  if(!window._invMonEsc){ window._invMonEsc=true; document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&document.getElementById('inv-monitor-modal')) invMonitorFechar(); }); }
+  invMonitorRefresh(false);
+  invMonTimerStart();
+}
+function invMonTimerStart(){
+  invMonTimerStop();
+  invMonTimer=setInterval(function(){
+    // para sozinho se a tela foi fechada por outro caminho
+    if(!document.getElementById('inv-monitor-modal')){ invMonTimerStop(); return; }
+    invMonitorRefresh(false);
+  },300000); // 5 minutos
+}
+function invMonTimerStop(){ if(invMonTimer){ clearInterval(invMonTimer); invMonTimer=null; } }
+function invMonitorFechar(){
+  invMonTimerStop();
+  var ov=document.getElementById('inv-monitor-modal'); if(ov) ov.remove();
+  invMonId=null;
+}
+async function invMonitorRefresh(manual){
+  var body=ge('inv-mon-body'); if(!body||!invMonId) return;
+  if(invMonBusy) return;
+  invMonBusy=true;
+  var btn=ge('inv-mon-btn'); if(btn){ btn.disabled=true; btn.textContent='Atualizando\u2026'; }
+  try{
+    var F=await invFetchAll('inventario_fichas','inventario_id=eq.'+invMonId+'&select=id,endereco,dep,nivel,rua,posicao,tem_estrutura,qtd_itens,qtd_sistema_total,modo,rodada_liberada,status,folha,ficha_num');
+    var T=await invFetchAll('inventario_tarefas','inventario_id=eq.'+invMonId+'&order=contada_em.desc.nullslast&select=rodada,status,contada_em,ficha_id,cod_produto,qtd_contada,endereco');
+    var _sf=invFichas, _st=invTarefas;            // preserva o estado do detalhe aberto
+    invFichas=F; invTarefas=T;
+    var html=F.length?invProgressHTML():'<div style="padding:16px;color:var(--text3)">Gere e libere fichas para ver o monitoramento.</div>';
+    invFichas=_sf; invTarefas=_st;
+    body.innerHTML=html;
+    invMonEm=new Date();
+    var st=ge('inv-mon-stamp');
+    if(st) st.textContent='atualizado \u00e0s '+invMonEm.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+' \u00b7 auto a cada 5 min';
+    if(manual&&typeof showToast==='function') showToast('Monitoramento atualizado','green');
+  }catch(e){
+    body.innerHTML='<div style="padding:16px;color:var(--red-text)">Erro ao carregar: '+(e.message||e)+'</div>';
+  }
+  invBusyOff();
+}
+function invBusyOff(){
+  invMonBusy=false;
+  var btn=ge('inv-mon-btn'); if(btn){ btn.disabled=false; btn.innerHTML='&#8635; Atualizar'; }
 }
 function invDistinct(field){ var s={}; for(var i=0;i<invFichas.length;i++){ var v=invFichas[i][field]; if(v)s[v]=1; } return Object.keys(s).sort(); }
 function invPctSafe(c,t){ if(!t)return 0; if(c>=t)return 100; return Math.min(99,Math.floor(c/t*100)); }
@@ -30701,6 +30805,7 @@ function invOpen(id){
   invRenderDetail();
 }
 function invBack(){
+  invMonitorFechar();
   var ov=document.getElementById('inv-detail-modal'); if(ov) ov.remove();
   invSel=null; invData=null;
   var r=ge('inv-root'); if(r) invRenderList(r);
@@ -30743,6 +30848,7 @@ function invListRows(invs){
       +'<div class="lsub" style="white-space:normal">'+(subBits.length?subBits.join(' &middot; ')+' &middot; ':'')+'<span style="color:var(--text3)">'+meta+'</span></div></div>'
       +'<div class="lright">'+invStatusBadge(inv.status)
       +'<div style="display:flex;gap:4px;margin-top:6px">'
+        +'<button class="btn btn-sm" title="Monitoramento da contagem" onclick="event.stopPropagation();invMonitorAbrir(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px;margin-right:4px">&#128200; Monitor</button>'
         +'<button class="btn btn-sm" title="Contar bipando (coletor)" onclick="event.stopPropagation();invColetor(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px;margin-right:4px">&#128241; Coletor</button>'
         +'<button class="btn btn-sm" title="Digitar contagens" onclick="event.stopPropagation();invDigitar(\''+inv.id+'\')" style="padding:3px 9px;font-size:11px">Digitar</button>'
         +(inv.status==='encerrado'
@@ -30851,16 +30957,13 @@ function invProdLabel(end){
   return a[0]+' <span style="color:var(--text3)">+'+(a.length-1)+'</span>';
 }
 function invDTab(tab){
-  ['resumo','import','fichas','monit'].forEach(function(t){
+  ['resumo','import','fichas'].forEach(function(t){
     var p=ge('idt-'+t), b=ge('idtb-'+t);
     if(p) p.style.display=(t===tab)?'':'none';
     if(b){ b.style.borderBottomColor=(t===tab)?'var(--accent)':'transparent'; b.style.color=(t===tab)?'var(--accent)':'var(--text2)'; b.style.fontWeight=(t===tab)?'700':'500'; }
   });
   if(tab==='import'){ invMaskPreview(); invEtiqProdRuler(); }
-  if(tab==='fichas' || tab==='monit'){
-    if(ge('inv-quadro')) invLoadQuadro();
-    else { var mb0=ge('inv-monit-body'); if(mb0) mb0.innerHTML='<div style="padding:16px;color:var(--text3)">Gere e libere fichas para ver o monitoramento.</div>'; }
-  }
+  if(tab==='fichas'){ if(ge('inv-quadro')) invLoadQuadro(); }
 }
 function invDetailHTML(inv){
   var mk=inv.mascara||{};
@@ -30888,7 +30991,7 @@ function invDetailHTML(inv){
   // abas de topo (sublinhado, estilo colaborador)
   var tb=function(t,lbl){var a=(t==='resumo'); return '<button id="idtb-'+t+'" onclick="invDTab(\''+t+'\')" style="padding:8px 14px;font-size:13px;font-weight:'+(a?'700':'500')+';border:none;background:none;cursor:pointer;border-bottom:2px solid '+(a?'var(--accent)':'transparent')+';color:'+(a?'var(--accent)':'var(--text2)')+'">'+lbl+'</button>';};
   h+='<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px;flex-wrap:wrap">'
-    +tb('resumo','Resumo')+tb('import','Importacao')+tb('fichas','Fichas')+tb('monit','Monitoramento')+'</div>';
+    +tb('resumo','Resumo')+tb('import','Importacao')+tb('fichas','Fichas')+'</div>';
   // ===== RESUMO =====
   var resumo=card(
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
@@ -30968,7 +31071,6 @@ function invDetailHTML(inv){
   h+='<div id="idt-resumo">'+resumo+'</div>';
   h+='<div id="idt-import" style="display:none">'+imp+'</div>';
   h+='<div id="idt-fichas" style="display:none">'+fichas+'</div>';
-  h+='<div id="idt-monit" style="display:none"><div id="inv-monit-body">'+invSpin('Carregando monitoramento...')+'</div></div>';
   return h;
 }
 
