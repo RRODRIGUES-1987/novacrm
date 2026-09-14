@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.939 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.940 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1298,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.939';
+const APP_VERSION='v1.0.940';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46227,8 +46227,18 @@ function ecomCxCurrentPid(){
   for(var i=0;i<ecomCx.fila.length;i++){ var p=ecomPedidos.find(function(x){return x.id===ecomCx.fila[i];}); if(p && p.status!=='conferido' && p.status!=='romaneado' && p.status!=='expedido') return p.id; }
   return null;
 }
+var _ecomCxBusy=false, _ecomCxLast={code:'',ts:0};
 async function ecomCxBip(code){
   if(!ecomCx || !ecomCx.fila.length){ ecomCxFlash('Bipe a folha para comecar','amber'); ecomCxRender(); return; }
+  // leitor em rajada: duas execuções simultâneas liam qtd_conferida antes da
+  // gravação, concluíam o mesmo pedido e imprimiam duas etiquetas — e, no
+  // consolidado, a segunda concluía o pedido seguinte sem bipe.
+  if(_ecomCxBusy) return;
+  var _now=Date.now();
+  if(_ecomCxLast.code===String(code) && (_now-_ecomCxLast.ts)<700) return;  // Enter duplicado
+  _ecomCxLast={code:String(code),ts:_now};
+  _ecomCxBusy=true;
+  try{
   var pid=ecomCxCurrentPid();
   if(!pid){ ecomCxFlash('Folha concluida','green'); ecomCxRender(); return; }
   var prod=ecomProdByCode(code);
@@ -46266,6 +46276,7 @@ async function ecomCxBip(code){
     } else { ecomCxFlash('Item OK','green'); }
     ecomCxRender();
   }catch(e){ ecomBeep(); ecomCxFlash('Erro: '+(e.message||e),'red'); ecomCxRender(); }
+  }finally{ _ecomCxBusy=false; var _i=ge('col-scan'); if(_i)_i.focus(); }
 }
 function ecomCxSemEtiqHtml(){
   var ids=(ecomCx&&ecomCx.semEtiq)||[]; if(!ids.length) return '';
