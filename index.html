@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.926 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.927 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1290,7 +1290,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.926';
+const APP_VERSION='v1.0.927';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8150,6 +8150,52 @@ function avisosCalcular(){
     add('WMS',cob,'1 recebimento guardado aguardando NF de cobertura','{n} recebimentos guardados aguardando NF de cobertura','wms-entradas');
   } }catch(e){console.warn('aviso wms',e);}
 
+  try{ if(pode('faturamento')){
+    var fatAg=(faturamento||[]).filter(function(f){return f.status==='aguardando';}).length;
+    add('Financeiro',fatAg,'1 fatura aguardando aprova\u00e7\u00e3o','{n} faturas aguardando aprova\u00e7\u00e3o','faturamento');
+  } }catch(e){console.warn('aviso fat',e);}
+
+  try{ if(pode('propostas')||pode('crm-dashboard')){
+    var propAg=(propostas||[]).filter(function(p){return p.status==='aguardando_aprovacao';}).length;
+    add('Comercial',propAg,'1 proposta aguardando aprova\u00e7\u00e3o','{n} propostas aguardando aprova\u00e7\u00e3o','aprovar-propostas');
+  } }catch(e){}
+
+  try{ if(pode('clientes')){
+    var cliP=(clientes||[]).filter(function(c){return c.status==='pendente';}).length;
+    add('Comercial',cliP,'1 cliente pendente de efetiva\u00e7\u00e3o','{n} clientes pendentes de efetiva\u00e7\u00e3o','clientes');
+  } }catch(e){}
+
+  try{ if(pode('tabelas-tarifarias')){
+    var tabP=(tabelasTarifarias||[]).filter(function(t){return t.status==='pendente';}).length;
+    add('Comercial',tabP,'1 tabela tarif\u00e1ria pendente de efetiva\u00e7\u00e3o','{n} tabelas tarif\u00e1rias pendentes de efetiva\u00e7\u00e3o','tabelas-tarifarias');
+  } }catch(e){}
+
+  try{ var _vg=(pode('tarifario-padrao')&&typeof checkVigenciaAlert==='function')?checkVigenciaAlert():null;
+    if(_vg) A.push({modulo:'Comercial',n:1,texto:_vg.vencido?'Tarif\u00e1rio padr\u00e3o vencido \u2014 atualizar':'Tarif\u00e1rio padr\u00e3o vence em '+_vg.dias+' dia(s)',pg:'tarifario-padrao'});
+  }catch(e){}
+
+  try{ if(pode('rh-pessoas')){
+    var _esc=(typeof escopoAvaliacaoIds==='function')?escopoAvaliacaoIds():null;
+    var _ne=function(pid){return _esc===null||_esc.has(pid);};
+    var fv=0,fp=0,hj2=new Date();
+    (pessoas||[]).filter(function(p){return ['funcionario','colaborador'].indexOf(p.tipo_pessoa)>=0&&p.ativo!==false&&p.data_admissao&&_ne(p.id);}).forEach(function(p){
+      var pi=new Date(p.data_admissao+'T00:00:00');
+      if(isNaN(pi.getTime())||pi.getFullYear()<1900||pi.getFullYear()>2100)return;
+      var dl=null,g=0;
+      while(g++<300){
+        var pf=new Date(pi);pf.setFullYear(pf.getFullYear()+1);
+        var d2=new Date(pf);d2.setMonth(d2.getMonth()+11);d2.setDate(d2.getDate()-1);
+        dl=d2; if(d2>=hj2)break; pi=pf;
+      }
+      if(!dl)return;
+      var dias=Math.floor((dl-hj2)/86400000);
+      var temProg=(rhFerias||[]).some(function(f){return f.pessoa_id===p.id&&['cancelado','concluido'].indexOf(f.status)<0;});
+      if(!temProg){ if(dias<0)fv++; else if(dias<=10)fp++; }
+    });
+    add('RH',fv,'1 colaborador com f\u00e9rias vencidas sem programa\u00e7\u00e3o','{n} colaboradores com f\u00e9rias vencidas sem programa\u00e7\u00e3o','rh-ferias');
+    add('RH',fp,'1 colaborador com f\u00e9rias a vencer em 10 dias','{n} colaboradores com f\u00e9rias a vencer em 10 dias','rh-ferias');
+  } }catch(e){console.warn('aviso ferias',e);}
+
   try{ if(typeof asLiberado==='function'&&asLiberado()){
     add('Hermes',(window._hmNaoCount||0),'1 pergunta que o Hermes não entendeu','{n} perguntas que o Hermes não entendeu','admin-hermes');
   } }catch(e){}
@@ -8157,27 +8203,58 @@ function avisosCalcular(){
 }
 function avisosIr(a){ if(!a)return; if(a.acao){ try{ eval(a.acao); }catch(e){ pg(a.pg); } } else pg(a.pg); }
 function rAvisosHome(){
-  var A=[]; try{ A=avisosCalcular(); }catch(e){ console.warn('avisosCalcular',e); return ''; }
-  if(!A.length)return '<div style="background:#eaf5ee;border:1px solid #cfe3d6;border-radius:12px;padding:14px 16px;margin-bottom:18px;font-size:13px;color:#166534">&#10003; Nada pendente da sua ação.</div>';
+  var A=[]; try{ A=avisosCalcular(); }catch(e){ console.warn('avisosCalcular',e); A=[]; }
+  var role=(profile&&profile.role)||'', isAdmin=role==='admin';
+  var pode=function(t){ try{ return isAdmin||canDo(t,'pode_ver'); }catch(e){ return isAdmin; } };
   var mods={}; A.forEach(function(a){(mods[a.modulo]=mods[a.modulo]||[]).push(a);});
-  var cor={Financeiro:'#1d4ed8',Comercial:'#7c3aed',Compras:'#b45309',RH:'#0f766e',WMS:'#0A2540',Hermes:'#6d28d9'};
+  var CFG=[
+    {m:'Financeiro',cor:'#1d4ed8',vis:pode('contas-pagar')||pode('contas-receber')||pode('faturamento')},
+    {m:'Comercial',cor:'#7c3aed',vis:pode('tarifario-padrao')||pode('propostas')||pode('clientes')||pode('crm-dashboard')},
+    {m:'Compras',cor:'#b45309',vis:pode('compras-solicitacoes')||pode('compras')},
+    {m:'RH',cor:'#0f766e',vis:pode('rh-pessoas')},
+    {m:'WMS',cor:'#0A2540',vis:pode('wms-visao')},
+    {m:'Helpdesk',cor:'#0e7490',vis:isAdmin||pode('helpdesk')},
+    {m:'Hermes',cor:'#6d28d9',vis:(function(){try{return typeof asLiberado==='function'&&asLiberado();}catch(e){return false;}})()}
+  ].filter(function(c){return c.vis;});
   window._avisosRef={};
+  var tot=A.reduce(function(t,a){return t+a.n;},0);
   var out='<div style="margin-bottom:22px">'
-    +'<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px"><div style="font-size:15px;font-weight:700;color:#0A2540">Precisa da sua ação</div>'
-    +'<div style="font-size:12px;color:var(--text3)">'+A.length+' aviso(s) · clique para ir à tela</div></div>'
+    +'<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px"><div style="font-size:15px;font-weight:700;color:#0A2540">Vigil\u00e2ncia por m\u00f3dulo</div>'
+    +'<div style="font-size:12px;color:var(--text3)">'+(tot?tot+' item(ns) precisam da sua a\u00e7\u00e3o':'nada pendente da sua a\u00e7\u00e3o')+'</div></div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px">';
-  Object.keys(mods).forEach(function(m){
-    out+='<div style="background:#fff;border:1px solid var(--border);border-left:4px solid '+(cor[m]||'#0A2540')+';border-radius:10px;padding:12px 14px">'
-      +'<div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:'+(cor[m]||'#0A2540')+';margin-bottom:8px">'+m.toUpperCase()+'</div>';
-    mods[m].forEach(function(a,i){
+  CFG.forEach(function(cfg){
+    var m=cfg.m, itens=mods[m]||[];
+    out+='<div style="background:var(--bg);border:1px solid var(--border);border-left:4px solid '+cfg.cor+';border-radius:10px;padding:12px 14px;min-height:74px">'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:'+cfg.cor+';margin-bottom:8px;display:flex;justify-content:space-between;align-items:center"><span>'+m.toUpperCase()+'</span>'
+      +(itens.length?'<span style="background:'+cfg.cor+';color:#fff;border-radius:99px;font-size:11px;padding:1px 8px">'+itens.reduce(function(t,a){return t+a.n;},0)+'</span>':'')+'</div>'
+      +'<div'+(m==='Helpdesk'?' id="aviso-hd-body"':'')+'>';
+    if(m==='Helpdesk'&&!itens.length){ out+='<div style="font-size:12px;color:var(--text3)">verificando chamados\u2026</div>'; }
+    else if(!itens.length){ out+='<div style="font-size:12.5px;color:#166534">&#10003; Sem pend\u00eancias no momento</div>'; }
+    else itens.forEach(function(a,i){
       var k=m+'_'+i; window._avisosRef[k]=a;
       out+='<div onclick="avisosIr(window._avisosRef[\''+k+'\'])" style="display:flex;gap:9px;align-items:flex-start;padding:7px 8px;border-radius:7px;cursor:pointer;margin-bottom:2px">'
-        +'<span style="flex:none;height:24px;border-radius:12px;background:'+(cor[m]||'#0A2540')+';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 9px">'+a.n+'</span>'
-        +'<span style="font-size:12.5px;color:#111;line-height:1.35">'+a.texto+'</span></div>';
+        +'<span style="flex:none;height:24px;border-radius:12px;background:'+cfg.cor+';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 9px">'+a.n+'</span>'
+        +'<span style="font-size:12.5px;color:var(--text);line-height:1.35">'+a.texto+'</span></div>';
     });
-    out+='</div>';
+    out+='</div></div>';
   });
-  return out+'</div></div>';
+  out+='</div></div>';
+  try{ setTimeout(homeHelpdeskAsync,0); }catch(e){}
+  return out;
+}
+async function homeHelpdeskAsync(){
+  var el=ge('aviso-hd-body'); if(!el)return;
+  var vazio='<div style="font-size:12.5px;color:#166534">&#10003; Sem pend\u00eancias no momento</div>';
+  try{
+    var cid=(company&&company.id)||null; if(!cid){el.innerHTML=vazio;return;}
+    var rows=await dbSelect('helpdesk_chamados','company_id=eq.'+cid+'&select=id,status').catch(function(){return[];})||[];
+    var ab=rows.filter(function(c){return c.status==='aberto';}).length;
+    var an=rows.filter(function(c){return c.status==='em_andamento';}).length;
+    if(!ab&&!an){el.innerHTML=vazio;return;}
+    var item=function(n,txt){ if(!n)return ''; return '<div onclick="pg(\'helpdesk\')" style="display:flex;gap:9px;align-items:flex-start;padding:7px 8px;border-radius:7px;cursor:pointer;margin-bottom:2px"><span style="flex:none;height:24px;border-radius:12px;background:#0e7490;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 9px">'+n+'</span><span style="font-size:12.5px;color:var(--text);line-height:1.35">'+txt+'</span></div>'; };
+    el.innerHTML=item(ab,ab===1?'1 chamado aberto sem tratamento':ab+' chamados abertos sem tratamento')
+                +item(an,an===1?'1 chamado em andamento':an+' chamados em andamento');
+  }catch(e){ el.innerHTML=vazio; }
 }
 
 function rDashboardGeral(){
@@ -8203,30 +8280,8 @@ function rDashboardGeral(){
   html += '<div style="font-size:13px;color:var(--text3);margin-top:2px;text-transform:capitalize">'+dataStr+'</div>';
   html += '</div>';
 
-  // Avisos — só o que exige ação (fonte única com o Hermes)
+  // Vigilância por módulo — fonte única (avisosCalcular); um card por módulo, vazio quando sem ação
   try{ html += rAvisosHome(); }catch(eA){ console.warn('avisos',eA); }
-
-  // Alerta tarifário
-  const alerta = podeVerTar ? checkVigenciaAlert() : null;
-  if(alerta){
-    const cor = alerta.vencido?'var(--red':'var(--amber';
-    const msg = alerta.vencido?'Tarifário vencido — clique para atualizar':'Tarifário vence em '+alerta.dias+' dia(s) — clique para preparar o reajuste';
-    html += "<div onclick=\"pg('tarifario-padrao')\" style=\"background:"+cor+"-bg);color:"+cor+"-text);border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid "+cor+"-text)\">";
-    html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-    html += msg+'</div>';
-  }
-
-  // Workflow alertas
-  if(podeVerCRM||podeVerFin) html += rWorkflowAlertas();
-
-  // Seção RH
-  if(podeVerRH){
-    html += rDashRH(role);
-    html += rDashDemissoesPendentes();
-  }
-
-  // Seção Financeiro
-  if(podeVerFin) html += rDashFinanceiro(faturamento, contasReceber, role);
 
   return html;
 }
@@ -16728,6 +16783,7 @@ function ctrlForaOperacao(nomeBloco){
 function rControladoria(){
   if(ctrlView==='dfc') return ctrlDFCView();
   if(ctrlView==='dre') return dreView();
+  if(ctrlView==='rent') return rentView();
   var card=function(id,tit,desc,svg,pronto){
     return '<div onclick="'+(pronto?'ctrlAbrir(\''+id+'\')':'')+'" style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--bg);'+(pronto?'cursor:pointer':'opacity:.55')+'"'
       +(pronto?' onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'"':'')+'>'
@@ -16743,10 +16799,11 @@ function rControladoria(){
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'
     +card('dfc','DFC &middot; Fluxo de caixa','O que entrou contra o que saiu, por dia, semana, quinzena ou m&ecirc;s. Sa&iacute;das abertas por bloco.','<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',true)
     +card('dre','DRE &middot; Resultado','Receita, dedu&ccedil;&otilde;es, custo e despesa por compet&ecirc;ncia, com Salto, Itu e consolidado.','<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',true)
+    +card('rent','Rentabilidade por cliente','Margem de contribui&ccedil;&atilde;o por depositante — drivers sintetizados das faturas (posi&ccedil;&otilde;es-pico e pallets movimentados).','<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',true)
     +card('analise','An&aacute;lise &middot; Pontos de aten&ccedil;&atilde;o','Distor&ccedil;&otilde;es do m&ecirc;s, contas fora da m&eacute;dia e proje&ccedil;&atilde;o para o pr&oacute;ximo per&iacute;odo.','<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',false)
     +'</div></div>';
 }
-function initControladoria(){ if(ctrlView==='dfc') ctrlRender(); if(ctrlView==='dre') dreInit(); }
+function initControladoria(){ if(ctrlView==='dfc') ctrlRender(); if(ctrlView==='dre') dreInit(); if(ctrlView==='rent') rentInit(); }
 
 function ctrlDFCView(){
   return '<div style="max-width:1400px;margin:0 auto;padding:4px">'
@@ -17288,6 +17345,278 @@ async function dreDepSalvar(){
   var m=ge('modal-dre-dep'); if(m)m.remove();
   showToast(falhou?'Parte n\u00e3o foi salva \u2014 rode o SQL da vers\u00e3o e tente de novo.':'Deprecia\u00e7\u00e3o salva.',falhou?'red':undefined);
   dreRender();
+}
+// ============ CONTROLADORIA · RENTABILIDADE POR CLIENTE ============
+// Drivers sintetizados das FATURAS (WMS ainda não implantado full):
+// posições-pico e pallets movimentados = quantidades das linhas.
+// Mês de referência = COMPETÊNCIA da fatura (mesma régua do DRE).
+// Ocupação no ano = média dos picos mensais. Pools de custo = blocos
+// "Custo" do DRE, divididos pela receita das famílias (split editável).
+var rentModo='ano', rentMes=new Date().getMonth(), rentServClass=null, rentSplitArm=null, rentNcAb=false;
+
+function rentView(){
+  return '<div style="max-width:1400px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">'
+    +'<button class="btn btn-sm" onclick="ctrlVoltar()">&larr; Voltar</button>'
+    +'<b style="font-size:17px">Rentabilidade por cliente</b>'
+    +'<span style="font-size:11px;color:var(--text3)">margem de contribui&ccedil;&atilde;o &middot; compet&ecirc;ncia da fatura</span>'
+    +'</div><div id="rent-box"></div></div>';
+}
+async function rentInit(){
+  await cpEnsureDfc();
+  var cid=company?company.id:null;
+  if(dreConfig===null){ dreConfig=await dbSelect('ctrl_dre_config',cid?('company_id=eq.'+cid):'select=*').catch(function(){return[];})||[]; }
+  if(rentServClass===null){
+    var rows=await dbSelect('ctrl_serv_class',cid?('company_id=eq.'+cid):'select=*').catch(function(){return[];})||[];
+    rentServClass={}; rows.forEach(function(r){ rentServClass[String(r.servico||'').trim().toLowerCase()]={id:r.id,familia:r.familia}; });
+  }
+  rentRender();
+}
+function rentSetModo(m){rentModo=m;rentRender();}
+function rentSetMes(v){rentMes=parseInt(v,10)||0;rentRender();}
+function rentSetAno(d){ctrlAno+=d;rentRender();}
+function rentToggleNc(){rentNcAb=!rentNcAb;rentRender();}
+
+function rentFamiliaDe(servico){
+  var k=String(servico||'').trim().toLowerCase();
+  if(rentServClass&&rentServClass[k])return rentServClass[k].familia;
+  if(/posi[c\u00e7]|armazen|estadia|estocag|m\u00b2|m2/.test(k))return 'armazenagem';
+  if(/moviment|entrada|sa[i\u00ed]da|recebiment|expedi|carregament|descarga|handling|cross|separa[c\u00e7]|picking|pallet/.test(k))return 'movimentacao';
+  if(/complemento|d[e\u00e9]bito|reembolso|repasse|avulso|hora extra|etiquet|filme|stretch|paletiza|unitiza|invent[a\u00e1]rio|seguro|frete/.test(k))return 'acessorio';
+  return null; // não classificado — aparece no aviso até alguém classificar
+}
+function rentCompetenciaFat(f){
+  var cr=(contasReceber||[]).find(function(x){return x.fatura_id===f.id&&x.competencia;});
+  var d=(cr&&cr.competencia)||f.periodo_fim||f.periodo_inicio||f.data_emissao||(f.created_at||'').slice(0,10)||'';
+  return d?String(d).slice(0,7):'';
+}
+
+function rentDados(){
+  var ano=String(ctrlAno), unit=activeUnit;
+  var noPer=function(ym){ if(!ym||ym.slice(0,4)!==ano)return false; return rentModo==='ano'||(parseInt(ym.slice(5,7),10)-1)===rentMes; };
+  var C={}, servDist={}, ncTot=0, recArm=0, recMov=0;
+  (faturamento||[]).forEach(function(f){
+    if(['cancelado','reprovado'].indexOf(f.status)>=0)return;
+    if(unit&&f.unit_id&&f.unit_id!==unit)return;
+    var ym=rentCompetenciaFat(f); if(!noPer(ym))return;
+    var m=parseInt(ym.slice(5,7),10)-1;
+    var lin; try{ lin=typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ lin=[]; }
+    var key=f.cliente_id||f.cliente_nome||'\u2014';
+    var c=C[key]=C[key]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,nc:0,posMes:{},mov:0};
+    var subNF=lin.filter(function(l){return !l.nota_debito;}).reduce(function(t,l){return t+Number(l.subtotal||0);},0);
+    var impTot=Number(f.impostos_total||0);
+    lin.forEach(function(l){
+      var sub=Number(l.subtotal||0); if(!sub)return;
+      var imp=(l.imposto_total!=null)?Number(l.imposto_total||0):(l.nota_debito?0:(subNF>0?impTot*sub/subNF:0));
+      var rl=sub-imp;
+      var fam=(l.nota_debito||l.is_complemento)?'acessorio':rentFamiliaDe(l.servico);
+      var lbl=String(l.servico||'').trim();
+      if(lbl&&!l.is_complemento){ var sd=servDist[lbl]=servDist[lbl]||{rl:0,fam:fam}; sd.rl+=rl; sd.fam=fam; }
+      c.rec+=rl;
+      if(fam==='armazenagem'){ c.recArm+=rl; recArm+=rl; c.posMes[m]=(c.posMes[m]||0)+Number(l.quantidade||0); }
+      else if(fam==='movimentacao'){ c.recMov+=rl; recMov+=rl; c.mov+=Number(l.quantidade||0); }
+      else if(fam==='acessorio'){ c.recAcc+=rl; }
+      else { c.nc+=rl; ncTot+=rl; }
+    });
+  });
+  Object.keys(C).forEach(function(k){
+    var pm=C[k].posMes, ms=Object.keys(pm);
+    C[k].pos=ms.length?ms.reduce(function(t,mm){return t+pm[mm];},0)/ms.length:0;   // média dos picos = ocupação média
+  });
+  var posTot=0,movTot=0; Object.keys(C).forEach(function(k){posTot+=C[k].pos;movTot+=C[k].mov;});
+  var D=dreDados(); // mesma régua do DRE (competência, activeUnit, ctrlAno)
+  var sum=function(a){return a.reduce(function(t,x){return t+x;},0);};
+  var custoOp=rentModo==='ano'?sum(D.cusT):D.cusT[rentMes];
+  var despTot=rentModo==='ano'?sum(D.desT):D.desT[rentMes];
+  var irTot  =rentModo==='ano'?sum(D.irT):D.irT[rentMes];
+  var depTot =rentModo==='ano'?sum(D.dep):D.dep[rentMes];
+  var shareArm=rentSplitArm!=null?rentSplitArm:((recArm+recMov)>0?recArm/(recArm+recMov):0.5);
+  var poolArm=custoOp*shareArm, poolMov=custoOp*(1-shareArm);
+  var lista=Object.keys(C).map(function(k){
+    var c=C[k];
+    c.custoArm=posTot>0?poolArm*c.pos/posTot:0;
+    c.custoMov=movTot>0?poolMov*c.mov/movTot:0;
+    c.margem=c.rec-c.custoArm-c.custoMov;
+    c.margemP=c.rec>0?c.margem/c.rec:null;
+    return c;
+  }).filter(function(c){return c.rec||c.pos||c.mov;});
+  lista.sort(function(a,b){return (b.margemP==null?-1e9:b.margemP)-(a.margemP==null?-1e9:a.margemP);});
+  return {lista:lista,posTot:posTot,movTot:movTot,custoOp:custoOp,poolArm:poolArm,poolMov:poolMov,shareArm:shareArm,
+          despTot:despTot,irTot:irTot,depTot:depTot,ncTot:ncTot,servDist:servDist,recArm:recArm,recMov:recMov};
+}
+
+function rentRender(){
+  var el=ge('rent-box'); if(!el)return;
+  var D=rentDados();
+  var M=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  var recTot=D.lista.reduce(function(t,c){return t+c.rec;},0);
+  var aloTot=D.lista.reduce(function(t,c){return t+c.custoArm+c.custoMov;},0);
+  var mgTot=recTot-aloTot;
+  var pcts=D.lista.filter(function(c){return c.margemP!=null;});
+  var amp=pcts.length?(pcts[0].margemP*100).toFixed(0)+'% \u2192 '+(pcts[pcts.length-1].margemP*100).toFixed(0)+'%':'\u2014';
+
+  var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
+  h+='<div style="display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden">'
+    +[['mes','M\u00eas'],['ano','Ano']].map(function(o){return '<button onclick="rentSetModo(\''+o[0]+'\')" style="padding:6px 14px;border:none;font-size:12px;cursor:pointer;font-weight:600;background:'+(rentModo===o[0]?'#0A2540':'var(--bg)')+';color:'+(rentModo===o[0]?'#fff':'var(--text2)')+'">'+o[1]+'</button>';}).join('')+'</div>';
+  if(rentModo==='mes')h+='<select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="rentSetMes(this.value)">'+M.map(function(l,i){return '<option value="'+i+'"'+(i===rentMes?' selected':'')+'>'+l+'</option>';}).join('')+'</select>';
+  h+='<button class="btn btn-sm" onclick="rentClassModal()">Classificar servi\u00e7os</button>';
+  h+='<span style="font-size:11px;color:var(--text3)">split do custo operacional: Armazenagem <b>'+(D.shareArm*100).toFixed(0)+'%</b> \u00b7 Movimenta\u00e7\u00e3o <b>'+((1-D.shareArm)*100).toFixed(0)+'%</b> '+(rentSplitArm==null?'(proporcional \u00e0 receita)':'(manual)')+' <span onclick="rentSplitEdit()" style="cursor:pointer;color:var(--accent);font-weight:600">\u270e</span></span>';
+  h+='<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
+    +'<button class="btn btn-sm" onclick="rentSetAno(-1)">&lsaquo;</button>'
+    +'<b style="font-size:15px;min-width:52px;text-align:center">'+ctrlAno+'</b>'
+    +'<button class="btn btn-sm" onclick="rentSetAno(1)">&rsaquo;</button>'
+    +'<button class="btn btn-sm" onclick="rentImprimir()">\ud83d\udda8 Imprimir</button></div>';
+  h+='</div>';
+
+  var kpi=function(l,v,sx,c){return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +'<div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">'+l+'</div>'
+    +'<div style="font-size:20px;font-weight:700;color:'+c+'">'+v+'</div>'
+    +'<div style="font-size:11px;color:var(--text2);margin-top:2px">'+sx+'</div></div>';};
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px;margin-bottom:16px">'
+    +kpi('Receita l\u00edquida',fmtV(recTot),D.lista.length+' cliente(s) faturado(s)','#166534')
+    +kpi('Custo operacional alocado',fmtV(aloTot),'blocos "Custo" do DRE','#991b1b')
+    +kpi('Margem de contribui\u00e7\u00e3o',fmtV(mgTot),(recTot?(mgTot/recTot*100).toFixed(1).replace('.',',')+'% da receita l\u00edq.':''),mgTot>=0?'#166534':'#991b1b')
+    +kpi('Amplitude',amp,'melhor \u2192 pior cliente','#0A2540')
+    +'</div>';
+
+  var fN=function(v){ if(!v)return '\u2014'; var t=Math.abs(v).toLocaleString('pt-BR',{maximumFractionDigits:0}); return v<0?('('+t+')'):t; };
+  var fQ=function(v){ return v?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0}):'\u2014'; };
+  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:62vh">'
+    +'<table class="tgtbl" style="width:100%;min-width:1000px"><thead><tr>'
+    +'<th class="nos" style="width:34px">#</th><th class="nos" style="text-align:left;min-width:180px">Cliente</th>'
+    +'<th class="nos" style="text-align:right">Receita l\u00edq.</th>'
+    +'<th class="nos" style="text-align:right">Posi\u00e7\u00f5es<br>(pico m\u00e9d.)</th>'
+    +'<th class="nos" style="text-align:right">Pallets mov.</th>'
+    +'<th class="nos" style="text-align:right">Custo armaz.</th>'
+    +'<th class="nos" style="text-align:right">Custo mov.</th>'
+    +'<th class="nos" style="text-align:right">Margem R$</th>'
+    +'<th class="nos" style="text-align:right;min-width:150px">Margem %</th>'
+    +'</tr></thead><tbody>';
+  var maxP=pcts.length?Math.max(0.01,pcts[0].margemP):1;
+  D.lista.forEach(function(c,i){
+    var mp=c.margemP;
+    var cor=mp==null?'var(--text3)':(mp<0?'#991b1b':'#166534');
+    var barra=mp!=null&&mp>0?'<span style="display:inline-block;height:8px;border-radius:4px;background:#166534;vertical-align:middle;margin-left:6px;width:'+Math.max(4,Math.round(mp/maxP*70))+'px"></span>':'';
+    h+='<tr>'
+      +'<td style="padding:7px 8px;text-align:center;color:var(--text3);font-weight:700">'+(i+1)+'</td>'
+      +'<td style="padding:7px 10px;font-weight:600">'+c.nome+'</td>'
+      +'<td style="padding:7px 10px;text-align:right">'+fN(c.rec)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right">'+fQ(c.pos)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right">'+fQ(c.mov)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right;color:var(--text2)">'+fN(c.custoArm)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right;color:var(--text2)">'+fN(c.custoMov)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+cor+'">'+fN(c.margem)+'</td>'
+      +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+cor+'">'+(mp==null?'\u2014':(mp*100).toFixed(1).replace('.',',')+'%')+barra+'</td>'
+      +'</tr>';
+  });
+  if(!D.lista.length)h+='<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--text3)">Nenhuma fatura no per\u00edodo.</td></tr>';
+  h+='</tbody></table></div>';
+
+  h+='<div style="margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text2)">'
+    +'<b>Fora do rateio (n\u00e3o alocados por cliente):</b> Despesas ADM/comercial '+fmtV(D.despTot)+' \u00b7 IRPJ/CSLL '+fmtV(D.irTot)+(D.depTot?' \u00b7 Deprecia\u00e7\u00e3o '+fmtV(D.depTot):'')+'. '
+    +'A margem de contribui\u00e7\u00e3o total ('+fmtV(mgTot)+') precisa cobrir esses blocos para chegar ao resultado do DRE.<br>'
+    +'Servi\u00e7os acess\u00f3rios e ND: receita inclu\u00edda, sem custo alocado (margem cheia).</div>';
+
+  if(D.ncTot>0){
+    var ncs=Object.keys(D.servDist).filter(function(k){return !D.servDist[k].fam;});
+    h+='<div style="margin-top:10px;border:1px solid #f0d9a8;background:#fdf7e7;border-radius:9px;overflow:hidden">'
+      +'<div onclick="rentToggleNc()" style="cursor:pointer;padding:9px 12px;font-size:12px;color:#8a6d1a">'
+      +(rentNcAb?'\u25be':'\u25b8')+' \u26a0 <b>'+ncs.length+' servi\u00e7o(s) sem classifica\u00e7\u00e3o</b> \u2014 '+fmtV(D.ncTot)+' fora dos drivers at\u00e9 classificar. <u onclick="event.stopPropagation();rentClassModal()">Classificar agora</u></div>';
+    if(rentNcAb){ h+='<div style="padding:0 12px 10px;font-size:12px;color:#8a6d1a">'+ncs.map(function(k){return '\u2022 '+k;}).join('<br>')+'</div>'; }
+    h+='</div>';
+  }
+  h+='<div style="font-size:11px;color:var(--text3);margin-top:8px">Drivers vindos das quantidades faturadas \u2014 quando o WMS estiver implantado full, passam a ser medidos e a fatura vira confer\u00eancia.</div>';
+  el.innerHTML=h;
+}
+
+function rentSplitEdit(){
+  var v=prompt('Percentual do custo operacional para ARMAZENAGEM (0 a 100).\nVazio = autom\u00e1tico (proporcional \u00e0 receita das fam\u00edlias).',rentSplitArm==null?'':String(Math.round(rentSplitArm*100)));
+  if(v===null)return;
+  v=String(v).trim();
+  if(v===''){rentSplitArm=null;}
+  else{var n=parseFloat(v.replace(',','.')); if(isNaN(n)||n<0||n>100){showToast('Valor inv\u00e1lido \u2014 use 0 a 100.','red');return;} rentSplitArm=n/100;}
+  rentRender();
+}
+
+function rentClassModal(){
+  var old=ge('modal-rent-cls'); if(old)old.remove();
+  var D=rentDados();
+  var lista=Object.keys(D.servDist).sort();
+  if(!lista.length){showToast('Nenhum servi\u00e7o faturado no per\u00edodo.','red');return;}
+  window._rentClsLista=lista;
+  var linhas=lista.map(function(sv,i){
+    var fam=D.servDist[sv].fam;
+    return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="flex:1;font-size:12.5px">'+sv+(fam?'':' <span style="font-size:10px;color:#b45309;font-weight:700">n\u00e3o classificado</span>')+'</div>'
+      +'<select id="rent-cls-'+i+'" class="fi" style="width:160px;padding:5px 8px;font-size:12px">'
+      +'<option value=""'+(!fam?' selected':'')+'>\u2014 escolher \u2014</option>'
+      +'<option value="armazenagem"'+(fam==='armazenagem'?' selected':'')+'>Armazenagem</option>'
+      +'<option value="movimentacao"'+(fam==='movimentacao'?' selected':'')+'>Movimenta\u00e7\u00e3o</option>'
+      +'<option value="acessorio"'+(fam==='acessorio'?' selected':'')+'>Acess\u00f3rio</option>'
+      +'</select></div>';
+  }).join('');
+  var html='<div id="modal-rent-cls" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px">'
+    +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:560px;width:100%;max-height:82vh;overflow:auto;padding:18px">'
+    +'<b style="font-size:15px">Classificar servi\u00e7os faturados</b>'
+    +'<div style="font-size:12px;color:var(--text3);margin:4px 0 12px"><b>Armazenagem</b> (quantidade = posi\u00e7\u00f5es-pico) \u00b7 <b>Movimenta\u00e7\u00e3o</b> (quantidade = pallets movimentados) \u00b7 <b>Acess\u00f3rio</b> (s\u00f3 receita, sem driver). A escolha fica salva por servi\u00e7o.</div>'
+    +linhas
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +'<button class="btn btn-sm" onclick="ge(\'modal-rent-cls\').remove()">Cancelar</button>'
+    +'<button class="btn btn-sm btn-primary" onclick="rentClassSalvar()">Salvar</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function rentClassSalvar(){
+  var lista=window._rentClsLista||[], cid=company?company.id:null, falhou=false;
+  for(var i=0;i<lista.length;i++){
+    var sel=ge('rent-cls-'+i); if(!sel||!sel.value)continue;
+    var sv=lista[i], k=sv.trim().toLowerCase(), v=sel.value;
+    var atual=rentServClass[k];
+    if(atual&&atual.familia===v)continue;
+    try{
+      if(atual&&atual.id){ await dbUpdate('ctrl_serv_class',atual.id,{familia:v}); atual.familia=v; }
+      else{
+        var res=await dbInsert('ctrl_serv_class',{company_id:cid,servico:sv.trim(),familia:v});
+        if(res)rentServClass[k]={id:res.id,familia:v}; else falhou=true;
+      }
+    }catch(e){falhou=true;}
+  }
+  var m=ge('modal-rent-cls'); if(m)m.remove();
+  showToast(falhou?'Parte n\u00e3o foi salva \u2014 rode o SQL da vers\u00e3o e tente de novo.':'Classifica\u00e7\u00e3o salva.',falhou?'red':undefined);
+  rentRender();
+}
+
+function rentImprimir(){
+  var D=rentDados();
+  var M=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  var per=rentModo==='ano'?String(ctrlAno):(M[rentMes]+'/'+ctrlAno);
+  var emp=(company&&company.name)||'Empresa';
+  var un=activeUnit?(((userUnits||[]).find(function(u){return u.id===activeUnit;})||{}).name||''):'Consolidado';
+  var f=function(v){return v?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0}):'-';};
+  var corpo=D.lista.map(function(c,i){
+    return '<tr><td>'+(i+1)+'</td><td class="l">'+c.nome+'</td><td>'+f(c.rec)+'</td><td>'+f(c.pos)+'</td><td>'+f(c.mov)+'</td><td>'+f(c.custoArm)+'</td><td>'+f(c.custoMov)+'</td><td class="'+(c.margem<0?'neg':'pos')+'">'+f(c.margem)+'</td><td class="'+(c.margem<0?'neg':'pos')+'">'+(c.margemP==null?'-':(c.margemP*100).toFixed(1).replace('.',',')+'%')+'</td></tr>';
+  }).join('');
+  var css='@page{size:A4 landscape;margin:8mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0}'
+    +'.hd{display:flex;justify-content:space-between;border-bottom:2px solid #0A2540;padding-bottom:5px;margin-bottom:8px}'
+    +'.emp{font-size:14px;font-weight:bold;color:#0A2540}.sub{font-size:9px;color:#555}'
+    +'table{width:100%;border-collapse:collapse;font-size:9px}'
+    +'th{background:#0A2540;color:#fff;padding:4px 3px;text-align:right}th:first-child,th:nth-child(2){text-align:left}'
+    +'td{padding:3px;text-align:right;border-bottom:0.5px solid #eee}td.l{text-align:left}'
+    +'td.pos{color:#166534;font-weight:bold}td.neg{color:#991b1b;font-weight:bold}'
+    +'.ft{font-size:8px;color:#555;margin-top:6px}';
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rentabilidade '+per+'</title><style>'+css+'</style></head><body>'
+    +'<div class="hd"><div><div class="emp">'+emp+'</div><div class="sub">'+un+' \u00b7 '+per+' \u00b7 compet\u00eancia da fatura</div></div>'
+    +'<div class="sub" style="text-align:right">Rentabilidade por cliente<br>margem de contribui\u00e7\u00e3o \u00b7 valores em R$</div></div>'
+    +'<table><thead><tr><th>#</th><th>Cliente</th><th>Receita l\u00edq.</th><th>Posi\u00e7\u00f5es</th><th>Pallets mov.</th><th>Custo armaz.</th><th>Custo mov.</th><th>Margem R$</th><th>Margem %</th></tr></thead><tbody>'+corpo+'</tbody></table>'
+    +'<div class="ft">Split do custo operacional: Armazenagem '+(D.shareArm*100).toFixed(0)+'% \u00b7 Movimenta\u00e7\u00e3o '+((1-D.shareArm)*100).toFixed(0)+'%. Fora do rateio: Despesas '+f(D.despTot)+' \u00b7 IRPJ/CSLL '+f(D.irTot)+'. Drivers sintetizados das faturas.</div>'
+    +'</body></html>';
+  Array.prototype.slice.call(document.querySelectorAll('iframe[id^="rent-print"]')).forEach(function(x){x.remove();});
+  var ifr=document.createElement('iframe'); ifr.id='rent-print-'+Date.now();
+  ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:297mm;height:210mm;border:none';
+  document.body.appendChild(ifr);
+  var doc=ifr.contentDocument||ifr.contentWindow.document; doc.open(); doc.write(html); doc.close();
+  var feito=false, go=function(){if(feito)return;feito=true;try{ifr.contentWindow.focus();ifr.contentWindow.print();}catch(e){}setTimeout(function(){ifr.remove();},4000);};
+  ifr.onload=go; setTimeout(go,900);
 }
 // ============ FIM CONTROLADORIA ============
 
@@ -21133,7 +21462,7 @@ async function selecionarEmpresaModal(id){
   // Zera caches de módulo — sem isso a tela re-renderiza com dados da empresa anterior
   _ecomLoaded=false; ecomLojistaId=null;
   dfcBlocos=[]; dfcContas=[];
-  dreConfig=null; dreLocalSec={}; ctrlView='hub';
+  dreConfig=null; dreLocalSec={}; ctrlView='hub'; rentServClass=null; rentSplitArm=null;
   // Recarrega dados
   await loadData();
   render();
