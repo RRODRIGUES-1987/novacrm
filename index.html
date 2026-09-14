@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.929 | Gerado: 2026-09-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.930 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -538,9 +538,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <svg class="mod-arrow" id="arrow-controladoria" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="nav-submenu" id="sub-controladoria">
-        <button class="navitem sub" id="nav-controladoria" onclick="pg('controladoria')">
+        <button class="navitem sub" id="nav-controladoria" onclick="ctrlIr('dfc')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          <span>DFC · Resultado</span>
+          <span>DFC · Fluxo de caixa</span>
+        </button>
+        <button class="navitem sub" id="nav-controladoria-dre" onclick="ctrlIr('dre')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+          <span>DRE · Resultado</span>
+        </button>
+        <button class="navitem sub" id="nav-controladoria-rent" onclick="ctrlIr('rent')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+          <span>Rentabilidade por cliente</span>
         </button>
       </div>
     </div>
@@ -1290,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.929';
+const APP_VERSION='v1.0.930';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2377,7 +2385,7 @@ function render(){
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
   else if(curPage==='contas-pagar'){c.innerHTML=rContasPagar();initContasPagar();}
-  else if(curPage==='controladoria'){ctrlView='hub';c.innerHTML=rControladoria();initControladoria();}
+  else if(curPage==='controladoria'){ctrlView=ctrlPend||'hub';ctrlPend=null;c.innerHTML=rControladoria();initControladoria();}
   else if(curPage==='fin-relatorios'){finRelView='hub';c.innerHTML=rFinRelatorios();initFinRelatorios();}
   else if(curPage==='orcamento'){c.innerHTML=rOrcamento();initOrcamento();}
   else if(curPage==='orc-dashboard'){c.innerHTML=rOrcDashboard();initOrcDashboard();}
@@ -15897,6 +15905,7 @@ function crDataStr(cr){
 }
 function crSetEixo(e){crEixo=e;if(curPage==='contas-receber'){var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}}}
 let cpPeriodo={ano:new Date().getFullYear(),mes:new Date().getMonth()};
+var cpMesesOff={};  // meses excluídos do demonstrativo (ex.: ainda não fechados)
 let cpAgrup='mes'; // dia | semana | quinzena | mes
 let cpEixo='caixa'; // caixa | competencia
 let cpTab='dashboard'; // lancamentos | relatorios
@@ -16674,6 +16683,13 @@ var ctrlAberto={};            // blocos expandidos no detalhe de saídas
 var ctrlView='hub';           // hub | dfc
 
 function ctrlAbrir(v){ctrlView=v;var c=ge('content');if(c){c.innerHTML=rControladoria();initControladoria();}}
+function ctrlIr(v){
+  ctrlPend=v;
+  if(curPage!=='controladoria'){ pg('controladoria'); return; }
+  ctrlView=v; ctrlPend=null;
+  var c=ge('content'); if(c){ c.innerHTML=rControladoria(); initControladoria(); }
+}
+var ctrlPend=null;
 function ctrlVoltar(){ctrlView='hub';var c=ge('content');if(c){c.innerHTML=rControladoria();initControladoria();}}
 function ctrlSetAno(d){ctrlAno+=d;ctrlRender();}
 function ctrlSetAgrup(a){ctrlAgrup=a;ctrlRender();}
@@ -17380,22 +17396,25 @@ function rentToggleNc(){rentNcAb=!rentNcAb;rentRender();}
 function rentFamiliaDe(servico){
   var k=String(servico||'').trim().toLowerCase();
   if(rentServClass&&rentServClass[k])return rentServClass[k].familia;
-  if(/posi[c\u00e7]|armazen|estadia|estocag|gris|advalorem|ad valorem|seguro/.test(k))return 'armazenagem';
-  if(/moviment|entrada|sa[i\u00ed]da|recebiment|expedi|carregament|descarga|handling|cross|separa[c\u00e7]|picking|paletiza|unitiza/.test(k))return 'movimentacao';
-  if(/complemento|d[e\u00e9]bito|reembolso|repasse|avulso|hora extra|etiquet|filme|stretch|invent[a\u00e1]rio|frete|retrabalho/.test(k))return 'acessorio';
+  // seguro primeiro: advalorem é apólice, não armazenagem
+  if(/advalorem|ad valorem|gris|seguro|ap[o\u00f3]lice/.test(k))return 'seguro';
+  // acessórios com nome próprio (checar antes de "pallet" genérico)
+  if(/palletiza|paletiza|repalletiza|repaletiza|fornecimento|filme|stretch|picking|separa[c\u00e7]|etiquet|invent[a\u00e1]rio|retrabalho|reembolso|repasse|avulso|hora extra|complemento|d[e\u00e9]bito|frete/.test(k))return 'acessorio';
+  // movimentação: entrada, saída e movimentação interna
+  if(/entrada|\bin\b|sa[i\u00ed]da|\bout\b|moviment|recebiment|expedi|carregament|descarga|handling|cross/.test(k))return 'movimentacao';
+  if(/armazen|posi[c\u00e7]|estadia|estocag/.test(k))return 'armazenagem';
   return null; // não classificado — aparece no aviso até alguém classificar
 }
-// A quantidade da linha só é DRIVER quando a unidade de cobrança mede pallet/posição.
-// Percentual, "Valor em estoque", "Folha", "Carretas", ND e complemento não medem
-// ocupação nem movimentação — entram só como receita, e o custo desses clientes
-// é rateado pelo mix de receita.
+// A quantidade da linha só é DRIVER quando mede pallet/posição.
+// "P. Pallet" (posição-pallet) e "Pallet" medem; "Valor estoque", "Folha",
+// "Carretas", percentual, ND e complemento não medem.
 function rentTemDriver(l){
   if(l.nota_debito||l.is_complemento)return false;
   if(String(l.tipo||'')==='percentual')return false;
   var u=String(l.unidade||'').trim().toLowerCase();
   if(!u)return false;
-  if(/valor em estoque|folha|carreta|ve[i\u00ed]culo|hora|m\u00b2|m2|mensal|fixo|verba/.test(u))return false;
-  if(/pallet|palete|posi[c\u00e7]|pl[t]?\b|volume separado|caixa|un\b|unidade|etiqueta/.test(u))return true;
+  if(/valor em estoque|valor estoque|folha|carreta|ve[i\u00ed]culo|hora|m\u00b2|m2|verba/.test(u))return false;
+  if(/pallet|palete|posi[c\u00e7]/.test(u))return true;
   return false;
 }
 function rentCompetenciaFat(f){
@@ -17408,7 +17427,7 @@ function rentDados(){
   var ano=String(ctrlAno), unit=activeUnit;
   var noPer=function(ym){ if(!ym||ym.slice(0,4)!==ano)return false; return rentModo==='ano'||(parseInt(ym.slice(5,7),10)-1)===rentMes; };
   var chave=function(nome){ return String(nome||'\u2014').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(ltda|s\/a|sa|me|epp|eireli|industrial|industria|com[e\u00e9]rcio|comercio|do brasil|brasil)\b/g,'').replace(/[^a-z0-9]/g,''); };
-  var C={}, servDist={}, ncTot=0, recArm=0, recMov=0;
+  var C={}, servDist={}, ncTot=0, recArm=0, recMov=0, recSeg=0;
   (faturamento||[]).forEach(function(f){
     if(['cancelado','reprovado'].indexOf(f.status)>=0)return;
     if(unit&&f.unit_id&&f.unit_id!==unit)return;
@@ -17416,9 +17435,10 @@ function rentDados(){
     var m=parseInt(ym.slice(5,7),10)-1;
     var lin; try{ lin=typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ lin=[]; }
     var k=chave(f.cliente_nome)||'\u2014';
-    var c=C[k]=C[k]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,nc:0,posMes:{},mov:0,recComDriver:0};
+    var c=C[k]=C[k]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,recSeg:0,nc:0,picoMes:{},mov:0,recComDriver:0};
     var subNF=lin.filter(function(l){return !l.nota_debito;}).reduce(function(t,l){return t+Number(l.subtotal||0);},0);
     var impTot=Number(f.impostos_total||0);
+    var picoFat=0; // pico desta fatura (posições)
     lin.forEach(function(l){
       var sub=Number(l.subtotal||0); if(!sub)return;
       var imp=(l.imposto_total!=null)?Number(l.imposto_total||0):(l.nota_debito?0:(subNF>0?impTot*sub/subNF:0));
@@ -17428,57 +17448,63 @@ function rentDados(){
       if(lbl&&!l.is_complemento){ var sd=servDist[lbl]=servDist[lbl]||{rl:0,fam:fam,un:String(l.unidade||'')}; sd.rl+=rl; sd.fam=fam; }
       c.rec+=rl;
       var drv=rentTemDriver(l);
-      if(fam==='armazenagem'){ c.recArm+=rl; recArm+=rl; if(drv){ c.posMes[m]=(c.posMes[m]||0)+Number(l.quantidade||0); c.recComDriver+=rl; } }
+      if(fam==='armazenagem'){ c.recArm+=rl; recArm+=rl; if(drv){ picoFat+=Number(l.quantidade||0); c.recComDriver+=rl; } }
       else if(fam==='movimentacao'){ c.recMov+=rl; recMov+=rl; if(drv){ c.mov+=Number(l.quantidade||0); c.recComDriver+=rl; } }
+      else if(fam==='seguro'){ c.recSeg+=rl; recSeg+=rl; }
       else if(fam==='acessorio'){ c.recAcc+=rl; }
       else { c.nc+=rl; ncTot+=rl; }
     });
+    // posições = PICO: no mês vale o MAIOR pico entre as faturas daquele mês
+    if(picoFat>0) c.picoMes[m]=Math.max(c.picoMes[m]||0,picoFat);
   });
   Object.keys(C).forEach(function(k){
-    var pm=C[k].posMes, ms=Object.keys(pm);
-    C[k].pos=ms.length?ms.reduce(function(t,mm){return t+pm[mm];},0)/ms.length:0;   // média dos picos = ocupação média
+    var pm=C[k].picoMes, ms=Object.keys(pm);
+    // no ano: média dos picos mensais; no mês: o próprio pico
+    C[k].pos=ms.length?ms.reduce(function(t,mm){return t+pm[mm];},0)/ms.length:0;
   });
   var D=dreDados(); // mesma régua do DRE (competência, activeUnit, ctrlAno)
   var sum=function(a){return a.reduce(function(t,x){return t+x;},0);};
-  var custoOp=rentModo==='ano'?sum(D.cusT):D.cusT[rentMes];
-  var despTot=rentModo==='ano'?sum(D.desT):D.desT[rentMes];
-  var irTot  =rentModo==='ano'?sum(D.irT):D.irT[rentMes];
-  var depTot =rentModo==='ano'?sum(D.dep):D.dep[rentMes];
+  var mesIdx=rentModo==='ano'?null:rentMes;
+  var pega=function(arr){return mesIdx===null?sum(arr):arr[mesIdx];};
+  // pool de SEGURO: blocos de apólice saem do custo operacional
+  var segT=[0,0,0,0,0,0,0,0,0,0,0,0];
+  Object.keys(D.cus).forEach(function(bl){
+    if(/seguro|ap[o\u00f3]lice/i.test(bl)) D.cus[bl].forEach(function(v,i){segT[i]+=v;});
+  });
+  var custoOpTot=pega(D.cusT), poolSeg=pega(segT);
+  var custoOp=custoOpTot-poolSeg;                    // operacional já sem o seguro
+  var despTot=pega(D.desT), irTot=pega(D.irT), depTot=pega(D.dep);
   var shareArm=rentSplitArm!=null?rentSplitArm:((recArm+recMov)>0?recArm/(recArm+recMov):0.5);
   var poolArm=custoOp*shareArm, poolMov=custoOp*(1-shareArm);
 
   var lista=Object.keys(C).map(function(k){return C[k];}).filter(function(c){return c.rec||c.pos||c.mov;});
-  // Passada 1 — quem tem driver medido consome o pool na proporção do driver,
-  // limitado à fatia de receita que esse pool deve cobrir (evita que poucos
-  // clientes medidos absorvam o custo de toda a carteira).
-  var posTot=0,movTot=0,recArmDrv=0,recMovDrv=0;
-  lista.forEach(function(c){ posTot+=c.pos; movTot+=c.mov; });
-  lista.forEach(function(c){
-    if(c.pos>0)recArmDrv+=c.recArm;
-    if(c.mov>0)recMovDrv+=c.recMov;
-  });
+  // Passada 1 — quem tem driver medido consome a fatia do pool proporcional
+  // à receita que representa (o resto vai pelo mix, na passada 2).
+  var posTot=0,movTot=0,recArmDrv=0,recMovDrv=0,segBase=0;
+  lista.forEach(function(c){ posTot+=c.pos; movTot+=c.mov; segBase+=c.recSeg; });
+  lista.forEach(function(c){ if(c.pos>0)recArmDrv+=c.recArm; if(c.mov>0)recMovDrv+=c.recMov; });
   var fatArm=recArm>0?recArmDrv/recArm:0, fatMov=recMov>0?recMovDrv/recMov:0;
   var poolArmDrv=poolArm*fatArm, poolMovDrv=poolMov*fatMov;
   lista.forEach(function(c){
     c.custoArm=(posTot>0&&c.pos>0)?poolArmDrv*c.pos/posTot:0;
     c.custoMov=(movTot>0&&c.mov>0)?poolMovDrv*c.mov/movTot:0;
+    c.custoSeg=segBase>0?poolSeg*c.recSeg/segBase:0;   // seguro pela receita de advalorem
     c.medido=(c.pos>0||c.mov>0);
   });
-  // Passada 2 — o que sobrou dos pools vai pelo MIX DE RECEITA de quem não tem driver
-  var restArm=poolArm-poolArmDrv, restMov=poolMov-poolMovDrv;
-  var baseArm=0, baseMov=0;
+  // Passada 2 — resto dos pools pelo MIX DE RECEITA de quem não tem driver
+  var restArm=poolArm-poolArmDrv, restMov=poolMov-poolMovDrv, baseArm=0, baseMov=0;
   lista.forEach(function(c){ if(!(c.pos>0))baseArm+=c.recArm; if(!(c.mov>0))baseMov+=c.recMov; });
   lista.forEach(function(c){
     if(!(c.pos>0)&&baseArm>0)c.custoArm+=restArm*c.recArm/baseArm;
     if(!(c.mov>0)&&baseMov>0)c.custoMov+=restMov*c.recMov/baseMov;
-    c.margem=c.rec-c.custoArm-c.custoMov;
+    c.margem=c.rec-c.custoArm-c.custoMov-c.custoSeg;
     c.margemP=c.rec>0?c.margem/c.rec:null;
   });
   lista.sort(function(a,b){return (b.margemP==null?-1e9:b.margemP)-(a.margemP==null?-1e9:a.margemP);});
   var recTot=lista.reduce(function(t,c){return t+c.rec;},0);
   var recDrv=lista.reduce(function(t,c){return t+c.recComDriver;},0);
-  return {lista:lista,posTot:posTot,movTot:movTot,custoOp:custoOp,poolArm:poolArm,poolMov:poolMov,shareArm:shareArm,
-          despTot:despTot,irTot:irTot,depTot:depTot,ncTot:ncTot,servDist:servDist,recArm:recArm,recMov:recMov,
+  return {lista:lista,posTot:posTot,movTot:movTot,custoOp:custoOp,poolArm:poolArm,poolMov:poolMov,poolSeg:poolSeg,shareArm:shareArm,
+          despTot:despTot,irTot:irTot,depTot:depTot,ncTot:ncTot,servDist:servDist,recArm:recArm,recMov:recMov,recSeg:recSeg,
           cobertura:recTot>0?recDrv/recTot:0};
 }
 
@@ -17487,7 +17513,7 @@ function rentRender(){
   var D=rentDados();
   var M=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   var recTot=D.lista.reduce(function(t,c){return t+c.rec;},0);
-  var aloTot=D.lista.reduce(function(t,c){return t+c.custoArm+c.custoMov;},0);
+  var aloTot=D.lista.reduce(function(t,c){return t+c.custoArm+c.custoMov+(c.custoSeg||0);},0);
   var mgTot=recTot-aloTot;
   var pcts=D.lista.filter(function(c){return c.margemP!=null;});
   var amp=pcts.length?(pcts[0].margemP*100).toFixed(0)+'% \u2192 '+(pcts[pcts.length-1].margemP*100).toFixed(0)+'%':'\u2014';
@@ -17498,7 +17524,7 @@ function rentRender(){
     +[['mes','M\u00eas'],['ano','Ano']].map(function(o){return '<button onclick="rentSetModo(\''+o[0]+'\')" style="padding:6px 14px;border:none;font-size:12px;cursor:pointer;font-weight:600;background:'+(rentModo===o[0]?'#0A2540':'var(--bg)')+';color:'+(rentModo===o[0]?'#fff':'var(--text2)')+'">'+o[1]+'</button>';}).join('')+'</div>';
   if(rentModo==='mes')h+='<select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="rentSetMes(this.value)">'+M.map(function(l,i){return '<option value="'+i+'"'+(i===rentMes?' selected':'')+'>'+l+'</option>';}).join('')+'</select>';
   h+='<button class="btn btn-sm" onclick="rentClassModal()">Classificar servi\u00e7os</button>';
-  h+='<span style="font-size:11px;color:var(--text3)">split do custo operacional: Armazenagem <b>'+(D.shareArm*100).toFixed(0)+'%</b> \u00b7 Movimenta\u00e7\u00e3o <b>'+((1-D.shareArm)*100).toFixed(0)+'%</b> '+(rentSplitArm==null?'(proporcional \u00e0 receita)':'(manual)')+' <span onclick="rentSplitEdit()" style="cursor:pointer;color:var(--accent);font-weight:600">\u270e</span></span>';
+    +'<span style="font-size:11px;color:var(--text3)">custo operacional: Armazenagem <b>'+(D.shareArm*100).toFixed(0)+'%</b> \u00b7 Movimenta\u00e7\u00e3o <b>'+((1-D.shareArm)*100).toFixed(0)+'%</b> '+(rentSplitArm==null?'(proporcional \u00e0 receita)':'(manual)')+' <span onclick="rentSplitEdit()" style="cursor:pointer;color:var(--accent);font-weight:600">\u270e</span>'+(D.poolSeg?' &nbsp;|&nbsp; <b>Seguro</b>: pool pr\u00f3prio ('+fmtV(D.poolSeg)+')':'')+'</span>';
   h+='<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
     +'<button class="btn btn-sm" onclick="rentSetAno(-1)">&lsaquo;</button>'
     +'<b style="font-size:15px;min-width:52px;text-align:center">'+ctrlAno+'</b>'
@@ -17512,7 +17538,7 @@ function rentRender(){
     +'<div style="font-size:11px;color:var(--text2);margin-top:2px">'+sx+'</div></div>';};
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px;margin-bottom:16px">'
     +kpi('Receita l\u00edquida',fmtV(recTot),D.lista.length+' cliente(s) faturado(s)','#166534')
-    +kpi('Custo operacional alocado',fmtV(aloTot),'blocos "Custo" do DRE','#991b1b')
+    +kpi('Custo alocado',fmtV(aloTot),(D.poolSeg?'operacional + seguro':'blocos "Custo" do DRE'),'#991b1b')
     +kpi('Margem de contribui\u00e7\u00e3o',fmtV(mgTot),(recTot?(mgTot/recTot*100).toFixed(1).replace('.',',')+'% da receita l\u00edq.':''),mgTot>=0?'#166534':'#991b1b')
     +kpi('Cobertura dos drivers',(D.cobertura*100).toFixed(0)+'%',(D.cobertura>=0.6?'da receita com driver medido':'baixa \u2014 maioria rateada pelo mix'),D.cobertura>=0.6?'#166534':'#b45309')
     +'</div>';
@@ -17527,6 +17553,7 @@ function rentRender(){
     +'<th class="nos" style="text-align:right">Pallets mov.</th>'
     +'<th class="nos" style="text-align:right">Custo armaz.</th>'
     +'<th class="nos" style="text-align:right">Custo mov.</th>'
+    +(D.poolSeg?'<th class="nos" style="text-align:right">Custo seguro</th>':'')
     +'<th class="nos" style="text-align:right">Margem R$</th>'
     +'<th class="nos" style="text-align:right;min-width:150px">Margem %</th>'
     +'</tr></thead><tbody>';
@@ -17543,18 +17570,22 @@ function rentRender(){
       +'<td style="padding:7px 10px;text-align:right">'+fQ(c.mov)+'</td>'
       +'<td style="padding:7px 10px;text-align:right;color:var(--text2)">'+fN(c.custoArm)+'</td>'
       +'<td style="padding:7px 10px;text-align:right;color:var(--text2)">'+fN(c.custoMov)+'</td>'
+      +(D.poolSeg?'<td style="padding:7px 10px;text-align:right;color:#7c3aed">'+fN(c.custoSeg)+'</td>':'')
       +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+cor+'">'+fN(c.margem)+'</td>'
       +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+cor+'">'+(mp==null?'\u2014':(mp*100).toFixed(1).replace('.',',')+'%')+barra+'</td>'
       +'</tr>';
   });
-  if(!D.lista.length)h+='<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--text3)">Nenhuma fatura no per\u00edodo.</td></tr>';
+  if(!D.lista.length)h+='<tr><td colspan="'+(D.poolSeg?10:9)+'" style="padding:16px;text-align:center;color:var(--text3)">Nenhuma fatura no per\u00edodo.</td></tr>';
   h+='</tbody></table></div>';
 
   h+='<div style="margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--text2)">'
     +'<b>Fora do rateio (n\u00e3o alocados por cliente):</b> Despesas ADM/comercial '+fmtV(D.despTot)+' \u00b7 IRPJ/CSLL '+fmtV(D.irTot)+(D.depTot?' \u00b7 Deprecia\u00e7\u00e3o '+fmtV(D.depTot):'')+'. '
     +'A margem de contribui\u00e7\u00e3o total ('+fmtV(mgTot)+') precisa cobrir esses blocos para chegar ao resultado do DRE.<br>'
     +'Servi\u00e7os acess\u00f3rios e ND: receita inclu\u00edda, sem custo alocado (margem cheia).<br>'
-    +'<b>~est.</b> = fatura sem driver medido (mensalidade fechada, percentual sobre estoque etc.) \u2014 custo rateado pelo mix de receita entre armazenagem e movimenta\u00e7\u00e3o do pr\u00f3prio cliente.</div>';
+    +'<b>Posi\u00e7\u00f5es:</b> pico do per\u00edodo \u2014 no m\u00eas vale o <b>maior</b> pico entre as faturas do m\u00eas; no ano, a <b>m\u00e9dia</b> dos picos mensais.<br>'
+    +'<b>Pallets mov.:</b> Entrada (In) + Sa\u00edda (Out) + Movimenta\u00e7\u00e3o interna.<br>'
+    +(D.poolSeg?'<b>Seguro:</b> pool pr\u00f3prio dos blocos de ap\u00f3lice ('+fmtV(D.poolSeg)+'), rateado pela receita de Advalorem \u2014 fora do custo operacional.<br>':'')
+    +'<b>~est.</b> = fatura sem driver medido \u2014 custo rateado pelo mix de receita entre armazenagem e movimenta\u00e7\u00e3o do pr\u00f3prio cliente.</div>';
 
   if(D.ncTot>0){
     var ncs=Object.keys(D.servDist).filter(function(k){return !D.servDist[k].fam;});
@@ -17591,13 +17622,14 @@ function rentClassModal(){
       +'<option value=""'+(!fam?' selected':'')+'>\u2014 escolher \u2014</option>'
       +'<option value="armazenagem"'+(fam==='armazenagem'?' selected':'')+'>Armazenagem</option>'
       +'<option value="movimentacao"'+(fam==='movimentacao'?' selected':'')+'>Movimenta\u00e7\u00e3o</option>'
+      +'<option value="seguro"'+(fam==='seguro'?' selected':'')+'>Seguro (ap\u00f3lice)</option>'
       +'<option value="acessorio"'+(fam==='acessorio'?' selected':'')+'>Acess\u00f3rio</option>'
       +'</select></div>';
   }).join('');
   var html='<div id="modal-rent-cls" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px">'
     +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:560px;width:100%;max-height:82vh;overflow:auto;padding:18px">'
     +'<b style="font-size:15px">Classificar servi\u00e7os faturados</b>'
-    +'<div style="font-size:12px;color:var(--text3);margin:4px 0 12px"><b>Armazenagem</b> (quantidade = posi\u00e7\u00f5es-pico) \u00b7 <b>Movimenta\u00e7\u00e3o</b> (quantidade = pallets movimentados) \u00b7 <b>Acess\u00f3rio</b> (s\u00f3 receita, sem driver). A escolha fica salva por servi\u00e7o.</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin:4px 0 12px"><b>Armazenagem</b> (quantidade = posi\u00e7\u00f5es-pico) \u00b7 <b>Movimenta\u00e7\u00e3o</b> (quantidade = pallets movimentados) \u00b7 <b>Seguro</b> (advalorem \u2014 puxa o custo da ap\u00f3lice) \u00b7 <b>Acess\u00f3rio</b> (s\u00f3 receita, sem driver). A escolha fica salva por servi\u00e7o.</div>'
     +linhas
     +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     +'<button class="btn btn-sm" onclick="ge(\'modal-rent-cls\').remove()">Cancelar</button>'
@@ -17632,8 +17664,9 @@ function rentImprimir(){
   var emp=(company&&company.name)||'Empresa';
   var un=activeUnit?(((userUnits||[]).find(function(u){return u.id===activeUnit;})||{}).name||''):'Consolidado';
   var f=function(v){return v?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:0}):'-';};
+  var _sg=!!D.poolSeg;
   var corpo=D.lista.map(function(c,i){
-    return '<tr><td>'+(i+1)+'</td><td class="l">'+c.nome+'</td><td>'+f(c.rec)+'</td><td>'+f(c.pos)+'</td><td>'+f(c.mov)+'</td><td>'+f(c.custoArm)+'</td><td>'+f(c.custoMov)+'</td><td class="'+(c.margem<0?'neg':'pos')+'">'+f(c.margem)+'</td><td class="'+(c.margem<0?'neg':'pos')+'">'+(c.margemP==null?'-':(c.margemP*100).toFixed(1).replace('.',',')+'%')+'</td></tr>';
+    return '<tr><td>'+(i+1)+'</td><td class="l">'+c.nome+'</td><td>'+f(c.rec)+'</td><td>'+f(c.pos)+'</td><td>'+f(c.mov)+'</td><td>'+f(c.custoArm)+'</td><td>'+f(c.custoMov)+'</td>'+(_sg?'<td>'+f(c.custoSeg)+'</td>':'')+'<td class="'+(c.margem<0?'neg':'pos')+'">'+f(c.margem)+'</td><td class="'+(c.margem<0?'neg':'pos')+'">'+(c.margemP==null?'-':(c.margemP*100).toFixed(1).replace('.',',')+'%')+'</td></tr>';
   }).join('');
   var css='@page{size:A4 landscape;margin:8mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0}'
     +'.hd{display:flex;justify-content:space-between;border-bottom:2px solid #0A2540;padding-bottom:5px;margin-bottom:8px}'
@@ -17646,7 +17679,7 @@ function rentImprimir(){
   var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rentabilidade '+per+'</title><style>'+css+'</style></head><body>'
     +'<div class="hd"><div><div class="emp">'+emp+'</div><div class="sub">'+un+' \u00b7 '+per+' \u00b7 compet\u00eancia da fatura</div></div>'
     +'<div class="sub" style="text-align:right">Rentabilidade por cliente<br>margem de contribui\u00e7\u00e3o \u00b7 valores em R$</div></div>'
-    +'<table><thead><tr><th>#</th><th>Cliente</th><th>Receita l\u00edq.</th><th>Posi\u00e7\u00f5es</th><th>Pallets mov.</th><th>Custo armaz.</th><th>Custo mov.</th><th>Margem R$</th><th>Margem %</th></tr></thead><tbody>'+corpo+'</tbody></table>'
+    +'<table><thead><tr><th>#</th><th>Cliente</th><th>Receita l\u00edq.</th><th>Posi\u00e7\u00f5es</th><th>Pallets mov.</th><th>Custo armaz.</th><th>Custo mov.</th>'+(_sg?'<th>Custo seguro</th>':'')+'<th>Margem R$</th><th>Margem %</th></tr></thead><tbody>'+corpo+'</tbody></table>'
     +'<div class="ft">Cobertura dos drivers: '+(D.cobertura*100).toFixed(0)+'% da receita. Split do custo operacional: Armazenagem '+(D.shareArm*100).toFixed(0)+'% \u00b7 Movimenta\u00e7\u00e3o '+((1-D.shareArm)*100).toFixed(0)+'%. Fora do rateio: Despesas '+f(D.despTot)+' \u00b7 IRPJ/CSLL '+f(D.irTot)+'. Drivers sintetizados das faturas.</div>'
     +'</body></html>';
   Array.prototype.slice.call(document.querySelectorAll('iframe[id^="rent-print"]')).forEach(function(x){x.remove();});
@@ -18199,12 +18232,42 @@ function rCPRelatorio(){
   h+='<div style="display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden">'+eixoBtn('caixa','Caixa')+eixoBtn('competencia','Compet.')+'</div>';
   h+='<div style="display:flex;align-items:center;gap:4px"><button onclick="cpNavAno(-1)" style="padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">‹</button><span style="font-size:13px;font-weight:600;min-width:44px;text-align:center">'+cpPeriodo.ano+'</span><button onclick="cpNavAno(1)" style="padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">›</button></div>';
   h+='<button onclick="imprimirCPRelatorio()" style="padding:6px 12px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:12px;font-weight:600">'+CPREL_PRINTER+' Imprimir</button>';
-  h+='</div></div></div>';
+  h+='</div></div>';
+  h+=cpMesesBarraHTML();
+  h+='</div>';
   h+='<div id="cp-rel-matrix" style="overflow:auto;max-height:68vh;border-radius:10px;border:1px solid var(--border)">Carregando…</div>';
   h+='<div style="margin-top:10px;font-size:11px;color:var(--text3)">Clique no <b>nome do bloco</b> para abrir/fechar · clique num <b>valor</b> para ver os lançamentos · impressão gera Consolidado + cada unidade</div>';
   return h;
 }
 
+function cpMesOn(m){ return !cpMesesOff[cpPeriodo.ano+'-'+m]; }
+function cpMesToggle(m){
+  var k=cpPeriodo.ano+'-'+m;
+  if(cpMesesOff[k]) delete cpMesesOff[k]; else cpMesesOff[k]=1;
+  renderCPRelatorio();
+}
+function cpMesesPreset(tipo){
+  var y=cpPeriodo.ano, hoje=new Date(), mAtual=hoje.getMonth(), yAtual=hoje.getFullYear();
+  for(var m=0;m<12;m++) delete cpMesesOff[y+'-'+m];
+  if(tipo==='fechados' && y===yAtual){ for(var m2=mAtual;m2<12;m2++) cpMesesOff[y+'-'+m2]=1; }
+  else if(tipo==='fechados' && y>yAtual){ for(var m3=0;m3<12;m3++) cpMesesOff[y+'-'+m3]=1; }
+  renderCPRelatorio();
+}
+function cpMesesBarraHTML(){
+  var M=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  var off=0; for(var i=0;i<12;i++) if(!cpMesOn(i)) off++;
+  var chips=M.map(function(lbl,m){
+    var on=cpMesOn(m);
+    return '<button onclick="cpMesToggle('+m+')" title="'+(on?'Clique para excluir':'Clique para incluir')+'" style="padding:3px 10px;border:1px solid '+(on?'#0A2540':'var(--border)')+';border-radius:99px;font-size:11px;font-weight:600;cursor:pointer;background:'+(on?'#0A2540':'var(--bg)')+';color:'+(on?'#fff':'var(--text3)')+';'+(on?'':'text-decoration:line-through')+'">'+lbl+'</button>';
+  }).join('');
+  return '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+    +'<span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-right:2px">Meses</span>'
+    +chips
+    +'<button onclick="cpMesesPreset(\'fechados\')" style="padding:3px 11px;border:1px solid var(--border);border-radius:99px;font-size:11px;font-weight:600;cursor:pointer;background:var(--bg);color:var(--text2);margin-left:4px">S\u00f3 meses fechados</button>'
+    +'<button onclick="cpMesesPreset(\'todos\')" style="padding:3px 11px;border:1px solid var(--border);border-radius:99px;font-size:11px;font-weight:600;cursor:pointer;background:var(--bg);color:var(--text2)">Todos</button>'
+    +(off?'<span style="font-size:11px;color:#8a6d1a;background:#fdf7e7;border:1px solid #f0d9a8;border-radius:99px;padding:2px 10px;margin-left:2px">'+off+' m\u00eas(es) fora do c\u00e1lculo</span>':'')
+    +'</div>';
+}
 async function cpRelEnsureCadastro(){
   if(dfcBlocos.length)return;
   var cid=company?company.id:null;
@@ -18237,7 +18300,7 @@ function cpRelData(unitId){
     if(!cpValido(cp))return;
     var ds=cpDataStr(cp);if(!ds)return;var d=new Date(ds+'T00:00');if(d.getFullYear()!==y)return;
     if(unitId&&cp.unit_id!==unitId)return;
-    var m=d.getMonth(),v=Number(cp.valor||0);
+    var m=d.getMonth(); if(!cpMesOn(m))return; var v=Number(cp.valor||0);
     var agr=(cp.agrupamento||'').trim(), cat=(cp.categoria||'').trim();
     var row=findRow(agr,cat);
     if(row){row.meses[m]+=v;row.total+=v;}
@@ -18267,7 +18330,7 @@ async function renderCPRelatorio(){
   var thTop='position:sticky;top:0;z-index:4;';
   var html='<table style="border-collapse:collapse;font-size:11px"><thead><tr>';
   html+='<th style="position:sticky;left:0;top:0;z-index:5;background:#0A2540;color:#fff;padding:8px 12px;text-align:left;min-width:200px;font-weight:600;font-size:12px;border-right:1px solid #1e5f82">Bloco / Conta</th>';
-  meses.forEach(function(m){html+='<th style="'+thTop+'padding:6px 8px;background:#0A2540;color:#fff;min-width:92px;font-weight:600;font-size:10px;border-right:1px solid #1e5f82">'+m+'</th>';});
+  meses.forEach(function(m,_mi){var _off=!cpMesOn(_mi);html+='<th style="'+thTop+'padding:6px 8px;background:'+(_off?'#5b6b7c':'#0A2540')+';color:'+(_off?'#c9d2da':'#fff')+';min-width:92px;font-weight:600;font-size:10px;border-right:1px solid #1e5f82'+(_off?';text-decoration:line-through':'')+'">'+m+'</th>';});
   html+='<th style="'+thTop+'padding:8px 10px;background:#0A2540;color:#fff;font-weight:600;font-size:12px;min-width:108px">Total</th>';
   html+='<th style="'+thTop+'padding:8px 10px;background:#123a5c;color:#fff;font-weight:600;font-size:12px;min-width:104px;border-left:1px solid #1e5f82" title="Total dividido pelos meses com movimento">M\u00e9dia</th></tr></thead><tbody>';
 
