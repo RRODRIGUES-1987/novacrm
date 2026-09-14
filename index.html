@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.942 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.943 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.942';
+const APP_VERSION='v1.0.943';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -29378,6 +29378,17 @@ function invParseSaldo(rows){
   // tipo da embalagem: aceita varios nomes de coluna (UA / Embalagem / Desc. UA ...)
   var embCands=['tipoembalagem','tipodeembalagem','embalagem','descricaoua','descua','tipoua','ua','unidadedemedida','unidademedida','unidmedida'];
   var embCol=null; for(var e=0;e<embCands.length;e++){ if(m[embCands[e]]!=null){ embCol=m[embCands[e]]; break; } }
+  // quantidade: aceita as variações usuais de cabeçalho — antes só 'qtdesaldo',
+  // e qualquer outro nome fazia a base inteira entrar zerada sem aviso
+  var qtdCands=['qtdesaldo','qtdsaldo','quantidadesaldo','saldo','saldoatual','saldodisponivel',
+                'qtde','qtd','quantidade','qtdeatual','qtdatual','qtdeestoque','qtdestoque',
+                'estoque','estoqueatual','qtdedisponivel','qtddisponivel','disponivel',
+                'qtdefisica','qtdfisica','quantidadefisica','saldofisico'];
+  var qtdCol=null, qtdNome=null;
+  for(var q=0;q<qtdCands.length;q++){ if(m[qtdCands[q]]!=null){ qtdCol=m[qtdCands[q]]; qtdNome=qtdCands[q]; break; } }
+  var empCands=['qtdeempenhada','qtdempenhada','empenhada','empenho','reservada','qtdereservada'];
+  var empCol=null; for(var p2=0;p2<empCands.length;p2++){ if(m[empCands[p2]]!=null){ empCol=m[empCands[p2]]; break; } }
+  window._invSaldoCol={achou:(qtdCol!=null),nome:qtdNome,cabecalhos:Object.keys(m)};
   for(var i=cm.hi+1;i<rows.length;i++){
     var r=rows[i]||[];
     var endRaw=invNorm(r[m['endereco']]);
@@ -29387,8 +29398,8 @@ function invParseSaldo(rows){
       cod_produto: cod||null,
       desc_produto: invNorm(r[m['descproduto']])||null,
       referencia: invNorm(r[m['agrupapalletmisto']])||null,
-      qtde_empenhada: invNum(r[m['qtdeempenhada']]),
-      qtde_saldo: invNum(r[m['qtdesaldo']]),
+      qtde_empenhada: empCol!=null?invNum(r[empCol]):0,
+      qtde_saldo: qtdCol!=null?invNum(r[qtdCol]):0,
       endereco: endRaw.toUpperCase(),
       endereco_raw: endRaw,
       unidade_medida: invNorm(r[m['unidademedida']])||null,
@@ -30131,6 +30142,27 @@ async function invProcessFile(input){
     var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
     var parsed=(ctx.tipo==='saldo')?invParseSaldo(rows):(ctx.tipo==='ean'?invParseEans(rows):invParseEnderecos(rows));
     if(!parsed.length){ if(typeof showToast==='function')showToast(ctx.tipo==='ean'?'Nenhum EAN valido - a planilha precisa das colunas EAN e Cod Produto':'Nenhuma linha valida (confira o cabecalho)','amber'); return; }
+    if(ctx.tipo==='saldo'){
+      var _sc=window._invSaldoCol||{};
+      if(!_sc.achou){
+        alert('Coluna de SALDO nao encontrada na planilha.\n\n'
+          +'Sem ela toda a base entra zerada, e o sistema passa a tratar endereco ocupado como VAZIO.\n\n'
+          +'Cabecalhos lidos: '+((_sc.cabecalhos||[]).join(', ')||'(nenhum)')+'\n\n'
+          +'Renomeie a coluna da quantidade para "Qtde Saldo" (ou Saldo / Quantidade / Estoque) e importe de novo.');
+        return;
+      }
+      var _comSaldo=0, _comProd=0;
+      for(var _z=0;_z<parsed.length;_z++){
+        if(parsed[_z].cod_produto) _comProd++;
+        if((parseFloat(parsed[_z].qtde_saldo)||0)>0) _comSaldo++;
+      }
+      if(_comProd>0 && _comSaldo===0){
+        if(!confirm('Atencao: '+_comProd+' linha(s) tem produto, mas NENHUMA tem saldo maior que zero.\n\n'
+          +'Coluna usada como saldo: "'+(_sc.nome||'?')+'".\n\n'
+          +'Se isso estiver errado, o inventario vai tratar endereco ocupado como vazio e acusar divergencia em tudo.\n\n'
+          +'Importar assim mesmo?')) return;
+      }
+    }
     var table=(ctx.tipo==='saldo')?'inventario_base':(ctx.tipo==='ean'?'inventario_eans':'inventario_enderecos');
     await sbFetch('DELETE','/rest/v1/'+table+'?inventario_id=eq.'+ctx.invId,null,tok,{'Prefer':'return=minimal'});
     for(var i=0;i<parsed.length;i++){ parsed[i].inventario_id=ctx.invId; }
