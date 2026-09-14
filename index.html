@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.938 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.939 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1298,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.938';
+const APP_VERSION='v1.0.939';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45897,7 +45897,7 @@ var _ecomCxAuthAction=null;
 var _ecomCxAuthUser=null;
 function ecomCxAuthAsk(action){
   _ecomCxAuthAction=action;
-  var titulo = action==='reimprimir' ? 'Reimprimir etiqueta' : (action==='impressora' ? 'Trocar impressora' : (action==='liberar' ? 'Liberar sem bipar a etiqueta' : (action==='manual' ? 'Conferir manualmente' : (action==='parcial' ? 'Fechar romaneio como coleta parcial' : 'Estornar confer\u00eancia'))));
+  var titulo = action==='reimprimir' ? 'Reimprimir etiqueta' : (action==='impressora' ? 'Trocar impressora' : (action==='liberar' ? 'Liberar sem bipar a etiqueta' : (action==='manual' ? 'Conferir manualmente' : (action==='parcial' ? 'Fechar romaneio como coleta parcial' : (action==='semconf' ? 'Confirmar sa\u00edda sem confer\u00eancia' : 'Estornar confer\u00eancia')))));
   var html='<div class="modal-overlay" id="ecom-cx-auth" style="z-index:5200;display:flex;align-items:center;justify-content:center">'
     +'<div class="modal" style="width:360px;max-width:94vw;padding:22px;text-align:center">'
     +'<div style="width:46px;height:46px;border-radius:50%;background:#fef3c7;display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>'
@@ -45947,6 +45947,7 @@ async function ecomCxAuthConfirm(){
   else if(action==='liberar') ecomCxLiberarAutorizado();
   else if(action==='manual') ecomCxManualModal();
   else if(action==='parcial') ecomEmbParcialModal();
+  else if(action==='semconf') ecomEmbSemConfModal();
 }
 var ECOM_MOTIVOS=['Codigo de barras ilegivel / danificado','Produto sem etiqueta de codigo',
   'Leitor com falha','Divergencia resolvida na conferencia fisica','Outro (descrever)'];
@@ -46704,6 +46705,7 @@ function ecomRomAbrir(romId){
       +'<div id="ecom-emb-res"></div></div>'))
     +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     +'<button class="btn btn-sm" onclick="ecomRomPDF(\''+r.id+'\')">Imprimir PDF (2 vias)</button>'
+    +(carregado?'':'<button class="btn btn-sm" id="ecom-emb-semconf" style="display:none;background:#b45309;color:#fff;border:none" onclick="ecomEmbSemConfAuth(\''+r.id+'\')">\u26a0 Confirmar sa\u00edda sem confer\u00eancia</button>')
     +(carregado?'':'<button class="btn btn-sm" id="ecom-emb-parcial" style="display:none;background:#b45309;color:#fff;border:none" onclick="ecomEmbParcialAuth(\''+r.id+'\')">\u2702 Fechar como coleta parcial</button>')
     +(carregado?'':'<button class="btn btn-p" id="ecom-emb-btn" onclick="ecomRomConfirmar(\''+r.id+'\')">Confirmar carregamento</button>')
     +'</div></div></div>';
@@ -46769,6 +46771,8 @@ function ecomEmbRender(){
   var _bp=ge('ecom-emb-parcial');
   if(_bp){ _bp.style.display=(falt.length&&feitos>0)?'inline-flex':'none';
            _bp.textContent='\u2702 Fechar como coleta parcial ('+feitos+')'; }
+  var _bs=ge('ecom-emb-semconf');
+  if(_bs) _bs.style.display=falt.length?'inline-flex':'none';
 }
 async function ecomEmbBip(code){
   if(!ecomEmb)return;
@@ -46825,6 +46829,74 @@ function ecomCloseRomAbrir(){
   if(_ecomEmbPrevScanHandler){ _colScanHandler=_ecomEmbPrevScanHandler; _ecomEmbPrevScanHandler=null; }
   else { _colScanHandler=function(code){ ecomRomScan(code); }; }
   setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },30);
+}
+function ecomEmbSemConfAuth(romId){ window._embSemConfRom=romId; ecomCxAuthAsk('semconf'); }
+function ecomEmbSemConfModal(){
+  var romId=window._embSemConfRom; if(!romId) return;
+  var r=ecomRomaneios.find(function(x){return x.id===romId;}); if(!r) return;
+  var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===romId;});
+  var semBipe=peds.filter(function(p){ return !(ecomEmb&&ecomEmb.ok[p.id]); });
+  var num='ROM-'+String(r.numero||0).padStart(4,'0');
+  window._embSemConf={romId:romId,peds:peds,semBipe:semBipe,num:num};
+  var html='<div class="modal-overlay" id="ecom-emb-semconf-modal" style="z-index:5300;display:flex;align-items:center;justify-content:center">'
+    +'<div class="modal" style="width:560px;max-width:95vw;padding:20px">'
+    +'<div style="font-size:16px;font-weight:800">Confirmar sa\u00edda do '+num+' sem confer\u00eancia</div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-top:2px">Use quando a carga j\u00e1 saiu fisicamente e as caixas n\u00e3o foram bipadas.</div>'
+    +'<div style="display:flex;gap:10px;margin-top:14px">'
+      +'<div style="flex:1;border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
+        +'<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Volumes no romaneio</div>'
+        +'<div style="font-size:26px;font-weight:800">'+peds.length+'</div></div>'
+      +'<div style="flex:1;border:1px solid #f0d9a8;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:12px;text-align:center">'
+        +'<div style="font-size:11px;color:var(--amber-text,#8a6d1a);text-transform:uppercase;letter-spacing:.5px">Sem bipe</div>'
+        +'<div style="font-size:26px;font-weight:800;color:var(--amber-text,#b45309)">'+semBipe.length+'</div></div>'
+    +'</div>'
+    +'<div style="font-size:12px;font-weight:700;color:var(--text3);margin-top:14px">MOTIVO (obrigatorio)</div>'
+    +'<select id="embsc-motivo" class="fi" style="width:100%;box-sizing:border-box;margin-top:6px">'
+      +['Carga saiu antes da conferencia','Leitor indisponivel no momento do carregamento',
+        'Conferencia feita em papel','Outro (descrever)'].map(function(m){return '<option>'+m+'</option>';}).join('')
+      +'</select>'
+    +'<input id="embsc-obs" class="fi" placeholder="Observacao (opcional)" style="width:100%;box-sizing:border-box;margin-top:8px">'
+    +'<div id="embsc-err" style="display:none;color:var(--red-text,#b91c1c);font-size:12px;margin-top:8px"></div>'
+    +'<div style="background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;border-radius:9px;padding:10px 12px;font-size:12.5px;color:var(--amber-text,#8a6d1a);margin-top:12px;line-height:1.55">'
+      +'\u26a0 Os '+semBipe.length+' volume(s) sem bipe s\u00e3o registrados como <b>sa\u00edda sem confer\u00eancia</b>, com o supervisor que autorizou e o motivo. '
+      +'Isso <b>n\u00e3o</b> os marca como n\u00e3o coletados \u2014 eles sa\u00edram no ve\u00edculo.</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+      +'<button class="btn" onclick="ecomEmbSemConfClose()">Cancelar</button>'
+      +'<button id="embsc-ok" class="btn" style="background:#b45309;color:#fff;border:none" onclick="ecomEmbSemConfExec()">Confirmar sa\u00edda de '+peds.length+' volume(s)</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function ecomEmbSemConfClose(){ var m=ge('ecom-emb-semconf-modal'); if(m)m.remove(); window._embSemConf=null; }
+async function ecomEmbSemConfExec(){
+  var ctx=window._embSemConf; if(!ctx) return;
+  var motivo=(ge('embsc-motivo')||{}).value||'', obs=((ge('embsc-obs')||{}).value||'').trim();
+  var errEl=ge('embsc-err');
+  if(/Outro/i.test(motivo)&&!obs){ if(errEl){errEl.style.display='block';errEl.textContent='Descreva o motivo na observacao';} return; }
+  var btn=ge('embsc-ok'); if(btn){btn.disabled=true;btn.textContent='Gravando\u2026';}
+  var iso=new Date().toISOString(), sup=_ecomCxAuthUser||'supervisor';
+  var txt=motivo+(obs?(' - '+obs):'');
+  try{
+    for(var i=0;i<ctx.peds.length;i++){
+      await dbUpdate('ecom_pedidos',ctx.peds[i].id,{status:'carregado',data_expedicao:iso});
+      ctx.peds[i].status='carregado';
+    }
+    // trilha apenas para os que saíram sem bipe
+    for(var j=0;j<ctx.semBipe.length;j++){
+      try{ await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:ctx.semBipe[j].id,
+           romaneio_id:ctx.romId,etapa:'saida_sem_conferencia',
+           codigo_lido:'SEM CONFERENCIA: '+txt,
+           operador:ecomOper()+' | autorizado por '+sup}); }catch(e){}
+    }
+    await dbUpdate('ecom_romaneios',ctx.romId,{status:'coletado',data_coleta_efetiva:iso});
+    ecomEmbSemConfClose(); ecomCloseRomAbrir();
+    _ecomLoaded=false; await ecomLoadAll();
+    var el=ge('ecom-body'); if(el) el.innerHTML=ecomPanelRomaneio();
+    _colScanHandler=function(code){ ecomRomScan(code); };
+    showToast(ctx.num+' baixado \u00b7 '+ctx.peds.length+' volume(s) \u00b7 '+ctx.semBipe.length+' sem confer\u00eancia','amber');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Tentar de novo';}
+    if(errEl){errEl.style.display='block';errEl.textContent='Erro: '+(e.message||e);}
+  }
 }
 function ecomEmbParcialAuth(romId){ window._embParcialRom=romId; ecomCxAuthAsk('parcial'); }
 function ecomEmbParcialModal(){
