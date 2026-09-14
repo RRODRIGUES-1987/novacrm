@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.941 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.942 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -328,6 +328,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes pulse-logo{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:0.85}}
 @keyframes dot-bounce{0%,80%,100%{transform:translateY(0);opacity:0.4}40%{transform:translateY(-8px);opacity:1}}
 @keyframes fi{from{opacity:0}to{opacity:1}}
+@keyframes colCamLaser{0%{transform:translateY(-46px)}50%{transform:translateY(46px)}100%{transform:translateY(-46px)}}
+.col-cam-laser{animation:colCamLaser 1.9s ease-in-out infinite}
 @keyframes su{from{transform:translateY(28px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes rotate{to{transform:rotate(360deg)}}
 </style>
@@ -1298,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.941';
+const APP_VERSION='v1.0.942';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -28663,9 +28665,22 @@ async function coletorCamStart(onCode){
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
       _colCamStream=stream;v.srcObject=stream;await v.play();
       let det;try{det=new window.BarcodeDetector({formats:['code_128','ean_13','ean_8','code_39','itf','codabar','data_matrix','qr_code','upc_a','upc_e']});}catch(_){det=new window.BarcodeDetector();}
+      // recorta a faixa da mira antes de decodificar: evita pegar a etiqueta do lado
+      var _cv=document.createElement('canvas'), _cx=_cv.getContext('2d',{willReadFrequently:true});
       const tick=async function(){
         if(!_colCamOn)return;
-        try{const codes=await det.detect(v);if(codes&&codes.length)emite(codes[0].rawValue||'');}catch(e){}
+        try{
+          var vw=v.videoWidth||0, vh=v.videoHeight||0, alvo=v;
+          if(vw&&vh){
+            var rx=Math.round(vw*0.08), rw=Math.round(vw*0.84);
+            var ry=Math.round(vh*0.32), rh=Math.round(vh*0.36);
+            if(_cv.width!==rw){_cv.width=rw;} if(_cv.height!==rh){_cv.height=rh;}
+            _cx.drawImage(v,rx,ry,rw,rh,0,0,rw,rh);
+            alvo=_cv;
+          }
+          const codes=await det.detect(alvo);
+          if(codes&&codes.length)emite(codes[0].rawValue||'');
+        }catch(e){}
         _colCamRAF=requestAnimationFrame(tick);
       };
       _colCamRAF=requestAnimationFrame(tick);
@@ -28703,7 +28718,19 @@ function coletorScanBox(){
     +'<input id="col-scan" placeholder="Bipe ou digite o código…" autocomplete="off" style="flex:1;padding:13px 14px;border:2px solid var(--blue-text);border-radius:10px;font-size:16px" onkeydown="if(event.key===&apos;Enter&apos;){event.preventDefault();event.stopPropagation();coletorScanSubmit(this.value);}">'
     +cam
     +'</div>'
-    +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>'
+    +'<div id="col-cam" style="display:none;margin-top:8px;position:relative;border-radius:10px;overflow:hidden;background:#000">'
+      +'<video id="col-cam-video" playsinline muted style="width:100%;max-height:260px;background:#000;display:block;object-fit:cover"></video>'
+      +'<div id="col-cam-mira" style="position:absolute;inset:0;pointer-events:none">'
+        +'<div style="position:absolute;inset:0;background:rgba(0,0,0,.55)"></div>'
+        +'<div style="position:absolute;left:8%;right:8%;top:32%;height:36%;box-shadow:0 0 0 9999px rgba(0,0,0,.55);border-radius:10px">'
+          +'<div style="position:absolute;left:0;top:0;width:26px;height:26px;border-left:3px solid #fff;border-top:3px solid #fff;border-radius:8px 0 0 0"></div>'
+          +'<div style="position:absolute;right:0;top:0;width:26px;height:26px;border-right:3px solid #fff;border-top:3px solid #fff;border-radius:0 8px 0 0"></div>'
+          +'<div style="position:absolute;left:0;bottom:0;width:26px;height:26px;border-left:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 0 8px"></div>'
+          +'<div style="position:absolute;right:0;bottom:0;width:26px;height:26px;border-right:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 8px 0"></div>'
+          +'<div class="col-cam-laser" style="position:absolute;left:6px;right:6px;top:50%;height:2px;background:#ff3b30;box-shadow:0 0 8px 2px rgba(255,59,48,.75);border-radius:2px"></div>'
+        +'</div>'
+        +'<div style="position:absolute;left:0;right:0;bottom:8px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px #000">alinhe o c\u00f3digo dentro da \u00e1rea</div>'
+      +'</div></div>'
     +'</div>';
 }
 
@@ -28746,8 +28773,8 @@ function coletorInvRender(){
     invColProdCode(raw); var q=ge('col-qtd'); if(q)q.focus();
   };
   coletorShow(titulo,'coletorInvListas()',coletorScanBox()+invColBodyHTML());
-  var i=ge('col-scan'); if(i){i.placeholder=invCol.end?'Bipe o pallet ou o produto…':'Bipe o endereço…';}
-  if(!invCol.end){ setTimeout(function(){var e=ge('col-scan');if(e)e.focus();},60); }
+  var i=ge('col-scan'); if(i){i.placeholder=invCol.end?'Bipe o pallet, o produto ou o EAN…':'Bipe o endereço…';}
+  setTimeout(function(){var e=ge('col-scan');if(e){e.value='';e.focus();}},60);
 }
 
 // ── SEPARAR ──
@@ -28947,7 +28974,19 @@ function coletorConfInjetarCamera(){
   if(!host)return;
   const box=document.createElement('div');box.id='col-cam-conf';box.style.cssText='margin-top:8px';
   box.innerHTML='<button type="button" onclick="coletorCamToggle(coletorConfScan)" style="width:100%;padding:10px;border:2px solid var(--blue-text);background:var(--blue-bg);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">📷 Ler com a câmera</button>'
-    +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>';
+    +'<div id="col-cam" style="display:none;margin-top:8px;position:relative;border-radius:10px;overflow:hidden;background:#000">'
+      +'<video id="col-cam-video" playsinline muted style="width:100%;max-height:260px;background:#000;display:block;object-fit:cover"></video>'
+      +'<div id="col-cam-mira" style="position:absolute;inset:0;pointer-events:none">'
+        +'<div style="position:absolute;inset:0;background:rgba(0,0,0,.55)"></div>'
+        +'<div style="position:absolute;left:8%;right:8%;top:32%;height:36%;box-shadow:0 0 0 9999px rgba(0,0,0,.55);border-radius:10px">'
+          +'<div style="position:absolute;left:0;top:0;width:26px;height:26px;border-left:3px solid #fff;border-top:3px solid #fff;border-radius:8px 0 0 0"></div>'
+          +'<div style="position:absolute;right:0;top:0;width:26px;height:26px;border-right:3px solid #fff;border-top:3px solid #fff;border-radius:0 8px 0 0"></div>'
+          +'<div style="position:absolute;left:0;bottom:0;width:26px;height:26px;border-left:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 0 8px"></div>'
+          +'<div style="position:absolute;right:0;bottom:0;width:26px;height:26px;border-right:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 8px 0"></div>'
+          +'<div class="col-cam-laser" style="position:absolute;left:6px;right:6px;top:50%;height:2px;background:#ff3b30;box-shadow:0 0 8px 2px rgba(255,59,48,.75);border-radius:2px"></div>'
+        +'</div>'
+        +'<div style="position:absolute;left:0;right:0;bottom:8px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px #000">alinhe o c\u00f3digo dentro da \u00e1rea</div>'
+      +'</div></div>';
   host.appendChild(box);
 }
 
@@ -28999,7 +29038,19 @@ function coletorEmbInjetarCamera(){
   const host=inp.parentElement||inp;
   const box=document.createElement('div');box.id='col-cam-emb';box.style.cssText='margin-top:8px';
   box.innerHTML='<button type="button" onclick="coletorCamToggle(coletorEmbScan)" style="width:100%;padding:10px;border:2px solid var(--blue-text);background:var(--blue-bg);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">\u{1F4F7} Ler com a c\u00e2mera</button>'
-    +'<div id="col-cam" style="display:none;margin-top:8px"><video id="col-cam-video" playsinline muted style="width:100%;max-height:230px;background:#000;border-radius:10px;object-fit:cover"></video></div>';
+    +'<div id="col-cam" style="display:none;margin-top:8px;position:relative;border-radius:10px;overflow:hidden;background:#000">'
+      +'<video id="col-cam-video" playsinline muted style="width:100%;max-height:260px;background:#000;display:block;object-fit:cover"></video>'
+      +'<div id="col-cam-mira" style="position:absolute;inset:0;pointer-events:none">'
+        +'<div style="position:absolute;inset:0;background:rgba(0,0,0,.55)"></div>'
+        +'<div style="position:absolute;left:8%;right:8%;top:32%;height:36%;box-shadow:0 0 0 9999px rgba(0,0,0,.55);border-radius:10px">'
+          +'<div style="position:absolute;left:0;top:0;width:26px;height:26px;border-left:3px solid #fff;border-top:3px solid #fff;border-radius:8px 0 0 0"></div>'
+          +'<div style="position:absolute;right:0;top:0;width:26px;height:26px;border-right:3px solid #fff;border-top:3px solid #fff;border-radius:0 8px 0 0"></div>'
+          +'<div style="position:absolute;left:0;bottom:0;width:26px;height:26px;border-left:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 0 8px"></div>'
+          +'<div style="position:absolute;right:0;bottom:0;width:26px;height:26px;border-right:3px solid #fff;border-bottom:3px solid #fff;border-radius:0 0 8px 0"></div>'
+          +'<div class="col-cam-laser" style="position:absolute;left:6px;right:6px;top:50%;height:2px;background:#ff3b30;box-shadow:0 0 8px 2px rgba(255,59,48,.75);border-radius:2px"></div>'
+        +'</div>'
+        +'<div style="position:absolute;left:0;right:0;bottom:8px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px #000">alinhe o c\u00f3digo dentro da \u00e1rea</div>'
+      +'</div></div>';
   host.appendChild(box);
 }
 
@@ -29346,6 +29397,25 @@ function invParseSaldo(rows){
   }
   return out;
 }
+function invParseEans(rows){
+  var cm=invColMap(rows,'ean'); if(!cm) return [];
+  var m=cm.map, out=[], vistos={};
+  // aceita variações do nome da coluna de código
+  var codCands=['codproduto','codigoproduto','codigo','cod','sku','produto','item'];
+  var ci=null; for(var k=0;k<codCands.length;k++){ if(codCands[k] in m){ ci=m[codCands[k]]; break; } }
+  var di=('descproduto' in m)?m['descproduto']:(('descricao' in m)?m['descricao']:(('descricaoproduto' in m)?m['descricaoproduto']:null));
+  if(ci==null) return [];
+  for(var i=cm.hi+1;i<rows.length;i++){
+    var r=rows[i]||[];
+    var ean=invNorm(r[m['ean']]).replace(/\D/g,'');
+    var cod=invNorm(r[ci]);
+    if(!ean||!cod) continue;
+    if(vistos[ean]) continue;        // primeiro vínculo vence
+    vistos[ean]=1;
+    out.push({ean:ean, cod_produto:cod, desc_produto:(di!=null?invNorm(r[di]):null)||null});
+  }
+  return out;
+}
 function invParseEnderecos(rows){
   var cm=invColMap(rows,'endereco'); if(!cm) return [];
   var m=cm.map, out=[];
@@ -29570,6 +29640,12 @@ async function invColCarregar(id){
     invCol.end=null; invCol.itens=[]; invCol.prodAtual=null;
     // base importada, agrupada por endereço
     var base=await invFetchAll('inventario_base','inventario_id=eq.'+id+'&select=endereco,cod_produto,qtde_saldo,tipo_embalagem,desc_produto');
+    // de-para de EAN: permite bipar o código de barras do próprio produto
+    invCol.eans={};
+    try{
+      var _ens=await invFetchAll('inventario_eans','inventario_id=eq.'+id+'&select=ean,cod_produto,desc_produto');
+      _ens.forEach(function(x){ var e=String(x.ean||'').replace(/\D/g,''); if(e) invCol.eans[e]={cod:x.cod_produto,desc:x.desc_produto||''}; });
+    }catch(_e){ invCol.eans={}; }
     invCol.baseByEnd={}; invCol.catalog=[]; var seen={};
     base.forEach(function(b){
       var e=invNorm(b.endereco); if(!e)return;
@@ -29651,7 +29727,7 @@ function invColBodyHTML(){
   var campoProd=invCol.portal
     ?''
     :('<div style="font-size:12px;font-weight:600;color:#0A2540;margin-bottom:4px">Bipe o pallet ou o produto</div>'
-      +'<input class="fi" id="col-prod" autocomplete="off" placeholder="etiqueta do produto" style="font-size:15px;padding:10px" '
+      +'<input class="fi" id="col-prod" autocomplete="off" inputmode="numeric" pattern="[0-9]*" placeholder="etiqueta do produto ou EAN" style="font-size:15px;padding:10px" '
       +'oninput="invColProdView()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var q=ge(\'col-qtd\');if(q)q.focus();}">');
   return invColProgresso()
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
@@ -29690,23 +29766,43 @@ function invColLerEndCode(raw){
   }
   invCol.end=code; invCol.itens=[]; invCol.prodAtual=null;
   invColRender();
+  // endereço reconhecido: já joga o operador no campo do produto
+  setTimeout(function(){
+    var pr=ge('col-prod'); if(pr){ pr.focus(); return; }
+    var sc=ge('col-scan'); if(sc){ sc.value=''; sc.focus(); }
+  },80);
 }
 function invColVoltar(){ invCol.end=null; invCol.itens=[]; invCol.prodAtual=null; invColRender(); }
 function invColProdView(){
   var i=ge('col-prod'); if(!i)return;
   invColProdCode(i.value);
 }
+// EAN bipado -> código do produto (etiqueta interna faltando ou ilegível)
+function invColResolveCod(raw){
+  var cod=invParseProd(raw,invCol.parser)||invNorm(raw);
+  if(!cod) return {cod:'',viaEan:false};
+  var dig=String(raw||'').replace(/\D/g,'');
+  var mapa=(invCol&&invCol.eans)||{};
+  // só traduz se o código lido não for, ele mesmo, um produto da base
+  var ehProduto=false;
+  for(var k=0;k<(invCol.catalog||[]).length;k++){ if(invCol.catalog[k].cod===cod){ehProduto=true;break;} }
+  if(!ehProduto && dig && mapa[dig]) return {cod:mapa[dig].cod,viaEan:true,desc:mapa[dig].desc};
+  if(!ehProduto && mapa[cod])        return {cod:mapa[cod].cod,viaEan:true,desc:mapa[cod].desc};
+  return {cod:cod,viaEan:false};
+}
 function invColProdCode(raw){
   var info=ge('col-prod-info'); if(!info)return;
-  var cod=invParseProd(raw,invCol.parser)||invNorm(raw);
+  var _r=invColResolveCod(raw);
+  var cod=_r.cod, _viaEan=_r.viaEan;
   if(!cod){info.innerHTML='';invCol.prodAtual=null;return;}
   var c=null; for(var k=0;k<invCol.catalog.length;k++)if(invCol.catalog[k].cod===cod){c=invCol.catalog[k];break;}
-  invCol.prodAtual={cod:cod,desc:c?c.desc:''};
-  info.innerHTML='<b style="color:'+(c?'var(--green-text)':'var(--amber-text)')+'">'+cod+'</b> '+(c?String(c.desc).slice(0,40):'<span style="color:var(--amber-text)">não está na base — será gravado assim mesmo</span>');
+  invCol.prodAtual={cod:cod,desc:c?c.desc:(_r.desc||'')};
+  var _selo=_viaEan?' <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--blue-bg);color:var(--blue-text)">via EAN</span>':'';
+  info.innerHTML='<b style="color:'+(c?'var(--green-text)':'var(--amber-text)')+'">'+cod+'</b>'+_selo+' '+(c?String(c.desc).slice(0,40):(_r.desc?String(_r.desc).slice(0,40):'<span style="color:var(--amber-text)">não está na base — será gravado assim mesmo</span>'));
 }
 function invColAdicionar(){
   var pi=ge('col-prod'), qi=ge('col-qtd'), msg=ge('col-msg2');
-  var cod=pi?(invParseProd(pi.value,invCol.parser)||invNorm(pi.value)):(invCol.prodAtual?invCol.prodAtual.cod:'');
+  var cod=pi?(invColResolveCod(pi.value).cod):(invCol.prodAtual?invCol.prodAtual.cod:'');
   var qtd=qi?parseFloat(qi.value):NaN;
   if(!cod){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Bipe o produto primeiro.</span>';if(pi)pi.focus();return;}
   if(isNaN(qtd)||qtd<0){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Informe a quantidade.</span>';if(qi)qi.focus();return;}
@@ -30033,14 +30129,14 @@ async function invProcessFile(input){
     var wb=XLSX.read(buf,{type:'array'});
     var ws=wb.Sheets[wb.SheetNames[0]];
     var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    var parsed=(ctx.tipo==='saldo')?invParseSaldo(rows):invParseEnderecos(rows);
-    if(!parsed.length){ if(typeof showToast==='function')showToast('Nenhuma linha valida (confira o cabecalho)','amber'); return; }
-    var table=(ctx.tipo==='saldo')?'inventario_base':'inventario_enderecos';
+    var parsed=(ctx.tipo==='saldo')?invParseSaldo(rows):(ctx.tipo==='ean'?invParseEans(rows):invParseEnderecos(rows));
+    if(!parsed.length){ if(typeof showToast==='function')showToast(ctx.tipo==='ean'?'Nenhum EAN valido - a planilha precisa das colunas EAN e Cod Produto':'Nenhuma linha valida (confira o cabecalho)','amber'); return; }
+    var table=(ctx.tipo==='saldo')?'inventario_base':(ctx.tipo==='ean'?'inventario_eans':'inventario_enderecos');
     await sbFetch('DELETE','/rest/v1/'+table+'?inventario_id=eq.'+ctx.invId,null,tok,{'Prefer':'return=minimal'});
     for(var i=0;i<parsed.length;i++){ parsed[i].inventario_id=ctx.invId; }
     if(typeof showToast==='function')showToast('Gravando '+parsed.length+' linhas...','blue');
     await invBulkInsert(table,parsed);
-    var upd=(ctx.tipo==='saldo')?{base_count:parsed.length}:{end_count:parsed.length};
+    var upd=(ctx.tipo==='saldo')?{base_count:parsed.length}:(ctx.tipo==='ean'?{ean_count:parsed.length}:{end_count:parsed.length});
     await dbUpdate('inventarios',ctx.invId,upd);
     if(typeof showToast==='function')showToast('Importado: '+parsed.length+' linhas','green');
     invLoad();
@@ -31342,10 +31438,12 @@ function invDetailHTML(inv){
   // ===== IMPORTACAO (+ mascara) =====
   var imp=card(
     sub('Importar planilhas')
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+chip('Saldo',(inv.base_count||0))+chip('Enderecos',(inv.end_count||0))+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+chip('Saldo',(inv.base_count||0))+chip('Enderecos',(inv.end_count||0))+chip('EANs',(inv.ean_count||0))+'</div>'
     +'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Importe a base de saldo (os enderecos, inclusive vazios, saem dela). Re-importar substitui.</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px">'
-      +'<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'saldo\')">Importar Saldo</button></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+      +'<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'saldo\')">Importar Saldo</button>'
+      +'<button class="btn btn-sm" onclick="invPickFile(\''+inv.id+'\',\'ean\')">Importar EANs</button></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-bottom:22px;line-height:1.5">Planilha de EAN (colunas <b>EAN</b> e <b>Cod Produto</b>, opcional <b>Desc Produto</b>): permite bipar o codigo de barras do proprio produto quando a etiqueta interna esta faltando ou ilegivel.</div>'
     +sub('Como ler o endereço')
     +'<div style="font-size:11.5px;color:var(--text3);margin-bottom:10px">Bipe uma etiqueta de endereço e diga de qual caractere até qual fica cada campo. O prefixo do leitor (9501/9502) é descartado sozinho.</div>'
     +'<div class="fg" style="margin-bottom:10px"><label class="fl" style="font-size:11px">Bipe ou cole uma etiqueta</label>'
