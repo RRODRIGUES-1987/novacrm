@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.931 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.932 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1298,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.931';
+const APP_VERSION='v1.0.932';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6592,6 +6592,13 @@ function parseValorTarifa(valor,isPerc){
 let fatLinhas=[];
 
 async function openFaturaEditor(id=null){
+  // fatura já salva com linha de complemento reabre com o subtotal considerado fechado
+  fatSubtotalOk=false;
+  if(id){
+    var _f0=(faturamento||[]).find(function(x){return x.id===id;});
+    if(_f0){ var _l0=[]; try{ _l0=typeof _f0.linhas==='string'?JSON.parse(_f0.linhas||'[]'):(_f0.linhas||[]); }catch(e){}
+      if(_l0.some(function(l){return l.is_complemento;})) fatSubtotalOk=true; }
+  }
   const f=id?faturamento.find(x=>x.id===id):null;
   faturaEditando=f||null;
   fatNfsePdfUrl=f?.nfse_pdf_url||null;
@@ -7435,7 +7442,7 @@ function renderLinhasFatura(){
               <td style="padding:4px 8px;font-size:12px;text-align:center">${l.unidade||''}</td>
               <td style="padding:4px 8px;font-size:12px;text-align:right">${l.preco_unitario||''}</td>
               <td style="padding:4px 6px">
-                <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;calcLinhaFatura(${gi});recalcFatura()"
+                <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
                   style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:center"
                   placeholder="${isPerc?'Valor R$':'Qtd'}">
               </td>
@@ -7508,6 +7515,19 @@ function fatImpostoLinhas(imp){
   if(imp.cofPct>0) r.push({label:'COFINS ('+fmtPct(imp.cofPct)+'%)'+tag,value:imp.cofins});
   return r;
 }
+// Enquanto false, o complemento de mínimo não entra na conta: só depois que o
+// usuário fecha o pré-cálculo em "Gerar subtotal" é que o mínimo é acrescentado.
+var fatSubtotalOk=false;
+function fatGerarSubtotal(){
+  fatSubtotalOk=true;
+  recalcFatura();
+  var t=ge('fat-totais'); if(t) t.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function fatInvalidaSubtotal(){
+  if(!fatSubtotalOk)return;
+  fatSubtotalOk=false;
+  recalcFatura();
+}
 function fatMinInfo(tabela,baseServicos){
   var raw=tabela&&tabela.cond_fat_minimo;
   if(!raw) return null;
@@ -7531,8 +7551,8 @@ function recalcFatura(){
   if(tabela?.cond_fat_minimo){
     const minStr=String(tabela.cond_fat_minimo).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.');
     fatMinVal=parseFloat(minStr)||0;
-    if(fatMinVal>0 && subtotalLinhas<fatMinVal){
-      complemento=fatMinVal-subtotalLinhas;
+    if(fatMinVal>0 && subtotalLinhas<fatMinVal && fatSubtotalOk){
+      complemento=fatMinVal-subtotalLinhas;   // só entra após "Gerar subtotal"
     }
   }
 
@@ -7559,8 +7579,16 @@ function recalcFatura(){
 
   const el=ge('fat-totais');
   if(!el)return;
+  const _temMin=!!(_minInfo&&_minInfo.valor>0);
+  const _btnSub=`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        ${(_temMin&&!fatSubtotalOk)?'<span style="font-size:11.5px;color:var(--amber-text)">\u26a1 Fat. mínimo de '+fmtV(_minInfo.valor)+' ainda não aplicado</span>':''}
+        ${(_temMin&&fatSubtotalOk)?'<span style="font-size:11.5px;color:var(--text3)">subtotal fechado'+(complemento>0?' \u00b7 mínimo aplicado':' \u00b7 acima do mínimo')+'</span>':''}
+        <button class="btn btn-sm${fatSubtotalOk?'':' btn-primary'}" onclick="fatGerarSubtotal()" title="Fecha o pré-cálculo das quantidades e aplica o faturamento mínimo, se houver">&#931; Gerar subtotal</button>
+      </div>`;
   el.innerHTML=`
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      ${_btnSub}
       <div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">Subtotal serviços:</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotalNF)}</span>
@@ -7574,7 +7602,7 @@ function recalcFatura(){
         <span style="color:var(--text2)">Subtotal (c/ mínimo):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
       </div>`:''}
-      ${_minInfo?('<div style="display:flex;gap:40px;font-size:12px"><span style="color:var(--text3)">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+':</span><span style="min-width:120px;text-align:right;color:var(--text3)">'+fmtV(_minInfo.valor)+'</span></div>'):''}
+      ${_minInfo?('<div style="display:flex;gap:40px;font-size:12px"><span style="color:var(--text3)">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':(fatSubtotalOk?' (complementado)':' (pendente de subtotal)'))+':</span><span style="min-width:120px;text-align:right;color:var(--text3)">'+fmtV(_minInfo.valor)+'</span></div>'):''}
       ${fatImpostoLinhas(_imp).map(function(x){return '<div style="display:flex;gap:40px;font-size:13px"><span style="color:var(--text2)">'+x.label+':</span><span style="font-weight:600;min-width:120px;text-align:right">'+fmtV(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?`<div style="display:flex;gap:40px;font-size:13px">
         <span style="color:var(--text2)">Nota de Débito (s/ imposto):</span>
