@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.932 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.935 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1298,7 +1298,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.932';
+const APP_VERSION='v1.0.935';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -44795,7 +44795,7 @@ function ecomDetLeituras(){
 // aptidão para OS: precisa de etiqueta (que promove o status) E de nota fiscal
 function ecomTemNf(pid){ return (ecomNfes||[]).some(function(n){ return n.pedido_id===pid; }); }
 function ecomTemEtiq(pid){ return ecomEtiquetas.some(function(e){ return e.pedido_id===pid; }); }
-function ecomAptoSep(p){ return p.status==='importado' && ecomTemNf(p.id); }
+function ecomAptoSep(p){ return p.status==='importado' && ecomTemEtiq(p.id) && ecomTemNf(p.id); }
 function ecomFaltaDe(p){
   var f=[];
   if(!ecomTemEtiq(p.id)||p.status==='aguardando_etiqueta') f.push('etiqueta');
@@ -46137,12 +46137,28 @@ async function ecomCxBip(code){
       await dbUpdate('ecom_pedidos',pid,_upd); p.status='conferido';
       try{ if(typeof intgNotificarSeparado==='function') intgNotificarSeparado([pid]); }catch(_e){}
       ecomCxAutoConcluiOS(pid);
-      ecomEtiqPrintAuto(pid);
-      ecomCx.pendingLabel=pid;
-      ecomCxFlash('Pedido E-'+String(p.numero_interno||0).padStart(6,'0')+' OK · bipe a etiqueta impressa para liberar','green');
+      var _temEtiq=false;
+      try{ _temEtiq=await ecomEtiqPrintAuto(pid); }catch(_pe){ console.warn('etiqueta',_pe); }
+      if(_temEtiq!==false){
+        ecomCx.pendingLabel=pid;
+        ecomCxFlash('Pedido E-'+String(p.numero_interno||0).padStart(6,'0')+' OK · bipe a etiqueta impressa para liberar','green');
+      } else {
+        // sem etiqueta vinculada não há o que bipar: a folha segue e o pedido
+        // fica sinalizado para vincular a etiqueta antes de expedir
+        ecomCx.pendingLabel=null;
+        ecomCx.semEtiq=ecomCx.semEtiq||[];
+        if(ecomCx.semEtiq.indexOf(pid)<0) ecomCx.semEtiq.push(pid);
+        ecomCxFlash('Pedido E-'+String(p.numero_interno||0).padStart(6,'0')+' conferido, mas SEM ETIQUETA vinculada \u2014 vincule antes de expedir. Seguindo para o proximo.','red');
+      }
     } else { ecomCxFlash('Item OK','green'); }
     ecomCxRender();
   }catch(e){ ecomBeep(); ecomCxFlash('Erro: '+(e.message||e),'red'); ecomCxRender(); }
+}
+function ecomCxSemEtiqHtml(){
+  var ids=(ecomCx&&ecomCx.semEtiq)||[]; if(!ids.length) return '';
+  var nomes=ids.map(function(id){ var p=ecomPedidos.find(function(x){return x.id===id;}); return 'E-'+String((p&&p.numero_interno)||0).padStart(6,'0'); });
+  return '<div style="margin-bottom:10px;padding:9px 12px;border-radius:10px;font-weight:600;text-align:center;background:var(--red-bg);color:var(--red-text)">'
+    +'\u26a0 Conferido(s) SEM ETIQUETA: '+nomes.join(', ')+' \u2014 vincule a etiqueta antes de expedir</div>';
 }
 function ecomCxMsgHtml(){
   if(!ecomCx||!ecomCx.msg) return '';
@@ -46172,7 +46188,7 @@ function ecomCxRender(){
   if(cont) cont.innerHTML=(ecomCx.modo==='sku'?('Folha '+ecomEsc(ecomCx.sku)+' &middot; '):'')+confUn+' de '+totUn+' un &middot; '+feitos+'/'+ecomCx.fila.length+' pedidos';
   if(ecomCx.pendingLabel){
     var pl=ecomPedidos.find(function(x){return x.id===ecomCx.pendingLabel;});
-    body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxMsgHtml()
+    body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxSemEtiqHtml()+ecomCxMsgHtml()
       +'<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:48px 56px;text-align:center;max-width:680px">'
       +'<div style="font-size:56px">&#128290;</div>'
       +'<div style="font-size:28px;font-weight:800;color:var(--green-text,#059669);margin-top:4px">Etiqueta impressa</div>'
@@ -46180,14 +46196,15 @@ function ecomCxRender(){
       +'<div style="font-size:15px;color:var(--text3);font-family:monospace">E-'+String((pl&&pl.numero_interno)||0).padStart(6,'0')+'</div>'
       +ecomCxBoxHtml(pl)
       +'<div style="font-size:18px;margin-top:18px">Bipe a <b>etiqueta impressa</b> para liberar o proximo pedido</div>'
-      +'<button class="btn btn-p" style="margin-top:16px;font-size:15px;padding:9px 22px" onclick="ecomCx.pendingLabel=null;ecomCxFlash(\'Liberado\',\'green\');ecomCxRender()">Liberar pr&oacute;ximo</button>'
+      +'<div style="font-size:13px;color:var(--text3);margin-top:8px">A etiqueta nao saiu? Use o botao abaixo \u2014 o pedido ja esta conferido.</div>'
+      +'<button class="btn btn-p" style="margin-top:10px;font-size:15px;padding:9px 22px" onclick="ecomCx.pendingLabel=null;ecomCxFlash(\'Liberado\',\'green\');ecomCxRender()">Liberar pr&oacute;ximo</button>'
       +'<div style="font-family:monospace;font-size:13px;color:var(--text3);margin-top:6px">'+ecomEsc((pl&&(pl.tracking||pl.numero_pedido))||'')+'</div>'
       +'</div></div>';
     setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },30); return;
   }
   var pid=ecomCxCurrentPid();
   if(!pid){
-    body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxMsgHtml()
+    body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxSemEtiqHtml()+ecomCxMsgHtml()
       +'<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:60px;text-align:center"><div style="font-size:60px">&#9989;</div><div style="font-size:30px;font-weight:800;color:var(--green-text,#059669)">Folha concluida</div><div style="font-size:16px;color:var(--text3);margin-top:6px">'+ecomCx.fila.length+' pedido(s) conferido(s)</div><button class="btn btn-p" style="margin-top:18px;font-size:16px;padding:10px 22px" onclick="ecomCx=null;ecomCxRender()">Nova folha</button></div></div>';
     setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },30); return;
   }
@@ -46199,7 +46216,7 @@ function ecomCxRender(){
   if(its.length>1){
     itensHtml='<div style="margin-top:18px;border-top:1px solid var(--border);padding-top:12px;width:100%;max-width:520px">'+its.map(function(i){ var ok=ecomN(i.qtd_conferida)>=ecomN(i.qtd); return '<div style="display:flex;justify-content:space-between;font-size:16px;padding:5px 0"><span>'+ecomEsc(i.sku||'')+' &middot; '+ecomEsc(i.descricao||'')+'</span><span style="font-family:monospace;color:'+(ok?'var(--green-text,#059669)':'var(--text)')+'">'+ecomN(i.qtd_conferida)+'/'+ecomN(i.qtd)+(ok?' &#10003;':'')+'</span></div>'; }).join('')+'</div>';
   }
-  body.innerHTML='<div style="height:100%;display:flex;flex-direction:column">'+ecomCxMsgHtml()
+  body.innerHTML='<div style="height:100%;display:flex;flex-direction:column">'+ecomCxSemEtiqHtml()+ecomCxMsgHtml()
     +'<div style="flex:1;display:flex;flex-wrap:wrap;gap:20px;align-items:stretch;min-height:0">'
       +'<div style="flex:1;min-width:300px;border:2px solid var(--border);border-radius:20px;padding:32px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">'
         +'<div style="font-size:14px;color:var(--text3);letter-spacing:1px">PEDIDO ATUAL <span style=\"font-size:11px;color:var(--text3)\">&middot; 1 VOLUME</span></div>'
@@ -46230,18 +46247,20 @@ async function ecomEtiqFetchImg(pedidoId){
   return (rows.length && rows[0].img) ? rows[0].img : null;
 }
 async function ecomEtiqPrint(pedidoId){
-  try{ var img=await ecomEtiqFetchImg(pedidoId); if(!img){ showToast('Conferido (sem etiqueta para imprimir)','amber'); return; } ecomEtiqPrintImgIframe(img); }
-  catch(e){ showToast('Erro ao imprimir etiqueta: '+(e.message||e),'red'); }
+  try{ var img=await ecomEtiqFetchImg(pedidoId); if(!img){ showToast('Conferido (sem etiqueta para imprimir)','amber'); return false; } ecomEtiqPrintImgIframe(img); return true; }
+  catch(e){ showToast('Erro ao imprimir etiqueta: '+(e.message||e),'red'); return false; }
 }
 async function ecomEtiqPrintAuto(pedidoId){
   try{
     var img=await ecomEtiqFetchImg(pedidoId);
-    if(!img){ showToast('Conferido (sem etiqueta para imprimir)','amber'); return; }
+    // sem etiqueta vinculada: avisa e devolve false — quem chamou decide o fluxo
+    if(!img){ showToast('Conferido (sem etiqueta para imprimir)','amber'); return false; }
     try{
       await ecomQzConnect(true);
       var _pr=await ecomQzResolvePrinter();
       await ecomQzPrintImg(_pr, img);
       showToast('Etiqueta enviada para: '+_pr,'green');
+      return true;
     }catch(qzerr){
       console.error('QZ (assinado) falhou:', qzerr);
       try{
@@ -46250,6 +46269,7 @@ async function ecomEtiqPrintAuto(pedidoId){
         var _pr2=await ecomQzResolvePrinter();
         await ecomQzPrintImg(_pr2, img);
         showToast('Zebra OK: '+_pr2+' (sem certificado)','amber');
+        return true;
       }catch(qzerr2){
         console.error('QZ (sem assinatura) falhou:', qzerr2);
         var _msg=String((qzerr2&&(qzerr2.message||qzerr2))||'');
@@ -47243,9 +47263,12 @@ async function ecomEtiqPendSalvar(){
     var it=_ecomEtiqPend[i]; var el=ge('ecom-etiqp-'+i); if(!el||!el.value)continue;
     var pid=el.value; var ped=ecomPedidos.find(function(x){return x.id===pid;}); if(!ped)continue;
     var cod=it.trk||it.jt||null;
-    try{ var ant=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+pid+'&select=id'); for(var k=0;k<ant.length;k++) await dbDelete('ecom_etiquetas',ant[k].id); }catch(e){}
+    // a nova entra ANTES de remover as antigas: se o insert falhar, o pedido
+    // continua com a etiqueta anterior em vez de ficar sem nenhuma
+    var _antA=[]; try{ _antA=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+pid+'&select=id'); }catch(e){}
     try{
       await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:pid,order_id:it.oid||null,tracking:cod,nfe_chave:it.chNfe||null,img:it.img,pagina:it.pg});
+      for(var _ka=0;_ka<_antA.length;_ka++){ try{ await dbDelete('ecom_etiquetas',_antA[_ka].id); }catch(e){} }
       var _u2={};
       if(cod && !ped.tracking) _u2.tracking=cod;
       if(it.tKey && it.tKey!=='?') _u2.transportadora=ECOM_TRANSP[it.tKey].nome;
@@ -47440,8 +47463,19 @@ async function ecomEtiqImportFile(input){
       }
 
       jaTem[ped.id]=1;
-      try{ var ant=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+ped.id+'&select=id'); for(var k=0;k<ant.length;k++) await dbDelete('ecom_etiquetas',ant[k].id); }catch(e){}
-      await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:(trk||jt||null),nfe_chave:chNfe||null,img:img,pagina:pg});
+      var _antB=[]; try{ _antB=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+ped.id+'&select=id'); }catch(e){}
+      // insere a nova primeiro e só então remove as antigas; falha aqui não pode
+      // deixar o pedido sem etiqueta nem abortar o laço dos demais pedidos
+      try{
+        await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:(trk||jt||null),nfe_chave:chNfe||null,img:img,pagina:pg});
+        for(var _kb=0;_kb<_antB.length;_kb++){ try{ await dbDelete('ecom_etiquetas',_antB[_kb].id); }catch(e){} }
+      }catch(_ei){
+        // falha ao gravar: mantém a etiqueta anterior, conta como pendente e
+        // segue para a próxima página em vez de abortar a importação inteira
+        console.error('etiqueta pagina '+pg+' falhou:',_ei);
+        orfas++; diag.push('p'+pg+': falha ao gravar ('+((_ei&&_ei.message)||_ei)+')');
+        continue;
+      }
       // grava codigo da transportadora + nome (define o BOX no checkout e o filtro do romaneio)
       var _up={};
       if((trk||jt) && !ped.tracking) _up.tracking=(trk||jt);
@@ -47875,7 +47909,7 @@ async function intgImportar(id){
     var ped=await dbInsert('ecom_pedidos',{company_id:cid,lojista_id:g.lojista_id,numero_pedido:p.numero||p.pedido_externo_id,
       canal:'olist_tiny',destinatario_nome:p.destinatario_nome||null,destinatario_doc:p.destinatario_doc||null,
       cep:p.cep||null,endereco:p.endereco||null,cidade:p.cidade||null,uf:p.uf||null,
-      transportadora:p.transportadora||null,tracking:p.tracking||null,status:'importado'});
+      transportadora:p.transportadora||null,tracking:p.tracking||null,status:'aguardando_etiqueta'});
     for(var j=0;j<its.length;j++){
       var it=its[j]; var dp=intgDeparaDe(p.integracao_id,it.sku);
       await dbInsert('ecom_pedido_itens',{company_id:cid,pedido_id:ped.id,produto_id:dp?dp.ecom_produto_id:null,
