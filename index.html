@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.946 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.947 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.946';
+const APP_VERSION='v1.0.947';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6483,6 +6483,28 @@ function getFatNumero(){
   return 'FT'+String(max+1).padStart(4,'0')+'/'+ano;
 }
 
+// competência da fatura (mesma régua do DRE/rentabilidade)
+function fatCompetencia(f){
+  if(!f) return '';
+  var cr=(contasReceber||[]).find(function(x){return x.fatura_id===f.id&&x.competencia;});
+  var d=(cr&&cr.competencia)||f.periodo_fim||f.periodo_inicio||f.data_emissao||'';
+  d=String(d).slice(0,7);
+  return d?(d.slice(5,7)+'/'+d.slice(0,4)):'';
+}
+function fatLinhasDe(f){
+  try{ return typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ return []; }
+}
+// o que ainda falta nesta fatura — some quando ela sai do rascunho
+function fatPendencia(f){
+  if(!f||['rascunho','aguardando'].indexOf(f.status)<0) return null;
+  var lin=fatLinhasDe(f);
+  if(!lin.length) return null;
+  var comQtd=lin.filter(function(l){ var q=String(l.quantidade||'').trim(); return q!==''&&q!=='0'; }).length;
+  if(comQtd===0) return 'quantidades em branco';
+  var temCompl=lin.some(function(l){ return l.is_complemento; });
+  if(!temCompl && !Number(f.total||0)) return 'subtotal n\u00e3o gerado';
+  return null;
+}
 function fatRowHTML(f,i){
   const role=profile?.role||'vendedor';
   const isGestor=['gestor','admin','adm'].includes(role);
@@ -6492,8 +6514,11 @@ function fatRowHTML(f,i){
       <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">${f.numero_fatura||'—'}</div>
       <div class="linfo">
         <div class="lname">${cli?.nome||f.cliente_nome||'—'}</div>
-        <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
+        <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${(function(){var c=fatCompetencia(f);return c?`<span style="font-weight:700;color:#0A2540;background:var(--bg3,#eaf0f7);border-radius:5px;padding:0 6px;font-size:11px">${c}</span>`:'';})()}
           ${f.periodo_inicio?`<span>${fmtDateSimples(f.periodo_inicio)} → ${fmtDateSimples(f.periodo_fim)}</span>`:''}
+          ${(function(){var n=fatLinhasDe(f).length;return n?`<span>· ${n} linha${n>1?'s':''}</span>`:'';})()}
+          ${(function(){var p=fatPendencia(f);return p?`<span style="font-weight:700;color:var(--amber-text,#b45309)">· ⚠ ${p}</span>`:'';})()}
           ${f.total?`<span>· ${fmtV(f.total)}</span>`:''}
           ${f.vencimento?`<span>· Venc: ${fmtDateSimples(f.vencimento)}</span>`:''}
           ${f.nfse_numero?`<span>· NFS-e: ${f.nfse_numero}</span>`:''}
@@ -6529,24 +6554,48 @@ function rFaturamento(){
   const isGestor=['gestor','admin','adm'].includes(role);
   const pendAprov=faturamento.filter(f=>f.status==='aguardando').length;
   const totalAutorizado=faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
+  // competência mais recente presente na base — é a que está sendo faturada
+  const _comps=faturamento.map(f=>fatCompetencia(f)).filter(Boolean)
+    .map(c=>c.slice(3)+'-'+c.slice(0,2)).sort();
+  const _compAtual=_comps.length?_comps[_comps.length-1]:'';
+  const _compLabel=_compAtual?(_compAtual.slice(5,7)+'/'+_compAtual.slice(0,4)):'—';
+  const _naComp=faturamento.filter(f=>fatCompetencia(f)===_compLabel);
+  const _semQtd=faturamento.filter(f=>fatPendencia(f)==='quantidades em branco');
+  const _semSub=faturamento.filter(f=>fatPendencia(f)==='subtotal n\u00e3o gerado');
+  const _aFaturar=faturamento.filter(f=>['rascunho','aguardando'].includes(f.status))
+    .reduce((s,f)=>s+Number(f.total||0),0);
+  window._fatCardCtx={comp:_compLabel};
 
-  const rows=faturamento.map((f,i)=>fatRowHTML(f,i)).join('');
+  const _lista=(function(){
+    switch(window._fatFiltro){
+      case 'comp':   return _naComp;
+      case 'semqtd': return _semQtd;
+      case 'semsub': return _semSub;
+      case 'aprov':  return faturamento.filter(f=>f.status==='aguardando');
+      case 'autor':  return faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status));
+      default:       return faturamento;
+    }
+  })();
+  const rows=_lista.map((f,i)=>fatRowHTML(f,i)).join('');
 
   return`
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
-    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Total faturas</div>
-      <div style="font-size:24px;font-weight:700">${faturamento.length}</div>
-    </div>
-    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Aguard. aprovação</div>
-      <div style="font-size:24px;font-weight:700;color:${pendAprov>0?'var(--amber-text)':'var(--text)'}">${pendAprov}</div>
-    </div>
-    <div style="background:var(--bg2);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:4px">Total autorizado</div>
-      <div style="font-size:20px;font-weight:700;color:var(--green-text)">${fmtV(totalAutorizado)}</div>
-    </div>
-  </div>
+  ${(function(){
+    const card=(k,t,v,sub,cor,amb)=>`<div onclick="fatCardFiltro('${k}')" style="background:${amb?'var(--amber-bg,#fef3c7)':'var(--bg2)'};border-radius:var(--radius);padding:12px;border:1px solid ${amb?'#f0d9a8':'var(--border)'};cursor:pointer${window._fatFiltro===k?';box-shadow:0 0 0 2px #0A2540':''}">
+      <div style="font-size:10.5px;color:${amb?'var(--amber-text,#b45309)':'var(--text2)'};text-transform:uppercase;letter-spacing:.5px">${t}</div>
+      <div style="font-size:23px;font-weight:800;margin-top:2px;color:${cor||'var(--text)'}">${v}</div>
+      <div style="font-size:11px;color:var(--text2)">${sub}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:14px">`
+      +card('comp','Compet\u00eancia '+_compLabel,_naComp.length,'de '+faturamento.length+' no total','')
+      +card('semqtd','Sem quantidade',_semQtd.length,'rascunho a digitar','',_semQtd.length>0)
+      +card('semsub','Subtotal n\u00e3o gerado',_semSub.length,'m\u00ednimo n\u00e3o aplicado','',_semSub.length>0)
+      +card('aprov','Aguard. aprova\u00e7\u00e3o',pendAprov,'esperando gestor',pendAprov>0?'var(--amber-text)':'')
+      +card('afaturar','A faturar',fmtV(_aFaturar),'soma dos rascunhos','var(--green-text)')
+      +card('autor','Autorizado',fmtV(totalAutorizado),'pronto p/ NFS-e','var(--green-text)')
+      +`</div>`;
+  })()}
+  ${window._fatFiltro?`<div style="margin-bottom:10px;padding:8px 11px;border-radius:9px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;font-size:12.5px;color:var(--amber-text,#8a6d1a);display:flex;align-items:center;gap:10px">
+      <span>Filtrando a lista \u2014 ${_lista.length} fatura(s)</span>
+      <button class="btn btn-sm" style="margin-left:auto" onclick="fatCardFiltro('')">Ver todas</button></div>`:''}
   <div class="sechdr">
     <div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input placeholder="Buscar cliente, fatura..." oninput="filterFaturamento(this.value)">
@@ -6558,6 +6607,10 @@ function rFaturamento(){
   </div>`;
 }
 
+function fatCardFiltro(k){
+  window._fatFiltro=(window._fatFiltro===k)?'':k;
+  var c=ge('content'); if(c) c.innerHTML=rFaturamento();
+}
 function filterFaturamento(q){
   const f=faturamento.filter(f=>{
     const cli=clientes.find(c=>c.id===f.cliente_id);
@@ -8584,8 +8637,19 @@ function rFatProgramacao(){
   html += '<div style="font-size:12px;color:var(--text3);margin-top:2px">Configure as faturas geradas automaticamente por período</div></div>';
   if(isAdmin){
     html += '<div style="display:flex;gap:8px">';
-    html += '<button class="btn" onclick="gerarSugestoesProg()">✨ Gerar sugestões</button>';
-    html += '<button class="btn" onclick="fatGerarAbrir()">🧾 Gerar faturas da competência</button>';
+    html += '<button class="btn" onclick="gerarSugestoesProg()" title="Varre as tabelas tarifárias vigentes e cadastra os clientes que faltam na programação">✨ Cadastrar clientes na programação</button>';
+    html += '<button class="btn btn-p" onclick="fatGerarAbrir()" title="Cria os rascunhos de fatura do mês a partir da programação">🧾 Abrir rascunhos do mês</button>';
+    // programação quase vazia era a causa de "0 faturas a criar" sem explicação
+    try{
+      var _cidP=company?company.id:null;
+      var _ativas=(fatProgramacao||[]).filter(function(p){return p.ativo!==false&&(!_cidP||p.company_id===_cidP);}).length;
+      var _clis=(clientes||[]).filter(function(c){return c.status!=='inativo';}).length;
+      if(_ativas< Math.max(3, Math.round(_clis*0.5))){
+        html += '<div style="margin-top:10px;padding:10px 12px;border-radius:9px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;font-size:12.5px;color:var(--amber-text,#8a6d1a);line-height:1.55">'
+          +'\u26a0 Apenas <b>'+_ativas+'</b> programa\u00e7\u00e3o(\u00f5es) ativa(s) para '+_clis+' cliente(s). '
+          +'S\u00f3 quem est\u00e1 aqui entra nos rascunhos do m\u00eas \u2014 use <b>Cadastrar clientes na programa\u00e7\u00e3o</b> para incluir os demais.</div>';
+      }
+    }catch(_ep){}
     html += '<button class="btn btn-primary" onclick="openFatProgModal()">+ Nova programação</button>';
     html += '</div>';
   }
