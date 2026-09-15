@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.949 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.950 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.949';
+const APP_VERSION='v1.0.950';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8805,7 +8805,27 @@ function rFatProgramacao(){
 // ===== Gerar faturas da competência (lote de rascunhos) =====
 var fgAno=null, fgMes=null, fgEscopo='encerrados';
 
-function fatGerarAbrir(){
+var _fgContatos=null;   // cliente_id -> [{tipo, contato}]
+async function fgCarregaContatos(){
+  if(_fgContatos)return _fgContatos;
+  _fgContatos={};
+  var ids={}; (fatProgramacao||[]).forEach(function(p){ if(p.cliente_id)ids[p.cliente_id]=1; });
+  var lista=Object.keys(ids);
+  for(var i=0;i<lista.length;i++){
+    try{
+      var cs=await dbSelect('clientes_contatos','cliente_id=eq.'+lista[i]+'&order=created_at.asc');
+      var tipos=[], vistos={};
+      (cs||[]).forEach(function(c){
+        var t=String(c.tipo_operacao||'').trim();
+        if(!t||vistos[t])return;
+        vistos[t]=1; tipos.push({tipo:t,contato:c});
+      });
+      _fgContatos[lista[i]]=tipos;
+    }catch(e){ _fgContatos[lista[i]]=[]; }
+  }
+  return _fgContatos;
+}
+async function fatGerarAbrir(){
   var hoje=new Date();
   if(fgAno===null){ // padrão: competência anterior (a que normalmente se fatura)
     var d=new Date(hoje.getFullYear(),hoje.getMonth()-1,1);
@@ -8820,9 +8840,11 @@ function fatGerarAbrir(){
     +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:18px">Abre um rascunho por cliente da programa\u00e7\u00e3o ativa, com as linhas da tabela prontas e as quantidades em branco.</div>'
     +'<div id="fg-corpo"></div></div>';
   document.body.appendChild(ov);
+  var _b=ge('fg-corpo'); if(_b)_b.innerHTML='<div style="padding:22px;text-align:center;color:var(--text3)">Carregando contatos por opera\u00e7\u00e3o\u2026</div>';
+  await fgCarregaContatos();
   fatGerarRender();
 }
-function fatGerarFechar(){ var m=ge('modal-fat-gerar'); if(m) m.remove(); }
+function fatGerarFechar(){ var m=ge('modal-fat-gerar'); if(m) m.remove(); _fgContatos=null; }
 function fgSet(campo,v){ if(campo==='ano')fgAno=parseInt(v,10); else if(campo==='mes')fgMes=parseInt(v,10); else fgEscopo=v; fatGerarRender(); }
 
 function fgLastDay(y,m){ return new Date(y,m+1,0).getDate(); }
@@ -8886,10 +8908,13 @@ function fgLinhasDaTabela(tab){
   });
   return out;
 }
-function fgJaExiste(clienteId,ini,fim){
+function fgJaExiste(clienteId,ini,fim,tipoOp){
   return (faturamento||[]).some(function(f){
-    return f.cliente_id===clienteId && f.periodo_inicio===ini && f.periodo_fim===fim
-      && ['cancelado','reprovado'].indexOf(f.status)<0;
+    if(f.cliente_id!==clienteId||f.periodo_inicio!==ini||f.periodo_fim!==fim)return false;
+    if(['cancelado','reprovado'].indexOf(f.status)>=0)return false;
+    // com quebra por operação, cada tipo tem a sua fatura no mesmo período
+    var a=String(f.tipo_operacao||''), b=String(tipoOp||'');
+    return a===b;
   });
 }
 
@@ -8899,17 +8924,24 @@ function fgPrevia(){
     var cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;});
     var tab=(tabelasTarifarias||[]).find(function(t){return t.id===p.tabela_id;});
     var per=(p.periodicidade||'mensal').toLowerCase();
+    // uma fatura por TIPO DE OPERAÇÃO (cada um tem seu aprovador);
+    // sem tipos cadastrados, segue com uma fatura só
+    var tipos=((_fgContatos||{})[p.cliente_id])||[];
+    var alvos=tipos.length?tipos:[{tipo:'',contato:null}];
     fgPeriodos(per).forEach(function(pr){
-      var linhas=tab?fgLinhasDaTabela(tab):[];
-      var emis=fgEmissao(pr.fim);
-      var venc=fgVencimento(tab,emis);
-      var item={prog:p,cli:cli,tab:tab,per:pr,emissao:emis,venc:venc,linhas:linhas,
-                nome:(cli&&cli.nome)||p.cliente_nome||'\u2014'};
-      if(!tab){ item.situacao='pendente'; item.motivo='sem tabela vigente'; }
-      else if(!linhas.length){ item.situacao='pendente'; item.motivo='tabela sem itens'; }
-      else if(fgJaExiste(p.cliente_id,pr.ini,pr.fim)){ item.situacao='pulada'; }
-      else { item.situacao='nova'; }
-      out.push(item);
+      alvos.forEach(function(al){
+        var linhas=tab?fgLinhasDaTabela(tab):[];
+        var emis=fgEmissao(pr.fim);
+        var venc=fgVencimento(tab,emis,pr.ini);
+        var item={prog:p,cli:cli,tab:tab,per:pr,emissao:emis,venc:venc,linhas:linhas,
+                  tipoOp:al.tipo,contato:al.contato,
+                  nome:(cli&&cli.nome)||p.cliente_nome||'\u2014'};
+        if(!tab){ item.situacao='pendente'; item.motivo='sem tabela vigente'; }
+        else if(!linhas.length){ item.situacao='pendente'; item.motivo='tabela sem itens'; }
+        else if(fgJaExiste(p.cliente_id,pr.ini,pr.fim,al.tipo)){ item.situacao='pulada'; }
+        else { item.situacao='nova'; }
+        out.push(item);
+      });
     });
   });
   return out;
@@ -8971,12 +9003,14 @@ function fatGerarRender(){
     };
     h+='<div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:42vh">'
       +'<table style="width:100%;border-collapse:collapse"><thead><tr>'
-      +['Cliente','Tabela','Per\u00edodo','Emiss\u00e3o','Vencimento','Linhas','Situa\u00e7\u00e3o'].map(function(t){
+      +['Cliente','Opera\u00e7\u00e3o','Tabela','Per\u00edodo','Emiss\u00e3o','Vencimento','Linhas','Situa\u00e7\u00e3o'].map(function(t){
         return '<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;text-align:left;white-space:nowrap">'+t+'</th>';}).join('')
       +'</tr></thead><tbody>';
     prev.forEach(function(x){
       h+='<tr>'
         +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)">'+x.nome+'</td>'
+        +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'
+          +(x.tipoOp?('<b>'+ecomEsc(x.tipoOp)+'</b>'+(x.contato&&x.contato.nome?('<div style="font-size:10px;color:var(--text3)">'+ecomEsc(x.contato.nome)+'</div>'):'')):'<span style="color:var(--text3)">\u2014</span>')+'</td>'
         +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border)'+(x.tab?'':';color:#b45309')+'">'+(x.tab?(x.tab.nome||'\u2014'):'\u2014 sem tabela vigente \u2014')+'</td>'
         +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'+dBR(x.per.ini)+' \u2013 '+dBR(x.per.fim)+'</td>'
         +'<td style="padding:7px 8px;font-size:12px;border-top:1px solid var(--border);white-space:nowrap">'+dBR(x.emissao)+'</td>'
@@ -8992,7 +9026,9 @@ function fatGerarRender(){
   h+='<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:14px;line-height:1.6">'
     +'<b>Vencimento em branco</b> \u2014 o prazo vem da proposta e s\u00f3 vale a partir da aprova\u00e7\u00e3o do cliente; sem aprova\u00e7\u00e3o, a fatura nasce sem data.<br>'
     +'<b>Faturamento m\u00ednimo</b> \u2014 n\u00e3o entra agora: o complemento \u00e9 calculado depois, quando as quantidades forem gravadas.<br>'
-    +'<b>Duplicidade</b> \u2014 cliente que j\u00e1 tem fatura no mesmo per\u00edodo \u00e9 pulado; pode rodar de novo sem risco.</div>';
+    +'<b>Duplicidade</b> \u2014 cliente que j\u00e1 tem fatura no mesmo per\u00edodo e opera\u00e7\u00e3o \u00e9 pulado; pode rodar de novo sem risco.<br>'
+    +'<b>Tipo de opera\u00e7\u00e3o</b> \u2014 cliente com v\u00e1rias opera\u00e7\u00f5es gera <b>um rascunho por opera\u00e7\u00e3o</b>, cada um com seu aprovador. '
+    +'Sem faturamento integrado, gere todos e <b>cancele os que n\u00e3o tiveram movimento</b>.</div>';
 
   h+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">'
     +'<button class="btn" onclick="fatGerarFechar()">Cancelar</button>'
@@ -9016,7 +9052,8 @@ async function fatGerarExecutar(){
         cliente_id:x.prog.cliente_id, cliente_nome:x.nome,
         tabela_id:x.prog.tabela_id||null,
         tipo_documento:'fatura',
-        responsavel_id:x.prog.responsavel||null,
+        tipo_operacao:x.tipoOp||null,
+        responsavel_id:(x.contato&&x.contato.id)||x.prog.responsavel||null,
         periodicidade:(x.prog.periodicidade||'mensal'),
         periodo_inicio:x.per.ini, periodo_fim:x.per.fim,
         data_emissao:x.emissao,
