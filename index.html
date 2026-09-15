@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.945 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.946 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.945';
+const APP_VERSION='v1.0.946';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -7832,10 +7832,18 @@ async function confirmarNFSe(id){
 
   // Calcula vencimento automaticamente: data NFS-e + dias de vencimento
   const f=faturamento.find(x=>x.id===id);
-  const diasVenc=parseInt(f?.vencimento_dias||7);
-  const dtNfse=new Date(data+'T00:00');
-  dtNfse.setDate(dtNfse.getDate()+diasVenc);
-  const vencimento=dtNfse.toISOString().slice(0,10);
+  // regra contratual de pagamento (proposta): datas certas, mes seguinte ou
+  // quinzena. Sem regra, cai no ciclo da proposta / dias da fatura.
+  let vencimento=null;
+  try{ vencimento=crVencPorRegra(f?.cliente_id,data,f?.periodo_inicio)||null; }catch(_vr){ vencimento=null; }
+  if(!vencimento){
+    const diasVenc=parseInt(f?.vencimento_dias||7);
+    const dtNfse=new Date(data+'T00:00');
+    dtNfse.setDate(dtNfse.getDate()+diasVenc);
+    vencimento=(typeof crProxDiaUtil==='function')
+      ? crProxDiaUtil(dtNfse.toISOString().slice(0,10))
+      : dtNfse.toISOString().slice(0,10);
+  }
 
   await dbUpdate('faturamento',id,{
     status:'nfse_emitida',
@@ -7846,7 +7854,7 @@ async function confirmarNFSe(id){
   faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento}:f);
   ge('modal-nfse')?.remove();
   await criarLancamentoCR(id);
-  alert(`NFS-e registrada! Vencimento calculado: ${dtNfse.toLocaleDateString('pt-BR')}`);
+  alert(`NFS-e registrada! Vencimento calculado: ${new Date(vencimento+'T00:00').toLocaleDateString('pt-BR')}`);
   render();
 }
 
@@ -10052,6 +10060,10 @@ function closePropEditor(){
   if(el)el.style.display='none';
 }
 
+function propVencRegraToggle(){
+  var t=ge('e-venc_regra_tipo'), b=ge('venc-regra-box');
+  if(t&&b) b.style.display=(t.value&&t.value!=='prazo')?'block':'none';
+}
 function getPropV(id){const e=ge(id);return e?e.value||null:null;}
 
 function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
@@ -10157,10 +10169,29 @@ function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
         <div class="fg"><label class="fl">Prazo de aprovação da fatura</label>
           <input class="fi" id="e-cond_prazo_aprovacao" value="${sc.cond_prazo_aprovacao||'2 dias úteis após apresentação'}" style="background:var(--bg2)" readonly>
         </div>
-        <div class="fg"><label class="fl">Prazo de pagamento (dias corridos)</label>
+        <div class="fg"><label class="fl">Prazo de pagamento (ciclo, dias corridos)</label>
           <div style="display:flex;align-items:center;gap:8px">
             <input class="fi" id="e-cond_prazo_pagamento_dias" value="${sc.cond_prazo_pagamento_dias||'7'}" style="max-width:80px">
-            <span style="font-size:12px;color:var(--text2)">dias corridos após fatura</span>
+            <span style="font-size:12px;color:var(--text2)">dias corridos apos fatura</span>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">E o <b>ciclo</b> de pagamento: base do vencimento e da analise de prazo medio. Com regra de data certa, o vencimento gravado e a data certa.</div>
+        </div>
+        <div class="fg"><label class="fl">Regra de vencimento</label>
+          <select class="fi" id="e-venc_regra_tipo" onchange="propVencRegraToggle()">
+            <option value="prazo"${(sc.venc_regra_tipo||'prazo')==='prazo'?' selected':''}>Prazo da proposta (padrao)</option>
+            <option value="certas"${sc.venc_regra_tipo==='certas'?' selected':''}>Datas certas no mes</option>
+            <option value="mes_seguinte"${sc.venc_regra_tipo==='mes_seguinte'?' selected':''}>Dia fixo do mes seguinte a emissao</option>
+            <option value="quinzena"${sc.venc_regra_tipo==='quinzena'?' selected':''}>Por quinzena faturada</option>
+          </select>
+          <div id="venc-regra-box" style="display:${(sc.venc_regra_tipo&&sc.venc_regra_tipo!=='prazo')?'block':'none'};margin-top:6px">
+            <input class="fi" id="e-venc_regra_dias" value="${sc.venc_regra_dias||''}" placeholder="ex.: 5/10/20">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">
+              <b>Datas certas:</b> o vencimento do prazo e empurrado para a proxima data da lista (nunca encurta o prazo).<br>
+              <b>Mes seguinte:</b> informe um dia — vence sempre nesse dia do mes seguinte a emissao, ignorando o prazo.<br>
+              <b>Quinzena:</b> 1a quinzena vence no ultimo dia util do mes; 2a no dia informado. <br>
+              Data em fim de semana ou feriado ja nasce gravada no <b>proximo dia util</b>.
+            </div>
+            <input class="fi" id="e-venc_regra_obs" value="${sc.venc_regra_obs||''}" placeholder="Observacao de pagamento (aparece na cobranca)" style="margin-top:6px">
           </div>
         </div>
         <div class="fg"><label class="fl">PIS/COFINS</label><input class="fi" value="Inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
@@ -10244,6 +10275,7 @@ async function gerarPropostaDoDeal(dealId){
     cond_fat_minimo:'R$60.000,00', cond_multa:'Não aplicado',
     cond_notice:'30 dias', cond_prazo_aprovacao:'2 dias úteis após apresentação',
     cond_prazo_pagamento_dias:'7',
+    venc_regra_tipo:'prazo', venc_regra_dias:'', venc_regra_obs:'',
     tarifas:JSON.stringify(tarifasPadrao),
   };
 
@@ -10358,6 +10390,9 @@ function getPropDados(status){
     cond_notice:getPropV('e-cond_notice'),
     cond_prazo_aprovacao:getPropV('e-cond_prazo_aprovacao'),
     cond_prazo_pagamento_dias:getPropV('e-cond_prazo_pagamento_dias'),
+    venc_regra_tipo:getPropV('e-venc_regra_tipo')||'prazo',
+    venc_regra_dias:getPropV('e-venc_regra_dias')||null,
+    venc_regra_obs:getPropV('e-venc_regra_obs')||null,
     tarifas:JSON.stringify(propTarifas),
     company_id:cid, owner_id:cu.id, status,
   };
@@ -10601,7 +10636,8 @@ async function criarRenovacao(tabelaId){
       cliente_nome: t.cliente_nome||t.nome||'',
       cond_faturamento:t.cond_faturamento||'', cond_reajustes:t.cond_reajustes||'',
       cond_prazo_contrato:t.cond_prazo_contrato||'', cond_fat_minimo:t.cond_fat_minimo||'',
-      cond_notice:t.cond_notice||'', cond_prazo_pagamento_dias:t.cond_prazo_pagamento_dias||''
+      cond_notice:t.cond_notice||'', cond_prazo_pagamento_dias:t.cond_prazo_pagamento_dias||'',
+      venc_regra_tipo:t.venc_regra_tipo||'prazo', venc_regra_dias:t.venc_regra_dias||'', venc_regra_obs:t.venc_regra_obs||''
     };
   }
   delete nova.id; delete nova.created_at; delete nova.updated_at;
@@ -16155,16 +16191,55 @@ function crPrazoDiasCliente(clienteId){
 // DIAS CERTOS, o resultado é deslocado para o dia de corte correspondente
 // — o corte é decidido pelo DIA DA EMISSÃO, que é o que o faturamento
 // controla. Sem regra, devolve o cálculo bruto, sem deslocamento.
-function crVencPorRegra(clienteId,dataEmissao){
+// proposta vigente do cliente (onde mora a regra contratual de pagamento)
+function crPropostaDe(clienteId){
+  return (tabelasTarifarias||[]).find(function(x){
+    return x.cliente_id===clienteId && x.status!=='pendente'; })||null;
+}
+// último dia ÚTIL do mês de uma data
+function crUltimoDiaUtilMes(ano,mes){
+  var d=new Date(ano,mes+1,0), g=0;
+  while(!crEhDiaUtil(d)&&g<10){ d.setDate(d.getDate()-1); g++; }
+  return d;
+}
+function crVencPorRegra(clienteId,dataEmissao,periodoInicio){
   if(!dataEmissao)return null;
-  var prazo=crPrazoDiasCliente(clienteId);
-  if(prazo==null)return null;                   // sem prazo na proposta
   var emi=new Date(String(dataEmissao).slice(0,10)+'T00:00');
   if(isNaN(emi))return null;
+  var prop=crPropostaDe(clienteId);
+  var tipo=(prop&&prop.venc_regra_tipo)||'prazo';
+  var dias=[];
+  String((prop&&prop.venc_regra_dias)||'').split(/[\/|,;]/).forEach(function(t){
+    var d=parseInt(String(t).trim(),10);
+    if(!isNaN(d)&&d>=1&&d<=31&&dias.indexOf(d)<0)dias.push(d);
+  });
+  dias.sort(function(a,b){return a-b;});
+
+  // dia fixo do mês SEGUINTE à emissão — ignora o prazo da proposta
+  if(tipo==='mes_seguinte' && dias.length){
+    var dm=new Date(emi.getFullYear(),emi.getMonth()+1,dias[0]);
+    return crProxDiaUtil(dm.toISOString().slice(0,10));
+  }
+  // por QUINZENA faturada: 1a -> último dia útil do mês; 2a -> dia fixo do mês seguinte
+  if(tipo==='quinzena'){
+    var ref=periodoInicio?new Date(String(periodoInicio).slice(0,10)+'T00:00'):emi;
+    if(isNaN(ref))ref=emi;
+    var q2=(ref.getDate()>15);
+    if(!q2){
+      var u=crUltimoDiaUtilMes(emi.getFullYear(),emi.getMonth());
+      return u.toISOString().slice(0,10);      // já é dia útil por construção
+    }
+    var d15=new Date(emi.getFullYear(),emi.getMonth()+(emi.getDate()>15?1:0),dias.length?dias[0]:15);
+    if(d15<=emi){ d15=new Date(emi.getFullYear(),emi.getMonth()+1,dias.length?dias[0]:15); }
+    return crProxDiaUtil(d15.toISOString().slice(0,10));
+  }
+
+  var prazo=crPrazoDiasCliente(clienteId);
+  if(prazo==null)return null;                   // sem prazo na proposta
   var bruto=new Date(emi.getTime()); bruto.setDate(bruto.getDate()+prazo);
-  var c=(clientes||[]).find(function(x){return x.id===clienteId;});
-  var regra=c&&c.cr_venc_regra?String(c.cr_venc_regra).trim():'';
-  if(!regra)return bruto.toISOString().slice(0,10);
+  var regra=(tipo==='certas'&&dias.length)?dias.join('|')
+           :((prop&&prop.cr_venc_regra)?String(prop.cr_venc_regra).trim():'');
+  if(!regra)return crProxDiaUtil(bruto.toISOString().slice(0,10));
   // Dias certos de vencimento do cliente (ex.: 10 e 20).
   // Aceita "10|20" e também o formato "corte:dia" (11:10|31:20).
   var dias=[];
@@ -16173,18 +16248,19 @@ function crVencPorRegra(clienteId,dataEmissao){
     var d=parseInt(t.length>1?t[1]:t[0],10);
     if(!isNaN(d)&&d>=1&&d<=31&&dias.indexOf(d)<0)dias.push(d);
   });
-  if(!dias.length)return bruto.toISOString().slice(0,10);
-  dias.sort(function(a,b){return a-b;});
+  if(!dias.length)return crProxDiaUtil(bruto.toISOString().slice(0,10));
   // O deslocamento é SEMPRE PARA A FRENTE: nunca encurta o prazo
   // contratual. Do vencimento bruto, vai para o próximo dia certo.
   for(var add=0;add<=2;add++){
     var ano=bruto.getFullYear(), mes=bruto.getMonth()+add;
     for(var i=0;i<dias.length;i++){
       var cand=new Date(ano,mes,dias[i]);
-      if(cand>bruto)return cand.toISOString().slice(0,10);
+      // fim de semana/feriado: grava já no próximo dia útil, para o título
+      // nascer na data real de pagamento (sem cobrança indevida)
+      if(cand>bruto)return crProxDiaUtil(cand.toISOString().slice(0,10));
     }
   }
-  return bruto.toISOString().slice(0,10);
+  return crProxDiaUtil(bruto.toISOString().slice(0,10));
 }
 
 function crDataStr(cr){
