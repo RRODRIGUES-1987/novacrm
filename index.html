@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.950 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.951 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.950';
+const APP_VERSION='v1.0.951';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48191,7 +48191,29 @@ async function ecomEtiqImportFile(input){
       if(!oid){
         var shp=txt.replace(/\s+/g,' ').match(/ID\s*pedido:?\s*([A-Z0-9]{10,20})/i);
         if(shp)oid=String(shp[1]).toUpperCase();
-        else{ var shp2=flat.match(/\b\d{6}[A-Z0-9]{8}\b/); if(shp2)oid=String(shp2[0]).toUpperCase(); }
+      }
+      // Shopee: o PDF devolve o texto fora de ordem e, no achatado, o ID fica
+      // colado na vizinhanca ("pedido:26091556XBTF1NContrato:"). Sem \b, o
+      // fallback antigo nunca casava. Aqui varremos TODOS os candidatos do
+      // padrao (AAMMDD + 8 alfanumericos) e confirmamos contra os pedidos.
+      if(!oid){
+        var cands=[], _re=/\d{6}[A-Z0-9]{8}/gi, _m;
+        var _up=String(flat||'').toUpperCase();
+        while((_m=_re.exec(_up))!==null){ cands.push(_m[0]); _re.lastIndex=_m.index+1; }
+        // preferencia: candidato que bate com um pedido conhecido
+        for(var _c=0;_c<cands.length&&!oid;_c++){
+          var cN=cands[_c].replace(/[^A-Z0-9]/g,'');
+          var achou=(ecomPedidos||[]).some(function(p){
+            var np=String(p.numero_pedido||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+            return np && (np===cN || np.indexOf(cN)===0 || cN.indexOf(np)===0);
+          });
+          if(achou)oid=cN;
+        }
+        // nenhum confirmado: fica com o primeiro que comeca por data plausivel
+        if(!oid&&cands.length){
+          var pref=cands.find(function(x){ return /^2[0-9]{5}/.test(x); });
+          oid=String(pref||cands[0]).toUpperCase();
+        }
       }
       var trk=(flat.match(/TXAQ\w+?tx/i)||[])[0]||'';
       // J&T: nao imprime Order ID; o codigo de barras da caixa e o "Pedido: 9998..."
