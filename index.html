@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.947 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.948 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.947';
+const APP_VERSION='v1.0.948';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6464,10 +6464,11 @@ async function delTabelaTarifaria(id){
 const FAT_STATUS={
   rascunho:      {label:'Rascunho',         color:'var(--text2)',       bg:'var(--bg3)'},
   aguardando:    {label:'Aguard. aprovação', color:'var(--amber-text)',  bg:'var(--amber-bg)'},
-  aprovado:      {label:'Aprovado',          color:'var(--blue-text)',   bg:'var(--blue-bg)'},
-  enviado:       {label:'Enviado ao cliente',color:'var(--purple-text)', bg:'var(--purple-bg)'},
-  autorizado:    {label:'Autorizado',        color:'var(--green-text)',  bg:'var(--green-bg)'},
-  nfse_emitida:  {label:'NFS-e emitida',     color:'var(--green-text)',  bg:'var(--green-bg)'},
+  aprovado:      {label:'A enviar ao cliente',color:'var(--blue-text)',  bg:'var(--blue-bg)'},
+  enviado:       {label:'Aguardando cliente',color:'var(--purple-text)', bg:'var(--purple-bg)'},
+  autorizado:    {label:'Autorizado — emitir NF', color:'var(--blue-text)', bg:'var(--blue-bg)'},
+  nfse_emitida:  {label:'Em aberto',         color:'var(--green-text)',  bg:'var(--green-bg)'},
+  pago:          {label:'Paga',              color:'var(--green-text)',  bg:'var(--green-bg)'},
   cancelado:     {label:'Cancelado',         color:'var(--red-text)',    bg:'var(--red-bg)'},
 };
 
@@ -6484,6 +6485,42 @@ function getFatNumero(){
 }
 
 // competência da fatura (mesma régua do DRE/rentabilidade)
+// prazos do fluxo, em DIAS ÚTEIS (parâmetros da empresa)
+function fatSLA(){
+  var c=company||{};
+  return {criar:+(c.sla_fat_criar||3), aprovar:+(c.sla_fat_aprovar||1), enviar:+(c.sla_fat_enviar||1),
+          cliente:+(c.sla_fat_cliente||5), emitir:+(c.sla_fat_emitir||1)};
+}
+// dias úteis decorridos entre uma data e hoje (usa o calendário de feriados)
+function fatDiasUteis(desdeISO){
+  if(!desdeISO)return null;
+  var d=new Date(String(desdeISO).slice(0,10)+'T00:00'); if(isNaN(d))return null;
+  var hoje=new Date(); hoje.setHours(0,0,0,0);
+  var n=0, g=0;
+  while(d<hoje && g<400){ d.setDate(d.getDate()+1); g++; if(typeof crEhDiaUtil!=='function'||crEhDiaUtil(d))n++; }
+  return n;
+}
+// etapa atual da fatura: de quem é a bola, há quantos dias e qual o limite
+function fatEtapa(f){
+  if(!f)return null;
+  var S=fatSLA();
+  var def=null;
+  if(f.status==='rascunho')      def={k:'criar',   quem:'nos',    txt:'rascunho',            desde:f.periodo_fim||f.created_at, lim:S.criar};
+  else if(f.status==='aguardando')def={k:'aprovar',quem:'nos',    txt:'aguardando gestor',   desde:f.created_at,                lim:S.aprovar};
+  else if(f.status==='aprovado') def={k:'enviar',  quem:'nos',    txt:'a enviar ao cliente', desde:f.aprovado_em||f.created_at, lim:S.enviar};
+  else if(f.status==='enviado')  def={k:'cliente', quem:'cliente',txt:'aguardando cliente',  desde:f.enviado_em||f.aprovado_em, lim:S.cliente};
+  else if(f.status==='autorizado')def={k:'emitir', quem:'nos',    txt:'a emitir NF',         desde:f.autorizado_em||f.created_at,lim:S.emitir};
+  else if(f.status==='nfse_emitida'&&f.vencimento){
+    var venc=new Date(String(f.vencimento).slice(0,10)+'T00:00'), hj=new Date(); hj.setHours(0,0,0,0);
+    if(venc<hj) return {k:'vencida',quem:'cliente',txt:'vencida',dias:fatDiasUteis(f.vencimento),lim:0,estourou:true};
+    return null;
+  }
+  if(!def||!def.desde)return null;
+  var dias=fatDiasUteis(def.desde);
+  if(dias==null)return null;
+  def.dias=dias; def.estourou=(dias>def.lim);
+  return def;
+}
 function fatCompetencia(f){
   if(!f) return '';
   var cr=(contasReceber||[]).find(function(x){return x.fatura_id===f.id&&x.competencia;});
@@ -6519,6 +6556,16 @@ function fatRowHTML(f,i){
           ${f.periodo_inicio?`<span>${fmtDateSimples(f.periodo_inicio)} → ${fmtDateSimples(f.periodo_fim)}</span>`:''}
           ${(function(){var n=fatLinhasDe(f).length;return n?`<span>· ${n} linha${n>1?'s':''}</span>`:'';})()}
           ${(function(){var p=fatPendencia(f);return p?`<span style="font-weight:700;color:var(--amber-text,#b45309)">· ⚠ ${p}</span>`:'';})()}
+          ${(function(){
+            var e=fatEtapa(f); if(!e)return '';
+            var cor=e.estourou?(e.dias>e.lim*2?'s-ur':'s-at'):'s-ok';
+            var css=cor==='s-ur'?'background:var(--red-bg);color:var(--red-text)'
+                   :cor==='s-at'?'background:var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)'
+                   :'background:var(--green-bg);color:var(--green-text)';
+            var lbl=e.k==='vencida'?('vencida h\u00e1 '+e.dias+' dia(s) \u00fatil(eis)')
+                   :(e.txt+' h\u00e1 '+e.dias+' dia(s) \u00fatil(eis)'+(e.estourou?(' \u00b7 limite '+e.lim):''));
+            return `<span style="font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:99px;${css}">${lbl}</span>`;
+          })()}
           ${f.total?`<span>· ${fmtV(f.total)}</span>`:''}
           ${f.vencimento?`<span>· Venc: ${fmtDateSimples(f.vencimento)}</span>`:''}
           ${f.nfse_numero?`<span>· NFS-e: ${f.nfse_numero}</span>`:''}
@@ -6564,6 +6611,16 @@ function rFaturamento(){
   const _semSub=faturamento.filter(f=>fatPendencia(f)==='subtotal n\u00e3o gerado');
   const _aFaturar=faturamento.filter(f=>['rascunho','aguardando'].includes(f.status))
     .reduce((s,f)=>s+Number(f.total||0),0);
+  const _et=f=>fatEtapa(f);
+  const _agCli =faturamento.filter(f=>f.status==='enviado');
+  const _agCliX=_agCli.filter(f=>{var e=_et(f);return e&&e.estourou;});
+  const _aEnv  =faturamento.filter(f=>f.status==='aprovado');
+  const _aEnvX =_aEnv.filter(f=>{var e=_et(f);return e&&e.estourou;});
+  const _aNF   =faturamento.filter(f=>f.status==='autorizado');
+  const _aNFX  =_aNF.filter(f=>{var e=_et(f);return e&&e.estourou;});
+  const _abertas=faturamento.filter(f=>f.status==='nfse_emitida');
+  const _venc  =_abertas.filter(f=>{var e=_et(f);return e&&e.k==='vencida';});
+  const _mediaCli=_agCli.length?Math.round(_agCli.reduce((s,f)=>{var e=_et(f);return s+((e&&e.dias)||0);},0)/_agCli.length):0;
   window._fatCardCtx={comp:_compLabel};
 
   const _lista=(function(){
@@ -6572,6 +6629,11 @@ function rFaturamento(){
       case 'semqtd': return _semQtd;
       case 'semsub': return _semSub;
       case 'aprov':  return faturamento.filter(f=>f.status==='aguardando');
+      case 'agcli':  return faturamento.filter(f=>f.status==='enviado');
+      case 'aenviar':return faturamento.filter(f=>f.status==='aprovado');
+      case 'anf':    return faturamento.filter(f=>f.status==='autorizado');
+      case 'aberto': return faturamento.filter(f=>f.status==='nfse_emitida');
+      case 'vencida':return faturamento.filter(f=>{var e=fatEtapa(f);return e&&e.k==='vencida';});
       case 'autor':  return faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status));
       default:       return faturamento;
     }
@@ -6589,8 +6651,12 @@ function rFaturamento(){
       +card('semqtd','Sem quantidade',_semQtd.length,'rascunho a digitar','',_semQtd.length>0)
       +card('semsub','Subtotal n\u00e3o gerado',_semSub.length,'m\u00ednimo n\u00e3o aplicado','',_semSub.length>0)
       +card('aprov','Aguard. aprova\u00e7\u00e3o',pendAprov,'esperando gestor',pendAprov>0?'var(--amber-text)':'')
+      +card('agcli','Aguardando cliente',_agCli.length,(_agCliX.length?_agCliX.length+' acima do prazo \u00b7 ':'')+'m\u00e9d. '+_mediaCli+' dias','',_agCliX.length>0)
+      +card('aenviar','A enviar ao cliente',_aEnv.length,(_aEnvX.length?_aEnvX.length+' acima do prazo':'no prazo'),'',_aEnvX.length>0)
+      +card('anf','A emitir NF',_aNF.length,(_aNFX.length?'prazo de pgto. n\u00e3o come\u00e7ou':'no prazo'),'',_aNFX.length>0)
+      +card('aberto','Em aberto',fmtV(_abertas.reduce((s,f)=>s+Number(f.total||0),0)),_abertas.length+' faturas','var(--green-text)')
+      +card('vencida','Vencidas',fmtV(_venc.reduce((s,f)=>s+Number(f.total||0),0)),_venc.length+' faturas',_venc.length?'var(--red-text)':'',_venc.length>0)
       +card('afaturar','A faturar',fmtV(_aFaturar),'soma dos rascunhos','var(--green-text)')
-      +card('autor','Autorizado',fmtV(totalAutorizado),'pronto p/ NFS-e','var(--green-text)')
       +`</div>`;
   })()}
   ${window._fatFiltro?`<div style="margin-bottom:10px;padding:8px 11px;border-radius:9px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;font-size:12.5px;color:var(--amber-text,#8a6d1a);display:flex;align-items:center;gap:10px">
@@ -8252,6 +8318,19 @@ function avisosCalcular(){
   try{ if(pode('faturamento')){
     var fatAg=(faturamento||[]).filter(function(f){return f.status==='aguardando';}).length;
     add('Financeiro',fatAg,'1 fatura aguardando aprova\u00e7\u00e3o','{n} faturas aguardando aprova\u00e7\u00e3o','faturamento');
+    // régua do fluxo: só o que passou do prazo (dias úteis) entra aqui
+    if(typeof fatEtapa==='function'){
+      var _fx={cliente:0,enviar:0,emitir:0,criar:0,vencida:0};
+      (faturamento||[]).forEach(function(f){
+        var e=null; try{ e=fatEtapa(f); }catch(_x){}
+        if(e&&e.estourou&&_fx[e.k]!=null)_fx[e.k]++;
+      });
+      add('Financeiro',_fx.cliente,'1 fatura parada com o cliente al\u00e9m do prazo \u2014 cobrar aprova\u00e7\u00e3o','{n} faturas paradas com o cliente al\u00e9m do prazo \u2014 cobrar aprova\u00e7\u00e3o','faturamento');
+      add('Financeiro',_fx.emitir,'1 fatura autorizada sem NF \u2014 o prazo de pagamento n\u00e3o come\u00e7ou','{n} faturas autorizadas sem NF \u2014 o prazo de pagamento n\u00e3o come\u00e7ou','faturamento');
+      add('Financeiro',_fx.enviar,'1 fatura aprovada a enviar ao cliente','{n} faturas aprovadas a enviar ao cliente','faturamento');
+      add('Financeiro',_fx.criar,'1 rascunho parado al\u00e9m do prazo de cria\u00e7\u00e3o','{n} rascunhos parados al\u00e9m do prazo de cria\u00e7\u00e3o','faturamento');
+      add('Financeiro',_fx.vencida,'1 fatura vencida sem pagamento','{n} faturas vencidas sem pagamento','faturamento');
+    }
   } }catch(e){console.warn('aviso fat',e);}
 
   try{ if(pode('propostas')||pode('crm-dashboard')){
@@ -20889,6 +20968,12 @@ function openModal(mode,id=null){
       +'<div class="fg"><label class="fl">Faturamento programado</label>'
       +'<select class="fi" id="emp-fat-prog"><option value="false" '+((!c||!c.fat_programado)?'selected':'')+'>Desativado</option><option value="true" '+(c&&c.fat_programado?'selected':'')+'>Ativado</option></select></div>'
       +'<div class="fg"><label class="fl" title="Dias antes do limite para exibir alerta amarelo">⚠ Alerta férias (dias)</label>'+'<input class="fi" id="emp-prazo-alerta" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_alerta?c.prazo_ferias_alerta:90)+'" placeholder="90"></div>'+'<div class="fg"><label class="fl" title="Dias antes do limite para escalonamento vermelho">🔴 Escalonamento (dias)</label>'+'<input class="fi" id="emp-prazo-escalona" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_escalona?c.prazo_ferias_escalona:75)+'" placeholder="75"></div>'+'<div class="fg"><label class="fl" title="Prazo mínimo para início das férias">🚨 Limite programação (dias)</label>'+'<input class="fi" id="emp-prazo-limite" type="number" min="1" max="365" value="'+(c&&c.prazo_ferias_limite?c.prazo_ferias_limite:60)+'" placeholder="60"></div>'
+      +'<div style="grid-column:1/-1;margin-top:6px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--text3);text-transform:uppercase">Faturamento · prazos do fluxo (dias úteis)</div>'
+      +'<div class="fg"><label class="fl" title="Do fim do período faturado até a fatura estar criada e pendente de aprovação">📝 Criar a fatura</label><input class="fi" id="emp-sla-criar" type="number" min="0" max="60" value="'+(c&&c.sla_fat_criar!=null?c.sla_fat_criar:3)+'"></div>'
+      +'<div class="fg"><label class="fl" title="Da criação até a aprovação do gestor">✔ Gestor aprovar</label><input class="fi" id="emp-sla-aprovar" type="number" min="0" max="60" value="'+(c&&c.sla_fat_aprovar!=null?c.sla_fat_aprovar:1)+'"></div>'
+      +'<div class="fg"><label class="fl" title="Da aprovação até o envio do draft ao cliente">📤 Enviar o draft</label><input class="fi" id="emp-sla-enviar" type="number" min="0" max="60" value="'+(c&&c.sla_fat_enviar!=null?c.sla_fat_enviar:1)+'"></div>'
+      +'<div class="fg"><label class="fl" title="Do envio até a autorização do cliente — base da cobrança do time">⏳ Cliente aprovar</label><input class="fi" id="emp-sla-cliente" type="number" min="0" max="60" value="'+(c&&c.sla_fat_cliente!=null?c.sla_fat_cliente:5)+'"></div>'
+      +'<div class="fg"><label class="fl" title="Da autorização até a emissão da NFS-e — o prazo de pagamento só corre depois">🧾 Emitir a NFS-e</label><input class="fi" id="emp-sla-emitir" type="number" min="0" max="60" value="'+(c&&c.sla_fat_emitir!=null?c.sla_fat_emitir:1)+'"></div>'
       +'</div></div>'
       // Aba Usuários
       +(id?'<div id="emp-panel-usuarios" style="display:none">'+usrRows
@@ -21860,7 +21945,11 @@ async function saveModal(){
       const prazoLimite   = parseInt(ge('emp-prazo-limite')?.value||'60');
       const name=ge('fcname').value.trim();const cnpj=ge('fccnpj').value.replace(/\D/g,'');
       if(!name||cnpj.length!==14)return alert('Preencha nome e CNPJ válido (14 dígitos).');
-      const obj={name,cnpj,created_by:cu.id,max_usuarios:maxU,fat_programado:fatProg,prazo_ferias_alerta:prazoAlerta,prazo_ferias_escalona:prazoEscalona,prazo_ferias_limite:prazoLimite};
+      const _slaN=(id,d)=>{var v=parseInt(ge(id)?.value,10);return isNaN(v)?d:v;};
+      const obj={name,cnpj,created_by:cu.id,max_usuarios:maxU,fat_programado:fatProg,prazo_ferias_alerta:prazoAlerta,prazo_ferias_escalona:prazoEscalona,prazo_ferias_limite:prazoLimite,
+        sla_fat_criar:_slaN('emp-sla-criar',3), sla_fat_aprovar:_slaN('emp-sla-aprovar',1),
+        sla_fat_enviar:_slaN('emp-sla-enviar',1), sla_fat_cliente:_slaN('emp-sla-cliente',5),
+        sla_fat_emitir:_slaN('emp-sla-emitir',1)};
       if(mid){await dbUpdate('companies',mid,obj);companies=companies.map(c=>c.id===mid?{...c,...obj}:c);company=companies.find(x=>x.id===company?.id)||company;}
       else{const d=await dbInsert('companies',obj);if(d)companies.unshift(d);}
 
