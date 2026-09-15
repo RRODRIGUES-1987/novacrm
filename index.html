@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.948 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.949 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.948';
+const APP_VERSION='v1.0.949';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -21759,6 +21759,102 @@ async function executarCopiaPermissoes(paraUserId){
   }
 }
 
+// ─────────────── INSPETOR DE CAMPOS (dev) ───────────────
+// Ctrl+Shift+D. Restrito: só o dono do sistema (admin). Mostra tabela.coluna
+// ao passar o mouse, para achar de onde vem cada campo sem abrir o código.
+var _inspOn=false, _inspTip=null;
+// prefixo do id -> tabela de origem
+var INSP_PREFIX={
+  'e-':'tabelas_tarifarias/propostas', 'tt-':'tabelas_tarifarias', 'prop-':'propostas',
+  'emp-':'companies', 'fc':'companies',
+  'fp-':'fat_programacao', 'fat-':'faturamento', 'nfse-':'faturamento',
+  'cc-':'clientes_contatos', 'cli-':'clientes', 'cl-':'clientes',
+  'cp-':'contas_pagar', 'cr-':'contas_receber',
+  'inv-':'inventarios', 'col-':'(coletor · sem persistência)',
+  'ecom-':'ecom_pedidos', 'rh-':'rh_*', 'cad-':'pessoas', 'ger-':'rh_ferias',
+  'dre-':'ctrl_dre_config', 'rent-':'ctrl_serv_class', 'ctrl-':'(controladoria · calculado)',
+  'fu':'profiles', 'sg-':'fat_programacao', 'embsc-':'(ação · sem campo)', 'cxm-':'(ação · sem campo)'
+};
+// ids que não seguem o padrão
+var INSP_EXC={
+  'fat-venc-dias':'faturamento.vencimento_dias',
+  'emp-prazo-alerta':'companies.prazo_ferias_alerta',
+  'emp-prazo-escalona':'companies.prazo_ferias_escalona',
+  'emp-prazo-limite':'companies.prazo_ferias_limite',
+  'emp-sla-criar':'companies.sla_fat_criar', 'emp-sla-aprovar':'companies.sla_fat_aprovar',
+  'emp-sla-enviar':'companies.sla_fat_enviar', 'emp-sla-cliente':'companies.sla_fat_cliente',
+  'emp-sla-emitir':'companies.sla_fat_emitir',
+  'emp-max':'companies.max_usuarios', 'emp-fat-prog':'companies.fat_programado',
+  'fcname':'companies.name', 'fccnpj':'companies.cnpj'
+};
+function inspAlvo(el){
+  if(!el)return null;
+  var tags=['INPUT','SELECT','TEXTAREA'];
+  var n=el;
+  for(var g=0;g<4&&n;g++){ if(tags.indexOf(n.tagName)>=0)return n; n=n.parentElement; }
+  return null;
+}
+function inspDescreve(el){
+  var id=el.id||'';
+  if(!id) return {tab:'(sem id)',col:'—',id:'—'};
+  if(INSP_EXC[id]){ var p=INSP_EXC[id].split('.'); return {tab:p[0],col:p[1],id:id}; }
+  var pre='', tab='';
+  Object.keys(INSP_PREFIX).forEach(function(k){ if(id.indexOf(k)===0 && k.length>pre.length){ pre=k; tab=INSP_PREFIX[k]; } });
+  var col=pre?id.slice(pre.length):id;
+  col=col.replace(/-/g,'_');
+  return {tab:tab||'(desconhecida)',col:col||'—',id:id};
+}
+function inspTip(){
+  if(_inspTip)return _inspTip;
+  _inspTip=document.createElement('div');
+  _inspTip.id='insp-tip';
+  _inspTip.style.cssText='position:fixed;z-index:99999;pointer-events:none;display:none;'
+    +'background:#0A2540;color:#fff;font:12px/1.45 monospace;padding:7px 10px;border-radius:8px;'
+    +'box-shadow:0 4px 14px rgba(0,0,0,.35);max-width:340px';
+  document.body.appendChild(_inspTip);
+  return _inspTip;
+}
+function inspMove(ev){
+  if(!_inspOn)return;
+  var el=inspAlvo(ev.target), t=inspTip();
+  if(!el){ t.style.display='none'; return; }
+  var d=inspDescreve(el);
+  t.innerHTML='<div style="color:#8fd3ff;font-weight:700">'+d.tab+'</div>'
+    +'<div style="font-size:13px;font-weight:700">'+d.col+'</div>'
+    +'<div style="color:#9fb3c8;font-size:11px;margin-top:2px">id: '+d.id+'</div>';
+  t.style.display='block';
+  var x=ev.clientX+14, y=ev.clientY+16;
+  if(x+340>window.innerWidth)x=window.innerWidth-350;
+  if(y+90>window.innerHeight)y=ev.clientY-90;
+  t.style.left=x+'px'; t.style.top=y+'px';
+}
+function inspToggle(){
+  _inspOn=!_inspOn;
+  var b=ge('insp-badge');
+  if(_inspOn){
+    document.addEventListener('mousemove',inspMove,true);
+    if(!b){
+      b=document.createElement('div'); b.id='insp-badge';
+      b.style.cssText='position:fixed;left:12px;bottom:12px;z-index:99999;background:#0A2540;color:#fff;'
+        +'font:11px/1 -apple-system,sans-serif;font-weight:700;padding:7px 11px;border-radius:99px;'
+        +'box-shadow:0 3px 10px rgba(0,0,0,.3);cursor:pointer';
+      b.textContent='\u2299 Inspetor de campos \u00b7 Ctrl+Shift+D para sair';
+      b.onclick=inspToggle;
+      document.body.appendChild(b);
+    }
+  } else {
+    document.removeEventListener('mousemove',inspMove,true);
+    if(b)b.remove();
+    if(_inspTip)_inspTip.style.display='none';
+  }
+}
+document.addEventListener('keydown',function(e){
+  if(e.ctrlKey&&e.shiftKey&&(e.key==='D'||e.key==='d')){
+    if((profile&&profile.role)!=='admin')return;   // ferramenta do dono do sistema
+    e.preventDefault(); inspToggle();
+  }
+  if(e.key==='Escape'&&_inspOn)inspToggle();
+});
 function showToast(msg, type){
   const old = document.getElementById('verus-toast');
   if(old) old.remove();
