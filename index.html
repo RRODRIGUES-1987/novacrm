@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.943 | Gerado: 2026-09-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.945 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.943';
+const APP_VERSION='v1.0.945';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -12398,6 +12398,10 @@ async function feriasMarcarGozado(feriasId){
 // Verifica se o usuário logado é o gestor (na hierarquia) do colaborador.
 // Usa a ponte profile.pessoa_id (qual colaborador é o usuário logado) + responde_para.
 // Mantém compatibilidade com o gestor_id antigo (usuário) durante a transição.
+// Status que ENCERRAM o período aquisitivo. 'gozado' é usado na operação e
+// não estava aqui: o sistema tratava férias já tiradas como ainda em aberto.
+const FERIAS_ENCERRADO=['cancelado','concluido','gozado'];
+function feriasEncerrada(f){ return FERIAS_ENCERRADO.includes(f&&f.status); }
 function souGestorDe(p){
   if(!p) return false;
   const minhaPessoa=profile?.pessoa_id||null;
@@ -12458,9 +12462,11 @@ function rRHFerias(){
   // Calcular alertas
   const alertas = [];
   const _isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  const _escFer = _isRH ? null : (typeof minhaEquipeIds==='function' ? minhaEquipeIds() : new Set());
   pessoas.filter(p=>{
     if(!p.data_admissao||!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
-    if(!_isRH && !souGestorDe(p)) return false;
+    // cadeia inteira (diretos e indiretos), igual ao escopo das avaliações
+    if(_escFer!==null && !_escFer.has(p.id)) return false;
     return true;
   }).forEach(p=>{
     const adm = new Date(p.data_admissao+'T00:00:00');
@@ -12470,8 +12476,15 @@ function rRHFerias(){
     const periodoFim = _per.periodoFim;
     const dataLimite = _per.dataLimite;
     const diasParaLimite = Math.floor((dataLimite-hoje)/(1000*60*60*24));
-    // Verifica se já tem férias programadas neste período
-    const feriasPeriodo = rhFerias.filter(f=>f.pessoa_id===p.id&&f.status!=='cancelado'&&f.status!=='concluido');
+    // Férias EM ABERTO do período aquisitivo atual (antes pegava qualquer
+    // registro de qualquer ano, o que praticamente desligava o alerta)
+    const _pIni=(periodoInicio instanceof Date)?periodoInicio.toISOString().slice(0,10):String(periodoInicio||'').slice(0,10);
+    const feriasPeriodo = rhFerias.filter(function(f){
+      if(f.pessoa_id!==p.id) return false;
+      if(feriasEncerrada(f)) return false;
+      var fi=String(f.periodo_inicio||'').slice(0,10);
+      return fi ? (fi===_pIni) : true;   // registro antigo sem período: conta como do atual
+    });
     const _prazoAlerta=company?.prazo_ferias_alerta||90;
     const _prazoEscalona=company?.prazo_ferias_escalona||75;
     if(feriasPeriodo.length===0&&diasParaLimite<_prazoAlerta&&diasParaLimite>=0){
@@ -12482,14 +12495,18 @@ function rRHFerias(){
   // Grid de colaboradores
   // Filtro por perfil: gestor vê só os seus; RH/admin veem todos
   const isRH = ['admin','adm','rh'].includes(profile?.role||'');
+  const _esc2 = isRH ? null : (typeof minhaEquipeIds==='function' ? minhaEquipeIds() : new Set());
+  // contadores do que os filtros escondem — antes a pessoa sumia sem aviso
+  let _foraSemAdm=0, _foraPJ=0, _foraInativo=0;
   const pessoasAtivas = pessoas.filter(p=>{
     if(!['funcionario','colaborador'].includes(p.tipo_pessoa)) return false;
-    if(p.ativo===false) return false;
-    if(!p.data_admissao) return false;
-    if(p.tipo_contrato==='pj') return false;
-    if(!isRH && !souGestorDe(p)) return false;
+    if(_esc2!==null && !_esc2.has(p.id)) return false;
+    if(p.ativo===false){ _foraInativo++; return false; }
+    if(!p.data_admissao){ _foraSemAdm++; return false; }
+    if((p.tipo_contrato||'').toLowerCase()==='pj'){ _foraPJ++; return false; }
     return true;
   }).sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  window._ferFora={semAdm:_foraSemAdm,pj:_foraPJ,inativo:_foraInativo};
 
   const rows = pessoasAtivas.map(p=>{
     const admStr=p.data_admissao?new Date(p.data_admissao+'T00:00:00').toLocaleDateString('pt-BR'):'—';
@@ -12576,7 +12593,13 @@ function rRHFerias(){
   return`<div>
     ${alertasHtml}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-size:14px;font-weight:600">${pessoasAtivas.length} colaboradores</div>
+      <div style="font-size:14px;font-weight:600">${pessoasAtivas.length} colaboradores${(function(){
+        var f=window._ferFora||{}, ps=[];
+        if(f.semAdm) ps.push(f.semAdm+' sem data de admiss\u00e3o');
+        if(f.pj)     ps.push(f.pj+' PJ');
+        if(f.inativo)ps.push(f.inativo+' inativo(s)');
+        return ps.length?('<span title="Fora da programa\u00e7\u00e3o por regra de cadastro" style="margin-left:8px;font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)">'+ps.join(' \u00b7 ')+' fora</span>'):'';
+      })()}</div>
       <div style="display:flex;gap:8px;align-items:center">
         ${feriasPodeAprovar()?`<button class="btn btn-sm btn-p" onclick="feriasGerarTodos()">↻ Gerar/sincronizar períodos</button>`:''}
         <select class="fi" id="ferias-filtro" onchange="filtrarFeriasGrid(this.value)" style="font-size:12px;padding:4px 10px;height:32px;width:auto">
@@ -12651,7 +12674,7 @@ function openFeriasPeriodo(feriasId){
 function openFeriasModal(pessoaId, feriasId){
   if(!feriasPodeProgramar(pessoaId)){ alert('Você não tem permissão para programar férias deste colaborador.'); return; }
   const p = pessoaId ? pessoas.find(x=>x.id===pessoaId) : null;
-  const ferias = pessoaId ? rhFerias.filter(f=>f.pessoa_id===pessoaId&&f.status!=='cancelado'&&f.status!=='concluido') : [];
+  const ferias = pessoaId ? rhFerias.filter(f=>f.pessoa_id===pessoaId&&!feriasEncerrada(f)) : [];
   const f = feriasId ? (rhFerias.find(x=>x.id===feriasId)||null) : (ferias[0] || null);
 
   // Calcular período aquisitivo (do registro, se já existir; senão o atual)
