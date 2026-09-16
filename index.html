@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.954 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.955 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.954';
+const APP_VERSION='v1.0.955';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -34683,12 +34683,13 @@ function wmsProdutoAtributosCheckboxes(produtoId){
 //  view com "← Voltar", barra de filtros e resultado.
 // ═══════════════════════════════════════════════
 var wmsRelView='hub';
-function wmsRelAbrir(which){ wmsRelView=which; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); }
+function wmsRelAbrir(which){ wmsRelView=which; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); if(which==='reimp-vol') setTimeout(wmsReimpVolInit,0); }
 function wmsRelVoltar(){ wmsRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); }
 
 function rWmsRelatorios(){
   if(wmsRelView==='sem-etiqueta') return wmsRelSemEtiquetaView();
   if(wmsRelView==='abastecimento') return wmsAbastView();
+  if(wmsRelView==='reimp-vol') return wmsReimpVolView();
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -34705,7 +34706,139 @@ function rWmsRelatorios(){
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Importe o estoque e os endere&ccedil;os: o sistema monta as transfer&ecirc;ncias do pulm&atilde;o para o picking em FIFO, por pallet fechado.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
+      +'</div>'
+      +'<div onclick="wmsRelAbrir(\'reimp-vol\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Reimprimir etiquetas de volume</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Etiqueta rasurada ou perdida? Reimprima s&oacute; o volume que precisa, sem refazer a lista inteira.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
     +'</div></div>';
+}
+
+// ───── RELATÓRIO · REIMPRESSÃO SELETIVA DE ETIQUETAS DE VOLUME ─────
+// A etiqueta reimpressa é gerada pela MESMA wmsVolumesDaLista, então sai com o
+// mesmo volume X/N e o mesmo QR da original — continua válida no embarque.
+var _rvLista=null, _rvSel={};
+function wmsReimpVolView(){
+  return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+      +'<button class="btn btn-sm" onclick="wmsRelVoltar()">&larr; Voltar</button>'
+      +'<b style="font-size:18px">Reimprimir etiquetas de volume</b>'
+    +'</div>'
+    +'<div id="rv-box"></div></div>';
+}
+function wmsReimpVolInit(){
+  var b=ge('rv-box'); if(!b)return;
+  b.innerHTML=wmsRvBuscaHTML()+'<div id="rv-res"></div>';
+  setTimeout(function(){ var i=ge('rv-busca'); if(i)i.focus(); },60);
+}
+function wmsRvBuscaHTML(){
+  return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px">'
+    +'<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
+      +'<div><div style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Lista de separa\u00e7\u00e3o</div>'
+      +'<input class="fi" id="rv-busca" style="width:260px" placeholder="n\u00famero da lista ou bipe uma etiqueta" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wmsRvBuscar();}"></div>'
+      +'<button class="btn btn-p" onclick="wmsRvBuscar()">Buscar</button>'
+    +'</div>'
+    +'<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:10px;line-height:1.5">'
+      +'\ud83d\udca1 Tamb\u00e9m d\u00e1 para <b>bipar o QR de uma etiqueta boa</b> da mesma carga: o sistema abre a lista dela na hora.</div>'
+    +'</div>';
+}
+function wmsRvBuscar(){
+  var v=String((ge('rv-busca')||{}).value||'').trim();
+  if(!v){ showToast('Informe o n\u00famero da lista ou bipe uma etiqueta','amber'); return; }
+  var l=null;
+  // 1) QR da etiqueta: "listaId|tarefaId|P|3"
+  if(v.indexOf('|')>=0){
+    var lid=v.split('|')[0];
+    l=wmsListasSeparacao.find(function(x){return x.id===lid;});
+  }
+  // 2) número da lista
+  if(!l){
+    var vn=v.toLowerCase();
+    l=wmsListasSeparacao.find(function(x){return String(x.numero_lista||'').toLowerCase()===vn;})
+    ||wmsListasSeparacao.find(function(x){return String(x.numero_lista||'').toLowerCase().indexOf(vn)>=0;});
+  }
+  if(!l){ ge('rv-res').innerHTML='<div style="margin-top:14px;padding:14px;border-radius:10px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;color:var(--amber-text,#8a6d1a);font-size:13px">N\u00e3o encontrei a lista <b>'+ecomEsc(v)+'</b>. Confira o n\u00famero ou bipe outra etiqueta da mesma carga.</div>'; return; }
+  _rvLista=l; _rvSel={};
+  wmsRvRender();
+}
+function wmsRvToggle(i){ if(_rvSel[i])delete _rvSel[i]; else _rvSel[i]=1; wmsRvRender(); }
+function wmsRvTodos(){
+  var vols=wmsVolumesDaLista(_rvLista.id);
+  var todos=vols.every(function(_,i){return _rvSel[i];});
+  _rvSel={}; if(!todos)vols.forEach(function(_,i){_rvSel[i]=1;});
+  wmsRvRender();
+}
+function wmsRvRender(){
+  var box=ge('rv-res'); if(!box||!_rvLista)return;
+  var l=_rvLista, vols=wmsVolumesDaLista(l.id);
+  if(!vols.length){ box.innerHTML='<div style="margin-top:14px;padding:14px;color:var(--text3)">Esta lista n\u00e3o tem volumes para etiquetar.</div>'; return; }
+  var cli=clientes.find(function(c){return c.id===l.cliente_id;});
+  var nSel=Object.keys(_rvSel).length;
+  var h='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 4px">'
+    +'<b style="font-size:15px">'+ecomEsc(l.numero_lista||'')+'</b>'
+    +'<span style="font-size:12.5px;color:var(--text2)">'+ecomEsc((cli&&cli.nome)||'')+' \u00b7 '+ecomEsc(l.tipo||'')+' \u00b7 <b>'+vols.length+' volumes</b></span></div>';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:58vh"><table style="width:100%;border-collapse:collapse">'
+    +'<thead><tr>'
+    +'<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;width:36px"><input type="checkbox" onclick="wmsRvTodos()"'+(nSel===vols.length?' checked':'')+'></th>'
+    +['Vol.','Tipo','SKU','Descri\u00e7\u00e3o','Qtd','Endere\u00e7o'].map(function(t){return '<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;text-align:left">'+t+'</th>';}).join('')
+    +'</tr></thead><tbody>';
+  vols.forEach(function(v,i){
+    var on=!!_rvSel[i];
+    var tg=v.tipo==='pallet'?'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--blue-bg);color:var(--blue-text)">pallet</span>'
+                            :'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--purple-bg);color:var(--purple-text)">fra\u00e7\u00e3o</span>';
+    h+='<tr onclick="wmsRvToggle('+i+')" style="cursor:pointer;'+(on?'background:var(--amber-bg,#fef3c7)':'')+'">'
+      +'<td style="padding:8px;border-top:1px solid var(--border)"><input type="checkbox"'+(on?' checked':'')+' onclick="event.stopPropagation();wmsRvToggle('+i+')"></td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-family:monospace;font-weight:700">'+v.volNum+'/'+v.volTotal+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border)">'+tg+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-family:monospace">'+ecomEsc(v.sku||'')+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-size:12px">'+ecomEsc(String(v.descricao||'').slice(0,46))+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border)">'+(v.qtd||'')+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)">'+ecomEsc(v.endereco||'')+'</td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">'
+    +'<span style="font-size:12.5px"><b>'+nSel+'</b> volume(s) selecionado(s) de '+vols.length+'</span>'
+    +'<span style="margin-left:auto"></span>'
+    +'<button class="btn"'+(nSel?'':' disabled style="opacity:.5;cursor:not-allowed"')+' onclick="wmsRvPdf()">Visualizar PDF</button>'
+    +'<button class="btn btn-p"'+(nSel?'':' disabled style="opacity:.5;cursor:not-allowed"')+' onclick="wmsRvZebra()">\ud83d\udda8 Reimprimir '+(nSel||'')+' na Zebra</button>'
+    +'</div>'
+    +'<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:12px;line-height:1.5">'
+    +'A etiqueta reimpressa sai <b>id\u00eantica \u00e0 original</b> \u2014 mesmo n\u00famero de volume e mesmo QR \u2014 ent\u00e3o bipa normalmente no embarque. Fica registrado quem reimprimiu, quando e quais volumes.</div>';
+  box.innerHTML=h;
+}
+function wmsRvSelecionados(){
+  var vols=wmsVolumesDaLista(_rvLista.id);
+  return vols.filter(function(_,i){return !!_rvSel[i];});
+}
+async function wmsRvRegistrar(sel){
+  try{
+    var nums=sel.map(function(v){return v.volNum+'/'+v.volTotal;}).join(', ');
+    var pid=null;
+    var t=wmsTarefasSeparacao.find(function(x){return x.lista_id===_rvLista.id&&x.pedido_id;});
+    if(t)pid=t.pedido_id;
+    if(typeof wmsPedidoHist==='function')
+      await wmsPedidoHist(pid,'reimpressao_etiqueta',
+        'Reimpress\u00e3o de '+sel.length+' etiqueta(s) da lista '+(_rvLista.numero_lista||'')+': volumes '+nums);
+  }catch(e){ console.warn('log reimpressao',e); }
+}
+async function wmsRvZebra(){
+  var sel=wmsRvSelecionados(); if(!sel.length)return;
+  var zpl=sel.map(function(v){ return zplEtiquetaSeparacao({
+    pedido:v.pedido, lista:v.lista, sku:v.sku, descricao:v.descricao,
+    tipoVolume:v.tipo, qtdVolume:v.qtd, volNum:v.volNum, volTotal:v.volTotal,
+    qrData:v.qr, endereco:v.endereco, frente:v.frente }); }).join('\n');
+  zebraImprimirOuBaixar(zpl,'reimp_'+(_rvLista.numero_lista||'lista')+'_'+sel.length+'vol.zpl');
+  await wmsRvRegistrar(sel);
+  showToast(sel.length+' etiqueta(s) reenviada(s) para a Zebra','green');
+}
+async function wmsRvPdf(){
+  var sel=wmsRvSelecionados(); if(!sel.length)return;
+  if(typeof wmsEtiquetasPdfDeVolumes==='function'){ await wmsEtiquetasPdfDeVolumes(sel); }
+  else if(typeof wmsEtiquetasPdf==='function'){ showToast('Gerando PDF da lista completa \u2014 use a Zebra para reimprimir s\u00f3 os selecionados','amber'); await wmsEtiquetasPdf(_rvLista.id); }
+  await wmsRvRegistrar(sel);
 }
 
 // ───── RELATÓRIO · ABASTECIMENTO DE PICKING (importa planilha → gera transferências) ─────
