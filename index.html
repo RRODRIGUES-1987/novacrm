@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.951 | Gerado: 2026-09-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.952 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.951';
+const APP_VERSION='v1.0.952';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46673,7 +46673,12 @@ function ecomCxScan(code){
     var pend=ecomPedidos.find(function(x){return x.id===ecomCx.pendingLabel;});
     var et=ecomEtiquetas.find(function(e){return e.pedido_id===ecomCx.pendingLabel;});
     var _cands=[]; if(pend){ if(pend.numero_pedido)_cands.push(String(pend.numero_pedido)); if(pend.tracking)_cands.push(String(pend.tracking)); } if(et){ if(et.order_id)_cands.push(String(et.order_id)); if(et.tracking)_cands.push(String(et.tracking)); }
-    var okp=false; for(var _ci=0;_ci<_cands.length;_ci++){ var _cv=_cands[_ci].toLowerCase(); if(!_cv)continue; if(_cv===lc){okp=true;break;} if(lc.length>=6 && _cv.length>=6 && (lc.indexOf(_cv)>=0 || _cv.indexOf(lc)>=0)){okp=true;break;} }
+    // normaliza: Correios lidos do barcode podem vir sem o sufixo BR, ou com
+    // caracteres do leitor (prefixo/sufixo). Compara pelo miolo alfanumérico.
+    var _nrm=function(v){ return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/BR$/,''); };
+    var lcN=_nrm(lc);
+    var okp=false; for(var _ci=0;_ci<_cands.length;_ci++){ var _cv=_cands[_ci].toLowerCase(); if(!_cv)continue; if(_cv===lc){okp=true;break;} if(lc.length>=6 && _cv.length>=6 && (lc.indexOf(_cv)>=0 || _cv.indexOf(lc)>=0)){okp=true;break;}
+      var _cvN=_nrm(_cv); if(_cvN.length>=8 && lcN.length>=8 && (_cvN===lcN || _cvN.indexOf(lcN)>=0 || lcN.indexOf(_cvN)>=0)){okp=true;break;} }
     if(okp){ ecomCx.pendingLabel=null; ecomCxFlash('Etiqueta confirmada · proximo pedido','green'); ecomCxRender(); return; }
     ecomBeep(); ecomCxFlash('Bipe a etiqueta do pedido E-'+String((pend&&pend.numero_interno)||0).padStart(6,'0')+' para liberar o proximo','amber'); ecomCxRender(); return;
   }
@@ -48344,7 +48349,12 @@ async function ecomEtiqImportFile(input){
       // insere a nova primeiro e só então remove as antigas; falha aqui não pode
       // deixar o pedido sem etiqueta nem abortar o laço dos demais pedidos
       try{
-        await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:(trk||jt||null),nfe_chave:chNfe||null,img:img,pagina:pg});
+        // tracking: Shopee Xpress (TXAQ), J&T (Pedido:) ou CORREIOS (AP498358008BR).
+        // O dos Correios era extraído mas não gravado — e é o que o operador bipa.
+        var _trkFinal=(trk||jt||cor||null);
+        await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:_trkFinal,nfe_chave:chNfe||null,img:img,pagina:pg});
+        // sobe o tracking para o pedido, para o romaneio e o checkout acharem
+        try{ if(_trkFinal && !ped.tracking){ await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkFinal}); ped.tracking=_trkFinal; } }catch(_et){}
         for(var _kb=0;_kb<_antB.length;_kb++){ try{ await dbDelete('ecom_etiquetas',_antB[_kb].id); }catch(e){} }
       }catch(_ei){
         // falha ao gravar: mantém a etiqueta anterior, conta como pendente e
