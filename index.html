@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.959 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.961 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.959';
+const APP_VERSION='v1.0.961';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45032,8 +45032,39 @@ function ecomWizGerarOS(){
   showToast(L.aptos.length+' pedido(s) já marcados — confira o modo e gere a OS','blue');
 }
 
+// lojista com integração ATIVA: pedidos e etiquetas só entram pela sincronização
+async function ecomLojistaIntegrado(){
+  try{
+    if(!ecomLojistaId) return null;
+    if(!Array.isArray(intgList)||!intgList.length){
+      var cid=ecomCid();
+      intgList=await dbSelect('integracoes','company_id=eq.'+cid+'&order=created_at.desc').catch(function(){return[];})||[];
+    }
+    return (intgList||[]).find(function(g){ return g.lojista_id===ecomLojistaId && g.ativo!==false; })||null;
+  }catch(e){ return null; }
+}
+function ecomBloqueioIntg(g,oque){
+  var nome=(g&&g.nome)||'integra\u00e7\u00e3o';
+  var html='<div class="modal-overlay" id="ecom-modal"><div class="modal" style="width:520px;max-width:95vw;padding:20px">'
+    +'<div style="display:flex;gap:12px;align-items:flex-start">'
+    +'<div style="flex:none;width:42px;height:42px;border-radius:50%;background:var(--red-bg,#fdf1f1);display:flex;align-items:center;justify-content:center;font-size:20px">\u26d4</div>'
+    +'<div><div style="font-size:16px;font-weight:800">Este lojista entra pela integra\u00e7\u00e3o</div>'
+    +'<div style="font-size:13px;color:var(--text2);margin-top:6px;line-height:1.55">'
+    +'<b>'+ecomEsc(ecomLojNome(ecomLojistaId))+'</b> tem a integra\u00e7\u00e3o <b>'+ecomEsc(nome)+'</b> ativa. '+oque+' '
+    +'Importar por planilha criaria pedido em dobro e quebraria os avisos autom\u00e1ticos ao cliente.</div>'
+    +'<div style="font-size:12.5px;margin-top:12px;padding:10px 12px;border-radius:9px;background:var(--bg2);border:1px solid var(--border)">'
+    +'\u2192 V\u00e1 em <b>Integra\u00e7\u00f5es \u2192 Olist</b>, clique em <b>Sincronizar tudo</b> e importe pelos cards verdes.</div>'
+    +'</div></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    +'<button class="btn" onclick="ecomModalClose()">Entendi</button>'
+    +'<button class="btn btn-p" onclick="ecomModalClose();pg(\'ecom-integracoes\')">Abrir a integra\u00e7\u00e3o</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
 async function ecomImportFile(input){
   var f=input.files&&input.files[0]; if(!f)return;
+  // importação manual permanece liberada: é o backup da integração.
+  // A consistência é feita do lado da integração (intgJaNaBase).
   var nm=(f.name||'').toLowerCase();
   try{
     if(nm.slice(-4)==='.pdf'){ await ecomPdfParse(f); }
@@ -48419,6 +48450,7 @@ async function ecomEtiqImportFile(input){
   var f=input.files&&input.files[0]; if(!f)return; input.value='';
   var cid=ecomCid();
   if(!ecomPedidosDoLojista().length){ showToast('Importe os pedidos antes das etiquetas','amber'); return; }
+  // etiqueta por PDF permanece liberada (backup da integração)
   try{
     ecomProgAbrir('Lendo etiquetas', 0, false);
     ecomProgSet(0,'abrindo o PDF…',null);
@@ -48996,6 +49028,8 @@ async function intgSync(id){
     var j=await r.json().catch(function(){return{};});
     if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
     _intgLoaded=false; await intgLoadAll();
+    // pedido que já entrou pela planilha: vincula, não importa, não dispara gatilho 1
+    try{ await intgVincularExistentes(); }catch(_ve){}
     // gatilho 2: faturados recebem pronto_envio (libera a etiqueta do lado do cliente)
     try{ await intgGatilhoSeparado(); }catch(_g2){}
     // pedido já importado que virou 'cancelado' no Olist é cancelado aqui também
@@ -49051,6 +49085,7 @@ function intgImportaveis(){
   return intgPedidos.filter(function(p){
     if(intgSitCfg(p).acao!=='importar')return false;
     if(intgStatusCalc(p)!=='pendente')return false;
+    if(intgJaNaBase(p))return false;          // já entrou pela planilha
     if(intgSitFiltro&&intgSitDe(p)!==intgSitFiltro)return false;
     return true;
   });
@@ -49084,11 +49119,13 @@ function intgPanelPed(){
     var act='<button class="btn" style="font-size:11px;padding:3px 8px" onclick="intgVerPayload(\''+p.id+'\')">Ver</button>';
     var sc=intgSitCfg(p), pode=!!impIds[p.id];
     if(pode) act+=' <button class="btn btn-p" style="font-size:11px;padding:3px 8px" onclick="intgImportar(\''+p.id+'\')">Importar</button>';
+    var _nb=intgJaNaBase(p);
     var chk=pode?'<input type="checkbox"'+(_intgSel[p.id]?' checked':'')+' onclick="event.stopPropagation();intgSelToggle(\''+p.id+'\')">'
-              :'<input type="checkbox" disabled title="'+ecomEsc(sc.sub)+'">';
+              :'<input type="checkbox" disabled title="'+ecomEsc(_nb?'j\u00e1 na base: E-'+String(_nb.numero_interno||0).padStart(6,'0'):sc.sub)+'">';
     return '<tr style="border-top:1px solid var(--border)'+(pode?'':';opacity:.55')+(_intgSel[p.id]?';background:var(--amber-bg,#fef3c7)':'')+'">'
       +'<td style="padding:6px 8px;text-align:center">'+chk+'</td>'
-      +'<td style="padding:6px 8px">'+ecomEsc(p.numero||p.pedido_externo_id||'—')+'</td>'
+      +'<td style="padding:6px 8px">'+ecomEsc(p.numero||p.pedido_externo_id||'—')
+        +(_nb?'<div style="font-size:10px;font-weight:700;color:#1d4ed8">na base \u00b7 E-'+String(_nb.numero_interno||0).padStart(6,'0')+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+ecomFmtD(p.data_pedido)+'</td>'
       +'<td style="padding:6px 8px"><span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:'+sc.bg+';color:'+sc.cor+';border:1px solid '+sc.bd+'">'+ecomEsc(sc.lbl)+'</span></td>'
       +'<td style="padding:6px 8px">'+(its.length?mp+'/'+its.length:'—')+'</td>'
@@ -49122,9 +49159,12 @@ async function intgImportar(id){
   var g=intgList.find(function(x){return x.id===p.integracao_id;}); if(!g){showToast('Integração não encontrada','red');return;}
   var cid=ecomCid(); var its=intgItens(p);
   if(intgStatusCalc(p)!=='pendente'){ showToast('Resolva o De-Para antes de importar','amber'); return; }
-  if(ecomPedidos.some(function(x){return x.numero_pedido&&String(x.numero_pedido)===String(p.numero);})){
-    try{ await dbUpdate('intg_pedidos',id,{status_importacao:'importado'}); }catch(e){}
-    _intgLoaded=false; await intgLoadAll(); intgRenderBody(); showToast('Pedido já existia no E-commerce','amber'); return;
+  var _jaTem=intgJaNaBase(p);
+  if(_jaTem){
+    // entrou pela planilha (backup): só vincula. Sem "pode faturar" — ele já veio pronto.
+    try{ await dbUpdate('intg_pedidos',id,{status_importacao:'importado',pedido_verus_id:_jaTem.id,erro_msg:'ja estava na base (importacao manual)'}); }catch(e){}
+    if(!window._intgLote){ _intgLoaded=false; await intgLoadAll(); intgRenderBody(); showToast('Pedido j\u00e1 estava na base (planilha) \u2014 vinculado, n\u00e3o importado','blue'); }
+    return;
   }
   try{
     var ped=await dbInsert('ecom_pedidos',{company_id:cid,lojista_id:g.lojista_id,numero_pedido:p.numero||p.pedido_externo_id,
@@ -49161,7 +49201,7 @@ function intgImportarLotePrev(){
   var ids=Object.keys(_intgSel); if(!ids.length)return;
   var peds=ids.map(function(id){return intgPedidos.find(function(x){return x.id===id;});}).filter(Boolean);
   var porSit={}; peds.forEach(function(p){ var k=intgSitCfg(p).lbl; porSit[k]=(porSit[k]||0)+1; });
-  var jaExiste=peds.filter(function(p){ return ecomPedidos.some(function(x){return x.numero_pedido&&String(x.numero_pedido)===String(p.numero);}); }).length;
+  var jaExiste=peds.filter(function(p){ return !!intgJaNaBase(p); }).length;
   var html='<div class="modal-overlay" id="ecom-modal"><div class="modal" style="width:520px;max-width:95vw;padding:18px">'
     +'<div style="font-size:16px;font-weight:800">Importar '+peds.length+' pedido(s) do Olist</div>'
     +'<div style="font-size:12.5px;color:var(--text3);margin-top:2px">Pr\u00e9via \u2014 nada foi gravado ainda.</div>'
@@ -49188,7 +49228,7 @@ async function intgImportarLoteExec(){
   for(var i=0;i<ids.length;i++){
     var p=intgPedidos.find(function(x){return x.id===ids[i];}); if(!p){continue;}
     if(prog)prog.innerHTML='Importando '+(i+1)+' de '+ids.length+' \u2014 <b>'+ecomEsc(p.numero||'')+'</b>';
-    var existia=ecomPedidos.some(function(x){return x.numero_pedido&&String(x.numero_pedido)===String(p.numero);});
+    var existia=!!intgJaNaBase(p);
     try{ await intgImportar(ids[i]); if(existia)pul++; else ok++; }
     catch(e){ err++; }
   }
@@ -49196,6 +49236,33 @@ async function intgImportarLoteExec(){
   _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll();
   ecomModalClose(); intgRenderBody();
   showToast(ok+' importado(s)'+(pul?' \u00b7 '+pul+' j\u00e1 existiam':'')+(err?' \u00b7 '+err+' com erro':''), err?'amber':'green');
+}
+// ───── PEDIDO JÁ NA BASE (entrou pela planilha): a integração reconhece e vincula ─────
+function intgNormId(v){ return String(v||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase(); }
+function intgJaNaBase(p){
+  if(!p)return null;
+  if(p.pedido_verus_id){ var l=ecomPedidos.find(function(x){return x.id===p.pedido_verus_id;}); if(l)return l; }
+  var cands=[p.pedido_externo_id,p.numero].map(intgNormId).filter(function(x){return x&&x.length>=5;});
+  if(!cands.length)return null;
+  return ecomPedidos.find(function(x){
+    var n=intgNormId(x.numero_pedido); if(!n)return false;
+    return cands.some(function(c){ return c===n || (c.length>=10&&n.length>=10&&(c.indexOf(n)===0||n.indexOf(c)===0)); });
+  })||null;
+}
+// na sincronização: staging pendente cujo pedido já está na base -> vincula e marca
+async function intgVincularExistentes(){
+  var n=0;
+  var alvo=intgPedidos.filter(function(p){ return !p.pedido_verus_id && (p.status_importacao||'pendente')==='pendente'; });
+  for(var i=0;i<alvo.length;i++){
+    var ped=intgJaNaBase(alvo[i]); if(!ped)continue;
+    try{
+      await dbUpdate('intg_pedidos',alvo[i].id,{status_importacao:'importado',pedido_verus_id:ped.id,erro_msg:'ja estava na base (importacao manual)'});
+      alvo[i].status_importacao='importado'; alvo[i].pedido_verus_id=ped.id; alvo[i].erro_msg='ja estava na base (importacao manual)';
+      n++;
+    }catch(e){}
+  }
+  if(n) showToast(n+' pedido(s) do Olist j\u00e1 estavam na base pela planilha \u2014 vinculados, n\u00e3o importados','blue');
+  return n;
 }
 // ───── GATILHO 2: pedido importado que apareceu FATURADO -> devolve pronto_envio ─────
 // É o "separado" que o cliente espera para gerar a etiqueta. Dispara uma vez
