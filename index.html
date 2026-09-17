@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.964 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.966 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.964';
+const APP_VERSION='v1.0.966';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48479,6 +48479,7 @@ async function ecomEtiqImportFile(input){
   var cid=ecomCid();
   if(!ecomPedidosDoLojista().length){ showToast('Importe os pedidos antes das etiquetas','amber'); return; }
   // etiqueta por PDF permanece liberada (backup da integração)
+  var _trkFix=0, _trkVazio=0;
   try{
     ecomProgAbrir('Lendo etiquetas', 0, false);
     ecomProgSet(0,'abrindo o PDF…',null);
@@ -48490,6 +48491,7 @@ async function ecomEtiqImportFile(input){
     _ecomEtiqPend=[];
     // pedidos ja com etiqueta -> ficam fora do pool do fallback por nome
     var jaTem={}; ecomEtiquetas.forEach(function(e){ if(e.pedido_id)jaTem[e.pedido_id]=1; });
+    var _diagTrk=[];
     // Algumas origens imprimem VÁRIAS etiquetas por folha (a Shopee usa
     // A4 com 4 por página). Cada etiqueta vira uma "região" própria: o
     // texto é filtrado pelas coordenadas e a imagem sai recortada — se
@@ -48565,7 +48567,11 @@ async function ecomEtiqImportFile(input){
       // NÃO dá para exigir borda antes — era isso que deixava o tracking nulo.
       var cor='';
       (function(){
-        var fonte=(txt||'')+' '+(flat||'');
+        // Este PDF entrega UM CARACTERE POR ITEM: juntando com espaco,
+        // "AP507284963BR" vira "A P 5 0 7 ..." e nenhuma regex acha.
+        // Procura tambem na versao SEM espaco algum.
+        var _semEsp=String((txt||'')+(_txtAll||'')).replace(/\s+/g,'');
+        var fonte=(txt||'')+' '+(flat||'')+' '+(_txtAll||'')+' '+_semEsp;
         var re=/[A-Z]{2}\d{9}BR/gi, m;
         while((m=re.exec(fonte.toUpperCase()))!==null){
           var achado=m[0], ini=m.index, fim=ini+achado.length;
@@ -48711,13 +48717,37 @@ async function ecomEtiqImportFile(input){
       }
 
       jaTem[ped.id]=1;
+      var _trkAgora=(trk||jt||cor||null);
+      // REIMPORTACAO: a etiqueta ja existe sem tracking e agora temos o codigo.
+      // Atualiza o registro existente — era isso que faltava para o bipe achar.
+      if(_trkAgora){
+        try{
+          var _exist=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+ped.id+'&select=id,tracking');
+          // corrige tambem o que ficou gravado com o Order ID no lugar do
+          // codigo dos Correios (quando a extracao falhava)
+          var _ehCor=/^[A-Z]{2}\d{9}BR$/i.test(String(_trkAgora||''));
+          var _semTrk=(_exist||[]).filter(function(e){
+            if(!e.tracking) return true;
+            return _ehCor && !/^[A-Z]{2}\d{9}BR$/i.test(String(e.tracking));
+          });
+          for(var _st=0;_st<_semTrk.length;_st++){
+            await dbUpdate('ecom_etiquetas',_semTrk[_st].id,{tracking:_trkAgora});
+            _trkFix++;
+          }
+          if(!ped.tracking || (_ehCor && !/^[A-Z]{2}\d{9}BR$/i.test(String(ped.tracking)))){
+            await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkAgora}); ped.tracking=_trkAgora; }
+        }catch(_eu){ console.warn('atualiza tracking',_eu); }
+      } else { _trkVazio++; }
       var _antB=[]; try{ _antB=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+ped.id+'&select=id'); }catch(e){}
       // insere a nova primeiro e só então remove as antigas; falha aqui não pode
       // deixar o pedido sem etiqueta nem abortar o laço dos demais pedidos
       try{
-        // tracking: Shopee Xpress (TXAQ), J&T (Pedido:) ou CORREIOS (AP498358008BR).
-        // O dos Correios era extraído mas não gravado — e é o que o operador bipa.
-        var _trkFinal=(trk||jt||cor||null);
+        // tracking: Shopee Xpress (TXAQ), J&T (Pedido:), CORREIOS (AP...BR).
+        // Rede de segurança: sem nenhum deles, grava o ORDER ID — o leitor
+        // também devolve o order id embutido, e o normalizador o extrai.
+        var _trkFinal=(trk||jt||cor||oid||null);
+        _diagTrk.push({pg:pg, trk:_trkFinal||'SEM TRACKING', via:(trk?'xpress':jt?'j&t':cor?'correios':oid?'order id':'-'),
+                       amostra:String(txt||'').replace(/\s+/g,' ').slice(0,90)});
         await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:_trkFinal,nfe_chave:chNfe||null,img:img,pagina:pg});
         // sobe o tracking para o pedido, para o romaneio e o checkout acharem
         try{ if(_trkFinal && !ped.tracking){ await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkFinal}); ped.tracking=_trkFinal; } }catch(_et){}
@@ -48741,11 +48771,24 @@ async function ecomEtiqImportFile(input){
     _ecomLoaded=false; await ecomLoadAll();
     var withEtiq={}; ecomEtiquetas.forEach(function(e){ if(e.pedido_id)withEtiq[e.pedido_id]=1; });
     var semEtiqList=[]; ecomPedidosDoLojista().forEach(function(p){ if(!withEtiq[p.id]) semEtiqList.push('E-'+String(p.numero_interno||0).padStart(6,'0')); });
-    ecomEtiqResult={casadas:casadas,orfas:orfas,porNome:porNome,porNfe:porNfe,reimp:reimp,semEtiq:semEtiqList.length,semEtiqList:semEtiqList,diag:diag};
+    ecomEtiqResult={casadas:casadas,orfas:orfas,porNome:porNome,porNfe:porNfe,reimp:reimp,semEtiq:semEtiqList.length,semEtiqList:semEtiqList,diag:diag,trk:_diagTrk};
+    // diagnóstico do tracking: quantas gravaram e por qual via
+    try{
+      var _semT=_diagTrk.filter(function(d){return d.trk==='SEM TRACKING';});
+      console.table&&console.table(_diagTrk);
+      if(_semT.length){
+        console.warn('Etiquetas sem tracking extraído:',_semT);
+        showToast(_semT.length+' etiqueta(s) sem tracking — abra o console (F12) para ver o texto lido','amber');
+      }
+    }catch(_dt){}
     ecomProgFechar();
     ecomRenderBody();
     var _det=[]; if(porNfe)_det.push(porNfe+' p/ NF'); if(porNome)_det.push(porNome+' p/ nome'); if(reimp)_det.push(reimp+' reimport');
-    showToast('Etiquetas: '+casadas+' casadas'+(_det.length?(' ('+_det.join(', ')+')'):'')+(liberados?(' - '+liberados+' liberados'):'')+(orfas?(' - '+orfas+' pendentes'):''), orfas?'amber':'green');
+    showToast('Etiquetas: '+casadas+' casadas'+(_det.length?(' ('+_det.join(', ')+')'):'')
+      +(_trkFix?(' - '+_trkFix+' tracking gravado'):'')
+      +(_trkVazio?(' - '+_trkVazio+' SEM codigo de rastreio'):'')
+      +(liberados?(' - '+liberados+' liberados'):'')+(orfas?(' - '+orfas+' pendentes'):''),
+      (orfas||_trkVazio)?'amber':'green');
     if(_ecomEtiqPend.length) ecomEtiqPendModal();
   }catch(e){ ecomProgFechar(); showToast('Falha ao importar etiquetas: '+(e.message||e),'red'); }
 }
