@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.955 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.956 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.955';
+const APP_VERSION='v1.0.956';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -34683,13 +34683,14 @@ function wmsProdutoAtributosCheckboxes(produtoId){
 //  view com "← Voltar", barra de filtros e resultado.
 // ═══════════════════════════════════════════════
 var wmsRelView='hub';
-function wmsRelAbrir(which){ wmsRelView=which; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); if(which==='reimp-vol') setTimeout(wmsReimpVolInit,0); }
+function wmsRelAbrir(which){ wmsRelView=which; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); if(which==='reimp-vol') setTimeout(wmsReimpVolInit,0); if(which==='reimp-emb') setTimeout(wmsReimpEmbInit,0); }
 function wmsRelVoltar(){ wmsRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); }
 
 function rWmsRelatorios(){
   if(wmsRelView==='sem-etiqueta') return wmsRelSemEtiquetaView();
   if(wmsRelView==='abastecimento') return wmsAbastView();
   if(wmsRelView==='reimp-vol') return wmsReimpVolView();
+  if(wmsRelView==='reimp-emb') return wmsReimpEmbView();
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -34711,6 +34712,12 @@ function rWmsRelatorios(){
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Reimprimir etiquetas de volume</div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Etiqueta rasurada ou perdida? Reimprima s&oacute; o volume que precisa, sem refazer a lista inteira.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
+      +'<div onclick="wmsRelAbrir(\'reimp-emb\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Reimprimir etiquetas de embarque</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Busque pelo <b>romaneio</b> e reimprima apenas os volumes com etiqueta danificada.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
     +'</div></div>';
@@ -34839,6 +34846,128 @@ async function wmsRvPdf(){
   if(typeof wmsEtiquetasPdfDeVolumes==='function'){ await wmsEtiquetasPdfDeVolumes(sel); }
   else if(typeof wmsEtiquetasPdf==='function'){ showToast('Gerando PDF da lista completa \u2014 use a Zebra para reimprimir s\u00f3 os selecionados','amber'); await wmsEtiquetasPdf(_rvLista.id); }
   await wmsRvRegistrar(sel);
+}
+
+// ───── RELATÓRIO · REIMPRESSÃO SELETIVA DE ETIQUETAS DE EMBARQUE (por romaneio) ─────
+// O código da etiqueta (etiqueta_codigo) é persistido em wms_pallets_embarque:
+// a reimpressão é idêntica por construção, nada é regerado.
+var _reLista=null, _reSel={};
+function wmsReimpEmbView(){
+  return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+      +'<button class="btn btn-sm" onclick="wmsRelVoltar()">&larr; Voltar</button>'
+      +'<b style="font-size:18px">Reimprimir etiquetas de embarque</b>'
+    +'</div><div id="re-box"></div></div>';
+}
+function wmsReimpEmbInit(){
+  var b=ge('re-box'); if(!b)return;
+  b.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px">'
+    +'<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
+      +'<div><div style="font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Romaneio</div>'
+      +'<input class="fi" id="re-busca" style="width:260px" placeholder="n\u00famero do romaneio ou bipe uma etiqueta" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wmsReBuscar();}"></div>'
+      +'<button class="btn btn-p" onclick="wmsReBuscar()">Buscar</button></div>'
+    +'<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:10px;line-height:1.5">'
+      +'\ud83d\udca1 Tamb\u00e9m d\u00e1 para <b>bipar o QR de uma etiqueta boa</b> da mesma carga \u2014 o romaneio dela abre na hora.</div>'
+    +'</div><div id="re-res"></div>';
+  setTimeout(function(){ var i=ge('re-busca'); if(i)i.focus(); },60);
+}
+function wmsReBuscar(){
+  var v=String((ge('re-busca')||{}).value||'').trim();
+  if(!v){ showToast('Informe o romaneio ou bipe uma etiqueta','amber'); return; }
+  var r=null;
+  // bipe da etiqueta de embarque -> pallet -> pedido -> romaneio
+  var pl=wmsPalletsEmbarque.find(function(x){ return String(x.etiqueta_codigo||'').toLowerCase()===v.toLowerCase(); });
+  if(pl){ var pd=wmsPedidos.find(function(p){return p.id===pl.pedido_id;});
+          if(pd&&pd.romaneio_id) r=wmsRomaneios.find(function(x){return x.id===pd.romaneio_id;}); }
+  if(!r){
+    var vn=v.toLowerCase().replace(/[^a-z0-9]/g,'');
+    r=wmsRomaneios.find(function(x){ return String(x.numero||'').toLowerCase().replace(/[^a-z0-9]/g,'')===vn; })
+    ||wmsRomaneios.find(function(x){ return String(x.numero||'').toLowerCase().indexOf(v.toLowerCase())>=0; });
+  }
+  if(!r){ ge('re-res').innerHTML='<div style="margin-top:14px;padding:14px;border-radius:10px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;color:var(--amber-text,#8a6d1a);font-size:13px">N\u00e3o encontrei o romaneio <b>'+ecomEsc(v)+'</b>.</div>'; return; }
+  _reLista=r; _reSel={};
+  wmsReRender();
+}
+function wmsReVolumes(){
+  if(!_reLista)return [];
+  var peds=wmsPedidos.filter(function(p){return p.romaneio_id===_reLista.id;});
+  var out=[];
+  peds.sort(function(a,b){return String(wmsNumeroCurto(a)||'').localeCompare(String(wmsNumeroCurto(b)||''));})
+      .forEach(function(p){
+    var pals=wmsPalletsEmbarque.filter(function(pl){return pl.pedido_id===p.id;})
+                               .sort(function(a,b){return (a.vol_num||0)-(b.vol_num||0);});
+    var N=pals.length;
+    pals.forEach(function(pl){ out.push({pl:pl,ped:p,N:N}); });
+  });
+  return out;
+}
+function wmsReToggle(i){ if(_reSel[i])delete _reSel[i]; else _reSel[i]=1; wmsReRender(); }
+function wmsReTodos(){
+  var v=wmsReVolumes(); var todos=v.every(function(_,i){return _reSel[i];});
+  _reSel={}; if(!todos)v.forEach(function(_,i){_reSel[i]=1;});
+  wmsReRender();
+}
+function wmsReRender(){
+  var box=ge('re-res'); if(!box||!_reLista)return;
+  var vols=wmsReVolumes();
+  if(!vols.length){ box.innerHTML='<div style="margin-top:14px;padding:14px;color:var(--text3)">Este romaneio n\u00e3o tem volumes unitizados/etiquetados.</div>'; return; }
+  var nSel=Object.keys(_reSel).length;
+  var nPed=new Set(vols.map(function(x){return x.ped.id;})).size;
+  var h='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 4px">'
+    +'<b style="font-size:15px">'+ecomEsc(String(_reLista.numero||''))+'</b>'
+    +'<span style="font-size:12.5px;color:var(--text2)">'+nPed+' pedido(s) \u00b7 <b>'+vols.length+' volumes</b></span></div>';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:58vh"><table style="width:100%;border-collapse:collapse">'
+    +'<thead><tr>'
+    +'<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;width:36px"><input type="checkbox" onclick="wmsReTodos()"'+(nSel===vols.length?' checked':'')+'></th>'
+    +['Pedido','Cliente','Vol.','Pallet','C\u00f3digo da etiqueta'].map(function(t){return '<th style="position:sticky;top:0;background:#0A2540;color:#fff;font-size:10.5px;padding:8px;text-align:left">'+t+'</th>';}).join('')
+    +'</tr></thead><tbody>';
+  vols.forEach(function(v,i){
+    var on=!!_reSel[i];
+    var cli=clientes.find(function(c){return c.id===v.ped.cliente_id;});
+    h+='<tr onclick="wmsReToggle('+i+')" style="cursor:pointer;'+(on?'background:var(--amber-bg,#fef3c7)':'')+'">'
+      +'<td style="padding:8px;border-top:1px solid var(--border)"><input type="checkbox"'+(on?' checked':'')+' onclick="event.stopPropagation();wmsReToggle('+i+')"></td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-family:monospace;font-weight:700">'+ecomEsc(wmsNumeroCurto(v.ped)||'')+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-size:12px">'+ecomEsc(String((cli&&cli.nome)||'').slice(0,28))+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-family:monospace;font-weight:700">'+(v.pl.vol_num||'')+'/'+v.N+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-size:12px">'+ecomEsc(String(v.pl.numero||''))+'</td>'
+      +'<td style="padding:8px;border-top:1px solid var(--border);font-family:monospace;font-size:11px;color:var(--text2)">'+ecomEsc(String(v.pl.etiqueta_codigo||''))+'</td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">'
+    +'<span style="font-size:12.5px"><b>'+nSel+'</b> volume(s) selecionado(s) de '+vols.length+'</span>'
+    +'<span style="margin-left:auto"></span>'
+    +'<button class="btn btn-p"'+(nSel?'':' disabled style="opacity:.5;cursor:not-allowed"')+' onclick="wmsReZebra()">\ud83d\udda8 Reimprimir '+(nSel||'')+' na Zebra</button>'
+    +'</div>'
+    +'<div style="font-size:11.5px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:12px;line-height:1.5">'
+    +'O c\u00f3digo da etiqueta fica gravado no volume, ent\u00e3o a reimpress\u00e3o sai <b>id\u00eantica \u00e0 original</b> e bipa normalmente na confer\u00eancia de embarque. Fica registrado quem reimprimiu, quando e quais volumes.</div>';
+  box.innerHTML=h;
+}
+async function wmsReZebra(){
+  var vols=wmsReVolumes().filter(function(_,i){return !!_reSel[i];});
+  if(!vols.length)return;
+  var zpl=vols.map(function(v){
+    var cli=clientes.find(function(c){return c.id===v.ped.cliente_id;});
+    var itens=(wmsPalletItens||[]).filter(function(x){return x.pallet_id===v.pl.id;});
+    return zplEtiquetaEmbarque({
+      cliente:(cli&&cli.nome)||'', rom:String(_reLista.numero||'S/ ROMANEIO'),
+      pedido:wmsNumeroCurto(v.ped), pallet:v.pl.numero,
+      volNum:v.pl.vol_num, volTotal:v.N,
+      codigo:v.pl.etiqueta_codigo, itens:itens, numCurto:wmsNumeroCurto(v.ped)
+    });
+  }).join('\n');
+  zebraImprimirOuBaixar(zpl,'reimp_emb_'+String(_reLista.numero||'rom')+'_'+vols.length+'vol.zpl');
+  // registro por pedido afetado
+  try{
+    var porPed={};
+    vols.forEach(function(v){ (porPed[v.ped.id]=porPed[v.ped.id]||[]).push(v.pl.vol_num+'/'+v.N); });
+    for(var pid in porPed){
+      if(typeof wmsPedidoHist==='function')
+        await wmsPedidoHist(pid,'reimpressao_etiqueta_embarque',
+          'Reimpress\u00e3o de '+porPed[pid].length+' etiqueta(s) de embarque \u00b7 romaneio '+(_reLista.numero||'')+' \u00b7 volumes '+porPed[pid].join(', '));
+    }
+  }catch(e){ console.warn('log reimp embarque',e); }
+  showToast(vols.length+' etiqueta(s) de embarque reenviada(s) para a Zebra','green');
 }
 
 // ───── RELATÓRIO · ABASTECIMENTO DE PICKING (importa planilha → gera transferências) ─────
