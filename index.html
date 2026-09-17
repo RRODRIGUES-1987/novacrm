@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.974 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.975 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -333,6 +333,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes su{from{transform:translateY(28px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes rotate{to{transform:rotate(360deg)}}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js"></script>
@@ -1047,6 +1048,21 @@ function _mkStore(kind,native){
 }
 var safeSession=_mkStore('s',_nativeStore('sessionStorage'));
 var safeLocal=_mkStore('l',_nativeStore('localStorage'));
+// Cliente do Supabase para STORAGE (upload de PDF). O resto do sistema usa
+// REST direto; so o storage precisa da biblioteca. Sem isto, todo upload
+// falhava com "Storage indisponivel".
+function sbStorageInit(token){
+  try{
+    var lib=window.supabase&&window.supabase.createClient?window.supabase:(window.Supabase||null);
+    if(!lib||!lib.createClient){ console.warn('supabase-js nao carregou'); return null; }
+    var cli=lib.createClient(SB_URL,SB_KEY,{
+      auth:{persistSession:false,autoRefreshToken:false},
+      global:token?{headers:{Authorization:'Bearer '+token}}:{}
+    });
+    window.supabase=cli;      // as funcoes de upload usam window.supabase.storage
+    return cli;
+  }catch(e){ console.warn('sbStorageInit',e); return null; }
+}
 const SB_URL='https://trngaecaurksscwmkfsf.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -1300,7 +1316,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.974';
+const APP_VERSION='v1.0.975';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1497,6 +1513,7 @@ async function doLogin(){
   btn.disabled=false;btn.innerHTML='Entrar';
   if(!ok)return showErr('lerr',data.error_description||data.msg||'Email ou senha incorretos.');
   tok=data.access_token;
+  sbStorageInit(tok);          // habilita o upload de PDF (storage) com a sessao
   safeSession.setItem('crm_tok',tok);
   safeSession.setItem('crm_user',JSON.stringify(data.user));
   enterApp(data.user);
@@ -7840,7 +7857,12 @@ async function uploadNfsePdf(input){
   const linkEl=ge('fat-nfse-pdf-link');
   if(statusEl){statusEl.textContent='Enviando…';statusEl.style.color='var(--text3)';}
   try{
-    if(!window.supabase){throw new Error('Storage indisponível.');}
+    if(!window.supabase||!window.supabase.storage){
+      if(typeof sbStorageInit==='function') sbStorageInit(tok);
+    }
+    if(!window.supabase||!window.supabase.storage){
+      throw new Error('Storage indisponível — recarregue a página (Ctrl+F5) e tente de novo.');
+    }
     const cid=company?.id||profile?.company_id||'sem-empresa';
     const fid=(faturaEditando&&faturaEditando.id)||'nova';
     const path='faturas/'+cid+'/'+fid+'/nfse_'+Date.now()+'_'+arquivo.name.replace(/[^\w.\-]/g,'_');
