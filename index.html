@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.961 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.962 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.961';
+const APP_VERSION='v1.0.962';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48169,6 +48169,7 @@ var ECOM_TRANSP={
   'TOTAL':{nome:'TOTAL EXPRESS', box:'BOX 1', cor:'#1d4ed8', bg:'#dbeafe'},
   'JT'   :{nome:'J&T EXPRESS',   box:'BOX 2', cor:'#b91c1c', bg:'#fee2e2'},
   'CORREIOS':{nome:'CORREIOS',   box:'BOX 3', cor:'#047857', bg:'#d1fae5'},
+  'ML'   :{nome:'MERCADO ENVIOS', box:'BOX 4', cor:'#b45309', bg:'#fef3c7'},
   '?'    :{nome:'SEM TRANSPORTADORA', box:'BOX —', cor:'#6b7280', bg:'#f3f4f6'}
 };
 // Identifica a transportadora a partir do texto da etiqueta (ou dos codigos lidos)
@@ -48177,6 +48178,8 @@ function ecomTranspDetect(txt,trk,jt,cor){
   if(trk) return 'TOTAL';                       // TXAQ...tx = Total Express
   if(jt)  return 'JT';                          // "Pedido: 9998..." = J&T
   if(cor) return 'CORREIOS';                    // AD/AP...BR = Correios (Shopee)
+  // Mercado Envios: "Pack ID:" / "Venda: 2000..." / hubs XSP2 > SDF1
+  if(/PACK\s*ID|VENDA:?\s*2000\d{12}|MERCADO\s*(LIVRE|ENVIOS)/.test(t)) return 'ML';
   if(t.indexOf('TOTAL')>=0 && t.indexOf('EXPRESS')>=0) return 'TOTAL';
   if(t.indexOf('J&T')>=0 || t.indexOf('JET EXPRESS')>=0) return 'JT';
   if(t.indexOf('SEDEX')>=0 || t.indexOf('CORREIOS')>=0 || /\bPAC\b/.test(t)) return 'CORREIOS';
@@ -48187,6 +48190,8 @@ function ecomTranspKey(v){
   var t=String(v||'').toUpperCase();
   if(t.indexOf('TOTAL')>=0) return 'TOTAL';
   if(t.indexOf('J&T')>=0||t.indexOf('JT')===0) return 'JT';
+  if(t.indexOf('CORREIO')>=0||t.indexOf('SEDEX')>=0||t.indexOf('PAC')===0) return 'CORREIOS';   // faltava: caía em '?'
+  if(t.indexOf('MERCADO')>=0||t==='ML') return 'ML';
   return '?';
 }
 function ecomTranspInfo(v){ return ECOM_TRANSP[ecomTranspKey(v)]||ECOM_TRANSP['?']; }
@@ -48492,7 +48497,15 @@ async function ecomEtiqImportFile(input){
       var txt=_itensRg.map(function(it){return it.str;}).join(' ');
       if(_regioes.length>1 && !/ID\s*pedido/i.test(txt)) continue;   // quadrante vazio
       var flat=txt.replace(/\s+/g,'');
+      // MERCADO LIVRE: a página de LISTA DE SEPARAÇÃO vem atrás da etiqueta e
+      // também traz "Venda:" — casava com o mesmo pedido e sobrescrevia a
+      // etiqueta. Não é etiqueta: pula.
+      if(/Despache\s*a\s*sua\s*venda|Identifi+ca[c\u00e7][a\u00e3]o\s*Produto/i.test(txt) && !/Despachar:/i.test(txt)){ continue; }
       var oid=(flat.match(/585\d{15}/)||[])[0]||'';
+      // Mercado Livre: "Venda: 2000018458200402" / "Pack ID: 2000015031251497" (16 dígitos)
+      if(!oid){ var _ml=flat.match(/(?:Venda|PackID):?(2000\d{12})/i); if(_ml)oid=_ml[1]; }
+      // número da NF impresso na etiqueta ("NF: 3841") — via de casamento exata
+      var nfNum=((txt.match(/\bNF:?\s*(\d{3,9})\b/i)||[])[1])||'';
       // Shopee: "ID pedido: 260906A5GWQFVU" — 6 dígitos + 8 alfanuméricos
       if(!oid){
         var shp=txt.replace(/\s+/g,' ').match(/ID\s*pedido:?\s*([A-Z0-9]{10,20})/i);
@@ -48559,6 +48572,20 @@ async function ecomEtiqImportFile(input){
         }
       }
 
+      // (b2) NÚMERO da NF impresso na etiqueta -> ecom_nfe.numero -> pedido
+      if(!ped && nfNum){
+        var _nfn=ecomNfes.find(function(n){ return String(n.numero||'').replace(/^0+/,'')===String(nfNum).replace(/^0+/,''); });
+        if(_nfn){
+          if(_nfn.pedido_id) ped=ecomPedidos.find(function(p){ return p.id===_nfn.pedido_id; });
+          if(!ped && _nfn.order_id){
+            ped=ecomPedidos.find(function(p){
+              var np=String(p.numero_pedido||''); if(!np)return false;
+              return np===_nfn.order_id || np.indexOf(_nfn.order_id)===0 || String(_nfn.order_id).indexOf(np)===0;
+            });
+          }
+          if(ped){ porNfe++; viaTxt='n\u00famero NF '+nfNum; }
+        }
+      }
       // (c) tracking da transportadora ja gravado no pedido
       if(!ped && (trk||jt||cor)){
         var cod=String(trk||jt||cor).toLowerCase();
