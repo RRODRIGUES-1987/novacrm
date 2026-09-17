@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.957 | Gerado: 2026-09-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.959 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.957';
+const APP_VERSION='v1.0.959';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48995,7 +48995,12 @@ async function intgSync(id){
       body:JSON.stringify({integracao_id:id||null})});
     var j=await r.json().catch(function(){return{};});
     if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
-    _intgLoaded=false; await intgLoadAll(); intgRenderBody();
+    _intgLoaded=false; await intgLoadAll();
+    // gatilho 2: faturados recebem pronto_envio (libera a etiqueta do lado do cliente)
+    try{ await intgGatilhoSeparado(); }catch(_g2){}
+    // pedido já importado que virou 'cancelado' no Olist é cancelado aqui também
+    try{ var _nc=await intgEspelharCancelados(); if(_nc){ _ecomLoaded=false; await ecomLoadAll(); } }catch(_ce){}
+    intgRenderBody();
     showToast('Sync ok: '+(j.novos||0)+' novo(s), '+(j.atualizados||0)+' atualizado(s)','green');
   }catch(e){ showToast('Erro no sync: '+(e.message||e),'red'); }
 }
@@ -49021,28 +49026,88 @@ function intgStatusCalc(p){
   var falta=its.some(function(i){return !intgDeparaDe(p.integracao_id,i.sku);});
   return falta?'depara_pendente':'pendente';
 }
+// Regra de entrada por situação do Tiny (fluxo PE Digital)
+var INTG_SIT={
+  aprovado:         {lbl:'Aprovado',          acao:'importar', cor:'#166534', bg:'#eef7f1', bd:'#a7ddc0', sub:'importar'},
+  faturado:         {lbl:'Faturado',          acao:'importar', cor:'#166534', bg:'#eef7f1', bd:'#a7ddc0', sub:'importar'},
+  dados_incompletos:{lbl:'Dados incompletos', acao:'aguardar', cor:'#b45309', bg:'#fef3c7', bd:'#f0d9a8', sub:'aguardar o cliente'},
+  enviado:          {lbl:'Enviado',           acao:'historico',cor:'#6b7280', bg:'var(--bg2)', bd:'var(--border)', sub:'hist\u00f3rico'},
+  entregue:         {lbl:'Entregue',          acao:'historico',cor:'#6b7280', bg:'var(--bg2)', bd:'var(--border)', sub:'hist\u00f3rico'},
+  cancelado:        {lbl:'Cancelado',         acao:'nunca',    cor:'#991b1b', bg:'#fdf1f1', bd:'#f5c2c0', sub:'nunca importar'}
+};
+function intgSitDe(p){ return String(p.situacao_tiny||'').toLowerCase().replace(/\s+/g,'_'); }
+function intgSitCfg(p){ return INTG_SIT[intgSitDe(p)]||{lbl:p.situacao_tiny||'\u2014',acao:'aguardar',cor:'var(--text3)',bg:'var(--bg2)',bd:'var(--border)',sub:'sem regra'}; }
+var intgSitFiltro=null, _intgSel={};
+function intgSitFiltrar(k){ intgSitFiltro=(intgSitFiltro===k)?null:k; _intgSel={}; intgRenderBody(); }
+function intgSelToggle(id){ if(_intgSel[id])delete _intgSel[id]; else _intgSel[id]=1; intgRenderBody(); }
+function intgSelTodos(){
+  var cand=intgImportaveis();
+  var todos=cand.length&&cand.every(function(p){return _intgSel[p.id];});
+  _intgSel={}; if(!todos)cand.forEach(function(p){_intgSel[p.id]=1;});
+  intgRenderBody();
+}
+// pedidos que PODEM entrar: situação de importar, pendentes, sem de-para faltando, ainda não no VERUS
+function intgImportaveis(){
+  return intgPedidos.filter(function(p){
+    if(intgSitCfg(p).acao!=='importar')return false;
+    if(intgStatusCalc(p)!=='pendente')return false;
+    if(intgSitFiltro&&intgSitDe(p)!==intgSitFiltro)return false;
+    return true;
+  });
+}
 function intgPanelPed(){
   var fl=['todos','pendente','depara_pendente','importado','erro'];
   var chips=fl.map(function(f){return '<button class="btn" style="font-size:12px;'+(intgPedFiltro===f?'background:var(--accent);color:#fff':'')+'" onclick="intgPedFiltro=\''+f+'\';intgRenderBody()">'+(f==='todos'?'Todos':INTG_IMP_LBL[f])+'</button>';}).join(' ');
-  var lista=intgPedidos.filter(function(p){ var st=intgStatusCalc(p); return intgPedFiltro==='todos'||st===intgPedFiltro; });
+  // cards por situação
+  var cont={}; intgPedidos.forEach(function(p){ var k=intgSitDe(p)||'(vazio)'; cont[k]=(cont[k]||0)+1; });
+  var ordem=['aprovado','faturado','dados_incompletos','enviado','entregue','cancelado'];
+  Object.keys(cont).forEach(function(k){ if(ordem.indexOf(k)<0)ordem.push(k); });
+  var cards='<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Situa\u00e7\u00e3o no Olist \u2014 clique para filtrar. S\u00f3 as <b style="color:#166534">verdes</b> entram como pedido.</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">'
+    +ordem.filter(function(k){return cont[k];}).map(function(k){
+      var c=INTG_SIT[k]||{lbl:k,cor:'var(--text3)',bg:'var(--bg2)',bd:'var(--border)',sub:'sem regra'};
+      return '<div onclick="intgSitFiltrar(\''+k+'\')" style="border:1px solid '+c.bd+';background:'+c.bg+';border-radius:12px;padding:11px 13px;cursor:pointer'+(intgSitFiltro===k?';box-shadow:0 0 0 2px #0A2540':'')+'">'
+        +'<div style="font-size:10px;color:'+c.cor+';text-transform:uppercase;letter-spacing:.5px">'+c.lbl+'</div>'
+        +'<div style="font-size:22px;font-weight:800;margin-top:2px;color:'+c.cor+'">'+cont[k]+'</div>'
+        +'<div style="font-size:11px;color:var(--text3)">'+c.sub+'</div></div>';
+    }).join('')+'</div>';
+  var lista=intgPedidos.filter(function(p){ var st=intgStatusCalc(p);
+    if(!(intgPedFiltro==='todos'||st===intgPedFiltro))return false;
+    if(intgSitFiltro&&intgSitDe(p)!==intgSitFiltro)return false;
+    return true; });
+  var impIds={}; intgImportaveis().forEach(function(p){impIds[p.id]=1;});
+  var nSel=Object.keys(_intgSel).length;
   var rows=lista.map(function(p){
     var st=intgStatusCalc(p); var its=intgItens(p);
     var mp=its.filter(function(i){return !!intgDeparaDe(p.integracao_id,i.sku);}).length;
     var et=p.etiqueta_url?'&#127991;&#65039;':'—';
     var act='<button class="btn" style="font-size:11px;padding:3px 8px" onclick="intgVerPayload(\''+p.id+'\')">Ver</button>';
-    if(st==='pendente') act+=' <button class="btn btn-p" style="font-size:11px;padding:3px 8px" onclick="intgImportar(\''+p.id+'\')">Importar</button>';
-    return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px">'+ecomEsc(p.numero||p.pedido_externo_id||'—')+'</td>'
+    var sc=intgSitCfg(p), pode=!!impIds[p.id];
+    if(pode) act+=' <button class="btn btn-p" style="font-size:11px;padding:3px 8px" onclick="intgImportar(\''+p.id+'\')">Importar</button>';
+    var chk=pode?'<input type="checkbox"'+(_intgSel[p.id]?' checked':'')+' onclick="event.stopPropagation();intgSelToggle(\''+p.id+'\')">'
+              :'<input type="checkbox" disabled title="'+ecomEsc(sc.sub)+'">';
+    return '<tr style="border-top:1px solid var(--border)'+(pode?'':';opacity:.55')+(_intgSel[p.id]?';background:var(--amber-bg,#fef3c7)':'')+'">'
+      +'<td style="padding:6px 8px;text-align:center">'+chk+'</td>'
+      +'<td style="padding:6px 8px">'+ecomEsc(p.numero||p.pedido_externo_id||'—')+'</td>'
       +'<td style="padding:6px 8px">'+ecomFmtD(p.data_pedido)+'</td>'
-      +'<td style="padding:6px 8px">'+ecomEsc(p.situacao_tiny||'—')+'</td>'
+      +'<td style="padding:6px 8px"><span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:'+sc.bg+';color:'+sc.cor+';border:1px solid '+sc.bd+'">'+ecomEsc(sc.lbl)+'</span></td>'
       +'<td style="padding:6px 8px">'+(its.length?mp+'/'+its.length:'—')+'</td>'
       +'<td style="padding:6px 8px">'+intgBadgeImp(st)+'</td>'
       +'<td style="padding:6px 8px;text-align:center">'+et+'</td>'
       +'<td style="padding:6px 8px;white-space:nowrap">'+act+'</td></tr>';
-  }).join('')||'<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido sincronizado.</td></tr>';
-  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chips
+  }).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido sincronizado.</td></tr>';
+  var nImp=intgImportaveis().length;
+  var lote='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg)">'
+    +'<span style="font-size:12.5px"><b>'+nSel+'</b> selecionado(s) de <b>'+nImp+'</b> import\u00e1vel(is)'+(intgSitFiltro?' \u00b7 filtro: '+(INTG_SIT[intgSitFiltro]||{lbl:intgSitFiltro}).lbl:'')+'</span>'
+    +'<span style="margin-left:auto"></span>'
+    +'<button class="btn" style="font-size:12px" onclick="intgSelTodos()">Marcar/desmarcar todos</button>'
+    +'<button class="btn btn-p" style="font-size:12px"'+(nSel?'':' disabled style="opacity:.5"')+' onclick="intgImportarLotePrev()">\u2b07 Importar '+(nSel||'')+' pedido(s)</button>'
+    +'</div>';
+  return cards+'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chips
     +'<span style="margin-left:auto"><button class="btn" style="font-size:12px" onclick="intgSync(null)">&#128260; Sincronizar tudo</button></span></div>'
+    +lote
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 function intgVerPayload(id){
   var p=intgPedidos.find(function(x){return x.id===id;}); if(!p)return;
@@ -49072,12 +49137,103 @@ async function intgImportar(id){
         sku:it.sku||null,ean:it.ean||null,descricao:it.descricao||null,qtd:ecomN(it.qtd)||1});
     }
     await dbUpdate('intg_pedidos',id,{status_importacao:'importado',pedido_verus_id:ped.id});
-    _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll(); intgRenderBody();
-    showToast('Pedido importado para o E-commerce','green');
+    // "pode faturar": o VERUS devolve ao Tiny assim que o pedido entra
+    intgNotificarPodeFaturar(p);
+    if(!window._intgLote){ _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll(); intgRenderBody();
+      showToast('Pedido importado para o E-commerce','green'); }
   }catch(e){
     try{ await dbUpdate('intg_pedidos',id,{status_importacao:'erro',erro_msg:String(e.message||e).slice(0,400)}); }catch(e2){}
-    showToast('Erro ao importar: '+(e.message||e),'red');
+    if(!window._intgLote) showToast('Erro ao importar: '+(e.message||e),'red');
+    throw e;
   }
+}
+// devolve ao Tiny a situação que libera o cliente a faturar
+async function intgNotificarPodeFaturar(p){
+  try{
+    if(!p||!intgList.length)return;
+    await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({action:'situacao',integracao_id:p.integracao_id,intg_pedido_id:p.id,situacao:'preparando_envio'})});
+  }catch(e){ /* não bloqueia a importação */ }
+}
+// ───── IMPORTAÇÃO EM LOTE (prévia + execução) ─────
+function intgImportarLotePrev(){
+  var ids=Object.keys(_intgSel); if(!ids.length)return;
+  var peds=ids.map(function(id){return intgPedidos.find(function(x){return x.id===id;});}).filter(Boolean);
+  var porSit={}; peds.forEach(function(p){ var k=intgSitCfg(p).lbl; porSit[k]=(porSit[k]||0)+1; });
+  var jaExiste=peds.filter(function(p){ return ecomPedidos.some(function(x){return x.numero_pedido&&String(x.numero_pedido)===String(p.numero);}); }).length;
+  var html='<div class="modal-overlay" id="ecom-modal"><div class="modal" style="width:520px;max-width:95vw;padding:18px">'
+    +'<div style="font-size:16px;font-weight:800">Importar '+peds.length+' pedido(s) do Olist</div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-top:2px">Pr\u00e9via \u2014 nada foi gravado ainda.</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;margin-top:12px;padding:10px 12px;font-size:13px">'
+    +Object.keys(porSit).map(function(k){return '<div style="display:flex;justify-content:space-between;padding:4px 0"><span>'+ecomEsc(k)+'</span><b>'+porSit[k]+'</b></div>';}).join('')
+    +(jaExiste?'<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--text3);border-top:1px solid var(--border);margin-top:4px"><span>j\u00e1 existem no VERUS (ser\u00e3o pulados)</span><b>'+jaExiste+'</b></div>':'')
+    +'</div>'
+    +'<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;font-size:12px;color:var(--text2);margin-top:12px;line-height:1.55">'
+    +'Cada pedido importado devolve ao Olist <b>preparando envio</b> (pode faturar). Quando a sincroniza\u00e7\u00e3o mostrar a NF emitida, o VERUS devolve <b>pronto envio</b> (separado) e o cliente gera a etiqueta. A separa\u00e7\u00e3o f\u00edsica s\u00f3 libera com NF + etiqueta em m\u00e3os.</div>'
+    +'<div id="intg-lote-prog" style="display:none;margin-top:12px;font-size:12.5px"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +'<button class="btn" onclick="ecomModalClose()">Cancelar</button>'
+    +'<button id="intg-lote-ok" class="btn btn-p" onclick="intgImportarLoteExec()">Importar '+peds.length+'</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function intgImportarLoteExec(){
+  var ids=Object.keys(_intgSel); if(!ids.length)return;
+  var btn=ge('intg-lote-ok'), prog=ge('intg-lote-prog');
+  if(btn){btn.disabled=true;btn.textContent='Importando\u2026';}
+  if(prog)prog.style.display='block';
+  window._intgLote=true;
+  var ok=0, pul=0, err=0;
+  for(var i=0;i<ids.length;i++){
+    var p=intgPedidos.find(function(x){return x.id===ids[i];}); if(!p){continue;}
+    if(prog)prog.innerHTML='Importando '+(i+1)+' de '+ids.length+' \u2014 <b>'+ecomEsc(p.numero||'')+'</b>';
+    var existia=ecomPedidos.some(function(x){return x.numero_pedido&&String(x.numero_pedido)===String(p.numero);});
+    try{ await intgImportar(ids[i]); if(existia)pul++; else ok++; }
+    catch(e){ err++; }
+  }
+  window._intgLote=false; _intgSel={};
+  _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll();
+  ecomModalClose(); intgRenderBody();
+  showToast(ok+' importado(s)'+(pul?' \u00b7 '+pul+' j\u00e1 existiam':'')+(err?' \u00b7 '+err+' com erro':''), err?'amber':'green');
+}
+// ───── GATILHO 2: pedido importado que apareceu FATURADO -> devolve pronto_envio ─────
+// É o "separado" que o cliente espera para gerar a etiqueta. Dispara uma vez
+// por pedido (pronto_envio_em) e só depois da NF, porque o Tiny não gera
+// etiqueta sem nota. A separação física acontece depois, com NF + etiqueta.
+async function intgGatilhoSeparado(){
+  var alvo=intgPedidos.filter(function(p){
+    if(!p.pedido_verus_id||p.pronto_envio_em)return false;
+    var sit=intgSitDe(p);
+    return sit==='faturado'||sit==='pronto_envio'||sit==='enviado';
+  });
+  var n=0;
+  for(var i=0;i<alvo.length;i++){
+    var p=alvo[i];
+    try{
+      if(intgSitDe(p)==='faturado'){
+        await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+          body:JSON.stringify({action:'situacao',integracao_id:p.integracao_id,intg_pedido_id:p.id,situacao:'pronto_envio'})});
+        n++;
+      }
+      await dbUpdate('intg_pedidos',p.id,{pronto_envio_em:new Date().toISOString()}); p.pronto_envio_em=new Date().toISOString();
+    }catch(e){ console.warn('gatilho2',e); }
+  }
+  if(n) showToast(n+' pedido(s) faturado(s): "separado" devolvido ao Olist para gerar etiqueta','green');
+  return n;
+}
+// ───── ESPELHA CANCELAMENTO: pedido já importado que virou 'cancelado' no Olist ─────
+async function intgEspelharCancelados(){
+  var alvo=intgPedidos.filter(function(p){ return intgSitDe(p)==='cancelado' && p.pedido_verus_id; });
+  var n=0;
+  for(var i=0;i<alvo.length;i++){
+    var ped=ecomPedidos.find(function(x){return x.id===alvo[i].pedido_verus_id;});
+    if(!ped||['cancelado','expedido','carregado'].indexOf(ped.status)>=0)continue;
+    try{ await dbUpdate('ecom_pedidos',ped.id,{status:'cancelado'}); ped.status='cancelado'; n++; }catch(e){}
+  }
+  if(n){ showToast(n+' pedido(s) cancelado(s) no Olist foram cancelados no VERUS','amber'); }
+  return n;
 }
 // ───── ABA DE-PARA ─────
 function intgPanelDep(){
@@ -49115,17 +49271,11 @@ async function intgDeparaRemover(id){
   catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 // ───── HOOK: avisar o Tiny quando a separação concluir (mata a emulação do cliente) ─────
-async function intgNotificarSeparado(pids){
-  try{
-    if(!pids||!pids.length||!intgList.length)return;
-    var ligados=intgPedidos.filter(function(p){return p.pedido_verus_id&&pids.indexOf(p.pedido_verus_id)>=0;});
-    for(var i=0;i<ligados.length;i++){
-      await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
-        body:JSON.stringify({action:'situacao',integracao_id:ligados[i].integracao_id,intg_pedido_id:ligados[i].id,situacao:'preparando_envio'})});
-    }
-  }catch(e){ /* não bloqueia a operação do armazém */ }
-}
+// A conferência real NÃO devolve situação ao Tiny. Os dois retornos ("pode
+// faturar" e "separado") acontecem no início do fluxo — na importação e na
+// sincronização em que o pedido aparece faturado — para destravar NF e
+// etiqueta do lado do cliente. Mantida como no-op para os pontos de chamada.
+async function intgNotificarSeparado(pids){ return; }
 // ======================= FIM INTEGRAÇÕES (intg_*) =======================
 
 
