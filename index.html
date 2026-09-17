@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.969 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.971 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.969';
+const APP_VERSION='v1.0.971';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8821,7 +8821,7 @@ async function fgCarregaContatos(){
       var cs=await dbSelect('clientes_contatos','cliente_id=eq.'+lista[i]+'&order=created_at.asc');
       var tipos=[], vistos={};
       (cs||[]).forEach(function(c){
-        var t=String(c.tipo_operacao||'').trim();
+        var t=String(c.tipo_operacao||'').replace(/\s+/g,' ').trim();
         if(!t||vistos[t])return;
         vistos[t]=1; tipos.push({tipo:t,contato:c});
       });
@@ -8829,6 +8829,21 @@ async function fgCarregaContatos(){
     }catch(e){ _fgContatos[lista[i]]=[]; }
   }
   return _fgContatos;
+}
+// Faturas JA EXISTENTES do periodo, lidas do BANCO. A checagem usava o array
+// `faturamento` em memoria — que na tela de Programacao pode nem estar
+// carregado. Resultado: toda execucao achava que nada existia e duplicava tudo.
+var _fgExistentes=null;
+async function fgCarregaExistentes(){
+  _fgExistentes=[];
+  try{
+    var cid=company?company.id:null; if(!cid)return _fgExistentes;
+    var ini=fgISO(fgAno,fgMes,1), fim=fgISO(fgAno,fgMes,fgLastDay(fgAno,fgMes));
+    _fgExistentes=await dbSelectAll('faturamento',
+      'company_id=eq.'+cid+'&periodo_inicio=gte.'+ini+'&periodo_fim=lte.'+fim
+      +'&select=id,cliente_id,tipo_operacao,periodo_inicio,periodo_fim,status')||[];
+  }catch(e){ console.warn('fgCarregaExistentes',e); _fgExistentes=[]; }
+  return _fgExistentes;
 }
 async function fatGerarAbrir(){
   var hoje=new Date();
@@ -8847,10 +8862,15 @@ async function fatGerarAbrir(){
   document.body.appendChild(ov);
   var _b=ge('fg-corpo'); if(_b)_b.innerHTML='<div style="padding:22px;text-align:center;color:var(--text3)">Carregando contatos por opera\u00e7\u00e3o\u2026</div>';
   await fgCarregaContatos();
+  await fgCarregaExistentes();
   fatGerarRender();
 }
 function fatGerarFechar(){ var m=ge('modal-fat-gerar'); if(m) m.remove(); _fgContatos=null; }
-function fgSet(campo,v){ if(campo==='ano')fgAno=parseInt(v,10); else if(campo==='mes')fgMes=parseInt(v,10); else fgEscopo=v; fatGerarRender(); }
+async function fgSet(campo,v){
+  if(campo==='ano')fgAno=parseInt(v,10); else if(campo==='mes')fgMes=parseInt(v,10); else fgEscopo=v;
+  if(campo==='ano'||campo==='mes'){ var b=ge('fg-corpo'); if(b)b.innerHTML='<div style="padding:22px;text-align:center;color:var(--text3)">Conferindo faturas j\u00e1 existentes\u2026</div>'; await fgCarregaExistentes(); }
+  fatGerarRender();
+}
 
 function fgLastDay(y,m){ return new Date(y,m+1,0).getDate(); }
 function fgISO(y,m,d){ return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); }
@@ -8914,11 +8934,14 @@ function fgLinhasDaTabela(tab){
   return out;
 }
 function fgJaExiste(clienteId,ini,fim,tipoOp){
-  return (faturamento||[]).some(function(f){
+  var base=(_fgExistentes&&_fgExistentes.length)?_fgExistentes:(faturamento||[]);
+  return base.some(function(f){
     if(f.cliente_id!==clienteId||f.periodo_inicio!==ini||f.periodo_fim!==fim)return false;
     if(['cancelado','reprovado'].indexOf(f.status)>=0)return false;
     // com quebra por operação, cada tipo tem a sua fatura no mesmo período
-    var a=String(f.tipo_operacao||''), b=String(tipoOp||'');
+    // compara sem depender de espaco extra no cadastro do contato
+    var a=String(f.tipo_operacao||'').replace(/\s+/g,' ').trim().toUpperCase();
+    var b=String(tipoOp||'').replace(/\s+/g,' ').trim().toUpperCase();
     return a===b;
   });
 }
@@ -9068,7 +9091,7 @@ async function fatGerarExecutar(){
         status:'rascunho'
       };
       var res=await dbInsert('faturamento',obj);
-      if(res){ faturamento.unshift(res); ok++; } else erros++;
+      if(res){ faturamento.unshift(res); (_fgExistentes=_fgExistentes||[]).push(res); ok++; } else erros++;
     }catch(e){ console.warn('gerar fatura',e); erros++; }
   }
   fatGerarFechar();
