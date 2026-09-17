@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.971 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.973 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1300,7 +1300,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.971';
+const APP_VERSION='v1.0.973';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6478,12 +6478,38 @@ const FAT_STATUS={
 // Número sequencial de fatura
 let fatNumeroAtual=1000;
 
+// Maior numero ja usado, lido do BANCO. Usar o array em memoria fazia o
+// contador voltar a 1000 em telas onde `faturamento` nao esta carregado —
+// e gerava numero de fatura REPETIDO.
+var _fatMaxNum=null;
+async function fatCarregaMaxNumero(){
+  try{
+    var cid=company?company.id:null; if(!cid){_fatMaxNum=null;return null;}
+    var rows=await dbSelectAll('faturamento','company_id=eq.'+cid+'&select=numero_fatura')||[];
+    var mx=1000;
+    rows.forEach(function(f){
+      // so conta a serie FT.../AA e le o miolo ANTES da barra: o replace(/\D/g)
+      // juntava o ano ao numero (FT1008/26 -> 100826) e quebrava a sequencia
+      var m=String(f.numero_fatura||'').match(/^FT\s*(\d+)\/\d{2}$/i);
+      if(!m)return;
+      var n=parseInt(m[1],10);
+      if(!isNaN(n)&&n>mx)mx=n;
+    });
+    _fatMaxNum=mx;
+  }catch(e){ console.warn('fatCarregaMaxNumero',e); _fatMaxNum=null; }
+  return _fatMaxNum;
+}
 function getFatNumero(){
   const ano=String(new Date().getFullYear()).slice(-2);
-  const max=faturamento.reduce((m,f)=>{
-    const n=parseInt((f.numero_fatura||'').replace(/\D/g,'').slice(0,4));
-    return n>m?n:m;
+  const emMemoria=(faturamento||[]).reduce((m,f)=>{
+    const mt=String(f.numero_fatura||'').match(/^FT\s*(\d+)\/\d{2}$/i);
+    if(!mt)return m;
+    const n=parseInt(mt[1],10);
+    return (!isNaN(n)&&n>m)?n:m;
   },1000);
+  // usa o maior entre o banco e a memoria: nunca reutiliza numero
+  const max=Math.max(emMemoria, (_fatMaxNum||0));
+  _fatMaxNum=max+1;                 // reserva, para o proximo do mesmo lote
   return 'FT'+String(max+1).padStart(4,'0')+'/'+ano;
 }
 
@@ -8863,6 +8889,7 @@ async function fatGerarAbrir(){
   var _b=ge('fg-corpo'); if(_b)_b.innerHTML='<div style="padding:22px;text-align:center;color:var(--text3)">Carregando contatos por opera\u00e7\u00e3o\u2026</div>';
   await fgCarregaContatos();
   await fgCarregaExistentes();
+  await fatCarregaMaxNumero();
   fatGerarRender();
 }
 function fatGerarFechar(){ var m=ge('modal-fat-gerar'); if(m) m.remove(); _fgContatos=null; }
