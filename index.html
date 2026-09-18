@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.977 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.978 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1316,7 +1316,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.977';
+const APP_VERSION='v1.0.978';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49597,9 +49597,52 @@ function intgPanelDep(){
       +'<td style="padding:6px 8px;min-width:240px">'+sel+'</td>'
       +'<td style="padding:6px 8px">'+(m.dp?'':'<button class="btn btn-p" style="font-size:11px;padding:3px 10px" onclick="intgDeparaSalvar(\''+m.integracao_id+'\',\''+ecomEsc(m.sku).replace(/'/g,"\\'")+'\','+ix+')">Vincular</button>')+'</td></tr>';
   }).join('')||'<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text3)">Nenhum SKU sincronizado ainda. Rode uma sincronização primeiro.</td></tr>';
-  return '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Vincule cada SKU do Tiny a um produto do E-commerce. Pedidos só podem ser importados com 100% dos itens mapeados.</div>'
+  // Os SKUs do Tiny e do VERUS sao os MESMOS (PE029, KIT007...). Vincular um a
+  // um seria digitacao pura — este botao casa todos os iguais de uma vez.
+  var _auto=0;
+  Object.keys(mapa).forEach(function(k){
+    var m=mapa[k]; if(!m||m.dp)return;
+    var sk=String(m.sku||'').trim().toUpperCase();
+    if((ecomProdutos||[]).some(function(p){ return String(p.sku||'').trim().toUpperCase()===sk; })) _auto++;
+  });
+  var _cab='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+    +'<span style="font-size:12px;color:var(--text3);flex:1">Vincule cada SKU do Tiny a um produto do E-commerce. Pedidos s\u00f3 podem ser importados com 100% dos itens mapeados.</span>'
+    +(_auto?('<button class="btn btn-p" style="font-size:12px" onclick="intgDeparaAuto()">\u26a1 Vincular '+_auto+' SKU(s) id\u00eantico(s)</button>'):'')
+    +'</div>';
+  return _cab
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px">SKU (Tiny)</th><th style="padding:6px 8px">Descrição</th><th style="padding:6px 8px">Produto VERUS</th><th style="padding:6px 8px"></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+// Vincula de uma vez todos os SKUs do Tiny que existem identicos no VERUS.
+async function intgDeparaAuto(){
+  var pend=[];
+  (intgPedidos||[]).forEach(function(p){
+    (intgItens(p)||[]).forEach(function(it){
+      var sk=String(it.sku||it.codigo||'').trim();
+      if(!sk)return;
+      var ja=(intgDepara||[]).some(function(d){ return String(d.sku_externo||'').trim().toUpperCase()===sk.toUpperCase(); });
+      if(ja)return;
+      var prod=(ecomProdutos||[]).find(function(x){ return String(x.sku||'').trim().toUpperCase()===sk.toUpperCase(); });
+      if(!prod)return;
+      if(pend.some(function(x){return x.sku.toUpperCase()===sk.toUpperCase();}))return;
+      pend.push({sku:sk, pid:prod.id, integracao_id:p.integracao_id, desc:prod.descricao||prod.nome||''});
+    });
+  });
+  if(!pend.length){ showToast('Nenhum SKU id\u00eantico pendente','amber'); return; }
+  if(!confirm('Vincular '+pend.length+' SKU(s) cujo c\u00f3digo \u00e9 igual no Tiny e no VERUS?\n\n'
+    +pend.slice(0,10).map(function(x){return '\u2022 '+x.sku;}).join('\n')
+    +(pend.length>10?('\n\u2026 e mais '+(pend.length-10)):'')
+    +'\n\nOs demais continuam para vincular \u00e0 m\u00e3o.')) return;
+  var ok=0, err=0;
+  for(var i=0;i<pend.length;i++){
+    try{
+      await dbInsert('intg_depara_produtos',{company_id:ecomCid(),integracao_id:pend[i].integracao_id,
+        sku_externo:pend[i].sku, ecom_produto_id:pend[i].pid});
+      ok++;
+    }catch(e){ err++; }
+  }
+  _intgLoaded=false; await intgLoadAll(); intgRenderBody();
+  showToast(ok+' SKU(s) vinculado(s)'+(err?(' \u00b7 '+err+' com erro'):''), err?'amber':'green');
 }
 async function intgDeparaSalvar(gId,sku,ix){
   var sel=ge('dp-sel-'+ix); var pid=sel&&sel.value; if(!pid){showToast('Selecione o produto','amber');return;}
