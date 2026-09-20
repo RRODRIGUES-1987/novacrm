@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.980 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.981 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1316,7 +1316,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.980';
+const APP_VERSION='v1.0.981';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49594,11 +49594,23 @@ async function intgGatilhoSeparado(){
 // ───── ESPELHA CANCELAMENTO: pedido já importado que virou 'cancelado' no Olist ─────
 async function intgEspelharCancelados(){
   var alvo=intgPedidos.filter(function(p){ return intgSitDe(p)==='cancelado' && p.pedido_verus_id; });
+  if(!alvo.length) return 0;
+  // Le o pedido do BANCO em vez do array em memoria: na tela de Integracoes o
+  // ecomPedidos pode nao estar carregado, e o cancelamento era ignorado em
+  // silencio (mesmo defeito que duplicou as faturas).
   var n=0;
   for(var i=0;i<alvo.length;i++){
-    var ped=ecomPedidos.find(function(x){return x.id===alvo[i].pedido_verus_id;});
+    var ped=null;
+    try{
+      var r=await dbSelect('ecom_pedidos','id=eq.'+alvo[i].pedido_verus_id+'&select=id,status,numero_interno');
+      ped=(r&&r[0])||null;
+    }catch(e){ continue; }
     if(!ped||['cancelado','expedido','carregado'].indexOf(ped.status)>=0)continue;
-    try{ await dbUpdate('ecom_pedidos',ped.id,{status:'cancelado'}); ped.status='cancelado'; n++; }catch(e){}
+    try{
+      await dbUpdate('ecom_pedidos',ped.id,{status:'cancelado'});
+      var m=(ecomPedidos||[]).find(function(x){return x.id===ped.id;}); if(m)m.status='cancelado';
+      n++;
+    }catch(e){}
   }
   if(n){ showToast(n+' pedido(s) cancelado(s) no Olist foram cancelados no VERUS','amber'); }
   return n;
