@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.981 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.982 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1316,7 +1316,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.981';
+const APP_VERSION='v1.0.982';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49474,8 +49474,27 @@ async function intgImportar(id){
       transportadora:p.transportadora||null,tracking:p.tracking||null,status:'aguardando_etiqueta'});
     for(var j=0;j<its.length;j++){
       var it=its[j]; var dp=intgDeparaDe(p.integracao_id,it.sku);
+      var qIt=ecomN(it.qtd)||1;
+      // KIT explode nos componentes, como ja fazem o PDF e a planilha.
+      // Sem isto a integracao gravava "KIT007" e a separacao procurava um
+      // produto que nao existe fisicamente no estoque.
+      var comps=ecomKitComp(String(it.sku||'').toUpperCase());
+      if(comps&&comps.length){
+        for(var c=0;c<comps.length;c++){
+          var cs=String(comps[c].sku||'').toUpperCase();
+          var pr=(ecomProdutos||[]).find(function(x){return String(x.sku||'').toUpperCase()===cs;});
+          var dpc=intgDeparaDe(p.integracao_id,cs);
+          await dbInsert('ecom_pedido_itens',{company_id:cid,pedido_id:ped.id,
+            produto_id:(dpc&&dpc.ecom_produto_id)||(pr&&pr.id)||null,
+            sku:cs, ean:(pr&&pr.ean)||null,
+            descricao:(pr&&pr.descricao)||cs,
+            qtd:qIt*(ecomN(comps[c].qtd)||1),
+            kit_sku:String(it.sku||'').toUpperCase()});
+        }
+        continue;
+      }
       await dbInsert('ecom_pedido_itens',{company_id:cid,pedido_id:ped.id,produto_id:dp?dp.ecom_produto_id:null,
-        sku:it.sku||null,ean:it.ean||null,descricao:it.descricao||null,qtd:ecomN(it.qtd)||1});
+        sku:it.sku||null,ean:it.ean||null,descricao:it.descricao||null,qtd:qIt});
     }
     await dbUpdate('intg_pedidos',id,{status_importacao:'importado',pedido_verus_id:ped.id});
     // "pode faturar": o VERUS devolve ao Tiny assim que o pedido entra
