@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.982 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.984 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1316,7 +1316,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.982';
+const APP_VERSION='v1.0.984';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49195,7 +49195,9 @@ async function intgLoadAll(){
   var cid=ecomCid(); if(!cid){_intgLoaded=true;return;}
   try{
     intgList   = await dbSelect('integracoes','company_id=eq.'+cid+'&order=created_at.desc');
-    intgPedidos= await dbSelect('intg_pedidos','company_id=eq.'+cid+'&order=created_at.desc&limit=300');
+    // 300 fixos escondiam os pedidos mais antigos: a busca nao achava e os
+    // cards mostravam so uma fatia. Carrega a janela recente inteira.
+    intgPedidos= await dbSelectAll('intg_pedidos','company_id=eq.'+cid+'&order=created_at.desc');
     intgDepara = await dbSelect('intg_depara_produtos','company_id=eq.'+cid);
     _intgLoaded=true;
   }catch(e){ showToast('Erro ao carregar Integrações: '+(e.message||e),'red'); }
@@ -49353,8 +49355,37 @@ var INTG_SIT={
 function intgSitDe(p){ return String(p.situacao_tiny||'').toLowerCase().replace(/\s+/g,'_'); }
 function intgSitCfg(p){ return INTG_SIT[intgSitDe(p)]||{lbl:p.situacao_tiny||'\u2014',acao:'aguardar',cor:'var(--text3)',bg:'var(--bg2)',bd:'var(--border)',sub:'sem regra'}; }
 var intgSitFiltro=null, _intgSel={}, intgBusca='';
+// Busca direto no banco quando o termo nao aparece no que esta carregado —
+// assim o operador acha qualquer pedido, inclusive fora da janela recente.
+async function intgBuscaRemota(){
+  var q=String(intgBusca||'').trim(); if(q.length<4)return;
+  try{
+    var cid=ecomCid(); if(!cid)return;
+    var t=encodeURIComponent('*'+q+'*');
+    var r=await dbSelect('intg_pedidos','company_id=eq.'+cid
+      +'&or=(numero.ilike.'+t+',pedido_externo_id.ilike.'+t+',destinatario_nome.ilike.'+t+',nf_numero.ilike.'+t+')&limit=50');
+    var novos=0;
+    (r||[]).forEach(function(x){
+      if(!intgPedidos.some(function(y){return y.id===x.id;})){ intgPedidos.push(x); novos++; }
+    });
+    if(novos){ showToast(novos+' pedido(s) encontrado(s) fora da janela carregada','blue'); intgRenderBody(); }
+    else if(!r||!r.length){ showToast('Nenhum pedido encontrado com "'+q+'"','amber'); }
+  }catch(e){ console.warn('busca remota',e); }
+}
 function intgBuscaSet(v){
   intgBusca=v;
+  clearTimeout(window._intgBuscaT);
+  window._intgBuscaT=setTimeout(function(){
+    var q=String(intgBusca||'').trim();
+    if(q.length>=4){
+      var achou=intgPedidos.some(function(p){
+        var alvo=[p.numero,p.pedido_externo_id,p.destinatario_nome,p.nf_numero]
+          .map(function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');}).join('|');
+        return alvo.indexOf(q.toLowerCase().replace(/[^a-z0-9]/g,''))>=0;
+      });
+      if(!achou) intgBuscaRemota();
+    }
+  },600);
   var el=ge('intg-busca'); var pos=el?el.selectionStart:null;
   intgRenderBody();
   var novo=ge('intg-busca');
@@ -49426,7 +49457,8 @@ function intgPanelPed(){
       +'<td style="padding:6px 8px">'+(its.length?mp+'/'+its.length:'—')+'</td>'
       +'<td style="padding:6px 8px">'+intgBadgeImp(st)+'</td>'
       +'<td style="padding:6px 8px;text-align:center">'+et+'</td>'
-      +'<td style="padding:6px 8px;white-space:nowrap">'+act+'</td></tr>';
+      +'<td style="padding:6px 8px;white-space:nowrap">'+act+'</td></tr>'
+      +(_intgAberto===p.id?('<tr><td colspan="8" style="padding:0">'+intgFichaHTML(p)+'</td></tr>'):'');
   }).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido sincronizado.</td></tr>';
   var nImp=intgImportaveis().length;
   var busca='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">'
@@ -49447,13 +49479,108 @@ function intgPanelPed(){
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
-function intgVerPayload(id){
-  var p=intgPedidos.find(function(x){return x.id===id;}); if(!p)return;
-  var html='<div class="modal-overlay" id="ecom-modal"><div class="modal" style="width:640px;max-width:95vw;padding:16px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:10px">Pedido '+ecomEsc(p.numero||p.pedido_externo_id||'')+'</div>'
-    +'<pre style="max-height:55vh;overflow:auto;background:var(--bg2);border-radius:10px;padding:12px;font-size:11px">'+ecomEsc(JSON.stringify(p.payload||{},null,2))+'</pre>'
-    +'<div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" onclick="ecomCloseModal()">Fechar</button></div></div></div>';
-  document.body.insertAdjacentHTML('beforeend',html);
+var _intgAberto=null;
+function intgVerPayload(id){ _intgAberto=(_intgAberto===id)?null:id; intgRenderBody(); }
+function _intgDias(desde){
+  if(!desde)return null;
+  var d=new Date(desde); if(isNaN(d))return null;
+  var h=Math.floor((Date.now()-d.getTime())/36e5);
+  if(h<1)return 'menos de 1 hora';
+  if(h<24)return h+' hora(s)';
+  var dd=Math.floor(h/24); return dd+' dia(s) e '+(h%24)+'h';
+}
+// Ficha do pedido: os dois lados na mesma tela, para o operador nao precisar
+// perguntar em que pe esta o pedido.
+function intgFichaHTML(p){
+  var sc=intgSitCfg(p), its=intgItens(p);
+  var ped=(ecomPedidos||[]).find(function(x){return x.id===p.pedido_verus_id;});
+  var temNf=!!p.nf_numero, temEtq=!!p.etiqueta_url;
+  var sit=intgSitDe(p);
+  var kv=function(k,v,cor){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:13px;border-top:1px solid var(--border)">'
+    +'<span style="color:var(--text3)">'+k+'</span><b style="text-align:right'+(cor?(';color:'+cor):'')+'">'+v+'</b></div>'; };
+  var ev=function(cor,t,sub){ return '<div style="display:flex;gap:11px;align-items:flex-start;padding:7px 0">'
+    +'<div style="flex:none;width:11px;height:11px;border-radius:50%;margin-top:4px;background:'+cor+'"></div>'
+    +'<div><div style="font-size:13px'+(cor==='#cbd2da'?';color:var(--text3)':'')+'">'+t+'</div>'
+    +(sub?('<div style="font-size:11.5px;color:var(--text3)">'+sub+'</div>'):'')+'</div></div>'; };
+  var OK='#059669', WA='#d99a2b', OFF='#cbd2da';
+
+  var h='<div style="background:var(--bg2);border-top:2px solid var(--accent);padding:16px 18px">';
+  // dois lados
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div style="border:1px solid var(--border);border-radius:11px;padding:13px;background:var(--bg)">'
+      +'<div style="font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">No Olist</div>'
+      +kv('Situa\u00e7\u00e3o','<span style="font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:99px;background:'+sc.bg+';color:'+sc.cor+'">'+ecomEsc(sc.lbl)+'</span>')
+      +kv('N\u00ba do pedido','<span style="font-family:monospace;font-size:12px">'+ecomEsc(p.numero||'\u2014')+'</span>')
+      +kv('ID interno Olist','<span style="font-family:monospace;font-size:12px">'+ecomEsc(p.pedido_externo_id||'\u2014')+'</span>')
+      +kv('Nota fiscal',temNf?ecomEsc(String(p.nf_numero)):'n\u00e3o emitida',temNf?'':'var(--amber-text)')
+      +kv('Etiqueta',temEtq?'dispon\u00edvel':'n\u00e3o gerada',temEtq?'':'var(--amber-text)')
+      +kv('Atualizado',p.updated_at?new Date(p.updated_at).toLocaleString('pt-BR'):'\u2014')
+    +'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:11px;padding:13px;background:var(--bg)">'
+      +'<div style="font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">No VERUS</div>'
+      +kv('Pedido',ped?('<span style="font-family:monospace;font-size:12px">E-'+String(ped.numero_interno||0).padStart(6,'0')+'</span>'):'n\u00e3o importado',ped?'':'var(--text3)')
+      +kv('Status',ped?ecomEsc(String(ped.status||'').replace(/_/g,' ')):'\u2014')
+      +kv('Importado em',p.status_importacao==='importado'&&p.updated_at?new Date(p.updated_at).toLocaleDateString('pt-BR'):'\u2014')
+      +kv('NF-e recebida',(ped&&(ecomNfes||[]).some(function(n){return n.pedido_id===ped.id;}))?'sim':'n\u00e3o')
+      +kv('Etiqueta recebida',(ped&&(ecomEtiquetas||[]).some(function(e){return e.pedido_id===ped.id;}))?'sim':'n\u00e3o')
+      +kv('Em folha',(ped&&(ecomOsPedidos||[]).some(function(o){return o.pedido_id===ped.id;}))?'sim':'n\u00e3o')
+    +'</div></div>';
+
+  // linha do tempo
+  h+='<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">'
+    +'<div style="font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);margin-bottom:4px">Linha do tempo</div>';
+  h+=ev(OK,'Pedido aprovado no Olist', p.data_pedido?new Date(p.data_pedido).toLocaleDateString('pt-BR'):'');
+  if(p.pedido_verus_id){
+    h+=ev(OK,'Importado para o VERUS'+(ped?(' \u00b7 E-'+String(ped.numero_interno||0).padStart(6,'0')):''),'');
+    h+=ev(p.situacao_enviada?OK:OFF,'VERUS avisou o Olist: <b>pode faturar</b>', p.situacao_enviada?'situa\u00e7\u00e3o gravada no Olist':'ainda n\u00e3o enviado');
+  } else {
+    h+=ev(OFF,'Importar para o VERUS','pendente');
+  }
+  if(sit==='cancelado'){
+    h+=ev('#991b1b','<b>Cancelado no Olist</b>', ped&&ped.status==='cancelado'?'cancelado tamb\u00e9m no VERUS':'\u26a0 ainda ativo no VERUS \u2014 sincronize');
+  } else if(!temNf){
+    h+=ev(WA,'Aguardando o cliente emitir a NF', p.updated_at?('h\u00e1 '+_intgDias(p.updated_at)):'');
+    h+=ev(OFF,'VERUS avisa: separado \u2192 cliente gera a etiqueta','');
+    h+=ev(OFF,'Etiqueta chega \u2192 libera a separa\u00e7\u00e3o','');
+  } else {
+    h+=ev(OK,'Nota fiscal emitida','NF '+ecomEsc(String(p.nf_numero)));
+    h+=ev(p.pronto_envio_em?OK:WA,'VERUS avisa: <b>separado</b>', p.pronto_envio_em?'enviado ao Olist':'na pr\u00f3xima sincroniza\u00e7\u00e3o');
+    h+=ev(temEtq?OK:WA,'Etiqueta gerada pelo cliente', temEtq?'recebida':'aguardando');
+    h+=ev((ped&&(ecomEtiquetas||[]).some(function(e){return e.pedido_id===ped.id;}))?OK:OFF,'Libera a separa\u00e7\u00e3o','');
+  }
+  h+='</div>';
+
+  // o que fazer agora
+  var msg='', cor='var(--bg3)', bd='var(--border)', txt='var(--text2)';
+  if(sit==='cancelado'){ msg='Pedido cancelado no Olist. Se ainda estiver ativo no VERUS, sincronize para o cancelamento espelhar.'; cor='var(--red-bg)';bd='#f5c2c0';txt='var(--red-text)'; }
+  else if(!p.pedido_verus_id){ msg='Ainda n\u00e3o importado. Se estiver em card verde, marque e importe.'; cor='var(--amber-bg,#fef3c7)';bd='#f0d9a8';txt='var(--amber-text,#8a6d1a)'; }
+  else if(!temNf){ msg='<b>Parado com o cliente.</b> O pedido est\u00e1 no Olist aguardando a emiss\u00e3o da nota fiscal. Nada a fazer do nosso lado \u2014 se passar de 2 dias, cobre o cliente.'; cor='var(--amber-bg,#fef3c7)';bd='#f0d9a8';txt='var(--amber-text,#8a6d1a)'; }
+  else if(!temEtq){ msg='NF emitida. Aguardando o cliente gerar a etiqueta \u2014 ela chega na pr\u00f3xima sincroniza\u00e7\u00e3o.'; cor='var(--amber-bg,#fef3c7)';bd='#f0d9a8';txt='var(--amber-text,#8a6d1a)'; }
+  else { msg='NF e etiqueta recebidas. O pedido est\u00e1 apto para entrar em folha de separa\u00e7\u00e3o.'; cor='var(--green-bg)';bd='#a7ddc0';txt='var(--green-text)'; }
+  h+='<div style="margin-top:14px;background:'+cor+';border:1px solid '+bd+';border-radius:10px;padding:12px 14px;font-size:13.5px;color:'+txt+';line-height:1.55">'+msg+'</div>';
+
+  // itens
+  h+='<div style="font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);margin:14px 0 4px">Itens</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    +'<thead><tr>'+['SKU','Descri\u00e7\u00e3o','Qtd','De-Para'].map(function(t){return '<th style="background:#0A2540;color:#fff;font-size:10px;padding:6px 8px;text-align:left">'+t+'</th>';}).join('')+'</tr></thead><tbody>';
+  its.forEach(function(i){
+    var dp=intgDeparaDe(p.integracao_id,i.sku);
+    var kit=ecomKitComp(String(i.sku||'').toUpperCase());
+    h+='<tr><td style="padding:6px 8px;border-top:1px solid var(--border);font-family:monospace">'+ecomEsc(i.sku||'')+'</td>'
+      +'<td style="padding:6px 8px;border-top:1px solid var(--border)">'+ecomEsc(String(i.descricao||'').slice(0,44))
+      +(kit?'<span style="font-size:10px;background:var(--purple-bg);color:var(--purple-text);padding:1px 6px;border-radius:99px;margin-left:5px">kit \u2192 '+kit.length+' itens</span>':'')+'</td>'
+      +'<td style="padding:6px 8px;border-top:1px solid var(--border)">'+(ecomN(i.qtd)||1)+'</td>'
+      +'<td style="padding:6px 8px;border-top:1px solid var(--border)">'
+        +(dp?'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--green-bg);color:var(--green-text)">ok</span>'
+            :'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)">pendente</span>')
+      +'</td></tr>';
+  });
+  h+='</tbody></table>';
+  h+='<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:var(--text3)">Dados brutos recebidos do Olist</summary>'
+    +'<pre style="max-height:40vh;overflow:auto;background:var(--bg3);border-radius:8px;padding:10px;font-size:11px;margin-top:6px">'+ecomEsc(JSON.stringify(p.payload||{},null,2))+'</pre></details>';
+  h+='<div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" onclick="intgVerPayload(\''+p.id+'\')">Fechar</button></div>';
+  h+='</div>';
+  return h;
 }
 async function intgImportar(id){
   var p=intgPedidos.find(function(x){return x.id===id;}); if(!p)return;
