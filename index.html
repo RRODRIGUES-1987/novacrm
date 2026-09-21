@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.995 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.997 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.995';
+const APP_VERSION='v1.0.997';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48020,7 +48020,7 @@ function ecomCxMsgHtml(){
 }
 // Indicador de BOX: em qual monte a caixa vai, por transportadora
 function ecomCxBoxHtml(p){
-  var t=ecomTranspInfo(p&&p.transportadora);
+  var t=ecomTranspInfo(p);
   return '<div style="margin-top:18px;border-radius:16px;padding:20px 28px;background:'+t.bg+';border:3px solid '+t.cor+'">'
     +'<div style="font-size:13px;letter-spacing:2px;color:'+t.cor+';opacity:.85">COLOCAR NO</div>'
     +'<div style="font-size:56px;font-weight:900;line-height:1.05;color:'+t.cor+'">'+t.box+'</div>'
@@ -48287,10 +48287,10 @@ async function ecomEmbContar(){
 }
 function ecomPanelRomaneio(){
   var confAll=ecomPedidosDoLojista().filter(function(p){return p.status==='conferido';});
-  var conf=_ecomRomTransp?confAll.filter(function(p){return ecomTranspKey(p.transportadora)===_ecomRomTransp;}):confAll;
-  var cnt={}; confAll.forEach(function(p){ var k=ecomTranspKey(p.transportadora); cnt[k]=(cnt[k]||0)+1; });
+  var conf=_ecomRomTransp?confAll.filter(function(p){return ecomTranspKey(p)===_ecomRomTransp;}):confAll;
+  var cnt={}; confAll.forEach(function(p){ var k=ecomTranspKey(p); cnt[k]=(cnt[k]||0)+1; });
   var chips='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
-    +['','TOTAL','JT','?'].filter(function(k){ return k===''||cnt[k]; }).map(function(k){
+    +[''].concat(Object.keys(ECOM_TRANSP)).filter(function(k){ return k===''||cnt[k]; }).map(function(k){
         var lbl=k===''?('Todas ('+confAll.length+')'):(ECOM_TRANSP[k].nome+' ('+(cnt[k]||0)+')');
         var on=(_ecomRomTransp===k);
         var cor=k===''?'var(--text2)':ECOM_TRANSP[k].cor;
@@ -48304,7 +48304,7 @@ function ecomPanelRomaneio(){
       +'<td style="padding:5px 8px">E-'+String(p.numero_interno||0).padStart(6,'0')+'</td>'
       +'<td style="padding:5px 8px;font-family:monospace;font-size:11px">'+ecomEsc(p.numero_pedido||'')+'</td>'
       +'<td style="padding:5px 8px">'+ecomEsc(p.destinatario_nome||'')+'</td>'
-      +'<td style="padding:5px 8px"><span style="font-size:11px;padding:2px 7px;border-radius:99px;background:'+ecomTranspInfo(p.transportadora).bg+';color:'+ecomTranspInfo(p.transportadora).cor+'">'+ecomEsc(ecomTranspInfo(p.transportadora).nome)+'</span></td>'
+      +'<td style="padding:5px 8px"><span style="font-size:11px;padding:2px 7px;border-radius:99px;background:'+ecomTranspInfo(p).bg+';color:'+ecomTranspInfo(p).cor+'">'+ecomEsc(ecomTranspInfo(p).nome)+'</span></td>'
       +'<td style="padding:5px 8px;text-align:center">'+vol+'</td></tr>';
   }).join('') : '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">Nenhum pedido conferido aguardando carregamento.</td></tr>';
 
@@ -49083,12 +49083,23 @@ function ecomTranspDetect(txt,trk,jt,cor){
   return '?';
 }
 // Normaliza o valor gravado em ecom_pedidos.transportadora de volta para a chave
+// Aceita o nome da transportadora OU o pedido inteiro. Com o pedido, se o nome
+// vier vazio, deduz pelo rastreio / numero do pedido.
 function ecomTranspKey(v){
-  var t=String(v||'').toUpperCase();
+  var ped=(v&&typeof v==='object')?v:null;
+  var t=String(ped?(ped.transportadora||''):(v||'')).toUpperCase();
   if(t.indexOf('TOTAL')>=0) return 'TOTAL';
   if(t.indexOf('J&T')>=0||t.indexOf('JT')===0) return 'JT';
   if(t.indexOf('CORREIO')>=0||t.indexOf('SEDEX')>=0||t.indexOf('PAC')===0) return 'CORREIOS';   // faltava: caía em '?'
   if(t.indexOf('MERCADO')>=0||t==='ML') return 'ML';
+  if(ped && !t.trim()){
+    var trk=String(ped.tracking||'').toUpperCase().replace(/\s+/g,'');
+    if(/^[A-Z]{2}\d{9}BR$/.test(trk)) return 'CORREIOS';       // AP123456789BR
+    if(/^JT/.test(trk)) return 'JT';
+    if(/^48\d{9}$/.test(trk)) return 'ML';                      // codigo de logistica do Mercado Envios
+    var np=String(ped.numero_pedido||'').replace(/\D/g,'');
+    if(/^2000\d{11,12}$/.test(np)) return 'ML';                 // pedido do Mercado Livre (o Excel pode cortar 1 digito)
+  }
   return '?';
 }
 function ecomTranspInfo(v){ return ECOM_TRANSP[ecomTranspKey(v)]||ECOM_TRANSP['?']; }
