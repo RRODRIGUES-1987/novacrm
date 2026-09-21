@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1000 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1002 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1000';
+const APP_VERSION='v1.0.1002';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -17358,13 +17358,38 @@ function agruparDias(dias,agrup){
 }
 
 // ============ CONTAS A PAGAR (espelha Contas a Receber) ============
+// Vencimento EFETIVO: se cair em sabado, domingo ou feriado, o pagamento no
+// proximo dia util esta no prazo. O vencimento gravado nao e alterado.
+function cpVencEf(cp){
+  if(!cp||!cp.vencimento)return null;
+  var iso=(typeof crProxDiaUtil==='function')?crProxDiaUtil(cp.vencimento):cp.vencimento;
+  return new Date(iso+'T00:00');
+}
+// Acerto retroativo: "pago em atraso" que foi pago ate o vencimento efetivo.
+// cpRecalcAtrasos(false) so mostra; (true) grava.
+async function cpRecalcAtrasos(aplicar){
+  var alvo=(contasPagar||[]).filter(function(cp){
+    if(cp.status!=='pago_atraso'||!cp.vencimento||!cp.data_pagamento)return false;
+    return new Date(cp.data_pagamento+'T00:00')<=cpVencEf(cp);
+  });
+  console.table(alvo.map(function(cp){return {beneficiario:cp.fornecedor_nome,descricao:cp.descricao,vencimento:cp.vencimento,
+    vencimento_efetivo:(typeof crProxDiaUtil==='function'?crProxDiaUtil(cp.vencimento):cp.vencimento),pago_em:cp.data_pagamento,valor:cp.valor};}));
+  if(aplicar){
+    for(var i=0;i<alvo.length;i++){
+      await dbUpdate('contas_pagar',alvo[i].id,{status:'pago'});
+      alvo[i].status='pago';
+    }
+    if(curPage==='contas-pagar'){var c=ge('content');if(c){c.innerHTML=rContasPagar();initContasPagar();}}
+  }
+  return alvo.length+' título(s) '+(aplicar?'corrigido(s) para Pago no prazo':'a corrigir — rode cpRecalcAtrasos(true) para gravar');
+}
 function cpDataStr(cp){
   return cpEixo==='competencia' ? (cp.competencia||'') : (cp.data_pagamento||cp.vencimento||'');
 }
 function cpISO(d){return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 function cpStatusInfo(cp){
   var hoje=new Date();hoje.setHours(0,0,0,0);
-  var venc=cp.vencimento?new Date(cp.vencimento+'T00:00'):null;
+  var venc=cpVencEf(cp);
   if(cp.status==='pago')return{label:'Pago',bg:'#dcfce7',color:'#166534'};
   if(cp.status==='pago_atraso')return{label:'Pago atraso',bg:'#fef9c3',color:'#854d0e'};
   if(venc&&venc<hoje)return{label:'Vencido',bg:'#fee2e2',color:'#991b1b'};
@@ -17560,7 +17585,7 @@ function rContasPagar(){
 function rCPLancamentos(){
   var hoje=new Date();hoje.setHours(0,0,0,0);
   var pago=function(cp){return['pago','pago_atraso'].includes(cp.status);};
-  var venceu=function(cp){if(pago(cp))return false;var v=cp.vencimento?new Date(cp.vencimento+'T00:00'):null;return v&&v<hoje;};
+  var venceu=function(cp){if(pago(cp))return false;var v=cpVencEf(cp);return v&&v<hoje;};
   var totalCP=contasPagar.reduce(function(s,cp){return s+Number(cp.valor||0);},0);
   var totalApagar=contasPagar.filter(function(cp){return!pago(cp);}).reduce(function(s,cp){return s+Number(cp.valor||0);},0);
   var totalAtraso=contasPagar.filter(venceu).reduce(function(s,cp){return s+Number(cp.valor||0);},0);
@@ -17684,7 +17709,7 @@ function renderCPMatrix(){
       var itens=lin.itens.filter(function(cp){return inCol(cpDataStr(cp),col);});
       var valor=itens.reduce(function(s,x){return s+Number(x.valor||0);},0);
       totaisCol[col.key]=(totaisCol[col.key]||0)+valor;
-      var temVenc=itens.some(function(cp){var v=cp.vencimento?new Date(cp.vencimento+'T00:00'):null;return v&&v<hoje&&!['pago','pago_atraso'].includes(cp.status);});
+      var temVenc=itens.some(function(cp){var v=cpVencEf(cp);return v&&v<hoje&&!['pago','pago_atraso'].includes(cp.status);});
       var temPago=itens.some(function(cp){return['pago','pago_atraso'].includes(cp.status);});
       var cbg=valor?(temVenc?'#fee2e2':temPago?'#dcfce7':'#dbeafe'):'';
       var ccor=valor?(temVenc?'#991b1b':temPago?'#166534':'#1e40af'):'';
@@ -17746,7 +17771,7 @@ function baixarContaPagar(){
   var hoje=new Date();hoje.setHours(0,0,0,0);
   var body='';
   pend.forEach(function(cp){
-    var venc=cp.vencimento?new Date(cp.vencimento+'T00:00'):null;var atr=venc&&venc<hoje;
+    var venc=cpVencEf(cp);var atr=venc&&venc<hoje;
     body+='<div style="padding:12px;border:1px solid '+(atr?'#fca5a5':'var(--border)')+';border-radius:8px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="ge(\'modal-cp-selbaixa\').remove();abrirBaixaCP(\''+cp.id+'\')"><div><div style="font-weight:600;font-size:13px">'+(cp.fornecedor_nome||'\u2014')+'</div><div style="font-size:11px;color:var(--text2)">'+[(cp.nf_numero?'NF '+cp.nf_numero:''),(cp.descricao||''),(venc?'Venc: '+venc.toLocaleDateString('pt-BR'):'')].filter(Boolean).join(' \u00b7 ')+'</div></div><div style="font-weight:700;color:var(--accent);white-space:nowrap">'+fmtV(cp.valor)+'</div></div>';
   });
   modal.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:20px;width:480px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.18)"><div style="font-size:15px;font-weight:600;margin-bottom:16px">Selecione o t\u00edtulo para baixar</div>'+body+'<button onclick="ge(\'modal-cp-selbaixa\').remove()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Fechar</button></div>';
@@ -17817,7 +17842,7 @@ async function confirmarBaixaCP(id){
   var dataPgto=ge('cpbaixa-data')?ge('cpbaixa-data').value:'';
   var valorPago=parseFloat((ge('cpbaixa-valor')?ge('cpbaixa-valor').value:'')||cp.valor);
   if(!dataPgto){alert('Informe a data de pagamento.');return;}
-  var venc=cp.vencimento?new Date(cp.vencimento+'T00:00'):new Date(dataPgto+'T00:00');
+  var venc=cp.vencimento?cpVencEf(cp):new Date(dataPgto+'T00:00');   // vencimento efetivo (dia util)
   var pgto=new Date(dataPgto+'T00:00');
   var status=pgto<=venc?'pago':'pago_atraso';
   try{
@@ -17827,6 +17852,154 @@ async function confirmarBaixaCP(id){
     if(curPage==='contas-pagar'){var c=ge('content');if(c){c.innerHTML=rContasPagar();initContasPagar();}}
     alert('\u2713 Baixa registrada como "'+(status==='pago'?'Pago no prazo':'Pago em atraso')+'"!');
   }catch(e){alert('Erro: '+e.message);}
+}
+
+// ============ CP · EXCLUSAO DE TITULO (v1.0.1002) ============
+function cpSouDiretor(){ return String((cu&&cu.email)||'').toLowerCase()===String(AS_DEMO_EMAIL||'').toLowerCase(); }
+// aprovado (ou legado sem aprovacao) ou pago: so com autorizacao do diretor
+function cpPrecisaAutorizacao(cp){ return cpPagoSt(cp) || (!cpPendenteAprov(cp)&&!cpReprovado(cp)); }
+function cpRefreshTela(){ if(curPage==='contas-pagar'){ var c=ge('content'); if(c){ c.innerHTML=rContasPagar(); initContasPagar(); } } }
+function cpExcluirAbrir(id){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp)return;
+  var dir=cpSouDiretor(), precisa=cpPrecisaAutorizacao(cp);
+  var old=ge('modal-cp-excl'); if(old)old.remove();
+  var m=document.createElement('div'); m.id='modal-cp-excl';
+  m.style.cssText='position:fixed;inset:0;z-index:600;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
+  var tit=tgEsc(cp.fornecedor_nome||'')+(cp.parcela_total>1?(' '+cp.parcela_num+'/'+cp.parcela_total):'')
+    +' · '+fmtV(Number(cp.valor||0))+' · venc. '+(cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR'):'—');
+  var h='<div style="background:var(--bg);border-radius:14px;padding:20px;max-width:460px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.2)">';
+  if(precisa&&!dir){
+    h+='<div style="font-size:15px;font-weight:700;margin-bottom:4px">Solicitar exclusão</div>'
+      +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">'+tit+'</div>'
+      +'<div style="font-size:12.5px;background:#fef3c7;border:1px solid #f0d9a8;border-radius:8px;padding:9px 11px;color:#8a6d1a;margin-bottom:10px">Título '+(cpPagoSt(cp)?'pago':'aprovado')+': a exclusão precisa da autorização do diretor.</div>'
+      +(cp.exclusao_solicitada_em?('<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Já existe um pedido de '+tgEsc(cp.exclusao_solicitada_nome||'')+' — enviar de novo atualiza o motivo.</div>'):'')
+      +'<div style="font-size:12px;font-weight:600;margin-bottom:4px">Motivo</div>'
+      +'<textarea id="cpex-motivo" rows="3" class="fi" style="width:100%;box-sizing:border-box" placeholder="Ex.: lançado em duplicidade">'+tgEsc(cp.exclusao_motivo||'')+'</textarea>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="ge(\'modal-cp-excl\').remove()">Cancelar</button>'
+      +'<button class="btn btn-p" onclick="cpSolicitarExclusao(\''+cp.id+'\')">Solicitar exclusão</button></div>';
+  } else {
+    var grupo=cp.parcela_grupo?(contasPagar||[]).filter(function(x){
+      return x.parcela_grupo===cp.parcela_grupo && !cpPagoSt(x) && (dir||!cpPrecisaAutorizacao(x)); }):[];
+    h+='<div style="font-size:15px;font-weight:700;margin-bottom:4px">Excluir título</div>'
+      +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">'+tit+'</div>'
+      +(cpPagoSt(cp)?'<div style="font-size:12.5px;background:#fee2e2;border:1px solid #f5c2c0;border-radius:8px;padding:9px 11px;color:#991b1b;margin-bottom:10px">Título PAGO: excluir não desfaz o pagamento no banco nem na conciliação.</div>':'')
+      +(grupo.length>1?('<label style="display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:9px;padding:9px 11px;font-size:13px;margin-bottom:6px"><input type="radio" name="cpex-esc" value="um" checked> Só esta parcela</label>'
+        +'<label style="display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:9px;padding:9px 11px;font-size:13px;margin-bottom:10px"><input type="radio" name="cpex-esc" value="grupo"> Todas as parcelas em aberto do lançamento ('+grupo.length+')</label>'):'')
+      +'<div style="font-size:12px;font-weight:600;margin-bottom:4px">Motivo <span style="font-weight:400;color:var(--text3)">(fica no registro)</span></div>'
+      +'<textarea id="cpex-motivo" rows="2" class="fi" style="width:100%;box-sizing:border-box" placeholder="Ex.: lançamento de teste">'+tgEsc(cp.exclusao_motivo||'')+'</textarea>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="ge(\'modal-cp-excl\').remove()">Cancelar</button>'
+      +'<button class="btn" style="background:#b91c1c;color:#fff;border-color:#b91c1c" onclick="cpExcluirConfirmar(\''+cp.id+'\')">Excluir</button></div>';
+  }
+  h+='</div>';
+  m.innerHTML=h; document.body.appendChild(m);
+}
+async function cpSolicitarExclusao(id){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp)return;
+  var motivo=String((ge('cpex-motivo')&&ge('cpex-motivo').value)||'').trim();
+  if(!motivo){ alert('Informe o motivo da exclusão.'); return; }
+  var upd={exclusao_solicitada_por:cu.id, exclusao_solicitada_nome:(profile&&profile.full_name)||cu.email,
+           exclusao_solicitada_em:new Date().toISOString(), exclusao_motivo:motivo};
+  try{
+    await dbUpdate('contas_pagar',id,upd);
+    Object.assign(cp,upd);
+    var mm=ge('modal-cp-excl'); if(mm)mm.remove();
+    var me=ge('modal-novo-cp'); if(me)me.remove();
+    try{
+      await fetch(SB_URL+'/functions/v1/send-email',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+        body:JSON.stringify({from:'VERUS ERP <noreply@mklogistica.com>',to:[AS_DEMO_EMAIL],
+          subject:'VERUS · pedido de exclusão no contas a pagar — '+(cp.fornecedor_nome||''),
+          html:'<p><b>'+tgEsc(upd.exclusao_solicitada_nome)+'</b> pediu a exclusão de um título '+(cpPagoSt(cp)?'<b>pago</b>':'<b>aprovado</b>')+':</p>'
+            +'<p>'+tgEsc(cp.fornecedor_nome||'')+' — '+tgEsc(cp.descricao||'')+'<br>Valor: '+fmtV(Number(cp.valor||0))
+            +' · Vencimento: '+(cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR'):'—')+'</p>'
+            +'<p>Motivo: '+tgEsc(motivo)+'</p><p>Autorize ou negue no VERUS, em Contas a Pagar.</p>'})});
+    }catch(_e){}
+    showToast('Pedido de exclusão enviado ao diretor','green');
+    cpRefreshTela();
+  }catch(e){ alert('Não foi possível registrar o pedido: '+(e.message||e)); }
+}
+async function cpExcluirConfirmar(id){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp)return;
+  var dir=cpSouDiretor();
+  if(cpPrecisaAutorizacao(cp)&&!dir){ alert('Exclusão deste título precisa da autorização do diretor.'); return; }
+  var esc=(document.querySelector('input[name="cpex-esc"]:checked')||{}).value||'um';
+  var alvo=[cp];
+  if(esc==='grupo'&&cp.parcela_grupo) alvo=(contasPagar||[]).filter(function(x){
+    return x.parcela_grupo===cp.parcela_grupo && !cpPagoSt(x) && (dir||!cpPrecisaAutorizacao(x)); });
+  var motivo=String((ge('cpex-motivo')&&ge('cpex-motivo').value)||'').trim();
+  if(!confirm('Excluir '+alvo.length+' título(s)? Esta ação não pode ser desfeita pela tela (fica registrada para auditoria).'))return;
+  var r=await cpExcluirExecutar(alvo,motivo);
+  var mm=ge('modal-cp-excl'); if(mm)mm.remove();
+  var me=ge('modal-novo-cp'); if(me)me.remove();
+  showToast(r.ok+' título(s) excluído(s)'+(r.erros.length?(' · '+r.erros.length+' com erro'):''), r.erros.length?'amber':'green');
+  if(r.erros.length) alert('Não excluídos:\n• '+r.erros.join('\n• '));
+  cpRefreshTela();
+}
+// Registra a copia do titulo ANTES de apagar; se o apagar falhar, desfaz o registro.
+async function cpExcluirExecutar(lista,motivo){
+  var ok=0, erros=[];
+  for(var i=0;i<lista.length;i++){
+    var cp=lista[i], log=null;
+    try{
+      log=await dbInsert('cp_exclusoes',{company_id:cp.company_id||(company&&company.id)||null, titulo_id:cp.id,
+        snapshot:cp, motivo:motivo||cp.exclusao_motivo||null,
+        solicitado_por:cp.exclusao_solicitada_por||cu.id, solicitado_nome:cp.exclusao_solicitada_nome||(profile&&profile.full_name)||cu.email,
+        solicitado_em:cp.exclusao_solicitada_em||new Date().toISOString(),
+        autorizado_por:cu.id, autorizado_nome:(profile&&profile.full_name)||cu.email});
+      if(!log) throw new Error('não foi possível registrar a exclusão (rode o SQL da v1.0.1002)');
+      await dbDelete('contas_pagar',cp.id);
+      // o banco nao da erro quando a permissao bloqueia: confere se sumiu mesmo
+      var ainda=await dbSelect('contas_pagar','id=eq.'+cp.id+'&select=id').catch(function(){return [];});
+      if(ainda&&ainda.length) throw new Error('o banco não permitiu excluir (permissão)');
+      contasPagar=(contasPagar||[]).filter(function(x){return x.id!==cp.id;});
+      ok++;
+    }catch(e){
+      if(log&&log.id){ try{ await dbDelete('cp_exclusoes',log.id); }catch(_x){} }
+      erros.push((cp.fornecedor_nome||'')+' '+(cp.vencimento||'')+': '+String(e.message||e).slice(0,160));
+    }
+  }
+  return {ok:ok,erros:erros};
+}
+function cpExclusoesPainel(){
+  if(!cpSouDiretor())return;
+  var pend=(contasPagar||[]).filter(function(cp){return !!cp.exclusao_solicitada_em;});
+  var old=ge('modal-cp-exped'); if(old)old.remove();
+  var m=document.createElement('div'); m.id='modal-cp-exped';
+  m.style.cssText='position:fixed;inset:0;z-index:600;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
+  var linhas=pend.map(function(cp){
+    var st=cpPagoSt(cp)?'<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:#dcfce7;color:#166534">Pago</span>'
+                       :'<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:#dbeafe;color:#1e40af">Aprovado</span>';
+    return '<tr><td style="padding:8px;border-bottom:1px solid var(--border)"><b>'+tgEsc(cp.fornecedor_nome||'')+'</b><div style="font-size:11px;color:var(--text3)">venc '+(cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR'):'—')+'</div></td>'
+      +'<td style="padding:8px;border-bottom:1px solid var(--border);white-space:nowrap">'+fmtV(Number(cp.valor||0))+'</td>'
+      +'<td style="padding:8px;border-bottom:1px solid var(--border)">'+st+'</td>'
+      +'<td style="padding:8px;border-bottom:1px solid var(--border);font-size:12px">'+tgEsc(cp.exclusao_solicitada_nome||'')+'<div style="color:var(--text3)">'+new Date(cp.exclusao_solicitada_em).toLocaleString('pt-BR')+'</div></td>'
+      +'<td style="padding:8px;border-bottom:1px solid var(--border);font-size:12px">'+tgEsc(cp.exclusao_motivo||'')+'</td>'
+      +'<td style="padding:8px;border-bottom:1px solid var(--border);white-space:nowrap">'
+        +'<button class="btn btn-sm" style="background:#b91c1c;color:#fff;border-color:#b91c1c" onclick="cpAutorizarExclusao(\''+cp.id+'\')">Autorizar</button> '
+        +'<button class="btn btn-sm" onclick="cpNegarExclusao(\''+cp.id+'\')">Negar</button></td></tr>';
+  }).join('');
+  m.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:18px;max-width:900px;width:100%;max-height:85vh;overflow:auto">'
+    +'<div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-size:16px;font-weight:700">Pedidos de exclusão a autorizar</div>'
+    +'<span onclick="ge(\'modal-cp-exped\').remove()" style="margin-left:auto;cursor:pointer;font-size:20px;color:var(--text3)">×</span></div>'
+    +(pend.length?('<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>'
+      +['Título','Valor','Situação','Pedido por','Motivo',''].map(function(t){return '<th style="background:#0A2540;color:#fff;font-size:10.5px;padding:7px 8px;text-align:left">'+t+'</th>';}).join('')
+      +'</tr></thead><tbody>'+linhas+'</tbody></table>'):'<div style="color:var(--text3);padding:14px">Nenhum pedido pendente.</div>')
+    +'</div>';
+  document.body.appendChild(m);
+}
+async function cpAutorizarExclusao(id){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp||!cpSouDiretor())return;
+  if(!confirm('Autorizar e excluir o título de '+(cp.fornecedor_nome||'')+' ('+fmtV(Number(cp.valor||0))+')?'))return;
+  var r=await cpExcluirExecutar([cp],cp.exclusao_motivo);
+  if(r.erros.length) alert('Não excluído: '+r.erros[0]); else showToast('Título excluído','green');
+  cpExclusoesPainel(); cpRefreshTela();
+}
+async function cpNegarExclusao(id){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp||!cpSouDiretor())return;
+  var upd={exclusao_solicitada_por:null,exclusao_solicitada_nome:null,exclusao_solicitada_em:null,exclusao_motivo:null};
+  try{ await dbUpdate('contas_pagar',id,upd); Object.assign(cp,upd); showToast('Pedido negado — o título continua','blue'); }
+  catch(e){ alert('Erro: '+(e.message||e)); }
+  cpExclusoesPainel(); cpRefreshTela();
 }
 
 // ============ CP · ABA LISTA DE LANÇAMENTOS ============
@@ -17846,7 +18019,7 @@ function cpLisStatusDe(cp){
   if(cpPagoSt(cp))return 'pago';
   if(cpPendenteAprov(cp))return 'aguardando';
   var hoje=new Date();hoje.setHours(0,0,0,0);
-  var v=cp.vencimento?new Date(cp.vencimento+'T00:00'):null;
+  var v=cpVencEf(cp);
   if(v&&v<hoje)return 'vencido';
   return 'apagar';
 }
@@ -17923,7 +18096,10 @@ function cpLisRender(){
     cnt[cpLisStatusDe(cp)]++;
   });
   var chip=function(k,cor,bg){return cnt[k]?'<span onclick="cpLisSetStatus(\''+k+'\')" style="font-size:12px;padding:4px 10px;border-radius:99px;background:'+bg+';color:'+cor+';cursor:pointer">'+cnt[k]+' '+CP_LIS_ST[k][0].toLowerCase()+'</span>':'';};
-  var h='<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">'
+  var _pedEx=cpSouDiretor()?(contasPagar||[]).filter(function(cp){return !!cp.exclusao_solicitada_em;}).length:0;
+  var h=(_pedEx?('<div onclick="cpExclusoesPainel()" style="cursor:pointer;display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #f0d9a8;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#8a6d1a">'
+      +'\ud83d\udd12 <b>'+_pedEx+' pedido(s) de exclusão a autorizar</b><span style="margin-left:auto;text-decoration:underline">ver</span></div>'):'')
+    +'<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">'
     +chip('aguardando','#854d0e','#fef9c3')+chip('vencido','#991b1b','#fee2e2')
     +chip('apagar','var(--text2)','var(--bg2)')+chip('pago','#166534','#dcfce7')+chip('recusado','#991b1b','#fee2e2')+'</div>';
 
@@ -17949,7 +18125,9 @@ function cpLisRender(){
       var acao='<span onclick="novoTituloCP(\''+cp.id+'\')" title="Editar título (unidade, conta, descrição…)" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
       if(st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span> <span style="color:var(--border)">|</span> '+acao;
       else if(['pago','pago_atraso'].includes(cp.status)) acao='<span onclick="cpEstornoModal(\''+cp.id+'\')" title="Estornar pagamento e voltar o título para em aberto" style="cursor:pointer;color:var(--red-text);font-size:11px">estornar</span> <span style="color:var(--border)">|</span> '+acao;
-      acao='<span onclick="cpAnexosModal(\''+cp.id+'\')" title="Anexos" style="cursor:pointer;color:var(--text3);margin-right:8px">\ud83d\udcce</span>'+acao;
+      acao='<span onclick="cpAnexosModal(\''+cp.id+'\')" title="Anexos" style="cursor:pointer;color:var(--text3);margin-right:8px">\ud83d\udcce</span>'+acao
+        +' <span onclick="cpExcluirAbrir(\''+cp.id+'\')" title="Excluir título" style="cursor:pointer;color:var(--text3);margin-left:6px">\ud83d\uddd1</span>';
+      if(cp.exclusao_solicitada_em) parc+=' <span title="'+String(cp.exclusao_motivo||'').replace(/"/g,'&quot;')+'" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#fef3c7;color:#92400e">exclusão solicitada</span>';
       h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
         +'<span style="font-size:12px;color:var(--text2)">'+venc+'</span>'
         +'<span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(cp.descricao||'').replace(/"/g,'&quot;')+'">'+(cp.fornecedor_nome||'—')+parc+'</span>'
@@ -19171,6 +19349,7 @@ async function novoTituloCP(editId){
    +'<div><label for="cp-semmov" style="font-size:13px;font-weight:600;cursor:pointer">N\u00e3o gerar movimento</label>'
    +'<div style="font-size:11px;color:var(--text3);margin-top:2px;line-height:1.45">O t\u00edtulo continua no Contas a Pagar e no Demonstrativo de despesas, mas n\u00e3o aparece no relat\u00f3rio Contabilidade \u00b7 pagamentos.</div></div></div>'
    +'<div style="display:flex;gap:8px;margin-top:14px">'
+   +(ed?('<button onclick="cpExcluirAbrir(\''+ed.id+'\')" style="padding:10px 14px;border:1px solid #f5c2c0;border-radius:8px;background:#fff5f5;color:#b91c1c;cursor:pointer;font-weight:600">\ud83d\uddd1 Excluir título</button>'):'')
    +'<button onclick="ge(\'modal-novo-cp\').remove()" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>'
    +'<button onclick="salvarTituloCP(false)" style="flex:1.2;padding:10px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-weight:600">'+(ed?'Salvar altera\u00e7\u00f5es':'Salvar')+'</button>'
    +(ed?'':'<button onclick="salvarTituloCP(true)" style="flex:1.2;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-weight:600">Salvar e novo</button>')
