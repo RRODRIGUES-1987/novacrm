@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.992 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.993 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.992';
+const APP_VERSION='v1.0.993';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6658,6 +6658,51 @@ async function deleteTTDoc(docId, path, tabelaId){
   await loadTTDocs(tabelaId);
 }
 
+// ── Tabela tarifaria: a coluna `tarifas` (JSON) e o que gerador, fatura manual e
+// propostas leem. A tela edita em tabelas_quadros/tabelas_itens. As duas precisam
+// andar juntas.
+function ttJsonDe(t){ try{ var j=Array.isArray(t&&t.tarifas)?t.tarifas:JSON.parse((t&&t.tarifas)||'[]'); return Array.isArray(j)?j:[]; }catch(e){ return []; } }
+function ttValorBR(v,perc){
+  if(v===null||v===undefined||v==='')return '';
+  var n=Number(String(v).replace('%','').replace(',','.'));
+  if(isNaN(n))return String(v);
+  var s=String(n).replace('.',',');            // 0.114 -> "0,114" (sem cortar casas)
+  return perc?s+'%':s;
+}
+function ttNdMapa(json){
+  var nd={}; (json||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){
+    if(it&&it.nota_debito===true) nd[String(it.servico||'').trim().toUpperCase()]=true; }); });
+  return nd;
+}
+// quadros da tela -> JSON no formato das propostas
+function ttJsonDeQuadros(quadros,jsonAntigo){
+  var nd=ttNdMapa(jsonAntigo);
+  return (quadros||[]).filter(function(q){return q&&q.nome&&(q.itens||[]).some(function(i){return i&&i.servico;});}).map(function(q){
+    return {quadro:q.nome, itens:(q.itens||[]).filter(function(i){return i&&i.servico;}).map(function(it){
+      var un=it.unidade_cobranca||it.unidade||'';
+      var perc=/%/.test(un)||String(it.valor||'').indexOf('%')>=0;
+      var k=String(it.servico).trim().toUpperCase();
+      return {servico:it.servico, unidade:un, unidade_cobranca:un, valor:ttValorBR(it.valor,perc),
+              qtde_minima:it.qtde_minima?Number(it.qtde_minima):null,
+              nota_debito:(it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true)};
+    })};
+  });
+}
+// JSON das propostas -> quadros da tela
+function ttQuadrosDeJson(json){
+  return (json||[]).map(function(q,qi){
+    return {id:'new-json-'+qi, nome:q.quadro||q.nome||('Quadro '+(qi+1)), isNew:true,
+      itens:(q.itens||[]).filter(function(i){return i&&(i.servico||i.descricao);}).map(function(it){
+        var perc=String(it.valor||'').indexOf('%')>=0||it.tipo==='percentual';
+        var un=it.unidade_cobranca||it.unidade||'';
+        if(perc&&!/%/.test(un)) un=(un?un+' ':'')+'%';
+        var v=parseValorTarifa(it.valor,perc);
+        return {servico:it.servico||it.descricao, unidade_cobranca:un, valor:v||'',
+                qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true,
+                cap_recebimento:false, cap_expedicao:false};
+      })};
+  });
+}
 async function loadTTQuadros(tabelaId){
   const quadros=await dbSelect('tabelas_quadros',`tabela_id=eq.${tabelaId}&order=ordem.asc`);
   ttQuadros=[];
@@ -6665,7 +6710,49 @@ async function loadTTQuadros(tabelaId){
     const itens=await dbSelect('tabelas_itens',`quadro_id=eq.${q.id}&order=ordem.asc`);
     ttQuadros.push({...q,itens,isNew:false});
   }
+  const _t=tabelasTarifarias.find(function(x){return x.id===tabelaId;});
+  const _js=ttJsonDe(_t);
+  if(!ttQuadros.some(function(q){return (q.itens||[]).length;})){
+    // tabela nascida de proposta: os itens so existem na coluna tarifas
+    if(_js.length) ttQuadros=ttQuadrosDeJson(_js);
+  } else {
+    // o flag de Nota de Debito so existe na coluna tarifas: traz de la
+    const nd=ttNdMapa(_js);
+    ttQuadros.forEach(function(q){ (q.itens||[]).forEach(function(it){
+      if(it.nota_debito===undefined) it.nota_debito=nd[String(it.servico||'').trim().toUpperCase()]===true; }); });
+  }
   renderTTQuadros();
+}
+// Sincronizacao unica: tabelas editadas na tela antes da v1.0.993 ficaram com a
+// coluna tarifas desatualizada. ttSincronizarJSON(false) so mostra; (true) grava.
+async function ttSincronizarJSON(aplicar){
+  var cid=company&&company.id;
+  var quadros=await dbSelectAll('tabelas_quadros','order=ordem.asc')||[];
+  var itens=await dbSelectAll('tabelas_itens','order=ordem.asc')||[];
+  var porQ={}; itens.forEach(function(i){ (porQ[i.quadro_id]=porQ[i.quadro_id]||[]).push(i); });
+  var porT={}; quadros.forEach(function(q){ (porT[q.tabela_id]=porT[q.tabela_id]||[]).push({nome:q.nome,itens:porQ[q.id]||[]}); });
+  var resumo=function(js){ var a=[]; (js||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){
+      var perc=String(it.valor||'').indexOf('%')>=0;
+      a.push(String(it.servico||'').trim().toUpperCase()+'='+(parseValorTarifa(it.valor,perc)||0).toFixed(4)); }); });
+    return a.sort(); };
+  var rel=[];
+  for(var tid in porT){
+    var t=tabelasTarifarias.find(function(x){return x.id===tid;});
+    if(!t||(cid&&t.company_id!==cid))continue;
+    var ant=ttJsonDe(t), novo=ttJsonDeQuadros(porT[tid],ant);
+    if(!novo.length)continue;
+    var ra=resumo(ant), rn=resumo(novo);
+    if(ra.join('|')===rn.join('|'))continue;
+    var sai=ra.filter(function(x){return rn.indexOf(x)<0;}), entra=rn.filter(function(x){return ra.indexOf(x)<0;});
+    rel.push({tabela:t.nome, itens_antes:ra.length, itens_depois:rn.length,
+              sai:sai.slice(0,4).join(' ; '), entra:entra.slice(0,4).join(' ; ')});
+    if(aplicar){
+      await dbUpdate('tabelas_tarifarias',tid,{tarifas:JSON.stringify(novo)});
+      t.tarifas=JSON.stringify(novo);
+    }
+  }
+  console.table(rel);
+  return rel.length+' tabela(s) '+(aplicar?'sincronizada(s)':'com diferença — rode ttSincronizarJSON(true) para gravar');
 }
 
 function addQuadro(){
@@ -6845,6 +6932,14 @@ async function saveTabelaTarifaria(){
       await dbInsert('tabelas_itens',{quadro_id:qd.id,servico:item.servico,unidade_cobranca:item.unidade_cobranca||null,valor:item.valor?Number(item.valor):null,qtde_minima:item.qtde_minima?Number(item.qtde_minima):null,cap_recebimento:item.cap_recebimento||false,cap_expedicao:item.cap_expedicao||false,ordem:ii});
     }
   }
+  // mantem a coluna tarifas — lida pelo gerador, fatura manual e propostas —
+  // igual ao que acabou de ser salvo aqui
+  try{
+    const _tAnt=tabelasTarifarias.find(function(x){return x.id===tabelaId;});
+    const _novo=ttJsonDeQuadros(ttQuadros,ttJsonDe(_tAnt));
+    await dbUpdate('tabelas_tarifarias',tabelaId,{tarifas:JSON.stringify(_novo)});
+    tabelasTarifarias=tabelasTarifarias.map(function(t){return t.id===tabelaId?Object.assign({},t,{tarifas:JSON.stringify(_novo)}):t;});
+  }catch(_se){ console.warn('sincronizar tarifas',_se); }
   ttQuadros=[];
 }
 
