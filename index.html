@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.988 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.990 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.988';
+const APP_VERSION='v1.0.990';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1521,7 +1521,45 @@ async function doLogin(){
   sbStorageInit(tok);          // habilita o upload de PDF (storage) com a sessao
   safeSession.setItem('crm_tok',tok);
   safeSession.setItem('crm_user',JSON.stringify(data.user));
+  if(HERMES_BOLSO && data.refresh_token){ safeLocal.setItem('hb_refresh',data.refresh_token); hbAgendar(data.expires_in); }
   enterApp(data.user);
+}
+// ── Hermes de bolso: sessao lembrada ──
+// Renova com o refresh_token guardado no aparelho. Na primeira chamada do
+// app (sem tok), entra direto; nas seguintes, so troca o token.
+async function hbRenovar(){
+  var rt=safeLocal.getItem('hb_refresh'); if(!rt)return false;
+  try{
+    var r=await sbAuth('token?grant_type=refresh_token',{refresh_token:rt});
+    var d=r&&r.data;
+    if(!r.ok||!d||!d.access_token){ safeLocal.removeItem('hb_refresh'); return false; }
+    var primeira=!tok;
+    tok=d.access_token; sbStorageInit(tok);
+    safeSession.setItem('crm_tok',tok);
+    if(d.user)safeSession.setItem('crm_user',JSON.stringify(d.user));
+    if(d.refresh_token)safeLocal.setItem('hb_refresh',d.refresh_token);
+    window._hbUlt=Date.now();
+    hbAgendar(d.expires_in);
+    if(primeira&&d.user) enterApp(d.user);
+    return true;
+  }catch(e){ console.warn('hbRenovar',e); return false; }
+}
+function hbAgendar(seg){
+  clearTimeout(window._hbT);
+  window._hbUlt=window._hbUlt||Date.now();
+  var ms=Math.max(60,(Number(seg)||3600)-300)*1000;   // 5 min antes de vencer
+  window._hbT=setTimeout(hbRenovar,ms);
+}
+// o iPhone congela o app em segundo plano: ao voltar, renova se passou de 45 min
+document.addEventListener('visibilitychange',function(){
+  if(!HERMES_BOLSO||document.visibilityState!=='visible')return;
+  if(!safeLocal.getItem('hb_refresh'))return;
+  if(!window._hbUlt||Date.now()-window._hbUlt>45*60*1000) hbRenovar();
+});
+function hbSair(){
+  if(!confirm('Sair do Hermes neste aparelho? Vai pedir o login de novo na próxima vez.'))return;
+  safeLocal.removeItem('hb_refresh');
+  if(typeof doLogout==='function') doLogout(); else location.reload();
 }
 
 async function doRecover(){
@@ -5897,10 +5935,11 @@ function hermesBolsoIniciar(){
   if(cab){
     var tit=cab.firstElementChild;
     if(tit) tit.innerHTML='<div style="display:flex;align-items:center;gap:10px">'
-      +'<div style="width:36px;height:36px;border-radius:50%;background:#d99a2b;color:#0A2540;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px">H</div>'
+      +'<img src="hermes-icon-192.png" alt="" style="width:36px;height:36px;border-radius:9px;display:block;border:1px solid rgba(255,255,255,.18)">'
       +'<div><div style="font-size:16px;font-weight:700">Hermes</div>'
-      +'<div style="font-size:11px;opacity:.75">assessor '+tgEsc((company&&company.name)||'MK Logística')+'</div></div></div>';
-    var x=cab.querySelector('button[onclick="asmFechar()"]'); if(x)x.remove();
+      +'<div style="font-size:11px;opacity:.72">assistente de alta performance da diretoria</div></div></div>';
+    var x=cab.querySelector('button[onclick="asmFechar()"]');
+    if(x){ x.outerHTML='<button onclick="hbSair()" title="Sair deste aparelho" style="background:rgba(255,255,255,.12);border:none;color:#fff;border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer">sair</button>'; }
   }
   // atalhos logo acima do campo de pergunta
   var barra=ov.lastElementChild;
@@ -5912,6 +5951,10 @@ function hermesBolsoIniciar(){
     }).join('');
     ov.insertBefore(ch,barra);
   }
+  // tema preto, combinando com o icone
+  ov.style.background='#000';
+  var mic=ge('asm-mic'); if(mic)mic.style.background='#111';
+  var env=barra&&barra.querySelector('button[onclick="asPerguntar()"]'); if(env)env.style.background='#111';
   document.title='Hermes';
 }
 function asmToggleFala(){ _asmFalar=!_asmFalar; var b=ge('asm-fala-btn'); if(b)b.textContent=_asmFalar?'🔊 voz':'🔇 mudo'; if(!_asmFalar)asmPararFala(); }
@@ -5944,7 +5987,7 @@ function asmMic(){
     if(ev.results[ev.results.length-1].isFinal){ try{rec.stop();}catch(e){} setTimeout(function(){asPerguntar(t);},120); }
   };
   rec.onerror=function(ev){ if(ev.error!=='aborted'&&ev.error!=='no-speech')showToast('Voz: '+ev.error,'amber'); };
-  rec.onend=function(){_asmOuvindo=false;if(btn){btn.style.background='#0A2540';btn.textContent='🎤';}if(inp)inp.placeholder='Pergunte… ou toque no microfone';};
+  rec.onend=function(){_asmOuvindo=false;if(btn){btn.style.background=HERMES_BOLSO?'#111':'#0A2540';btn.textContent='🎤';}if(inp)inp.placeholder='Pergunte… ou toque no microfone';};
   try{rec.start();}catch(e){showToast('Não consegui abrir o microfone.','amber');}
 }
 function asmPintar(ferramentaEmUso){
@@ -5954,7 +5997,7 @@ function asmPintar(ferramentaEmUso){
     var t=asTexto(m); if(!t)return;
     var eu=(m.role==='user');
     h+='<div style="display:flex;justify-content:'+(eu?'flex-end':'flex-start')+';margin-bottom:10px">'
-      +'<div style="max-width:84%;padding:11px 14px;border-radius:18px;'+(eu?'border-bottom-right-radius:6px;background:#0A2540;color:#fff':'border-bottom-left-radius:6px;background:#fff;color:#111;border:1px solid #e2e5e9')+';font-size:15px;line-height:1.45;white-space:pre-wrap">'+wEsc(t)+'</div></div>';
+      +'<div style="max-width:84%;padding:11px 14px;border-radius:18px;'+(eu?'border-bottom-right-radius:6px;background:'+(HERMES_BOLSO?'#111':'#0A2540')+';color:#fff':'border-bottom-left-radius:6px;background:#fff;color:#111;border:1px solid #e2e5e9')+';font-size:15px;line-height:1.45;white-space:pre-wrap">'+wEsc(t)+'</div></div>';
   });
   if(asBusy)h+='<div style="display:flex;justify-content:flex-start;margin-bottom:10px"><div style="padding:11px 16px;border-radius:18px;background:#fff;border:1px solid #e2e5e9;color:#888;font-size:14px">'+(ferramentaEmUso?('consultando '+ferramentaEmUso+'…'):'…')+'</div></div>';
   box.innerHTML=h; box.scrollTop=box.scrollHeight;
@@ -9796,6 +9839,9 @@ function gerarSessionToken(){
 
 async function iniciarSessao(){
   if(!cu||!profile) return;
+  // Hermes de bolso: mesmo usuario em outro app, somente leitura. Nao registra
+  // sessao — nao derruba o VERUS, nao e derrubado e nao ocupa vaga.
+  if(typeof HERMES_BOLSO!=='undefined'&&HERMES_BOLSO) return;
 
   // Verificar se já temos um token nesta aba (reload/F5)
   const tokenExistente = safeSession.getItem('verus_session_token');
@@ -9893,6 +9939,7 @@ async function encerrarSessao(){
 
 async function verificarLimiteSessoes(){
   if(!cu) return true;
+  if(typeof HERMES_BOLSO!=='undefined'&&HERMES_BOLSO) return {bloqueado:false};
   try{
     const limite90s = new Date(Date.now()-90000).toISOString();
 
@@ -22774,7 +22821,16 @@ if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then
   try{
     const t=safeSession.getItem('crm_tok');
     const u=safeSession.getItem('crm_user');
-    if(t&&u){tok=t;enterApp(JSON.parse(u));}
+    const _hbRt=(typeof HERMES_BOLSO!=='undefined'&&HERMES_BOLSO)?safeLocal.getItem('hb_refresh'):null;
+    if(t&&u){tok=t;enterApp(JSON.parse(u)); if(_hbRt)hbRenovar();}
+    else if(_hbRt){
+      // app do Hermes: entra sozinho com a sessao lembrada
+      hbRenovar().then(function(ok){
+        if(ok)return;
+        var ld=document.getElementById('app-loading'); if(ld)ld.style.display='none';
+        var aw=document.getElementById('auth-wrap'); if(aw)aw.style.display='flex';
+      });
+    }
     else{
       // Sem sessão - mostra login
       const ld=document.getElementById('app-loading');
