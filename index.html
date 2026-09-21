@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.999 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1000 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.999';
+const APP_VERSION='v1.0.1000';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1988,11 +1988,22 @@ async function loadUserPermissoes(userId){
 }
 
 // ── DATA ──
+// Hierarquia da EMPRESA inteira (so quem responde a quem), independente da
+// unidade ativa: as equipes atravessam as filiais.
+var pessoasHier=null;
+async function carregarHierarquia(){
+  var cid=company?.id||null; if(!cid){ pessoasHier=null; return; }
+  try{
+    pessoasHier=await dbSelectAll('pessoas','company_id=eq.'+cid+'&select=id,responde_para')||null;
+    // telas que dependem da equipe se redesenham com a cadeia completa
+    if(['rh-ferias','rh-avaliacoes','rh-experiencia','rh-performance'].indexOf(curPage)>=0 && typeof render==='function') render();
+  }catch(e){ console.warn('carregarHierarquia',e); pessoasHier=null; }
+}
 async function loadData(){
   const uid=cu.id;
   const role=profile?.role||'vendedor';
   const cid=company?.id||null; // empresa selecionada na tela de seleção
-
+  carregarHierarquia();   // em paralelo: nao atrasa o carregamento
   // Carrega as unidades do usuário ANTES das queries, para o unitFilter() já restringir
   if(cid){ await loadUserUnits().catch(e=>console.warn('loadUserUnits init:',e)); }
   // Carrega templates de relatório da empresa (editor de relatórios)
@@ -13455,9 +13466,10 @@ function minhaEquipeIds(){
   const raiz=profile?.pessoa_id||null;
   const ids=new Set();
   if(!raiz)return ids;
-  // mapa pai -> filhos (quem responde_para X)
+  // mapa pai -> filhos (quem responde_para X) — sobre a empresa inteira,
+  // nao so a unidade ativa (senao a cadeia quebra em quem esta em outra filial)
   const filhosDe={};
-  pessoas.forEach(function(p){
+  ((pessoasHier&&pessoasHier.length)?pessoasHier:pessoas).forEach(function(p){
     if(p.responde_para){
       if(!filhosDe[p.responde_para])filhosDe[p.responde_para]=[];
       filhosDe[p.responde_para].push(p.id);
