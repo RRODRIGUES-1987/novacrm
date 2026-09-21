@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.998 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.999 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.998';
+const APP_VERSION='v1.0.999';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -22702,7 +22702,8 @@ async function executarDuplicarUsuario(){
     // 4) empresas e unidades
     for(const r of O.emps){ try{ await dbInsert('user_companies',Object.assign(semId(r),{user_id:userId})); }catch(e){ avisos.push('empresa'); } }
     for(const r of O.units){ try{ await dbInsert('user_units',Object.assign(semId(r),{user_id:userId})); }catch(e){ avisos.push('unidade'); } }
-    // 5) e-mail de acesso (mesmo do cadastro normal)
+    // 5) e-mail de acesso (mesmo do cadastro normal) — com confirmacao
+    let emailSt='nao_solicitado', emailErro='';
     if(ge('dup-mail')?.checked){
       try{
         const comp2=(companies||[]).find(c=>c.id===O.de.company_id);
@@ -22711,18 +22712,47 @@ async function executarDuplicarUsuario(){
           body:JSON.stringify({from:'VERUS ERP <noreply@mklogistica.com>',to:[email],
             subject:'Bem-vindo ao VERUS ERP — '+((comp2&&comp2.name)||''),
             html:htmlEmailAcesso({nome:name,email:email,empresa:(comp2&&comp2.name)||'—',role:O.de.role,senha:pw,reenvio:false})})});
-        if(!r.ok) avisos.push('e-mail de acesso não enviado');
-      }catch(e){ avisos.push('e-mail de acesso não enviado'); }
+        const j=await r.json().catch(()=>({}));
+        if(r.ok&&!(j&&(j.error||j.ok===false))) emailSt='enviado';
+        else { emailSt='falhou'; emailErro=String((j&&(j.error||j.message))||('HTTP '+r.status)); }
+      }catch(e){ emailSt='falhou'; emailErro=String(e.message||e); }
     }
     window._dupOrigem=null;
     closeModal(); render();
-    alert('✓ Usuário '+name+' criado a partir de '+(O.de.full_name||O.de.email)+'.'
-      +(avisos.length?('\n\nAtenção: '+Array.from(new Set(avisos)).join(', ')+'.'):''));
+    dupResultado({nome:name,email:email,senha:pw,de:(O.de.full_name||O.de.email),
+      perms:O.perms.length,emps:O.emps.length,units:O.units.length,
+      emailSt:emailSt,emailErro:emailErro,avisos:Array.from(new Set(avisos))});
   }catch(e){
     showModalErr(e.message||'Erro ao duplicar usuário.');
   }finally{
     if(btn){btn.disabled=false;btn.innerHTML='Salvar';}
   }
+}
+
+// Janela final do duplicar: mesma linguagem do "Reenviar e-mail de acesso"
+function dupResultado(o){
+  const cor=o.emailSt==='enviado'?'var(--green-text)':(o.emailSt==='falhou'?'var(--red-text)':'var(--text3)');
+  const tit=o.emailSt==='enviado'?('✉ Usuário criado e e-mail de acesso enviado')
+           :(o.emailSt==='falhou'?'⚠ Usuário criado, mas o e-mail NÃO foi enviado':'✓ Usuário criado');
+  const sub=o.emailSt==='enviado'?('Enviado para '+o.email)
+           :(o.emailSt==='falhou'?('Repasse a senha manualmente. Motivo: '+o.emailErro):('E-mail de acesso não foi solicitado — repasse a senha a '+o.email));
+  const m=document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+  m.innerHTML='<div style="background:var(--bg);border-radius:var(--radius-xl,16px);padding:26px 24px;max-width:420px;width:95%;box-shadow:0 8px 40px rgba(0,0,0,.2)">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px;color:'+cor+'">'+tit+'</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'+tgEsc(sub)+'</div>'
+    +'<div style="font-size:12.5px;margin-bottom:12px"><b>'+tgEsc(o.nome)+'</b> · criado a partir de '+tgEsc(o.de)+'</div>'
+    +'<div style="font-size:11px;color:var(--text2);margin-bottom:6px">Senha inicial</div>'
+    +'<div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius,10px);padding:12px 14px;margin-bottom:12px">'
+      +'<span style="font-family:monospace;font-size:18px;font-weight:700;letter-spacing:2px;flex:1;word-break:break-all">'+tgEsc(o.senha)+'</span>'
+      +'<button id="dup-copiar" style="border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;background:var(--bg)">Copiar</button></div>'
+    +'<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px">Copiado: '+o.perms+' permissão(ões) · '+o.emps+' empresa(s) · '+o.units+' unidade(s)'
+      +(o.avisos&&o.avisos.length?('<br><span style="color:var(--amber-text)">Atenção: '+tgEsc(o.avisos.join(', '))+'</span>'):'')+'</div>'
+    +'<button id="dup-ok" style="width:100%;padding:10px;border:none;border-radius:var(--radius,10px);background:var(--accent);color:var(--accent-text);font-weight:600;cursor:pointer">Ok</button>'
+  +'</div>';
+  document.body.appendChild(m);
+  m.querySelector('#dup-copiar').onclick=function(){ try{ navigator.clipboard.writeText(o.senha); this.textContent='✓'; }catch(e){} };
+  m.querySelector('#dup-ok').onclick=function(){ m.remove(); };
 }
 
 async function executarCopiaPermissoes(paraUserId){
