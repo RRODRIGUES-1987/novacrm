@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.993 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.995 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.993';
+const APP_VERSION='v1.0.995';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1521,23 +1521,31 @@ async function doLogin(){
   sbStorageInit(tok);          // habilita o upload de PDF (storage) com a sessao
   safeSession.setItem('crm_tok',tok);
   safeSession.setItem('crm_user',JSON.stringify(data.user));
-  if(HERMES_BOLSO && data.refresh_token){ safeLocal.setItem('hb_refresh',data.refresh_token); hbAgendar(data.expires_in); }
+  if(data.refresh_token){
+    if(HERMES_BOLSO) safeLocal.setItem('hb_refresh',data.refresh_token);   // app do Hermes: lembra o login
+    else safeSession.setItem('crm_refresh',data.refresh_token);           // VERUS: so enquanto o navegador estiver aberto
+    hbAgendar(data.expires_in);
+  }
   enterApp(data.user);
 }
 // ── Hermes de bolso: sessao lembrada ──
 // Renova com o refresh_token guardado no aparelho. Na primeira chamada do
 // app (sem tok), entra direto; nas seguintes, so troca o token.
+// onde fica o refresh: no app do Hermes, no aparelho; no VERUS, so na aba
+function sessRtGet(){ return HERMES_BOLSO?safeLocal.getItem('hb_refresh'):safeSession.getItem('crm_refresh'); }
+function sessRtSet(v){ if(HERMES_BOLSO)safeLocal.setItem('hb_refresh',v); else safeSession.setItem('crm_refresh',v); }
+function sessRtDel(){ if(HERMES_BOLSO)safeLocal.removeItem('hb_refresh'); else safeSession.removeItem('crm_refresh'); }
 async function hbRenovar(){
-  var rt=safeLocal.getItem('hb_refresh'); if(!rt)return false;
+  var rt=sessRtGet(); if(!rt)return false;
   try{
     var r=await sbAuth('token?grant_type=refresh_token',{refresh_token:rt});
     var d=r&&r.data;
-    if(!r.ok||!d||!d.access_token){ safeLocal.removeItem('hb_refresh'); return false; }
+    if(!r.ok||!d||!d.access_token){ sessRtDel(); return false; }
     var primeira=!tok;
     tok=d.access_token; sbStorageInit(tok);
     safeSession.setItem('crm_tok',tok);
     if(d.user)safeSession.setItem('crm_user',JSON.stringify(d.user));
-    if(d.refresh_token)safeLocal.setItem('hb_refresh',d.refresh_token);
+    if(d.refresh_token)sessRtSet(d.refresh_token);
     window._hbUlt=Date.now();
     hbAgendar(d.expires_in);
     if(primeira&&d.user) enterApp(d.user);
@@ -1552,8 +1560,8 @@ function hbAgendar(seg){
 }
 // o iPhone congela o app em segundo plano: ao voltar, renova se passou de 45 min
 document.addEventListener('visibilitychange',function(){
-  if(!HERMES_BOLSO||document.visibilityState!=='visible')return;
-  if(!safeLocal.getItem('hb_refresh'))return;
+  if(document.visibilityState!=='visible')return;
+  if(!sessRtGet())return;
   if(!window._hbUlt||Date.now()-window._hbUlt>45*60*1000) hbRenovar();
 });
 function hbSair(){
@@ -4896,7 +4904,7 @@ const AS_TOOLS=[
       // Sem periodo E sem situacao: nao da pra adivinhar o que ele quer.
       if(!a.de && !a.situacao) return {precisa_de:'periodo'};
 
-      const ABERTOS=['rascunho','aguardando','aprovado','enviado','autorizado','nfse_emitida'];
+      const ABERTOS=['rascunho','aguardando','aprovado','enviado','autorizado','faturado','nfse_emitida','pago_parcial'];
       const hoje=new Date().toISOString().slice(0,10);
       let arr=(faturamento||[]).slice();
 
@@ -6956,9 +6964,11 @@ const FAT_STATUS={
   aguardando:    {label:'Aguard. aprovação', color:'var(--amber-text)',  bg:'var(--amber-bg)'},
   aprovado:      {label:'A enviar ao cliente',color:'var(--blue-text)',  bg:'var(--blue-bg)'},
   enviado:       {label:'Aguardando cliente',color:'var(--purple-text)', bg:'var(--purple-bg)'},
-  autorizado:    {label:'Autorizado — emitir NF', color:'var(--blue-text)', bg:'var(--blue-bg)'},
+  autorizado:    {label:'Autorizado — emitir documentos', color:'var(--blue-text)', bg:'var(--blue-bg)'},
+  faturado:      {label:'Faturado — anexar NFS-e', color:'var(--amber-text)', bg:'var(--amber-bg)'},
   nfse_emitida:  {label:'Em aberto',         color:'var(--green-text)',  bg:'var(--green-bg)'},
   pago:          {label:'Paga',              color:'var(--green-text)',  bg:'var(--green-bg)'},
+  pago_parcial:  {label:'Paga parcial',      color:'var(--amber-text)',  bg:'var(--amber-bg)'},
   cancelado:     {label:'Cancelado',         color:'var(--red-text)',    bg:'var(--red-bg)'},
 };
 
@@ -7025,8 +7035,9 @@ function fatEtapa(f){
   else if(f.status==='aguardando')def={k:'aprovar',quem:'nos',    txt:'aguardando gestor',   desde:f.created_at,                lim:S.aprovar};
   else if(f.status==='aprovado') def={k:'enviar',  quem:'nos',    txt:'a enviar ao cliente', desde:f.aprovado_em||f.created_at, lim:S.enviar};
   else if(f.status==='enviado')  def={k:'cliente', quem:'cliente',txt:'aguardando cliente',  desde:f.enviado_em||f.aprovado_em, lim:S.cliente};
-  else if(f.status==='autorizado')def={k:'emitir', quem:'nos',    txt:'a emitir NF',         desde:f.autorizado_em||f.created_at,lim:S.emitir};
-  else if(f.status==='nfse_emitida'&&f.vencimento){
+  else if(f.status==='autorizado')def={k:'emitir', quem:'nos',    txt:'a emitir documentos', desde:f.autorizado_em||f.created_at,lim:S.emitir};
+  else if(f.status==='faturado') def={k:'emitir',  quem:'nos',    txt:'anexar NFS-e',        desde:f.autorizado_em||f.faturado_em||f.created_at,lim:S.emitir};
+  else if((f.status==='nfse_emitida'||f.status==='pago_parcial')&&f.vencimento){
     var venc=new Date(String(f.vencimento).slice(0,10)+'T00:00'), hj=new Date(); hj.setHours(0,0,0,0);
     if(venc<hj) return {k:'vencida',quem:'cliente',txt:'vencida',dias:fatDiasUteis(f.vencimento),lim:0,estourou:true};
     return null;
@@ -7093,13 +7104,16 @@ function fatRowHTML(f,i){
           ${isGestor&&f.status==='aguardando'?`<button class="bicon btn-sm" title="Aprovar" style="color:var(--green)" onclick="aprovarFatura('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </button>`:''}
-          ${['aprovado','enviado','autorizado','nfse_emitida','pago'].includes(f.status)?`<button class="bicon btn-sm" title="${f.status==='enviado'?'Reenviar fatura por e-mail':'Enviar fatura por e-mail ao cliente'}" style="color:var(--accent)" onclick="event.stopPropagation();enviarFaturaEmail('${f.id}')">
+          ${['aprovado','enviado','autorizado','faturado','nfse_emitida','pago_parcial','pago'].includes(f.status)?`<button class="bicon btn-sm" title="${f.status==='enviado'?'Reenviar fatura por e-mail':'Enviar fatura por e-mail ao cliente'}" style="color:var(--accent)" onclick="event.stopPropagation();enviarFaturaEmail('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           </button>
           <button class="bicon btn-sm" title="Registrar autorização cliente" onclick="event.stopPropagation();registrarAutorizacao('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 8.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 16z"/></svg>
           </button>`:''}
-          ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Registrar NFS-e" onclick="registrarNFSe('${f.id}')">
+          ${f.status==='faturado'?`<button class="bicon btn-sm" title="Anexar NFS-e (número e PDF)" style="color:var(--amber-text)" onclick="event.stopPropagation();registrarNFSe('${f.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>`:''}
+          ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Emitir documentos (NF / ND)" style="color:var(--accent)" onclick="event.stopPropagation();fatEmitirAbrir('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           </button>`:''}
           ${f.status==='rascunho'?`<button class="bicon btn-sm" title="Excluir" style="color:var(--red-text)" onclick="event.stopPropagation();delFaturamento('${f.id}')">
@@ -7116,7 +7130,7 @@ function rFaturamento(){
   const role=profile?.role||'vendedor';
   const isGestor=['gestor','admin','adm'].includes(role);
   const pendAprov=faturamento.filter(f=>f.status==='aguardando').length;
-  const totalAutorizado=faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
+  const totalAutorizado=faturamento.filter(f=>['autorizado','faturado','nfse_emitida'].includes(f.status)).reduce((s,f)=>s+Number(f.total||0),0);
   // competência mais recente presente na base — é a que está sendo faturada
   const _comps=faturamento.map(f=>fatCompetencia(f)).filter(Boolean)
     .map(c=>c.slice(3)+'-'+c.slice(0,2)).sort();
@@ -7134,7 +7148,7 @@ function rFaturamento(){
   const _aEnvX =_aEnv.filter(f=>{var e=_et(f);return e&&e.estourou;});
   const _aNF   =faturamento.filter(f=>f.status==='autorizado');
   const _aNFX  =_aNF.filter(f=>{var e=_et(f);return e&&e.estourou;});
-  const _abertas=faturamento.filter(f=>f.status==='nfse_emitida');
+  const _abertas=faturamento.filter(f=>['faturado','nfse_emitida','pago_parcial'].includes(f.status));
   const _venc  =_abertas.filter(f=>{var e=_et(f);return e&&e.k==='vencida';});
   const _mediaCli=_agCli.length?Math.round(_agCli.reduce((s,f)=>{var e=_et(f);return s+((e&&e.dias)||0);},0)/_agCli.length):0;
   window._fatCardCtx={comp:_compLabel};
@@ -7148,9 +7162,9 @@ function rFaturamento(){
       case 'agcli':  return faturamento.filter(f=>f.status==='enviado');
       case 'aenviar':return faturamento.filter(f=>f.status==='aprovado');
       case 'anf':    return faturamento.filter(f=>f.status==='autorizado');
-      case 'aberto': return faturamento.filter(f=>f.status==='nfse_emitida');
+      case 'aberto': return faturamento.filter(f=>['faturado','nfse_emitida','pago_parcial'].includes(f.status));
       case 'vencida':return faturamento.filter(f=>{var e=fatEtapa(f);return e&&e.k==='vencida';});
-      case 'autor':  return faturamento.filter(f=>['autorizado','nfse_emitida'].includes(f.status));
+      case 'autor':  return faturamento.filter(f=>['autorizado','faturado','nfse_emitida'].includes(f.status));
       default:       return faturamento;
     }
   })();
@@ -7887,7 +7901,7 @@ async function confirmarEnvioEmail(id){
     </body></html>`;
 
     // Dados estruturados para a Edge Function gerar o PDF com pdf-lib
-    const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado','zerada':'Zerada'};
+    const FAT_STATUS_LABELS={'rascunho':'Rascunho','aguardando':'Aguardando Aprovação','aprovado':'Aprovado','enviado':'Enviado','autorizado':'Autorizado','faturado':'Faturado','pago_parcial':'Paga parcial','nfse_emitida':'NFS-e Emitida','pago':'Pago','cancelado':'Cancelado','zerada':'Zerada'};
 const FAT_TIPOS={'fatura':'Fatura','nota_debito':'Nota de Débito'};
     const pdf_dados={
       empresa_nome:company?.name||'MK LOGÍSTICA LTDA.',
@@ -8509,6 +8523,168 @@ async function confirmarAutorizacao(id){
   render();
 }
 
+// ═══════════════ EMITIR DOCUMENTOS (NF / ND) ═══════════════
+var _feLin=null, _feFatId=null, _feNfsePdf=null;
+async function fatUploadDoc(arquivo,faturaId,prefixo){
+  if(!window.supabase||!window.supabase.storage){ if(typeof sbStorageInit==='function') sbStorageInit(tok); }
+  if(!window.supabase||!window.supabase.storage) throw new Error('Storage indisponível — recarregue a página (Ctrl+F5) e tente de novo.');
+  const cid=(company&&company.id)||'sem-empresa';
+  const path='faturas/'+cid+'/'+faturaId+'/'+prefixo+'_'+Date.now()+'_'+String(arquivo.name||'doc.pdf').replace(/[^\w.\-]/g,'_');
+  const up=await window.supabase.storage.from('faturas-docs').upload(path,arquivo,{upsert:true});
+  if(up&&up.error) throw up.error;
+  const u=window.supabase.storage.from('faturas-docs').getPublicUrl(path);
+  return (u&&u.data&&u.data.publicUrl)||null;
+}
+function feTab(f){ return (tabelasTarifarias||[]).find(function(t){return t.id===f.tabela_id;}); }
+function feMinimo(tab){
+  if(!tab||!tab.cond_fat_minimo) return 0;
+  var n=parseFloat(String(tab.cond_fat_minimo).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.'));
+  return isNaN(n)?0:n;
+}
+// mesmo calculo da fatura: minimo e impostos so sobre a parte NF; ND sem imposto
+function feCalc(f,lin){
+  var tab=feTab(f);
+  var temCompl=lin.some(function(l){return l.is_complemento;});
+  var base=lin.filter(function(l){return !l.nota_debito&&!l.is_complemento;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
+  var compl=0; if(temCompl){ var mn=feMinimo(tab); compl=(mn>base)?(mn-base):0; }
+  var baseNF=base+compl;
+  var imp=fatImpostosCalc(baseNF,tab,f.iss_incluso===true);
+  var nd=lin.filter(function(l){return l.nota_debito&&!l.is_complemento;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
+  var totalNF=baseNF>0?imp.bruto:0;
+  return {tab:tab,base:base,compl:compl,baseNF:baseNF,imp:imp,totalNF:totalNF,nd:nd,total:totalNF+nd};
+}
+function feVencimento(f,dataRef){
+  var v=null;
+  try{ v=crVencPorRegra(f.cliente_id,dataRef,f.periodo_inicio)||null; }catch(e){ v=null; }
+  if(!v){
+    var d=new Date(dataRef+'T00:00'); d.setDate(d.getDate()+parseInt(f.vencimento_dias||7,10));
+    v=(typeof crProxDiaUtil==='function')?crProxDiaUtil(d.toISOString().slice(0,10)):d.toISOString().slice(0,10);
+  }
+  return v;
+}
+function fatEmitirAbrir(id){
+  var f=(faturamento||[]).find(function(x){return x.id===id;}); if(!f)return;
+  _feFatId=id; _feNfsePdf=f.nfse_pdf_url||null;
+  _feLin=fatLinhasDe(f).map(function(l){return Object.assign({},l);});
+  var old=ge('modal-fe'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='modal-fe';
+  ov.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
+  ov.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:16px;max-width:980px;width:100%;max-height:92vh;overflow:auto"><div id="fe-corpo"></div></div>';
+  document.body.appendChild(ov);
+  feRender();
+}
+function feSet(i,nd){ if(!_feLin||!_feLin[i]||_feLin[i].is_complemento)return; _feLin[i].nota_debito=!!nd; feRender(); }
+function feRender(){
+  var box=ge('fe-corpo'); if(!box)return;
+  var f=(faturamento||[]).find(function(x){return x.id===_feFatId;}); if(!f)return;
+  var nfse=(ge('fe-nfse-num')?ge('fe-nfse-num').value:(f.nfse_numero||''));
+  var nfseData=(ge('fe-nfse-data')?ge('fe-nfse-data').value:(f.nfse_em||new Date().toISOString().slice(0,10)));
+  var c=feCalc(f,_feLin);
+  var hoje=new Date().toISOString().slice(0,10);
+  var venc=feVencimento(f,(nfse&&nfseData)?nfseData:hoje);
+  var ocultas=0;
+  var linhas=_feLin.map(function(l,i){
+    var v=Number(l.subtotal||0);
+    if(!l.is_complemento && !(v>0)){ ocultas++; return ''; }
+    var sv=l.is_complemento?c.compl:v;
+    var seg=l.is_complemento
+      ?'<span style="font-size:11px;color:var(--text3)">sempre NF</span>'
+      :'<span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">'
+        +'<span onclick="feSet('+i+',false)" style="padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer;'+(!l.nota_debito?'background:#e0e7ff;color:#3730a3':'color:var(--text3)')+'">NF</span>'
+        +'<span onclick="feSet('+i+',true)" style="padding:4px 12px;font-size:11.5px;font-weight:700;cursor:pointer;'+(l.nota_debito?'background:#fef3c7;color:#92400e':'color:var(--text3)')+'">ND</span></span>';
+    return '<tr><td style="padding:7px 9px;border-bottom:1px solid var(--border)">'+tgEsc(String(l.servico||(l.is_complemento?'Complemento de faturamento mínimo':'')))+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:right">'+tgEsc(String(l.quantidade||''))+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'+fmtV(sv)+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:center">'+seg+'</td></tr>';
+  }).join('');
+  var th=function(t,al){return '<th style="background:#0A2540;color:#fff;font-size:10.5px;padding:7px 9px;text-align:'+(al||'left')+'">'+t+'</th>';};
+  var kv=function(k,v,forte){return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0'+(forte?';border-top:1px solid var(--border);margin-top:4px;padding-top:7px':'')+'"><span style="color:var(--text3)">'+k+'</span><b'+(forte?' style="font-size:15px"':'')+'>'+v+'</b></div>';};
+  var h='<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<div style="font-size:17px;font-weight:700">Emitir documentos</div>'
+    +'<span style="color:var(--text3);font-size:13px">'+tgEsc((f.numero_fatura||'')+' · '+(f.cliente_nome||'')+' · '+fatCompetencia(f))+'</span>'
+    +'<span style="margin-left:auto;font-size:12px;color:var(--text3)">sugestão inicial vem da tabela tarifária</span></div>'
+    +'<div style="padding:16px 20px">'
+    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>'
+      +th('Serviço')+th('Qtd','right')+th('Subtotal','right')+th('Vai para','center')+'</tr></thead><tbody>'+linhas+'</tbody></table></div>'
+    +(ocultas?'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+ocultas+' linha(s) sem valor não aparecem aqui.</div>':'')
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:14px">'
+      +'<div style="border:1px solid var(--border);border-radius:12px;padding:13px">'
+        +'<div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#3730a3;margin-bottom:8px">NF · nota fiscal de serviço</div>'
+        +kv('Serviços',fmtV(c.base))+(c.compl>0?kv('Complemento mínimo',fmtV(c.compl)):'')
+        +kv('ISS · PIS · COFINS',fmtV(c.totalNF>0?c.imp.totalImpostos:0))+kv('Total da NF',fmtV(c.totalNF),true)
+        +'<div style="font-size:11.5px;color:var(--text3);margin-top:10px">Nº da NFS-e <span style="font-weight:400">(se já emitida — senão, anexe depois)</span></div>'
+        +'<div style="display:flex;gap:8px"><input class="fi" id="fe-nfse-num" value="'+tgEsc(nfse)+'" placeholder="emitida por fora? informe aqui" oninput="feRender()" style="flex:1">'
+        +'<input class="fi" id="fe-nfse-data" type="date" value="'+tgEsc(nfseData)+'" onchange="feRender()" style="width:150px"></div>'
+        +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><span id="fe-nfse-st" style="flex:1;font-size:12px;color:'+(_feNfsePdf?'var(--green-text)':'var(--text3)')+'">'+(_feNfsePdf?'✓ PDF anexado':'nenhum PDF anexado')+'</span>'
+        +'<label class="btn btn-sm" style="cursor:pointer">Anexar PDF<input type="file" accept="application/pdf" style="display:none" onchange="feUploadNfse(this)"></label></div>'
+      +'</div>'
+      +'<div style="border:1px solid var(--border);border-radius:12px;padding:13px">'
+        +'<div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#92400e;margin-bottom:8px">ND · nota de débito</div>'
+        +kv('Itens',fmtV(c.nd))+kv('Impostos','não incidem')+kv('Total da ND',fmtV(c.nd),true)
+        +'<div style="font-size:11.5px;color:var(--text3);margin-top:10px">Nº da ND</div>'
+        +'<div class="fi" style="background:var(--bg2)">'+(f.nd_numero?tgEsc(f.nd_numero):(c.nd>0?'gerado pelo VERUS ao faturar':'sem itens de ND'))+'</div>'
+        +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">O PDF da ND é gerado na fatura depois de faturar.</div>'
+      +'</div>'
+    +'</div>'
+    +'<div style="margin-top:12px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;border-radius:10px;padding:10px 13px;font-size:12.5px;color:var(--amber-text,#8a6d1a)">'
+      +'Vencimento dos títulos: <b>'+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+'</b> (regra da proposta'+(nfse?', a partir da data da NFS-e':', recalculado quando a NFS-e for anexada')+').</div>'
+    +'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg2)">'
+      +'<span style="font-size:13px;color:var(--text3)">Total da fatura <b style="color:var(--text)">'+fmtV(c.total)+'</b>'+(c.nd>0?(' = NF '+fmtV(c.totalNF)+' + ND '+fmtV(c.nd)):'')+'</span>'
+      +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn" onclick="ge(\'modal-fe\').remove()">Cancelar</button>'
+      +'<button class="btn btn-p" id="fe-btn" onclick="feFaturar()">Faturar · gerar '+((c.totalNF>0?1:0)+(c.nd>0?1:0))+' título(s)</button></span></div>';
+  // preserva o foco do campo que disparou o redesenho
+  var foco=document.activeElement&&document.activeElement.id, pos=foco&&document.activeElement.selectionStart;
+  box.innerHTML=h;
+  if(foco){ var el=ge(foco); if(el){ el.focus(); try{ if(pos!=null)el.setSelectionRange(pos,pos); }catch(e){} } }
+}
+async function feUploadNfse(input){
+  var a=input.files&&input.files[0]; if(!a)return;
+  var st=ge('fe-nfse-st'); if(st){st.textContent='Enviando…';st.style.color='var(--text3)';}
+  try{ _feNfsePdf=await fatUploadDoc(a,_feFatId,'nfse'); if(st){st.textContent='✓ '+a.name;st.style.color='var(--green-text)';} }
+  catch(e){ if(st){st.textContent='Falha no envio';st.style.color='var(--red-text)';} showToast('Erro ao anexar: '+(e.message||e),'red'); }
+}
+async function feFaturar(){
+  var f=(faturamento||[]).find(function(x){return x.id===_feFatId;}); if(!f)return;
+  var c=feCalc(f,_feLin);
+  if(!(c.total>0)){ alert('A fatura está sem valor.'); return; }
+  var nfse=String((ge('fe-nfse-num')&&ge('fe-nfse-num').value)||'').trim();
+  var nfseData=(ge('fe-nfse-data')&&ge('fe-nfse-data').value)||'';
+  var hoje=new Date().toISOString().slice(0,10);
+  var venc=feVencimento(f,(nfse&&nfseData)?nfseData:hoje);
+  var qt=(c.totalNF>0?1:0)+(c.nd>0?1:0);
+  if(!confirm('Faturar '+(f.numero_fatura||'')+'?\n\n'
+    +(c.totalNF>0?('• NF: '+fmtV(c.totalNF)+(nfse?(' — NFS-e '+nfse):' — NFS-e a anexar depois')+'\n'):'')
+    +(c.nd>0?('• ND: '+fmtV(c.nd)+' — número gerado agora\n'):'')
+    +'\nVencimento: '+new Date(venc+'T00:00').toLocaleDateString('pt-BR')
+    +'\nSerão criados '+qt+' título(s) no contas a receber.'))return;
+  var btn=ge('fe-btn'); if(btn){btn.disabled=true;btn.textContent='Faturando…';}
+  try{
+    var lin=_feLin.map(function(l){ var x=Object.assign({},l); if(x.is_complemento)x.subtotal=c.compl; return x; })
+                  .filter(function(l){ return !(l.is_complemento&&!(Number(l.subtotal)>0)); });
+    var upd={linhas:JSON.stringify(lin), subtotal:c.baseNF, iss_valor:c.imp.iss, pis_valor:c.imp.pis, cofins_valor:c.imp.cofins,
+             impostos_total:c.totalNF>0?c.imp.totalImpostos:0, valor_bruto:c.totalNF, total:c.total, nd_valor:c.nd>0?c.nd:null,
+             vencimento:venc, faturado_em:new Date().toISOString(), status:nfse?'nfse_emitida':'faturado'};
+    if(c.nd>0&&!f.nd_numero){
+      var ndNum=await dbRpc('next_numero',{p_company:f.company_id,p_prefixo:'ND'});
+      if(!ndNum) throw new Error('não foi possível gerar o número da ND');
+      upd.nd_numero=ndNum; upd.nd_em=hoje;
+    }
+    if(nfse){ upd.nfse_numero=nfse; upd.nfse_em=nfseData||hoje; }
+    if(_feNfsePdf) upd.nfse_pdf_url=_feNfsePdf;
+    await dbUpdate('faturamento',f.id,upd);
+    Object.assign(f,upd);
+    faturamento=faturamento.map(function(x){return x.id===f.id?f:x;});
+    var n=await criarTitulosFatura(f.id);
+    var m=ge('modal-fe'); if(m)m.remove();
+    showToast((f.numero_fatura||'Fatura')+' faturada · '+n+' título(s) criado(s)'+(upd.nd_numero?(' · ND '+upd.nd_numero):''),'green');
+    render();
+  }catch(e){
+    alert('Não foi possível faturar: '+(e.message||e));
+    if(btn){btn.disabled=false;btn.textContent='Faturar · gerar '+qt+' título(s)';}
+  }
+}
+
 function registrarNFSe(id){
   const old=ge('modal-nfse');if(old)old.remove();
   const modal=document.createElement('div');
@@ -8521,6 +8697,9 @@ function registrarNFSe(id){
     </div>
     <div class="fg"><label class="fl">Data emissão</label>
       <input class="fi" id="nfse-data" type="date" value="${new Date().toISOString().slice(0,10)}">
+    </div>
+    <div class="fg"><label class="fl">PDF da NFS-e <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+      <input type="file" id="nfse-pdf" accept="application/pdf" class="fi" style="padding:6px">
     </div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button onclick="ge('modal-nfse').remove()" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Cancelar</button>
@@ -8550,15 +8729,28 @@ async function confirmarNFSe(id){
       : dtNfse.toISOString().slice(0,10);
   }
 
-  await dbUpdate('faturamento',id,{
-    status:'nfse_emitida',
-    nfse_numero:num,
-    nfse_em:data,
-    vencimento,
-  });
-  faturamento=faturamento.map(f=>f.id===id?{...f,status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento}:f);
+  // PDF opcional
+  let _pdfUrl=null;
+  const _arq=ge('nfse-pdf')&&ge('nfse-pdf').files&&ge('nfse-pdf').files[0];
+  if(_arq){ try{ _pdfUrl=await fatUploadDoc(_arq,id,'nfse'); }catch(_pe){ alert('A NFS-e será registrada, mas o PDF não subiu: '+(_pe.message||_pe)+'\nAnexe de novo depois.'); } }
+  const _updN={status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento};
+  if(_pdfUrl)_updN.nfse_pdf_url=_pdfUrl;
+  const _eraFaturado=f&&f.status==='faturado';
+  await dbUpdate('faturamento',id,_updN);
+  faturamento=faturamento.map(f=>f.id===id?{...f,..._updN}:f);
   ge('modal-nfse')?.remove();
-  await criarLancamentoCR(id);
+  if(_eraFaturado){
+    // titulos ja existem desde o Faturar: NF recebe o numero; os dois (em aberto)
+    // recebem o vencimento recalculado pela data da nota
+    let _crs=[]; try{ _crs=await dbSelect('contas_receber','fatura_id=eq.'+id+'&select=id,documento_tipo,status')||[]; }catch(e){}
+    for(const cr of _crs){
+      const u={};
+      if(['pago','pago_atraso'].indexOf(cr.status)<0) u.vencimento=vencimento;
+      if(String(cr.documento_tipo||'nf')==='nf') u.documento_numero=num;
+      if(Object.keys(u).length){ await dbUpdate('contas_receber',cr.id,u); contasReceber=(contasReceber||[]).map(x=>x.id===cr.id?{...x,...u}:x); }
+    }
+  }
+  await criarLancamentoCR(id);   // cobre fatura antiga (sem titulos) — nao duplica
   alert(`NFS-e registrada! Vencimento calculado: ${new Date(vencimento+'T00:00').toLocaleDateString('pt-BR')}`);
   render();
 }
@@ -9422,7 +9614,7 @@ async function fgCarregaExistentes(){
     var ini=fgISO(fgAno,fgMes,1), fim=fgISO(fgAno,fgMes,fgLastDay(fgAno,fgMes));
     _fgExistentes=await dbSelectAll('faturamento',
       'company_id=eq.'+cid+'&periodo_inicio=gte.'+ini+'&periodo_fim=lte.'+fim
-      +'&select=id,cliente_id,tipo_operacao,periodo_inicio,periodo_fim,status')||[];
+      +'&select=id,numero_fatura,cliente_id,tipo_operacao,periodo_inicio,periodo_fim,status')||[];
   }catch(e){ console.warn('fgCarregaExistentes',e); _fgExistentes=[]; }
   return _fgExistentes;
 }
@@ -9442,6 +9634,7 @@ async function fatGerarAbrir(){
     +'<div id="fg-corpo"></div></div>';
   document.body.appendChild(ov);
   var _b=ge('fg-corpo'); if(_b)_b.innerHTML='<div style="padding:22px;text-align:center;color:var(--text3)">Carregando contatos por opera\u00e7\u00e3o\u2026</div>';
+  _fgContatos=null;          // sempre fresco: cliente recem-cadastrado precisa aparecer
   await fgCarregaContatos();
   await fgCarregaExistentes();
   await fatCarregaMaxNumero();
@@ -9515,9 +9708,10 @@ function fgLinhasDaTabela(tab){
   });
   return out;
 }
-function fgJaExiste(clienteId,ini,fim,tipoOp){
+function fgJaExiste(clienteId,ini,fim,tipoOp){ return !!fgAchaExistente(clienteId,ini,fim,tipoOp); }
+function fgAchaExistente(clienteId,ini,fim,tipoOp){
   var base=(_fgExistentes&&_fgExistentes.length)?_fgExistentes:(faturamento||[]);
-  return base.some(function(f){
+  return base.find(function(f){
     if(f.cliente_id!==clienteId||f.periodo_inicio!==ini||f.periodo_fim!==fim)return false;
     if(['cancelado','reprovado'].indexOf(f.status)>=0)return false;
     // com quebra por operação, cada tipo tem a sua fatura no mesmo período
@@ -9548,7 +9742,7 @@ function fgPrevia(){
                   nome:(cli&&cli.nome)||p.cliente_nome||'\u2014'};
         if(!tab){ item.situacao='pendente'; item.motivo='sem tabela vigente'; }
         else if(!linhas.length){ item.situacao='pendente'; item.motivo='tabela sem itens'; }
-        else if(fgJaExiste(p.cliente_id,pr.ini,pr.fim,al.tipo)){ item.situacao='pulada'; }
+        else if((item.existente=fgAchaExistente(p.cliente_id,pr.ini,pr.fim,al.tipo))){ item.situacao='pulada'; }
         else { item.situacao='nova'; }
         out.push(item);
       });
@@ -9608,7 +9802,11 @@ function fatGerarRender(){
     var dBR=function(iso){ if(!iso)return '\u2014'; var p=iso.split('-'); return p[2]+'/'+p[1]; };
     var badge=function(x){
       if(x.situacao==='nova')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#e7f3ec;color:#166534">nova</span>';
-      if(x.situacao==='pulada')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--bg3);color:var(--text3)">j\u00e1 existe</span>';
+      if(x.situacao==='pulada'){
+        var _ex=x.existente||{}, _st=String(_ex.status||'').replace(/_/g,' ');
+        return '<span title="Procure por este n\u00famero na lista de faturamento" style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--bg3);color:var(--text3)">j\u00e1 existe'
+          +(_ex.numero_fatura?(' \u00b7 '+_ex.numero_fatura):'')+(_st?(' \u00b7 '+_st):'')+'</span>';
+      }
       return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#fdf7e7;color:#8a6d1a">'+(x.motivo||'pendente')+'</span>';
     };
     h+='<div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:42vh">'
@@ -9651,7 +9849,7 @@ async function fatGerarExecutar(){
   var novas=window._fgNovas||[]; if(!novas.length) return;
   var btn=ge('fg-btn-criar'); if(btn){ btn.disabled=true; btn.textContent='Criando\u2026'; }
   var cid=company?company.id:null;
-  var ok=0, erros=0;
+  var ok=0, erros=0, falhas=[];
   // numeração sequencial local (getFatNumero lê o maior já existente)
   for(var i=0;i<novas.length;i++){
     var x=novas[i];
@@ -9673,14 +9871,19 @@ async function fatGerarExecutar(){
         status:'rascunho'
       };
       var res=await dbInsert('faturamento',obj);
-      if(res){ faturamento.unshift(res); (_fgExistentes=_fgExistentes||[]).push(res); ok++; } else erros++;
-    }catch(e){ console.warn('gerar fatura',e); erros++; }
+      if(res){ faturamento.unshift(res); (_fgExistentes=_fgExistentes||[]).push(res); ok++; }
+      else { erros++; falhas.push(x.nome+(x.tipoOp?(' \u00b7 '+x.tipoOp):'')+': o banco n\u00e3o confirmou a grava\u00e7\u00e3o'); }
+    }catch(e){ console.warn('gerar fatura',e); erros++; falhas.push(x.nome+(x.tipoOp?(' \u00b7 '+x.tipoOp):'')+': '+String((e&&e.message)||e).slice(0,220)); }
   }
   fatGerarFechar();
   if(typeof showToast==='function')
     showToast(ok+' rascunho(s) criado(s)'+(erros?' \u00b7 '+erros+' com erro':''), erros?'amber':'green');
-  if(curPage==='faturamento'){ var c=ge('content'); if(c) c.innerHTML=rFaturamento(); }
-  else pg('faturamento');
+  if(falhas.length) alert('Rascunhos que N\u00c3O foram criados ('+falhas.length+'):\n\n\u2022 '+falhas.join('\n\u2022 ')
+    +'\n\nMande esta mensagem ao suporte se n\u00e3o souber o motivo.');
+  try{
+    if(curPage==='faturamento'){ var c=ge('content'); if(c) c.innerHTML=rFaturamento(); }
+    else pg('faturamento');
+  }catch(_re){ console.error('rFaturamento',_re); alert('A lista de faturamento n\u00e3o p\u00f4de ser exibida: '+String((_re&&_re.message)||_re)); }
 }
 
 function gerarSugestoesProg(){
@@ -19829,7 +20032,7 @@ function finRelPagImprimir(){
 // ============ FIM FINANCEIRO · RELATÓRIOS ============
 
 // ============ CR · ABA LISTA DE LANÇAMENTOS ============
-var crLisBusca='', crLisStatus='todos', crLisMes=null, crLisOrd='venc';
+var crLisBusca='', crLisStatus='todos', crLisMes=null, crLisOrd='venc', crLisDoc='todos';
 var contasReceberFatNum={};
 
 function crLisMesRef(){
@@ -19838,6 +20041,7 @@ function crLisMesRef(){
 }
 function crLisSetBusca(v){crLisBusca=(v||'').toLowerCase();crLisRender();}
 function crLisSetStatus(v){crLisStatus=v;crLisRender();}
+function crLisSetDoc(v){crLisDoc=v;crLisRender();}
 function crLisSetMes(v){crLisMes=v;crLisRender();}
 function crLisSetOrd(v){crLisOrd=(crLisOrd===v)?(v+'_desc'):v;crLisRender();}
 
@@ -19864,8 +20068,9 @@ function crLisFiltrados(){
     }
     var st=crLisStatusDe(cp);
     if(crLisStatus!=='todos'&&st!==crLisStatus)return false;
+    if(crLisDoc!=='todos'&&String(cp.documento_tipo||'nf')!==crLisDoc)return false;
     if(crLisBusca){
-      var alvo=[(cp.cliente_nome||''),((contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||'')].join(' ').toLowerCase();
+      var alvo=[(cp.cliente_nome||''),((contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||''),(cp.documento_numero||'')].join(' ').toLowerCase();
       if(alvo.indexOf(crLisBusca)<0)return false;
     }
     return true;
@@ -19897,6 +20102,9 @@ function rCRLista(){
   h+='<input class="fi" id="cp-lis-busca" placeholder="Buscar cliente, fatura…" value="'+crLisBusca.replace(/"/g,'&quot;')+'" oninput="crLisSetBusca(this.value)" style="flex:1;min-width:220px">';
   h+='<select class="fi" onchange="crLisSetMes(this.value)" style="width:auto">'+meses+'</select>';
   h+='<select class="fi" onchange="crLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
+  h+='<select class="fi" onchange="crLisSetDoc(this.value)" style="width:auto">'
+    +[['todos','NF e ND'],['nf','Só NF'],['nd','Só ND']].map(function(o){return '<option value="'+o[0]+'"'+(crLisDoc===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')
+    +'</select>';
   h+='</div>';
   h+='<div id="cp-lis-box"></div>';
   return h;
@@ -19934,7 +20142,10 @@ function crLisRender(){
       var venc=cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'—';
       var fat=(contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||'';
       var comp=cp.competencia?new Date(cp.competencia+'T00:00').toLocaleDateString('pt-BR',{month:'2-digit',year:'2-digit'}):'';
-      var cls=[fat,comp?'comp '+comp:''].filter(Boolean).join(' · ');
+      var _dt=String(cp.documento_tipo||'nf'), _dn=cp.documento_numero||'';
+      var _bdg=cp.fatura_id?('<span style="font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;margin-right:5px;'+(_dt==='nd'?'background:#fef3c7;color:#92400e">ND':'background:#e0e7ff;color:#3730a3">NF')+'</span>'):'';
+      var _doc=_dn?(_dt==='nd'?_dn:('NFS-e '+_dn)):((cp.fatura_id&&_dt==='nf')?'NFS-e a anexar':'');
+      var cls=[_doc,fat,comp?'comp '+comp:''].filter(Boolean).join(' · ');
       var parc='';
       var acao='';
       if(st==='aguardando') acao='<span onclick="novoTituloCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
@@ -19942,7 +20153,7 @@ function crLisRender(){
       h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
         +'<span style="font-size:12px;color:var(--text2)">'+venc+'</span>'
         +'<span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(cp.descricao||'').replace(/"/g,'&quot;')+'">'+(cp.cliente_nome||'—')+parc+'</span>'
-        +'<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(cls||'—')+'</span>'
+        +'<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_bdg+(cls||'—')+'</span>'
         +'<span style="font-size:13px;text-align:right;white-space:nowrap">'+fmtV(cp.valor)+'</span>'
         +'<span><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+S[1]+';color:'+S[2]+';white-space:nowrap">'+S[0]+'</span></span>'
         +'<span style="text-align:right">'+acao+'</span></div>';
@@ -20463,7 +20674,7 @@ async function confirmarBaixaCR(crId){
   // Retenção na fonte: valida bruto-ou-líquido e apura o retido
   const cliR=(clientes||[]).find(c=>c.id===cr.cliente_id);
   const fatR=cr.fatura_id?(faturamento||[]).find(f=>f.id===cr.fatura_id):null;
-  const impR=fatR?Number(fatR.impostos_total||0):0;
+  const impR=(fatR&&String(cr.documento_tipo||'nf')!=='nd')?Number(fatR.impostos_total||0):0;   // ND nao tem imposto
   const retemR=!!(cliR&&cliR.cr_retem_imposto===true&&impR>0);
   let valorRetido=null;
   if(retemR){
@@ -20484,11 +20695,17 @@ async function confirmarBaixaCR(crId){
   await dbUpdate('contas_receber',crId,updCR);
   contasReceber=contasReceber.map(x=>x.id===crId?{...x,...updCR}:x);
 
-  // Sincroniza status da fatura
+  // Sincroniza status da fatura: so vira "pago" quando TODOS os titulos (NF e ND)
+  // estiverem baixados; antes disso fica "pago_parcial".
   if(cr.fatura_id){
-    const novoStatusFat=status==='pago'?'pago':'pago_atraso';
-    await dbUpdate('faturamento',cr.fatura_id,{status:novoStatusFat,data_pagamento:dataPgto});
-    faturamento=faturamento.map(f=>f.id===cr.fatura_id?{...f,status:novoStatusFat}:f);
+    let irmaos=[];
+    try{ irmaos=await dbSelect('contas_receber','fatura_id=eq.'+cr.fatura_id+'&select=id,status')||[]; }catch(e){ irmaos=[{id:crId}]; }
+    irmaos=irmaos.map(x=>x.id===crId?Object.assign({},x,updCR):x);
+    const pagoCR=x=>x.status==='pago'||x.status==='pago_atraso';
+    const todos=irmaos.length>0&&irmaos.every(pagoCR);
+    const updF=todos?{status:'pago',data_pagamento:dataPgto,pago_com_atraso:irmaos.some(x=>x.status==='pago_atraso')}:{status:'pago_parcial'};
+    await dbUpdate('faturamento',cr.fatura_id,updF);
+    faturamento=faturamento.map(f=>f.id===cr.fatura_id?{...f,...updF}:f);
   }
 
   ge('modal-baixa-cr')?.remove();
@@ -20679,22 +20896,34 @@ function imprimirVisaoAcionista(){
   },600);
 }
 // Cria lançamento em contas a receber ao emitir NFS-e
-async function criarLancamentoCR(faturaId){
-  const f=faturamento.find(x=>x.id===faturaId);if(!f||!f.vencimento)return;
+async function criarLancamentoCR(faturaId){ return criarTitulosFatura(faturaId); }
+// Um titulo por DOCUMENTO: NF (total com impostos, sem a ND) e ND (sem imposto).
+// Existencia conferida no BANCO — o array em memoria pode nao estar carregado.
+async function criarTitulosFatura(faturaId){
+  const f=(faturamento||[]).find(x=>x.id===faturaId); if(!f||!f.vencimento)return 0;
   const cid=company?.id||profile?.company_id||null;
-  const existing=contasReceber.find(cr=>cr.fatura_id===faturaId);
-  if(existing)return; // já existe
-  const obj={
-    company_id:cid,...unitPayload(),
-    fatura_id:faturaId,
-    cliente_id:f.cliente_id||null,
-    cliente_nome:f.cliente_nome||'',
-    valor:f.total||0,
-    vencimento:f.vencimento,
-    status:'a_vencer',
-  };
-  const res=await dbInsert('contas_receber',obj);
-  if(res)contasReceber.push(res);
+  const comp=String(f.periodo_fim||f.periodo_inicio||f.data_emissao||'').slice(0,7);
+  const nd=Math.round(Number(f.nd_valor||0)*100)/100;
+  const nf=Math.round((Number(f.total||0)-nd)*100)/100;
+  let exist=[];
+  try{ exist=await dbSelect('contas_receber','fatura_id=eq.'+faturaId+'&select=id,documento_tipo,valor')||[]; }catch(e){ exist=[]; }
+  const docs=[];
+  if(nf>0) docs.push({tipo:'nf',valor:nf,numero:f.nfse_numero||null});
+  if(nd>0) docs.push({tipo:'nd',valor:nd,numero:f.nd_numero||null});
+  let n=0;
+  for(const d of docs){
+    const ja=exist.find(x=>String(x.documento_tipo||'nf')===d.tipo);
+    if(ja) continue;
+    // titulo antigo unico (NF + ND somados): nao duplica a ND — o acerto e feito pelo SQL
+    if(d.tipo==='nd'){ const nfAnt=exist.find(x=>String(x.documento_tipo||'nf')==='nf'); if(nfAnt&&Number(nfAnt.valor||0)>nf+0.05) continue; }
+    const obj=Object.assign({company_id:cid},unitPayload(),{
+      fatura_id:faturaId, cliente_id:f.cliente_id||null, cliente_nome:f.cliente_nome||'',
+      valor:d.valor, vencimento:f.vencimento, status:'a_vencer',
+      documento_tipo:d.tipo, documento_numero:d.numero, competencia:comp?comp+'-01':null});
+    const res=await dbInsert('contas_receber',obj);
+    if(res){ contasReceber.push(res); n++; }
+  }
+  return n;
 }
 
 
@@ -20883,7 +21112,7 @@ function getWorkflowAlertas(){
     });
 
     // Alertas automáticos — vencimento
-    faturamento.filter(f=>f.vencimento&&f.status==='nfse_emitida').forEach(f=>{
+    faturamento.filter(f=>f.vencimento&&(f.status==='nfse_emitida'||f.status==='pago_parcial')).forEach(f=>{
       const venc=new Date(f.vencimento+'T00:00');
       const diff=Math.ceil((venc-hoje)/(1000*60*60*24));
       if(diff<=3)alertas.push({tipo:'vencimento',label:`Fatura ${f.numero_fatura||''} vence em ${diff<=0?'VENCIDA':diff+' dias'}`,cliente:f.cliente_nome||'',dias:diff,prazo:0,id:f.id,status:'nfse_emitida',vencida:diff<=0});
@@ -22917,7 +23146,8 @@ if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then
     const t=safeSession.getItem('crm_tok');
     const u=safeSession.getItem('crm_user');
     const _hbRt=(typeof HERMES_BOLSO!=='undefined'&&HERMES_BOLSO)?safeLocal.getItem('hb_refresh'):null;
-    if(t&&u){tok=t;enterApp(JSON.parse(u)); if(_hbRt)hbRenovar();}
+    const _rtAba=safeSession.getItem('crm_refresh');
+    if(t&&u){tok=t;enterApp(JSON.parse(u)); if(_hbRt||_rtAba)hbRenovar();}
     else if(_hbRt){
       // app do Hermes: entra sozinho com a sessao lembrada
       hbRenovar().then(function(ok){
