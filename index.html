@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.991 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.992 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.991';
+const APP_VERSION='v1.0.992';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -50146,12 +50146,17 @@ async function intgGatilhoSeparado(){
     var p=alvo[i];
     try{
       if(intgSitDe(p)==='faturado'){
-        await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
+        // a edge (v7.2) grava pronto_envio_em so quando o Tiny aceita
+        var rr=await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
           headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
           body:JSON.stringify({action:'situacao',integracao_id:p.integracao_id,intg_pedido_id:p.id,situacao:'pronto_envio'})});
-        n++;
+        var jj=await rr.json().catch(function(){return{};});
+        if(rr.ok&&jj.ok){ p.pronto_envio_em=new Date().toISOString(); if(!jj.skip)n++; }
+        else console.warn('gatilho2: Tiny recusou',p.numero,jj);
+      } else {
+        // ja passou do faturado (pronto_envio/enviado): so marca para nao reavaliar
+        await dbUpdate('intg_pedidos',p.id,{pronto_envio_em:new Date().toISOString()}); p.pronto_envio_em=new Date().toISOString();
       }
-      await dbUpdate('intg_pedidos',p.id,{pronto_envio_em:new Date().toISOString()}); p.pronto_envio_em=new Date().toISOString();
     }catch(e){ console.warn('gatilho2',e); }
   }
   if(n) showToast(n+' pedido(s) faturado(s): "separado" devolvido ao Olist para gerar etiqueta','green');
