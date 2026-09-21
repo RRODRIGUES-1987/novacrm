@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1002 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1003 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1002';
+const APP_VERSION='v1.0.1003';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -17586,12 +17586,17 @@ function rCPLancamentos(){
   var hoje=new Date();hoje.setHours(0,0,0,0);
   var pago=function(cp){return['pago','pago_atraso'].includes(cp.status);};
   var venceu=function(cp){if(pago(cp))return false;var v=cpVencEf(cp);return v&&v<hoje;};
-  var totalCP=contasPagar.reduce(function(s,cp){return s+Number(cp.valor||0);},0);
-  var totalApagar=contasPagar.filter(function(cp){return!pago(cp);}).reduce(function(s,cp){return s+Number(cp.valor||0);},0);
-  var totalAtraso=contasPagar.filter(venceu).reduce(function(s,cp){return s+Number(cp.valor||0);},0);
-  var nTot=contasPagar.length;
-  var nApagar=contasPagar.filter(function(cp){return!pago(cp);}).length;
-  var nAtraso=contasPagar.filter(venceu).length;
+  // mesma regua da lista: recusado nao conta; aguardando aprovacao tem cartao proprio
+  var _stDe=function(cp){return cpLisStatusDe(cp);};
+  var _validos=contasPagar.filter(function(cp){return _stDe(cp)!=='recusado';});
+  var _aberto=contasPagar.filter(function(cp){var st=_stDe(cp);return st==='apagar'||st==='vencido';});
+  var _atraso=contasPagar.filter(function(cp){return _stDe(cp)==='vencido';});
+  var totalCP=_validos.reduce(function(s,cp){return s+Number(cp.valor||0);},0);
+  var totalApagar=_aberto.reduce(function(s,cp){return s+Number(cp.valor||0);},0);
+  var totalAtraso=_atraso.reduce(function(s,cp){return s+Number(cp.valor||0);},0);
+  var nTot=_validos.length;
+  var nApagar=_aberto.length;
+  var nAtraso=_atraso.length;
   var nomeMes=new Date(cpPeriodo.ano,cpPeriodo.mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
   var eixoBtn=function(v,lbl){return '<button onclick="cpSetEixo(\''+v+'\')" style="padding:6px 16px;border:none;font-size:13px;cursor:pointer;font-weight:600;background:'+(cpEixo===v?'#0A2540':'var(--bg)')+';color:'+(cpEixo===v?'#fff':'var(--text2)')+'">'+lbl+'</button>';};
 
@@ -17606,9 +17611,9 @@ function rCPLancamentos(){
   var totAp=filaAp.reduce(function(s,x){return s+Number(x.valor||0);},0);
   h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">';
   h+=cpKpi('Aguardando aprova\u00e7\u00e3o',fmtV(totAp),filaAp.length+' t\u00edtulo(s)',filaAp.length?'#854d0e':'var(--text)',filaAp.length?'#854d0e':'var(--text2)',filaAp.length?'cpSetTab(\'aprovacoes\')':'');
-  h+=cpKpi('Total contas a pagar',fmtV(totalCP),nTot+' t\u00edtulo(s)','#0A2540','var(--text2)','');
-  h+=cpKpi('A pagar',fmtV(totalApagar),nApagar+' t\u00edtulo(s)','#1e5f82','var(--text2)','');
-  h+=cpKpi('Em atraso',fmtV(totalAtraso),nAtraso+' t\u00edtulo(s)',totalAtraso>0?'#991b1b':'var(--text)',totalAtraso>0?'#991b1b':'var(--text2)','');
+  h+=cpKpi('Total contas a pagar',fmtV(totalCP),nTot+' t\u00edtulo(s)','#0A2540','var(--text2)','cpLisIr(\'todos\')');
+  h+=cpKpi('A pagar',fmtV(totalApagar),nApagar+' t\u00edtulo(s)','#1e5f82','var(--text2)',nApagar?'cpLisIr(\'aberto\')':'');
+  h+=cpKpi('Em atraso',fmtV(totalAtraso),nAtraso+' t\u00edtulo(s)',totalAtraso>0?'#991b1b':'var(--text)',totalAtraso>0?'#991b1b':'var(--text2)',nAtraso?'cpLisIr(\'vencido\')':'');
   h+='</div>';
 
   h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
@@ -18011,6 +18016,8 @@ function cpLisMesRef(){
 }
 function cpLisSetBusca(v){cpLisBusca=(v||'').toLowerCase();cpLisRender();}
 function cpLisSetStatus(v){cpLisStatus=v;cpLisRender();}
+// atalho dos cartoes: abre a Lista filtrada, em todos os meses
+function cpLisIr(st){ cpLisStatus=st; cpLisMes='todos'; cpLisBusca=''; cpSetTab('lista'); }
 function cpLisSetMes(v){cpLisMes=v;cpLisRender();}
 function cpLisSetOrd(v){cpLisOrd=(cpLisOrd===v)?(v+'_desc'):v;cpLisRender();}
 
@@ -18040,7 +18047,8 @@ function cpLisFiltrados(){
       if(ds.slice(0,7)!==mes)return false;
     }
     var st=cpLisStatusDe(cp);
-    if(cpLisStatus!=='todos'&&st!==cpLisStatus)return false;
+    if(cpLisStatus==='aberto'){ if(st!=='apagar'&&st!=='vencido')return false; }
+    else if(cpLisStatus!=='todos'&&st!==cpLisStatus)return false;
     if(cpLisBusca){
       var alvo=[(cp.fornecedor_nome||''),(cp.descricao||''),(cp.nf_numero||''),(cp.categoria||''),(cp.agrupamento||'')].join(' ').toLowerCase();
       if(alvo.indexOf(cpLisBusca)<0)return false;
@@ -18067,7 +18075,7 @@ function rCPLista(){
     var lbl=d.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
     meses+='<option value="'+v+'"'+(v===mes?' selected':'')+'>'+lbl+'</option>';
   }
-  var sts=[['todos','Todos os status'],['aguardando','Aguardando aprovação'],['apagar','A pagar'],['vencido','Vencido'],['pago','Pago'],['recusado','Recusado']]
+  var sts=[['todos','Todos os status'],['aguardando','Aguardando aprovação'],['aberto','Em aberto (a pagar + vencido)'],['apagar','A pagar'],['vencido','Vencido'],['pago','Pago'],['recusado','Recusado']]
     .map(function(s){return '<option value="'+s[0]+'"'+(cpLisStatus===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('');
   var h='';
   h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
