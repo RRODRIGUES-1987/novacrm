@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.987 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.988 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.987';
+const APP_VERSION='v1.0.988';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1821,6 +1821,7 @@ async function finishEnterApp(user){
     profiles=[profile,...profiles];
   }
   resetIdle();
+  if(HERMES_BOLSO) hermesBolsoIniciar();
   bootFinalizar(); // dashboard renderizado — libera a tela
   checkFechamentoSemanal();
 }
@@ -2133,6 +2134,7 @@ const IDLE=15*60*1000,WARN=60*1000;
 let itimer=null,wtimer=null,cdiv=null;
 function resetIdle(){
   if(!cu)return;
+  if(HERMES_BOLSO)return;   // app do Hermes: o bloqueio e o do celular
   clearTimeout(itimer);clearTimeout(wtimer);clearInterval(cdiv);
   ge('idlewarn').classList.remove('show');
   wtimer=setTimeout(()=>{
@@ -4710,6 +4712,8 @@ const AS_DEMO_EMAIL='robson.rodrigues@mklogistica.com';
 let asKey='', asModelo='claude-sonnet-4-5', asMsgs=[], asLog=[], asBusy=false, asMotor='local';
 let asPend=null, asUnits=null, asUltimo=null; // asUltimo = ultimo assunto, para perguntas de acompanhamento
 
+// Hermes de bolso: aberto pelo app proprio (hermes.html -> index.html?modo=hermes)
+var HERMES_BOLSO=/[?&]modo=hermes\b/.test(location.search||'');
 function asLiberado(){
   const e=((cu&&cu.email)||'').toLowerCase();
   return e===AS_DEMO_EMAIL;
@@ -5153,6 +5157,7 @@ function asIntent(txt){
 function asPlural(n,um,varios){ return n+' '+(n===1?um:varios); }
 function asRespostaLocal(tool,d){
   if(d && d.erro) return 'Não consegui consultar: '+d.erro;
+  if(d && typeof d.texto_pronto==='string') return d.texto_pronto;
   if(tool==='avisos_pendentes'){
     if(!d.total) return 'Nada pendente da sua ação. Tudo em dia.';
     const mods={}; d.avisos.forEach(x=>{(mods[x.modulo]=mods[x.modulo]||[]).push(x.texto);});
@@ -5549,6 +5554,23 @@ function hmFatTendencia(){
   return r;
 }
 
+// As perguntas de faturamento precisam estar no AS_TOOLS: e por ali que o
+// Hermes executa a funcao ligada a cada linha do mapa. Rodam SEM os filtros
+// que estiverem ativos na tela de relatorios (senao a resposta sairia filtrada).
+function hmSemFiltro(fn){
+  var bk={c:frCliente,o:frTipoOp,b:frBase,a:frAno};
+  frCliente=''; frTipoOp=''; frBase='bruto'; frAno=new Date().getFullYear();
+  try{ return {texto_pronto:fn()}; } finally { frCliente=bk.c; frTipoOp=bk.o; frBase=bk.b; frAno=bk.a; }
+}
+AS_TOOLS.push(
+  {name:'hmFatPorTipo', description:'Receita do ano por tipo de servico (armazenagem, movimentacao, picking, ad valorem, stretch, pallet, locacao, outros).',
+   input_schema:{type:'object',properties:{}}, run:async()=>hmSemFiltro(hmFatPorTipo)},
+  {name:'hmFatPorCliente', description:'Faturamento do ano por cliente, do maior para o menor.',
+   input_schema:{type:'object',properties:{}}, run:async()=>hmSemFiltro(hmFatPorCliente)},
+  {name:'hmFatTendencia', description:'Se o faturamento medio mensal esta subindo, caindo ou estavel, e quais clientes estao em queda.',
+   input_schema:{type:'object',properties:{}}, run:async()=>hmSemFiltro(hmFatTendencia)}
+);
+
 // ═══════════════════════════════════════════════════════════════════
 //  HERMES · MAPA DE PERGUNTAS (tabela hermes_perguntas)
 //  A frase é casada contra as palavras-chave de cada linha do mapa.
@@ -5859,7 +5881,39 @@ function asmAbrir(){
   asPintar();
   setTimeout(function(){var i=ge('asm-inp');if(i)i.focus();},80);
 }
-function asmFechar(){ _asmAberto=false; asmPararFala(); if(_asmRec){try{_asmRec.stop();}catch(e){}} var m=document.getElementById('asm-modal'); if(m)m.remove(); }
+function asmFechar(){ if(HERMES_BOLSO){ asmPararFala(); return; } _asmAberto=false; asmPararFala(); if(_asmRec){try{_asmRec.stop();}catch(e){}} var m=document.getElementById('asm-modal'); if(m)m.remove(); }
+var HB_ATALHOS=['O faturamento médio está subindo ou caindo?','Quanto faturamos por tipo de receita?',
+  'Quanto temos a receber?','O que está vencido?','Como fica o caixa em 30 dias?','Qual o faturamento por cliente?'];
+function hermesBolsoIniciar(){
+  if(!asLiberado()){
+    document.body.insertAdjacentHTML('beforeend','<div style="position:fixed;inset:0;z-index:9999;background:#0A2540;color:#fff;display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;font-size:15px;line-height:1.6">O Hermes ainda não está liberado para o seu usuário.</div>');
+    return;
+  }
+  if(!hermesMapa) hermesCarregarMapa();
+  asmAbrir();
+  var ov=document.getElementById('asm-modal'); if(!ov)return;
+  // cabecalho de assessor, sem o botao de fechar
+  var cab=ov.firstElementChild;
+  if(cab){
+    var tit=cab.firstElementChild;
+    if(tit) tit.innerHTML='<div style="display:flex;align-items:center;gap:10px">'
+      +'<div style="width:36px;height:36px;border-radius:50%;background:#d99a2b;color:#0A2540;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px">H</div>'
+      +'<div><div style="font-size:16px;font-weight:700">Hermes</div>'
+      +'<div style="font-size:11px;opacity:.75">assessor '+tgEsc((company&&company.name)||'MK Logística')+'</div></div></div>';
+    var x=cab.querySelector('button[onclick="asmFechar()"]'); if(x)x.remove();
+  }
+  // atalhos logo acima do campo de pergunta
+  var barra=ov.lastElementChild;
+  if(barra){
+    var ch=document.createElement('div');
+    ch.style.cssText='display:flex;gap:6px;overflow-x:auto;padding:8px 12px 2px;background:#fff;-webkit-overflow-scrolling:touch';
+    ch.innerHTML=HB_ATALHOS.map(function(q){
+      return '<button onclick="asPerguntar(\''+q.replace(/'/g,"\\'")+'\')" style="flex:none;white-space:nowrap;font-size:12.5px;padding:7px 12px;border:1px solid #d8dde4;border-radius:99px;background:#f7f9fb;color:#0A2540;cursor:pointer">'+tgEsc(q)+'</button>';
+    }).join('');
+    ov.insertBefore(ch,barra);
+  }
+  document.title='Hermes';
+}
 function asmToggleFala(){ _asmFalar=!_asmFalar; var b=ge('asm-fala-btn'); if(b)b.textContent=_asmFalar?'🔊 voz':'🔇 mudo'; if(!_asmFalar)asmPararFala(); }
 function asmPararFala(){ try{ if(window.speechSynthesis)window.speechSynthesis.cancel(); }catch(e){} }
 function asmFalar(texto){
