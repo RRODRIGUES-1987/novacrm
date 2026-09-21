@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1003 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1004 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1003';
+const APP_VERSION='v1.0.1004';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5051,12 +5051,14 @@ const AS_TOOLS=[
     }},
     run:async(a)=>{
       const cid=asCid(), hoje=asHoje().toISOString().slice(0,10);
-      let arr=(contasPagar||[]).filter(x=>x.company_id===cid&&x.status==='pendente');
+      // em aberto = aprovado e nao pago (recusado e aguardando aprovacao nao contam)
+      const _st=x=>(typeof cpLisStatusDe==='function')?cpLisStatusDe(x):'apagar';
+      let arr=(contasPagar||[]).filter(x=>x.company_id===cid&&['apagar','vencido'].includes(_st(x)));
       if(a&&a.beneficiario){const q=String(a.beneficiario).toLowerCase();arr=arr.filter(x=>String(x.fornecedor_nome||'').toLowerCase().includes(q));}
-      if(a&&a.apenas_vencidos)arr=arr.filter(x=>(x.vencimento||'')<hoje);
+      if(a&&a.apenas_vencidos)arr=arr.filter(x=>_st(x)==='vencido');
       if(a&&a.dias){const lim=new Date(asHoje().getTime()+a.dias*86400000).toISOString().slice(0,10);arr=arr.filter(x=>(x.vencimento||'')<=lim);}
       const som=l=>l.reduce((t,x)=>t+asNum(x.valor),0);
-      const venc=arr.filter(x=>(x.vencimento||'')<hoje), avenc=arr.filter(x=>(x.vencimento||'')>=hoje);
+      const venc=arr.filter(x=>_st(x)==='vencido'), avenc=arr.filter(x=>_st(x)!=='vencido');
       const por={}; arr.forEach(x=>{const k=x.fornecedor_nome||'—';por[k]=(por[k]||0)+asNum(x.valor);});
       const top=Object.keys(por).map(k=>({beneficiario:k,valor:por[k]})).sort((a,b)=>b.valor-a.valor).slice(0,8);
       return {titulos:arr.length,total:som(arr),vencido:som(venc),vencidos_qtd:venc.length,a_vencer:som(avenc),por_beneficiario:top};
@@ -5071,7 +5073,7 @@ const AS_TOOLS=[
       const lim=new Date(asHoje().getTime()+n*86400000).toISOString().slice(0,10);
       const som=l=>l.reduce((t,x)=>t+asNum(x.valor),0);
       const rec=(contasReceber||[]).filter(x=>x.company_id===cid&&!['pago','pago_atraso','cancelado'].includes(x.status)&&(x.vencimento||'')<=lim);
-      const pag=(contasPagar||[]).filter(x=>x.company_id===cid&&x.status==='pendente'&&(x.vencimento||'')<=lim);
+      const pag=(contasPagar||[]).filter(x=>x.company_id===cid&&(typeof cpLisStatusDe!=='function'||['apagar','vencido'].includes(cpLisStatusDe(x)))&&(x.vencimento||'')<=lim);
       return {dias:n,a_receber:som(rec),a_pagar:som(pag),saldo:som(rec)-som(pag),titulos_receber:rec.length,titulos_pagar:pag.length};
     }
   },
@@ -9067,6 +9069,10 @@ function avisosCalcular(){
   try{ if(pode('contas-pagar')){
     var cpAprov=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status==='pendente'&&(x.aprovacao_status||'')==='pendente';}).length;
     add('Financeiro',cpAprov,'1 título a pagar aguardando sua aprovação','{n} títulos a pagar aguardando sua aprovação','contas-pagar');
+    // contas a PAGAR em atraso — mesma regua da lista (aprovado, nao pago, vencimento efetivo)
+    var cpVenc=(contasPagar||[]).filter(function(x){ return x.company_id===cid && typeof cpLisStatusDe==='function' && cpLisStatusDe(x)==='vencido'; });
+    var cpVTot=cpVenc.reduce(function(t,x){return t+Number(x.valor||0);},0);
+    add('Financeiro',cpVenc.length,'1 título a pagar em atraso · '+money(cpVTot),'{n} títulos a pagar em atraso · '+money(cpVTot),'contas-pagar',"cpLisIr('vencido')");
     var dup=(typeof cpDuplicidades==='function')?cpDuplicidades().length:0;
     add('Financeiro',dup,'1 possível duplicidade no contas a pagar','{n} possíveis duplicidades no contas a pagar','contas-pagar','cpDuplicidadesModal()');
   } }catch(e){console.warn('aviso cp',e);}
@@ -18017,7 +18023,11 @@ function cpLisMesRef(){
 function cpLisSetBusca(v){cpLisBusca=(v||'').toLowerCase();cpLisRender();}
 function cpLisSetStatus(v){cpLisStatus=v;cpLisRender();}
 // atalho dos cartoes: abre a Lista filtrada, em todos os meses
-function cpLisIr(st){ cpLisStatus=st; cpLisMes='todos'; cpLisBusca=''; cpSetTab('lista'); }
+function cpLisIr(st){
+  cpLisStatus=st; cpLisMes='todos'; cpLisBusca=''; cpTab='lista';
+  if(curPage!=='contas-pagar') pg('contas-pagar');   // vindo da tela inicial / Hermes
+  else cpSetTab('lista');
+}
 function cpLisSetMes(v){cpLisMes=v;cpLisRender();}
 function cpLisSetOrd(v){cpLisOrd=(cpLisOrd===v)?(v+'_desc'):v;cpLisRender();}
 
