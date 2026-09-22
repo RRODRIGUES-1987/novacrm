@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1006 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1008 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1006';
+const APP_VERSION='v1.0.1008';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46798,9 +46798,39 @@ function ecomPedCards(){
     +card('Total na base',tot,'var(--text)')+card('Importados hoje',thj,'var(--accent)')+card('Importados ontem',tot2,'var(--text2)')
     +cardSB+'</div>';
 }
+// ── Origem do pedido (v1.0.1008) ──
+var ecomFiltroOrigem='';          // '' | 'integracao' | 'planilha'
+var _ecomNoOlist=null;            // ids de pedidos da planilha vinculados pela integracao
+function ecomOrigem(p){ return String(p&&p.canal||'')==='olist_tiny'?'integracao':'planilha'; }
+function ecomMarketplace(p){
+  var c=String(p&&p.canal||'').toLowerCase(), n=String(p&&p.numero_pedido||'').trim();
+  if(c.indexOf('tiktok')>=0||/^5\d{17}$/.test(n)) return {nome:'TikTok',bg:'#111',cor:'#fff'};
+  if(c.indexOf('mercado')>=0||/^2000\d{11,12}$/.test(n)) return {nome:'Mercado Livre',bg:'#ffe600',cor:'#333'};
+  if(c.indexOf('shopee')>=0||/^\d{6}[A-Z0-9]{8}$/i.test(n)) return {nome:'Shopee',bg:'#ee4d2d',cor:'#fff'};
+  return null;
+}
+async function ecomCarregarNoOlist(){
+  if(_ecomNoOlist!==null)return;
+  _ecomNoOlist={};
+  try{
+    var r=await dbSelectAll('intg_pedidos','company_id=eq.'+ecomCid()+'&status_importacao=eq.manual&select=pedido_verus_id')||[];
+    r.forEach(function(x){ if(x.pedido_verus_id)_ecomNoOlist[x.pedido_verus_id]=1; });
+    var el=ge('ecom-body'); if(el&&typeof ecomPanelPedidos==='function'&&ge('ecom-ped-busca')) el.innerHTML=ecomPanelPedidos();
+  }catch(e){ console.warn('ecomCarregarNoOlist',e); }
+}
+function ecomSetOrigem(v){ ecomFiltroOrigem=v||''; var el=ge('ecom-body'); if(el) el.innerHTML=ecomPanelPedidos(); }
+function ecomOrigemHTML(p){
+  var o=ecomOrigem(p), mk=ecomMarketplace(p);
+  return '<span style="font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;'
+      +(o==='integracao'?'background:#dbeafe;color:#1e40af">Integração':'background:var(--bg3);color:var(--text2)">Planilha')+'</span>'
+    +(mk?('<span style="font-size:10px;padding:1px 7px;border-radius:5px;margin-left:4px;font-weight:700;background:'+mk.bg+';color:'+mk.cor+'">'+mk.nome+'</span>'):'')
+    +((o==='planilha'&&_ecomNoOlist&&_ecomNoOlist[p.id])?'<div style="font-size:10px;color:var(--text3);margin-top:2px">também no Olist</div>':'');
+}
 function ecomPanelPedidos(){
   if(!ecomPedidosDoLojista().length) return '<div class="empty"><p>Nenhum pedido importado ainda</p></div>';
+  ecomCarregarNoOlist();
   var _base=ecomPedidosDoLojista();
+  if(ecomFiltroOrigem) _base=_base.filter(function(p){ return ecomOrigem(p)===ecomFiltroOrigem; });
   if(_ecomFiltroSemBipe){ var _ids={}; ecomEmFolhaSemBipe().forEach(function(p){_ids[p.id]=1;});
                           _base=_base.filter(function(p){return _ids[p.id];}); }
   var rows=_base.map(function(p){
@@ -46810,6 +46840,7 @@ function ecomPanelPedidos(){
       +'onclick="if(!event.target.closest(\'button\'))ecomPedAbrir(\''+p.id+'\')" title="Ver detalhes do pedido">'
       +'<td style="padding:8px;font-family:monospace">E-'+String(p.numero_interno||0).padStart(6,'0')+'</td>'
       +'<td style="padding:8px">'+ecomEsc(p.numero_pedido||'—')+'</td>'
+      +'<td style="padding:8px">'+ecomOrigemHTML(p)+'</td>'
       +'<td style="padding:8px;white-space:nowrap">'+ecomFmtD(p.created_at)+'</td>'
       +'<td style="padding:8px">'+ecomEsc(p.destinatario_nome||'—')+'</td>'
       +'<td style="padding:8px">'+ecomEsc(p.transportadora||'—')+'</td>'
@@ -46823,10 +46854,13 @@ function ecomPanelPedidos(){
       +'<button class="btn btn-sm" style="margin-left:auto" onclick="ecomToggleSemBipe()">Ver todos</button></div>'):'')
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
     +'<input id="ecom-ped-busca" placeholder="&#128269; Buscar pedido (n&ordm;, Order ID, destinat&aacute;rio, tracking&hellip;)" oninput="ecomBuscaTbl(this.value,\'ecom-ped-tr\',\'ecom-ped-busca-info\')" style="flex:1;max-width:380px">'
+    +'<select onchange="ecomSetOrigem(this.value)" style="height:32px;font-size:12.5px;border:1px solid var(--border);border-radius:8px;padding:0 8px;background:var(--bg)">'
+      +[['','Todas as origens'],['integracao','Integração Olist'],['planilha','Planilha']].map(function(o){return '<option value="'+o[0]+'"'+(ecomFiltroOrigem===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')
+    +'</select>'
     +'<span id="ecom-ped-busca-info" style="font-size:12px;color:var(--text3)"></span>'
     +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer&ecirc;ncias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:8px">Nº interno</th><th style="padding:8px">Nº pedido</th><th style="padding:8px">Data</th><th style="padding:8px">Destinatário</th><th style="padding:8px">Transp.</th><th style="padding:8px">Itens</th><th style="padding:8px">NF</th><th style="padding:8px">Status</th><th style="padding:8px"></th></tr></thead>'
+    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:8px">Nº interno</th><th style="padding:8px">Nº pedido</th><th style="padding:8px">Origem</th><th style="padding:8px">Data</th><th style="padding:8px">Destinatário</th><th style="padding:8px">Transp.</th><th style="padding:8px">Itens</th><th style="padding:8px">NF</th><th style="padding:8px">Status</th><th style="padding:8px"></th></tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div>';
 }
 async function ecomImportLogModal(){
@@ -50458,11 +50492,12 @@ async function ecomProdSalvar(id){
 // Credenciais NUNCA transitam legíveis no front após salvas: tabela integracao_credenciais é write-only via RLS.
 let intgList=[], intgPedidos=[], intgDepara=[], intgTab='cfg', _intgLoaded=false, intgPedFiltro='todos';
 const INTG_PROVEDORES={olist_tiny:'Olist Tiny (ERP)'};
-const INTG_IMP_LBL={pendente:'Sincronizado',depara_pendente:'Pend. De-Para',importado:'Importado',erro:'Erro'};
+const INTG_IMP_LBL={pendente:'Sincronizado',depara_pendente:'Pend. De-Para',importado:'Importado · integração',manual:'Já na base · planilha',erro:'Erro'};
+var intgCtl=null;   // filtro da faixa de controle
 function intgHoraLocal(iso){ if(!iso)return ''; var d=new Date(iso); if(isNaN(d))return String(iso).slice(0,16).replace('T',' ');
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function intgBadgeImp(st){
-  var map={pendente:'var(--blue-bg);color:var(--blue-text)',depara_pendente:'var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)',importado:'var(--green-bg,#dcfce7);color:var(--green-text,#059669)',erro:'var(--red-bg);color:var(--red-text)'};
+  var map={pendente:'var(--blue-bg);color:var(--blue-text)',depara_pendente:'var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)',importado:'var(--green-bg,#dcfce7);color:var(--green-text,#059669)',manual:'var(--bg3);color:var(--text2)',erro:'var(--red-bg);color:var(--red-text)'};
   return '<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+(map[st]||'var(--bg3);color:var(--text2)')+'">'+(INTG_IMP_LBL[st]||st||'—')+'</span>';
 }
 // Status do PEDIDO (nao do registro da integracao). "Importado" so diz que o
@@ -50479,6 +50514,12 @@ var INTG_ST_PED={
 };
 function intgBadgePedido(p){
   var st=p.status_importacao||'pendente';
+  if(intgStatusCalc(p)==='manual'){
+    var pm=(ecomPedidos||[]).find(function(x){return x.id===p.pedido_verus_id;});
+    var cm=pm?(INTG_ST_PED[pm.status]||{lbl:String(pm.status||'').replace(/_/g,' '),bg:'var(--bg3)',cor:'var(--text2)'}):null;
+    return (cm?('<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;background:'+cm.bg+';color:'+cm.cor+'">'+cm.lbl+'</span>'):intgBadgeImp('manual'))
+      +'<div style="font-size:10px;color:var(--text3);margin-top:2px">já na base · planilha'+(pm?(' · E-'+String(pm.numero_interno||0).padStart(6,'0')):'')+'</div>';
+  }
   if(st!=='importado'||!p.pedido_verus_id){
     // ainda nao virou pedido: mostra o estado do registro
     return intgBadgeImp(st)+'<div style="font-size:10px;color:var(--text3);margin-top:2px">no staging</div>';
@@ -50635,7 +50676,44 @@ async function intgLog(id){
 // ───── ABA PEDIDOS SINCRONIZADOS ─────
 function intgItens(p){ try{ return Array.isArray(p.itens)?p.itens:(p.itens?JSON.parse(p.itens):[]); }catch(e){ return []; } }
 function intgDeparaDe(gId,sku){ sku=String(sku||'').toLowerCase(); return intgDepara.find(function(d){return d.integracao_id===gId&&String(d.sku_externo||'').toLowerCase()===sku;}); }
+// Faixa de controle: em que "balde" cada pedido do Olist esta do nosso lado
+function intgCtlCat(p){
+  if(p.alerta==='devolucao') return 'devolucao';
+  var st=intgStatusCalc(p);
+  if(st==='manual') return 'manual';
+  if(st==='importado') return 'integracao';
+  var cfg=INTG_SIT[intgSitDe(p)];
+  if(!cfg||cfg.acao!=='importar') return null;
+  if(st==='depara_pendente') return 'depara';
+  if(st==='pendente') return 'importar';
+  return null;
+}
+function intgCtlSet(k){ intgCtl=(intgCtl===k)?null:k; intgRenderBody(); }
+function intgFaixaControle(){
+  var c={importar:0,manual:0,integracao:0,depara:0,devolucao:0}, porSit={};
+  (intgPedidos||[]).forEach(function(p){
+    var k=intgCtlCat(p); if(!k)return; c[k]++;
+    if(k==='importar'){ var sd=intgSitDe(p); porSit[sd]=(porSit[sd]||0)+1; }
+  });
+  var subImp=Object.keys(porSit).map(function(k){return porSit[k]+' '+String((INTG_SIT[k]&&INTG_SIT[k].lbl)||k).toLowerCase();}).join(' · ')||'nada pendente';
+  var q=function(k,tit,v,sub,cor,bg,bd){
+    return '<div onclick="intgCtlSet(\''+k+'\')" style="cursor:pointer;border:1px solid '+bd+';background:'+bg+';border-radius:12px;padding:11px 13px'+(intgCtl===k?';box-shadow:0 0 0 2px #0A2540':'')+'">'
+      +'<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:'+cor+'">'+tit+'</div>'
+      +'<div style="font-size:24px;font-weight:800;color:'+cor+'">'+v+'</div>'
+      +'<div style="font-size:11px;color:var(--text3)">'+sub+'</div></div>';
+  };
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">'
+    +q('importar','A importar',c.importar,subImp,'#166534','#eef7f1','#a7ddc0')
+    +q('manual','Já na base · planilha',c.manual,'entraram pela importação manual','var(--text2)','var(--bg)','var(--border)')
+    +q('integracao','Importados · integração',c.integracao,'fluxo automático','#1e40af','#eff6ff','#bfdbfe')
+    +q('depara','Pendente de De-Para',c.depara,'SKU sem vínculo','#92400e','#fef3c7','#f0d9a8')
+    +q('devolucao','Cancelado após expedir',c.devolucao,c.devolucao?'tratar como devolução':'nenhum','#991b1b','#fdf1f1','#f5c2c0')
+    +'</div>'
+    +(intgCtl?'<div style="font-size:12px;color:var(--text3);margin:-6px 0 10px">Filtrado pela faixa · <span onclick="intgCtlSet(null)" style="cursor:pointer;color:var(--accent);text-decoration:underline">limpar</span></div>':'');
+}
 function intgStatusCalc(p){
+  // pedido que entrou pela planilha e foi so vinculado (novo 'manual' ou legado)
+  if(p.status_importacao==='manual'||(p.status_importacao==='importado'&&/^ja estava na base/i.test(String(p.erro_msg||''))))return 'manual';
   if(p.status_importacao==='importado'||p.status_importacao==='erro')return p.status_importacao;
   var its=intgItens(p); if(!its.length)return p.status_importacao||'pendente';
   var falta=its.some(function(i){return !intgDeparaDe(p.integracao_id,i.sku);});
@@ -50711,13 +50789,13 @@ function intgImportaveis(){
   });
 }
 function intgPanelPed(){
-  var fl=['todos','pendente','depara_pendente','importado','erro'];
+  var fl=['todos','pendente','depara_pendente','importado','manual','erro'];
   var chips=fl.map(function(f){return '<button class="btn" style="font-size:12px;'+(intgPedFiltro===f?'background:var(--accent);color:#fff':'')+'" onclick="intgPedFiltro=\''+f+'\';intgRenderBody()">'+(f==='todos'?'Todos':INTG_IMP_LBL[f])+'</button>';}).join(' ');
   // cards por situação
   var cont={}; intgPedidos.forEach(function(p){ var k=intgSitDe(p)||'(vazio)'; cont[k]=(cont[k]||0)+1; });
   var ordem=['aprovado','faturado','dados_incompletos','enviado','entregue','cancelado'];
   Object.keys(cont).forEach(function(k){ if(ordem.indexOf(k)<0)ordem.push(k); });
-  var cards='<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Situa\u00e7\u00e3o no Olist \u2014 clique para filtrar. S\u00f3 as <b style="color:#166534">verdes</b> entram como pedido.</div>'
+  var cards=intgFaixaControle()+'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Situa\u00e7\u00e3o no Olist \u2014 clique para filtrar. S\u00f3 as <b style="color:#166534">verdes</b> entram como pedido.</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">'
     +ordem.filter(function(k){return cont[k];}).map(function(k){
       var c=INTG_SIT[k]||{lbl:k,cor:'var(--text3)',bg:'var(--bg2)',bd:'var(--border)',sub:'sem regra'};
@@ -50730,6 +50808,7 @@ function intgPanelPed(){
   var _bq=String(intgBusca||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
   var lista=intgPedidos.filter(function(p){ var st=intgStatusCalc(p);
     if(!(intgPedFiltro==='todos'||st===intgPedFiltro))return false;
+    if(intgCtl&&intgCtlCat(p)!==intgCtl)return false;
     if(intgSitFiltro&&intgSitDe(p)!==intgSitFiltro)return false;
     if(_bq){
       var alvo=[p.numero,p.pedido_externo_id,p.cliente_nome,p.numero_nota,p.nfe_numero]
@@ -51015,8 +51094,8 @@ async function intgVincularExistentes(){
   for(var i=0;i<alvo.length;i++){
     var ped=intgJaNaBase(alvo[i]); if(!ped)continue;
     try{
-      await dbUpdate('intg_pedidos',alvo[i].id,{status_importacao:'importado',pedido_verus_id:ped.id,erro_msg:'ja estava na base (importacao manual)'});
-      alvo[i].status_importacao='importado'; alvo[i].pedido_verus_id=ped.id; alvo[i].erro_msg='ja estava na base (importacao manual)';
+      await dbUpdate('intg_pedidos',alvo[i].id,{status_importacao:'manual',pedido_verus_id:ped.id,erro_msg:'ja estava na base (importacao manual)'});
+      alvo[i].status_importacao='manual'; alvo[i].pedido_verus_id=ped.id; alvo[i].erro_msg='ja estava na base (importacao manual)';
       n++;
     }catch(e){}
   }
