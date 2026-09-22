@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1014 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1015 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1014';
+const APP_VERSION='v1.0.1015';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -50759,6 +50759,17 @@ async function intgLog(id){
 // ───── ABA PEDIDOS SINCRONIZADOS ─────
 function intgItens(p){ try{ return Array.isArray(p.itens)?p.itens:(p.itens?JSON.parse(p.itens):[]); }catch(e){ return []; } }
 function intgDeparaDe(gId,sku){ sku=String(sku||'').toLowerCase(); return intgDepara.find(function(d){return d.integracao_id===gId&&String(d.sku_externo||'').toLowerCase()===sku;}); }
+// Item resolvido: tem vinculo no De-Para OU e um kit cuja composicao inteira
+// existe (a importacao desmonta o kit nos componentes).
+function intgItemOk(gId,sku){
+  if(intgDeparaDe(gId,sku)) return true;
+  var comps=(typeof ecomKitComp==='function')?ecomKitComp(String(sku||'').toUpperCase()):null;
+  if(!comps||!comps.length) return false;
+  return comps.every(function(c){
+    var cs=String(c.sku||'').toUpperCase();
+    return !!intgDeparaDe(gId,cs)||(ecomProdutos||[]).some(function(x){return String(x.sku||'').toUpperCase()===cs;});
+  });
+}
 // Faixa de controle: em que "balde" cada pedido do Olist esta do nosso lado
 function intgCtlCat(p){
   if(p.alerta==='devolucao') return 'devolucao';
@@ -50802,7 +50813,7 @@ function intgStatusCalc(p){
   if(p.status_importacao==='historico'||(p.status_importacao==='importado'&&!p.pedido_verus_id))return 'historico';
   if(p.status_importacao==='importado'||p.status_importacao==='erro')return p.status_importacao;
   var its=intgItens(p); if(!its.length)return p.status_importacao||'pendente';
-  var falta=its.some(function(i){return !intgDeparaDe(p.integracao_id,i.sku);});
+  var falta=its.some(function(i){return !intgItemOk(p.integracao_id,i.sku);});
   return falta?'depara_pendente':'pendente';
 }
 // Regra de entrada por situação do Tiny (fluxo PE Digital)
@@ -50906,7 +50917,7 @@ function intgPanelPed(){
   var nSel=Object.keys(_intgSel).length;
   var rows=lista.map(function(p){
     var st=intgStatusCalc(p); var its=intgItens(p);
-    var mp=its.filter(function(i){return !!intgDeparaDe(p.integracao_id,i.sku);}).length;
+    var mp=its.filter(function(i){return intgItemOk(p.integracao_id,i.sku);}).length;
     var et=p.etiqueta_url?'&#127991;&#65039;':'—';
     var act='<button class="btn" style="font-size:11px;padding:3px 8px" onclick="intgVerPayload(\''+p.id+'\')">Ver</button>';
     var sc=intgSitCfg(p), pode=!!impIds[p.id];
