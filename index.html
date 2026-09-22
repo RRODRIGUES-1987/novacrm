@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1012 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1013 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1012';
+const APP_VERSION='v1.0.1013';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -47324,6 +47324,8 @@ function ecomRelModal(){
     +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:14px">'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data inicial</div><input type="date" id="ecom-rel-ini" value="'+fmt(ini)+'"></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data final</div><input type="date" id="ecom-rel-fim" value="'+fmt(hoje)+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px"><b>OS</b> (uma ou v&aacute;rias)</div><input id="ecom-rel-os" list="ecom-rel-os-lista" placeholder="ex.: 812, 813" style="width:150px">'
+        +'<datalist id="ecom-rel-os-lista">'+ecomRelOsSugestoes()+'</datalist></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Tipo</div><select id="ecom-rel-tipo"><option value="sintetico">Sint&eacute;tico (por produto)</option><option value="analitico">Anal&iacute;tico (por pedido)</option></select></div>'
       +'<button class="btn btn-p btn-sm" onclick="ecomRelGerar()">Gerar</button>'
       +'<span style="margin-left:auto;font-size:12px;color:var(--text3)">S&oacute; pedidos <b>carregados</b> no per&iacute;odo</span>'
@@ -47790,6 +47792,8 @@ function ecomRelExpedicaoView(){
     +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:14px">'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data inicial</div><input type="date" id="ecom-rel-ini" value="'+fmt(ini)+'"></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data final</div><input type="date" id="ecom-rel-fim" value="'+fmt(hoje)+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px"><b>OS</b> (uma ou v&aacute;rias)</div><input id="ecom-rel-os" list="ecom-rel-os-lista" placeholder="ex.: 812, 813" style="width:150px">'
+        +'<datalist id="ecom-rel-os-lista">'+ecomRelOsSugestoes()+'</datalist></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Tipo</div><select id="ecom-rel-tipo"><option value="sintetico">Sint&eacute;tico (por produto)</option><option value="analitico">Anal&iacute;tico (por pedido)</option></select></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Base</div><select id="ecom-rel-base" onchange="ecomRelBaseTrocou()"><option value="importado">Importados (entrada)</option><option value="expedido">Expedidos (carregados)</option></select></div>'
       +'<button class="btn btn-p btn-sm" onclick="ecomRelGerar()">Gerar</button>'
@@ -47814,13 +47818,42 @@ function ecomRelDataDe(p,base){
   return base==='expedido' ? String(p.data_expedicao||p.data_conferencia||'').slice(0,10)
                            : String(p.data_importacao||p.created_at||'').slice(0,10);
 }
-function ecomRelCompute(ini,fim,base){
+// ── Filtro por OS (v1.0.1013) ──
+function ecomRelOsLabel(osId){ var o=(ecomOrdensSep||[]).find(function(x){return x.id===osId;}); return o?('OS-'+String(o.numero||0).padStart(4,'0')):''; }
+function ecomRelOsSugestoes(){
+  var meus={}; ecomPedidosDoLojista().forEach(function(p){ meus[p.id]=1; });
+  var cont={};
+  (ecomOsPedidos||[]).forEach(function(op){ if(meus[op.pedido_id]) cont[op.os_id]=(cont[op.os_id]||0)+1; });
+  ecomPedidosDoLojista().forEach(function(p){ if(p.os_id&&!cont[p.os_id]) cont[p.os_id]=(cont[p.os_id]||0)+1; });
+  return (ecomOrdensSep||[]).filter(function(o){return cont[o.id];}).slice(0,40).map(function(o){
+    var dt=String(o.created_at||'').slice(0,10);
+    return '<option value="'+(o.numero||0)+'">OS-'+String(o.numero||0).padStart(4,'0')+(dt?(' · '+ecomRelDataBr(dt)):'')+' · '+cont[o.id]+' pedido(s)</option>';
+  }).join('');
+}
+// "812, 813" / "OS-0812" -> conjunto de os_id
+function ecomRelOsIds(txt){
+  var nums=String(txt||'').split(/[^0-9]+/).filter(Boolean).map(function(n){return parseInt(n,10);});
+  var ids={}; nums.forEach(function(n){ (ecomOrdensSep||[]).forEach(function(o){ if(Number(o.numero)===n) ids[o.id]=1; }); });
+  return {ids:ids, nums:nums};
+}
+function ecomRelOsDoPedido(p){
+  if(p.os_id) return p.os_id;
+  var op=(ecomOsPedidos||[]).find(function(x){return x.pedido_id===p.id;}); return op?op.os_id:null;
+}
+function ecomRelCompute(ini,fim,base,osTxt){
   base=base||'importado';
+  var _os=ecomRelOsIds(osTxt), _temOs=Object.keys(_os.ids).length>0;
   var peds=ecomPedidosDoLojista().filter(function(p){
     if(base==='expedido' && p.status!=='carregado') return false;
+    if(_temOs){ var oid=ecomRelOsDoPedido(p); return !!(oid&&_os.ids[oid]); }   // OS passa por cima do periodo
     var dd=ecomRelDataDe(p,base); if(!dd)return false;
     return (!ini||dd>=ini)&&(!fim||dd<=fim);
   });
+  if(_temOs){
+    // periodo das colunas = datas dos pedidos das OS escolhidas
+    var _ds=peds.map(function(p){return ecomRelDataDe(p,base)||String(p.created_at||'').slice(0,10);}).filter(Boolean).sort();
+    ini=_ds[0]||ini; fim=_ds[_ds.length-1]||fim;
+  }
   var gran=ecomRelGran(ini,fim); var cols=ecomRelCols(ini,fim,gran);
   var colTotals={},grand=0,agg={},ord=[],ana=[];
   peds.forEach(function(p){
@@ -47834,17 +47867,19 @@ function ecomRelCompute(ini,fim,base){
       var k=(_pe||_sku||_desc||'').toUpperCase(); if(!k)return;
       if(!agg[k]){ agg[k]={sku:_dsku,descricao:_nome,cells:{},total:0}; ord.push(k); }
       var q=ecomN(i.qtd); agg[k].cells[bk]=(agg[k].cells[bk]||0)+q; agg[k].total+=q; colTotals[bk]=(colTotals[bk]||0)+q; grand+=q;
-      ana.push({ data:dt, interno:'E-'+String(p.numero_interno||0).padStart(6,'0'), order:p.numero_pedido||'', dest:p.destinatario_nome||'', sku:_dsku, descricao:_nome, vol:q });
+      ana.push({ data:dt, os:ecomRelOsLabel(ecomRelOsDoPedido(p)), interno:'E-'+String(p.numero_interno||0).padStart(6,'0'), order:p.numero_pedido||'', dest:p.destinatario_nome||'', sku:_dsku, descricao:_nome, vol:q });
     });
   });
   var pivot=ord.map(function(k){return agg[k];}).sort(function(a,b){return b.total-a.total;});
   ana.sort(function(a,b){ return a.data<b.data?-1:a.data>b.data?1:(a.interno<b.interno?-1:(a.sku<b.sku?-1:1)); });
-  return { cols:cols, pivot:pivot, colTotals:colTotals, grand:grand, ana:ana, nped:peds.length, gran:gran, ini:ini, fim:fim };
+  var _osLbl=_temOs?Object.keys(_os.ids).map(ecomRelOsLabel).sort():[];
+  return { cols:cols, pivot:pivot, colTotals:colTotals, grand:grand, ana:ana, nped:peds.length, gran:gran, ini:ini, fim:fim, osFiltro:_osLbl, osNaoAchadas:_temOs?[]:_os.nums };
 }
 function ecomRelGerar(){
   var ini=ge('ecom-rel-ini').value, fim=ge('ecom-rel-fim').value, tipo=ge('ecom-rel-tipo').value;
   var base=(ge('ecom-rel-base')&&ge('ecom-rel-base').value)||'importado';
-  ecomRelData=ecomRelCompute(ini,fim,base); ecomRelData.tipo=tipo; ecomRelData.base=base; ecomRelRender();
+  var osTxt=(ge('ecom-rel-os')&&ge('ecom-rel-os').value)||'';
+  ecomRelData=ecomRelCompute(ini,fim,base,osTxt); ecomRelData.tipo=tipo; ecomRelData.base=base; ecomRelRender();
 }
 function ecomRelBaseTrocou(){
   var b=(ge('ecom-rel-base')&&ge('ecom-rel-base').value)||'importado';
@@ -47855,6 +47890,7 @@ function ecomRelBaseTrocou(){
 }
 function ecomRelRender(){
   var el=ge('ecom-rel-res'); if(!el||!ecomRelData)return; var d=ecomRelData;
+  if(d.osNaoAchadas&&d.osNaoAchadas.length){ el.innerHTML='<div class="empty" style="padding:30px;text-align:center;color:var(--amber-text)">Nenhuma OS encontrada com o(s) n&uacute;mero(s) '+d.osNaoAchadas.join(', ')+'.</div>'; return; }
   if(!d.nped){ el.innerHTML='<div class="empty" style="padding:30px;text-align:center;color:var(--text3)">Nenhum pedido '
     +(d.base==='expedido'?'carregado':'importado')+' no per&iacute;odo.</div>'; return; }
   var body;
@@ -47864,27 +47900,29 @@ function ecomRelRender(){
     var foot='<td style="padding:8px 9px;position:sticky;left:0;background:var(--bg)">TOTAL</td>'+d.cols.map(function(c){return '<td style="padding:8px 9px;text-align:center">'+(d.colTotals[c.key]||0)+'</td>';}).join('')+'<td style="padding:8px 9px;text-align:center;background:var(--bg2)">'+d.grand+'</td>';
     body='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:'+(220+d.cols.length*54)+'px"><thead><tr style="background:var(--bg2);text-align:left">'+head+'</tr></thead><tbody>'+rows+'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800">'+foot+'</tr></tfoot></table></div>';
   } else {
-    body='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="background:var(--bg2);text-align:left"><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Order ID</th><th style="padding:6px 8px">Destinat&aacute;rio</th><th style="padding:6px 8px">SKU</th><th style="padding:6px 8px">Produto</th><th style="padding:6px 8px;text-align:center">Vol.</th></tr></thead><tbody>'
-      +d.ana.map(function(r){return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px">'+ecomRelDataBr(r.data)+'</td><td style="padding:5px 8px">'+ecomEsc(r.interno)+'</td><td style="padding:5px 8px;font-family:monospace;font-size:11px">'+ecomEsc(r.order)+'</td><td style="padding:5px 8px">'+ecomEsc(r.dest)+'</td><td style="padding:5px 8px;font-family:monospace">'+ecomEsc(r.sku)+'</td><td style="padding:5px 8px">'+ecomEsc(r.descricao)+'</td><td style="padding:5px 8px;text-align:center">'+r.vol+'</td></tr>';}).join('')
-      +'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800"><td style="padding:7px 8px" colspan="6">TOTAL DE VOLUMES</td><td style="padding:7px 8px;text-align:center">'+d.grand+'</td></tr></tfoot></table></div>';
+    body='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="background:var(--bg2);text-align:left"><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">OS</th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Order ID</th><th style="padding:6px 8px">Destinat&aacute;rio</th><th style="padding:6px 8px">SKU</th><th style="padding:6px 8px">Produto</th><th style="padding:6px 8px;text-align:center">Vol.</th></tr></thead><tbody>'
+      +d.ana.map(function(r){return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px">'+ecomRelDataBr(r.data)+'</td><td style="padding:5px 8px;font-family:monospace;font-weight:700">'+ecomEsc(r.os||'—')+'</td><td style="padding:5px 8px">'+ecomEsc(r.interno)+'</td><td style="padding:5px 8px;font-family:monospace;font-size:11px">'+ecomEsc(r.order)+'</td><td style="padding:5px 8px">'+ecomEsc(r.dest)+'</td><td style="padding:5px 8px;font-family:monospace">'+ecomEsc(r.sku)+'</td><td style="padding:5px 8px">'+ecomEsc(r.descricao)+'</td><td style="padding:5px 8px;text-align:center">'+r.vol+'</td></tr>';}).join('')
+      +'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800"><td style="padding:7px 8px" colspan="7">TOTAL DE VOLUMES</td><td style="padding:7px 8px;text-align:center">'+d.grand+'</td></tr></tfoot></table></div>';
   }
-  var info='<span style="font-size:12px;color:var(--text3);margin-right:auto">'+d.nped+' pedido(s) &middot; '+d.grand+' volumes &middot; coluna '+ecomRelGranLbl(d.gran)+'</span>';
+  var info='<span style="font-size:12px;color:var(--text3);margin-right:auto">'
+    +((d.osFiltro&&d.osFiltro.length)?d.osFiltro.map(function(o){return '<span style="font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--blue-bg);color:var(--blue-text);font-weight:700;margin-right:5px">'+o+'</span>';}).join(''):'')
+    +d.nped+' pedido(s) &middot; '+d.grand+' volumes &middot; coluna '+ecomRelGranLbl(d.gran)+'</span>';
   el.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+info+'<button class="btn btn-sm" onclick="ecomRelPdf()">&#8595; PDF</button><button class="btn btn-sm" onclick="ecomRelExcel()">&#8595; Excel</button></div>'+body;
 }
 function ecomRelPdf(){
   if(!ecomRelData)return; var d=ecomRelData;
   var _bl=(d.base==='expedido')?'Expedidos (data de carregamento)':'Importados (data de entrada)';
   var titulo='Relatorio de Saida por Item - '+(d.tipo==='sintetico'?'Sintetico (produto x data)':'Analitico (pedido x produto)');
-  var periodo='Base: '+_bl+'  |  Periodo: '+ecomRelDataBr(d.ini)+' a '+ecomRelDataBr(d.fim)+'  |  Pedidos: '+d.nped+'  |  Volumes: '+d.grand+'  |  Coluna: '+ecomRelGranLbl(d.gran);
+  var periodo='Base: '+_bl+((d.osFiltro&&d.osFiltro.length)?('  |  OS: '+d.osFiltro.join(', ')):'')+'  |  Periodo: '+ecomRelDataBr(d.ini)+' a '+ecomRelDataBr(d.fim)+'  |  Pedidos: '+d.nped+'  |  Volumes: '+d.grand+'  |  Coluna: '+ecomRelGranLbl(d.gran);
   var tbl;
   if(d.tipo==='sintetico'){
     tbl='<table><thead><tr><th>SKU / Produto</th>'+d.cols.map(function(c){return '<th style="text-align:center">'+c.label+'</th>';}).join('')+'<th style="text-align:center">Total</th></tr></thead><tbody>'
       +d.pivot.map(function(r){return '<tr><td>'+ecomEsc(r.sku)+' '+ecomEsc(r.descricao)+'</td>'+d.cols.map(function(c){return '<td style="text-align:center">'+(r.cells[c.key]||0)+'</td>';}).join('')+'<td style="text-align:center"><b>'+r.total+'</b></td></tr>';}).join('')
       +'</tbody><tfoot><tr><td><b>TOTAL</b></td>'+d.cols.map(function(c){return '<td style="text-align:center"><b>'+(d.colTotals[c.key]||0)+'</b></td>';}).join('')+'<td style="text-align:center"><b>'+d.grand+'</b></td></tr></tfoot></table>';
   } else {
-    tbl='<table><thead><tr><th>Data</th><th>Pedido</th><th>Order ID</th><th>Destinatario</th><th>SKU</th><th>Produto</th><th>Vol.</th></tr></thead><tbody>'
-      +d.ana.map(function(r){return '<tr><td>'+ecomRelDataBr(r.data)+'</td><td>'+ecomEsc(r.interno)+'</td><td>'+ecomEsc(r.order)+'</td><td>'+ecomEsc(r.dest)+'</td><td>'+ecomEsc(r.sku)+'</td><td>'+ecomEsc(r.descricao)+'</td><td style="text-align:center">'+r.vol+'</td></tr>';}).join('')
-      +'</tbody><tfoot><tr><td colspan="6"><b>TOTAL DE VOLUMES</b></td><td style="text-align:center"><b>'+d.grand+'</b></td></tr></tfoot></table>';
+    tbl='<table><thead><tr><th>Data</th><th>OS</th><th>Pedido</th><th>Order ID</th><th>Destinatario</th><th>SKU</th><th>Produto</th><th>Vol.</th></tr></thead><tbody>'
+      +d.ana.map(function(r){return '<tr><td>'+ecomRelDataBr(r.data)+'</td><td>'+ecomEsc(r.os||'')+'</td><td>'+ecomEsc(r.interno)+'</td><td>'+ecomEsc(r.order)+'</td><td>'+ecomEsc(r.dest)+'</td><td>'+ecomEsc(r.sku)+'</td><td>'+ecomEsc(r.descricao)+'</td><td style="text-align:center">'+r.vol+'</td></tr>';}).join('')
+      +'</tbody><tfoot><tr><td colspan="7"><b>TOTAL DE VOLUMES</b></td><td style="text-align:center"><b>'+d.grand+'</b></td></tr></tfoot></table>';
   }
   var land=(d.tipo==='sintetico' && d.cols.length>6);
   var html='<html><head><meta charset="utf-8"><title>'+titulo+'</title><style>@page{size:A4 '+(land?'landscape':'portrait')+';margin:10mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:11px}h1{font-size:17px;margin:0 0 2px}.per{color:#444;margin-bottom:8px;font-size:11px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border:1px solid #999;padding:3px 5px;text-align:left}th{background:#eee}tfoot td{border-top:2px solid #111}</style></head><body><h1>'+titulo+'</h1><div class="per">'+periodo+'</div>'+tbl+'</body></html>';
@@ -47902,8 +47940,8 @@ async function ecomRelExcel(){
       aoa=[head].concat(d.pivot.map(function(r){ return [r.sku,r.descricao].concat(d.cols.map(function(c){return r.cells[c.key]||0;})).concat([r.total]); }));
       aoa.push(['TOTAL',''].concat(d.cols.map(function(c){return d.colTotals[c.key]||0;})).concat([d.grand]));
     } else {
-      aoa=[['Data','Pedido','Order ID','Destinatario','SKU','Produto','Volumes']].concat(d.ana.map(function(r){return [ecomRelDataBr(r.data),r.interno,r.order,r.dest,r.sku,r.descricao,r.vol];}));
-      aoa.push(['','','','','','TOTAL',d.grand]);
+      aoa=[['Data','OS','Pedido','Order ID','Destinatario','SKU','Produto','Volumes']].concat(d.ana.map(function(r){return [ecomRelDataBr(r.data),r.os||'',r.interno,r.order,r.dest,r.sku,r.descricao,r.vol];}));
+      aoa.push(['','','','','','','TOTAL',d.grand]);
     }
     var ws=XLSX.utils.aoa_to_sheet(aoa); var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,(ecomRelData&&ecomRelData.base==='expedido')?'Expedidos':'Importados');
     XLSX.writeFile(wb,'expedicao_'+d.tipo+'.xlsx');
