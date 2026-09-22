@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1015 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1017 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1015';
+const APP_VERSION='v1.0.1017';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46679,6 +46679,13 @@ async function ecomImportConfirm(){
   // trava de consistência: Order IDs (numero_pedido) já existentes na base
   var _existentes={};
   ecomPedidosDoLojista().forEach(function(p){ if(p.numero_pedido) _existentes[String(p.numero_pedido).trim().toLowerCase()]=true; });
+  // numero cortado pelo Excel (15 digitos): indices pelo prefixo
+  var _prefix15={}, _curtos={}, _cortados=[];
+  ecomPedidosDoLojista().forEach(function(p){
+    var n=String(p.numero_pedido||'').trim();
+    if(/^\d{16,}$/.test(n)) _prefix15[n.slice(0,15)]=p;       // completo ja na base
+    if(/^\d{15}$/.test(n))  _curtos[n]=p;                      // copia cortada ja na base
+  });
   var _novosIds=[];
   var _totalPrev=ecomImportRows.pedidos.length;
   ecomProgAbrir('Gravando pedidos', _totalPrev, true);
@@ -46700,6 +46707,22 @@ async function ecomImportConfirm(){
     ecomProgSet(i, 'pedido '+(i+1)+' de '+_totalPrev, {gravados:btnOk,ignorados:btnDup,falhas:btnErr});
     if(i%5===0) await ecomTick();
     var _npk=(P.numero_pedido && P.numero_pedido.indexOf('(sem-')!==0) ? String(P.numero_pedido).trim().toLowerCase() : null;
+    var _nraw=String(P.numero_pedido||'').trim();
+    if(/^\d{15}$/.test(_nraw)){
+      // cortado, e o completo ja esta na base -> e o mesmo pedido
+      if(_prefix15[_nraw]){ btnDup++; continue; }
+      // TikTok tem 18 digitos: com 15, veio cortado — nao cria pedido que nunca vai casar
+      if(/^5\d{14}$/.test(_nraw)){ btnErr++; _cortados.push(_nraw); _logDet.push({pedido:_nraw,erro:'numero do TikTok cortado pelo Excel (15 de 18 digitos)'}); continue; }
+    }
+    // chegou o completo e existe a copia cortada que ainda nao andou: corrige a copia
+    if(/^\d{16,}$/.test(_nraw) && _curtos[_nraw.slice(0,15)]){
+      var _cc=_curtos[_nraw.slice(0,15)];
+      // vale em qualquer etapa (inclusive ja em separacao): e o mesmo pedido
+      if(String(_cc.status||'')!=='cancelado'){
+        try{ await dbUpdate('ecom_pedidos',_cc.id,{numero_pedido:_nraw}); _cc.numero_pedido=_nraw; }catch(_ue){}
+        _existentes[_npk]=true; btnDup++; continue;
+      }
+    }
     if(_npk && _existentes[_npk]){ btnDup++; continue; } // já está na base -> ignora (não duplica)
     try{
       var ped=await dbInsert('ecom_pedidos',{company_id:cid,lojista_id:ecomLojistaId,numero_pedido:P.numero_pedido&&P.numero_pedido.indexOf('(sem-')===0?null:P.numero_pedido,
@@ -46743,6 +46766,8 @@ async function ecomImportConfirm(){
   }
   var _msg='Importados: '+btnOk;
   if(_ecomProgStop) _msg='Interrompido — '+btnOk+' já gravado(s)';
+  if(_cortados.length) setTimeout(function(){ alert(_cortados.length+' pedido(s) do TikTok NÃO foram importados: o número veio cortado em 15 dígitos (o correto tem 18).\n\n'
+    +'Isso acontece quando a planilha é aberta e salva no Excel. Importe o arquivo original baixado do TikTok, sem abrir no Excel.\n\nExemplos: '+_cortados.slice(0,5).join(', ')); },300);
   if(btnDup) _msg+=' · '+btnDup+' pedido(s) não importado(s) (já estavam na base)';
   if(btnErr) _msg+=' · falhas: '+btnErr;
   showToast(_msg, (btnErr?'red':(btnDup?'amber':'green')));
