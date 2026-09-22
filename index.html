@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1011 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1012 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1011';
+const APP_VERSION='v1.0.1012';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49954,6 +49954,24 @@ async function ecomEtiqPendSalvar(){
   ecomRenderBody();
   showToast(n+' etiqueta(s) vinculada(s) manualmente', n?'green':'amber');
 }
+// Chave de NF-e (44 digitos) no meio de uma sequencia colada: modelo 55/65 nas
+// posicoes 21-22 e digito verificador modulo 11 conferido.
+function ecomAchaChaveNfe(flat){
+  var runs=String(flat||'').match(/\d{44,}/g)||[];
+  for(var r=0;r<runs.length;r++){
+    var d=runs[r];
+    for(var i=0;i+44<=d.length;i++){
+      var k=d.substr(i,44), mod=k.substr(20,2);
+      if(mod!=='55'&&mod!=='65')continue;
+      var uf=+k.substr(0,2); if(uf<11||uf>53)continue;
+      var soma=0,peso=2;
+      for(var j=42;j>=0;j--){ soma+=(+k[j])*peso; peso=(peso===9)?2:peso+1; }
+      var dv=11-(soma%11); if(dv>=10)dv=0;
+      if(dv===+k[43]) return k;
+    }
+  }
+  return '';
+}
 async function ecomEtiqImportFile(input){
   var f=input.files&&input.files[0]; if(!f)return; input.value='';
   var cid=ecomCid();
@@ -50006,7 +50024,15 @@ async function ecomEtiqImportFile(input){
       // também traz "Venda:" — casava com o mesmo pedido e sobrescrevia a
       // etiqueta. Não é etiqueta: pula.
       if(/Despache\s*a\s*sua\s*venda|Identifi+ca[c\u00e7][a\u00e3]o\s*Produto/i.test(txt) && !/Despachar:/i.test(txt)){ continue; }
-      var oid=(flat.match(/58\d{16}/)||[])[0]||'';   // TikTok: 585, 586... (18 digitos)
+      // TikTok: 585, 586... (18 digitos) — so como numero ISOLADO. Numa folha da
+      // Shopee o "58" aparece colado na chave da NF (ou no horario ":58") e era
+      // lido como pedido do TikTok.
+      var _ehShopee=/IDpedido/i.test(flat)||/shopee/i.test(txt);
+      var oid='';
+      if(!_ehShopee){
+        var _semLongas=flat.replace(/\d{19,}/g,'|');           // sequencias longas = chave/codigos
+        oid=((_semLongas.match(/(?:^|\D)(58\d{16})(?!\d)/)||[])[1])||'';
+      }
       // Mercado Livre: "Venda: 2000018458200402" / "Pack ID: 2000015031251497" (16 dígitos)
       if(!oid){ var _ml=flat.match(/(?:Venda|PackID):?(2000\d{12})/i); if(_ml)oid=_ml[1]; }
       // número da NF impresso na etiqueta ("NF: 3841") — via de casamento exata
@@ -50050,7 +50076,9 @@ async function ecomEtiqImportFile(input){
         }
         // nenhum confirmado: fica com o primeiro que comeca por data plausivel
         if(!oid&&cands.length){
-          var pref=cands.find(function(x){ return /^2[0-9]{5}/.test(x); });
+          // AAMMDD valido + pelo menos uma letra (o contrato "9912482023DEST" nao passa)
+          var pref=cands.find(function(x){ return /^2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/.test(x) && /[A-Z]/.test(x.slice(6)); })
+                 ||cands.find(function(x){ return /^2[0-9]{5}/.test(x) && /[A-Z]/.test(x.slice(6)); });
           oid=String(pref||cands[0]).toUpperCase();
         }
       }
@@ -50080,6 +50108,9 @@ async function ecomEtiqImportFile(input){
       // chave da NF-e impressa no rodape da etiqueta (44 digitos)
       // busca no texto COM espacos: no achatado os digitos grudam e a janela de 44 escorrega
       var chNfe=((txt.match(/(?:^|[^\d])(\d{44})(?:[^\d]|$)/)||[])[1])||'';
+      // chave colada a outros numeros (texto letra por letra): acha pelo digito verificador
+      if(!chNfe) chNfe=ecomAchaChaveNfe(flat)||'';
+      if(!nfNum && chNfe) nfNum=String(parseInt(chNfe.slice(25,34),10)||'');
 
       var ped=null, hits=[], viaTxt='';
 
