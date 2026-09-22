@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1005 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1006 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1005';
+const APP_VERSION='v1.0.1006';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -9088,11 +9088,21 @@ function avisosCalcular(){
     add('Comercial',prop,'1 proposta vence nos próximos 30 dias','{n} propostas vencem nos próximos 30 dias','tarifario-padrao');
   } }catch(e){console.warn('aviso prop',e);}
 
-  try{ if(pode('compras')){
-    var cot=(comprasCotacoes||[]).filter(function(c){return c.status==='aguardando_aprovacao_cotacao';}).length;
-    var ped=(comprasPedidos||[]).filter(function(c){return c.status==='aguardando_aprovacao_compra';}).length;
-    add('Compras',cot+ped,'1 compra aguardando sua aprovação','{n} compras aguardando sua aprovação','compras');
-  } }catch(e){console.warn('aviso compras',e);}
+  try{
+    var _sols=(comprasSolicitacoes||[]).filter(function(x){return !x.company_id||x.company_id===cid;});
+    if(typeof compraSouDiretor==='function'&&compraSouDiretor()){
+      var lib=_sols.filter(function(x){return x.status==='aguardando_aprovacao_cotacao';}).length;
+      var apc=_sols.filter(function(x){return x.status==='aguardando_aprovacao_compra';}).length;
+      add('Compras',lib,'1 solicitação de compra aguardando tua liberação para cotar','{n} solicitações de compra aguardando tua liberação para cotar','compras-solicitacoes');
+      add('Compras',apc,'1 compra aguardando tua aprovação','{n} compras aguardando tua aprovação','compras-aprovacoes');
+    }
+    if(pode('compras-cotacoes')){
+      var fila=_sols.filter(function(x){return x.status==='em_cotacao';}).length;
+      add('Compras',fila,'1 solicitação liberada para cotar','{n} solicitações liberadas para cotar','compras-cotacoes');
+    }
+    var minhas=_sols.filter(function(x){return x.status==='aguardando_informacao'&&x.owner_id===(cu&&cu.id);}).length;
+    add('Compras',minhas,'O diretor pediu mais informação sobre 1 solicitação tua','O diretor pediu mais informação sobre {n} solicitações tuas','compras-solicitacoes');
+  }catch(e){console.warn('aviso compras',e);}
 
   try{ if(pode('rh-pessoas')){
     var dem=(rhDemissoes||[]).filter(function(d){return ['solicitado','aguardando_homologacao'].indexOf(d.status)>=0;}).length;
@@ -23512,7 +23522,8 @@ if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then
 
 const COMPRAS_STATUS={
   rascunho:{lbl:'Rascunho',cls:'bdg',cor:'background:var(--bg3);color:var(--text2)'},
-  aguardando_aprovacao_cotacao:{lbl:'Ag. Aprovação Cotação',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
+  aguardando_aprovacao_cotacao:{lbl:'Ag. Liberação p/ Cotar',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
+  aguardando_informacao:{lbl:'Ag. Informação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
   em_cotacao:{lbl:'Em Cotação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
   aguardando_homologacao:{lbl:'Ag. Homologação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
   aguardando_aprovacao_compra:{lbl:'Ag. Aprovação Compra',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
@@ -23532,6 +23543,138 @@ const COMPRAS_PRIORIDADE={
   alta:{lbl:'Alta',cor:'background:var(--red-bg);color:var(--red-text)'},
 };
 
+// ═══════════ COMPRAS · fluxo com o diretor (v1.0.1006) ═══════════
+function compraSouDiretor(){ return String((cu&&cu.email)||'').toLowerCase()===String(AS_DEMO_EMAIL||'').toLowerCase(); }
+async function uploadDocBucket(bucket,arquivo,pasta){
+  if(!window.supabase||!window.supabase.storage){ if(typeof sbStorageInit==='function') sbStorageInit(tok); }
+  if(!window.supabase||!window.supabase.storage) throw new Error('Storage indisponível — recarregue a página.');
+  const cid=(company&&company.id)||'sem-empresa';
+  const path=pasta+'/'+cid+'/'+Date.now()+'_'+String(arquivo.name||'arquivo').replace(/[^\w.\-]/g,'_');
+  const up=await window.supabase.storage.from(bucket).upload(path,arquivo,{upsert:true});
+  if(up&&up.error) throw up.error;
+  const u=window.supabase.storage.from(bucket).getPublicUrl(path);
+  return (u&&u.data&&u.data.publicUrl)||null;
+}
+async function compraEmail(para,assunto,html){
+  if(!para)return;
+  try{
+    await fetch(SB_URL+'/functions/v1/send-email',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({from:'VERUS ERP <noreply@mklogistica.com>',to:[para],subject:'VERUS · Compras — '+assunto,html:html})});
+  }catch(e){ console.warn('email compras',e); }
+}
+function compraAvisarDiretor(assunto,html){ compraEmail(AS_DEMO_EMAIL,assunto,html); }
+function compraAvisarSolicitante(solId,assunto,html){
+  const sol=(comprasSolicitacoes||[]).find(x=>x.id===solId); if(!sol)return;
+  const p=(profiles||[]).find(x=>x.id===sol.owner_id);
+  if(p&&p.email) compraEmail(p.email,assunto,'<p>Solicitação <b>'+tgEsc(sol.numero||'')+' · '+tgEsc(sol.titulo||'')+'</b></p>'+html);
+}
+async function pedirInfoSolicitacao(id){
+  if(!compraSouDiretor()){ alert('Somente o diretor.'); return; }
+  const q=prompt('O que você precisa saber de quem pediu?'); if(!q||!q.trim())return;
+  const upd={status:'aguardando_informacao',info_pergunta:q.trim(),info_resposta:null,info_pedida_em:new Date().toISOString()};
+  await dbUpdate('compras_solicitacoes',id,upd);
+  comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,...upd}:s);
+  compraAvisarSolicitante(id,'O diretor pediu mais informação','<p><b>Pergunta:</b> '+tgEsc(q.trim())+'</p><p>Responda em Compras › Solicitações.</p>');
+  showToast('Pergunta enviada a quem pediu','green'); render();
+}
+async function responderInfoSolicitacao(id){
+  const sol=comprasSolicitacoes.find(s=>s.id===id); if(!sol)return;
+  const r=prompt('Pergunta do diretor:\n'+(sol.info_pergunta||'')+'\n\nSua resposta:'); if(!r||!r.trim())return;
+  const upd={status:'aguardando_aprovacao_cotacao',info_resposta:r.trim()};
+  await dbUpdate('compras_solicitacoes',id,upd);
+  comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,...upd}:s);
+  compraAvisarDiretor('Resposta recebida — solicitação '+(sol.numero||''),'<p><b>'+tgEsc(sol.titulo||'')+'</b></p><p><b>Tua pergunta:</b> '+tgEsc(sol.info_pergunta||'')+'</p><p><b>Resposta:</b> '+tgEsc(r.trim())+'</p>');
+  showToast('Resposta enviada ao diretor','green'); render();
+}
+// linha de resposta do fornecedor na cotacao: valor, entrega, pagamento, proposta
+function cotRespostaHTML(f,i){
+  f=f||{};
+  return `<div style="border-top:1px dashed var(--border2);padding-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div><label class="lbl" style="font-size:10px">Valor total cotado</label><input class="fi" id="forn-valor-${i}" type="number" step="0.01" value="${f.valor_total||''}" placeholder="0,00" style="font-size:12px"></div>
+      <div><label class="lbl" style="font-size:10px">Prazo de entrega</label><input class="fi" id="forn-entrega-${i}" value="${f.prazo||''}" placeholder="Ex.: 10 dias" style="font-size:12px"></div>
+      <div><label class="lbl" style="font-size:10px">Pagamento</label><input class="fi" id="forn-pgto-${i}" value="${f.condicao_pagamento||''}" placeholder="Ex.: 30/60 dias" style="font-size:12px"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <input type="hidden" id="forn-pdf-${i}" value="${f.proposta_url||''}">
+      <span id="forn-pdf-st-${i}" style="font-size:11.5px;flex:1;color:${f.proposta_url?'var(--green-text)':'var(--text3)'}">${f.proposta_url?`✓ <a href="${f.proposta_url}" target="_blank" style="color:inherit">proposta anexada</a>`:'nenhuma proposta anexada'}</span>
+      <label class="btn btn-sm" style="cursor:pointer;font-size:11px">📎 Anexar proposta<input type="file" accept="application/pdf,image/*" style="display:none" onchange="cotAnexarProposta(this,${i})"></label>
+    </div>`;
+}
+async function cotAnexarProposta(input,i){
+  const a=input.files&&input.files[0]; if(!a)return;
+  const st=ge('forn-pdf-st-'+i); if(st){st.textContent='Enviando…';st.style.color='var(--text3)';}
+  try{
+    const url=await uploadDocBucket('gestao-docs',a,'compras/propostas');
+    const h=ge('forn-pdf-'+i); if(h)h.value=url||'';
+    if(st){st.innerHTML='✓ '+tgEsc(a.name);st.style.color='var(--green-text)';}
+  }catch(e){ if(st){st.textContent='Falha no envio';st.style.color='var(--red-text)';} alert('Não foi possível anexar: '+(e.message||e)); }
+}
+// aprovacao da compra: propostas lado a lado
+function abrirAprovacaoCompra(solId){
+  const sol=comprasSolicitacoes.find(s=>s.id===solId);
+  const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
+  if(!sol||!cot){ alert('Cotação não encontrada.'); return; }
+  const fns=cot.fornecedores||[], esc=cot.fornecedor_escolhido_idx;
+  const cards=fns.map((f,i)=>{
+    const win=(i===esc)||(esc==null&&cot.fornecedor_escolhido&&cot.fornecedor_escolhido.nome===f.nome);
+    return `<div style="border:${win?'2px solid #0A2540':'1px solid var(--border)'};border-radius:11px;padding:12px 14px;background:var(--bg)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><b>${tgEsc(f.nome||'')}</b>${win?'<span style="font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--green-bg);color:var(--green-text)">vencedor</span>':''}</div>
+      <div style="font-size:20px;font-weight:800;margin:6px 0">${Number(f.valor_total)>0?fmtV(Number(f.valor_total)):'<span style="font-size:13px;color:var(--text3)">sem valor</span>'}</div>
+      <div style="font-size:12px;color:var(--text3)">${tgEsc(f.prazo||'prazo —')} · ${tgEsc(f.condicao_pagamento||'pagamento —')}</div>
+      <div style="margin-top:8px;font-size:12px">${f.proposta_url?`<a href="${f.proposta_url}" target="_blank" style="color:var(--accent)">📄 ver proposta</a>`:'<span style="color:var(--amber-text)">⚠ sem proposta anexada</span>'}</div>
+    </div>`;
+  }).join('');
+  const dir=compraSouDiretor();
+  const html=`<div class="modal-overlay" id="modal-aprov-compra"><div class="modal" style="max-width:860px;width:95%;max-height:90vh;overflow-y:auto">
+    <div class="modal-hdr"><span>Aprovar compra — ${tgEsc(sol.numero||'')} · ${tgEsc(sol.titulo||'')}</span><button class="modal-x" onclick="ge('modal-aprov-compra').remove()">×</button></div>
+    <div style="padding:18px 20px">
+      <div style="font-size:12.5px;color:var(--text3);margin-bottom:12px">Pedido por ${tgEsc(sol.solicitante_nome||'')} · qtd ${sol.quantidade||1}${sol.data_necessaria?(' · precisa até '+fmtDateSimples(sol.data_necessaria)):''}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">${cards}</div>
+      <div style="font-size:12.5px;margin-top:14px"><b>Justificativa de compras:</b> ${tgEsc(cot.justificativa_escolha||'—')}</div>
+      ${cot.justificativa_menos3?`<div style="font-size:12.5px;margin-top:6px"><b>Menos de 3 fornecedores:</b> ${tgEsc(cot.justificativa_menos3)}</div>`:''}
+      ${dir?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn" style="color:#b91c1c;border-color:#f5c2c0;background:#fff5f5" onclick="ge('modal-aprov-compra').remove();reprovarCompra('${solId}')">Reprovar</button>
+        <button class="btn" onclick="pedirNovaCotacao('${solId}')">Pedir nova cotação</button>
+        <button class="btn" style="background:#166534;color:#fff;border-color:#166534" onclick="ge('modal-aprov-compra').remove();aprovarCompra('${solId}')">Aprovar compra · gerar pedido</button></div>`
+        :'<div style="font-size:12px;color:var(--text3);margin-top:14px">A aprovação é feita pelo diretor.</div>'}
+    </div></div></div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function pedirNovaCotacao(solId){
+  if(!compraSouDiretor())return;
+  const motivo=prompt('O que precisa mudar na cotação?'); if(motivo===null)return;
+  const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
+  if(cot){ await dbUpdate('compras_cotacoes',cot.id,{status:'em_cotacao',fornecedor_escolhido:null,fornecedor_escolhido_idx:null}); comprasCotacoes=comprasCotacoes.map(c=>c.id===cot.id?{...c,status:'em_cotacao',fornecedor_escolhido:null,fornecedor_escolhido_idx:null}:c); }
+  await dbUpdate('compras_solicitacoes',solId,{status:'em_cotacao',recotacao_motivo:motivo||null});
+  comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'em_cotacao',recotacao_motivo:motivo||null}:s);
+  ge('modal-aprov-compra')?.remove();
+  showToast('Voltou para Compras cotar de novo','blue'); render();
+}
+// recebimento: como fica a cobranca no contas a pagar
+function recCobrancaHTML(sol,forn){
+  const nomeF=String((forn&&forn.nome)||'').toLowerCase().trim();
+  const cands=(contasPagar||[]).filter(function(cp){
+    if(typeof cpPagoSt==='function'&&cpPagoSt(cp))return false;
+    if(cp.solicitacao_id&&cp.solicitacao_id!==sol.id)return false;
+    const n=String(cp.fornecedor_nome||'').toLowerCase();
+    return nomeF&&(n.indexOf(nomeF)>=0||nomeF.indexOf(n)>=0);
+  }).slice(0,8);
+  const itens=cands.map(function(cp,k){
+    return '<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;border-top:1px solid var(--border)">'
+      +'<input type="radio" name="rec-tit" value="'+cp.id+'"'+(k===0?' checked':'')+'> '
+      +tgEsc(cp.descricao||cp.fornecedor_nome||'')+' · venc '+(cp.vencimento?fmtDateSimples(cp.vencimento):'—')+' · '+fmtV(Number(cp.valor||0))+'</label>';
+  }).join('');
+  return '<div><div class="lbl">Cobrança no contas a pagar</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><label style="display:flex;gap:8px;font-weight:600;font-size:13px"><input type="radio" name="rec-cob" value="vincular"'+(cands.length?' checked':' disabled')+'> Vincular a título já lançado</label>'
+      +(cands.length?('<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Títulos em aberto de '+tgEsc((forn&&forn.nome)||'')+':</div>'+itens):'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Nenhum título em aberto desse fornecedor.</div>')+'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><label style="display:flex;gap:8px;font-weight:600;font-size:13px"><input type="radio" name="rec-cob" value="gerar"'+(cands.length?'':' checked')+'> Gerar título novo</label>'
+      +'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Abre o lançamento já vinculado ao pedido.</div>'
+      +'<label style="display:flex;gap:8px;font-size:12.5px;margin-top:8px"><input type="radio" name="rec-cob" value="depois"> Decidir depois</label></div>'
+    +'</div></div>';
+}
+
 function gerarNumSolicitacao(){
   const n=String(comprasSolicitacoes.length+1).padStart(4,'0');
   const y=new Date().getFullYear().toString().slice(-2);
@@ -23547,7 +23690,7 @@ function gerarNumPedido(){
 // ── SOLICITAÇÕES ──
 function rComprasSolicitacoes(){
   const role=profile?.role||'vendedor';
-  const isAprovador=(role==='admin'||role==='gestor');
+  const isAprovador=compraSouDiretor();   // so o diretor libera e aprova
   const filtro=ge('cmp-sol-filtro')?.value||'todos';
 
   let lista=[...comprasSolicitacoes];
@@ -23571,13 +23714,15 @@ function rComprasSolicitacoes(){
         ${s.valor_total?`<div style="font-size:13px;font-weight:600;color:var(--text)">${fmtV(s.valor_total)}</div>`:''}
         <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
           <button class="bicon btn-sm" title="Ver detalhes" onclick="openSolicitacaoDetalhe('${s.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
+          ${s.status==='aguardando_informacao'&&s.owner_id===cu?.id?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);padding:3px 8px;font-size:11px;border-radius:6px" onclick="responderInfoSolicitacao('${s.id}')">Responder ao diretor</button>`:''}
           ${s.status==='rascunho'?`<button class="bicon btn-sm" title="Editar" onclick="openSolicitacaoEditor('${s.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`:''}
           ${isAprovador&&s.status==='aguardando_aprovacao_cotacao'?`
-            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="aprovarParaCotacao('${s.id}')">Aprovar Cotação</button>
+            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="aprovarParaCotacao('${s.id}')">Pode cotar</button>
             <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="reprovarSolicitacao('${s.id}')">Reprovar</button>
+            <button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);padding:3px 8px;font-size:11px;border-radius:6px" onclick="pedirInfoSolicitacao('${s.id}')">Pedir mais informação</button>
           `:''}
           ${isAprovador&&s.status==='aguardando_aprovacao_compra'?`
-            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="aprovarCompra('${s.id}')">Aprovar Compra</button>
+            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="abrirAprovacaoCompra('${s.id}')">Analisar e aprovar</button>
             <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="reprovarCompra('${s.id}')">Reprovar</button>
           `:''}
         </div>
@@ -23625,13 +23770,14 @@ function openSolicitacaoEditor(id){
           <label class="lbl">Título / Descrição do Item *</label>
           <input class="fi" id="sol-titulo" placeholder="Ex: Notebook Dell i7 16GB" value="${sol?.titulo||''}">
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
           <div>
-            <label class="lbl">Categoria *</label>
-            <select class="fi" id="sol-categoria">
-              <option value="">Selecione...</option>
-              ${COMPRAS_CATEGORIAS.map(c=>`<option value="${c}" ${sol?.categoria===c?'selected':''}>${c}</option>`).join('')}
-            </select>
+            <label class="lbl">Quantidade *</label>
+            <input class="fi" id="sol-qtd" type="number" min="1" step="1" value="${sol?.quantidade||1}">
+          </div>
+          <div>
+            <label class="lbl">Precisa até</label>
+            <input class="fi" id="sol-precisa" type="date" value="${sol?.data_necessaria||''}">
           </div>
           <div>
             <label class="lbl">Prioridade</label>
@@ -23644,7 +23790,12 @@ function openSolicitacaoEditor(id){
         </div>
         <div>
           <label class="lbl">Justificativa / Observações</label>
-          <textarea class="fi" id="sol-justificativa" rows="3" placeholder="Descreva a necessidade e motivação da compra...">${sol?.justificativa||''}</textarea>
+          <textarea class="fi" id="sol-justificativa" rows="3" placeholder="Para quê? Descreva a necessidade e motivação da compra...">${sol?.justificativa||''}</textarea>
+        </div>
+        <div>
+          <label class="lbl">Anexo <span style="font-weight:400;color:var(--text3)">(foto, orçamento de referência — opcional)</span></label>
+          <input type="file" id="sol-anexo" class="fi" style="padding:6px" accept="image/*,application/pdf">
+          ${sol?.anexo_url?`<a href="${sol.anexo_url}" target="_blank" style="font-size:12px;color:var(--accent)">📎 anexo atual</a>`:''}
         </div>
         <div id="sol-status-msg" style="display:none"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px">
@@ -23659,22 +23810,27 @@ function openSolicitacaoEditor(id){
 
 async function salvarSolicitacao(id){
   const titulo=ge('sol-titulo')?.value?.trim();
-  const categoria=ge('sol-categoria')?.value;
+  const quantidade=parseFloat(ge('sol-qtd')?.value||'1')||1;
+  const data_necessaria=ge('sol-precisa')?.value||null;
   const prioridade=ge('sol-prioridade')?.value;
   const justificativa=ge('sol-justificativa')?.value?.trim();
   const statusEl=ge('sol-status-msg');
 
-  if(!titulo||!categoria){
+  if(!titulo){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
-    statusEl.textContent='Preencha título e categoria.';return;
+    statusEl.textContent='Preencha o que precisa ser comprado.';return;
   }
 
   const btn=document.querySelector('#modal-compra-sol .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='Salvando...';}
 
   const cid=company?.id;
+  let anexo_url=null;
+  const _arqSol=ge('sol-anexo')?.files?.[0];
+  if(_arqSol){ try{ anexo_url=await uploadDocBucket('gestao-docs',_arqSol,'compras/solicitacoes'); }catch(_ue){ console.warn('anexo',_ue); } }
   const dados={
-    titulo,categoria,prioridade,justificativa,
+    titulo,quantidade,data_necessaria,prioridade,justificativa,
+    ...(anexo_url?{anexo_url}:{}),
     company_id:cid,...unitPayload(),owner_id:cu?.id,
     solicitante_nome:profile?.nome||cu?.email,
     status:'aguardando_aprovacao_cotacao',
@@ -23688,7 +23844,13 @@ async function salvarSolicitacao(id){
   } else {
     dados.numero=gerarNumSolicitacao();
     salvo=await dbInsert('compras_solicitacoes',dados);
-    if(salvo)comprasSolicitacoes=[salvo,...comprasSolicitacoes];
+    if(salvo){
+      comprasSolicitacoes=[salvo,...comprasSolicitacoes];
+      compraAvisarDiretor('Nova solicitação de compra aguardando tua liberação',
+        '<p><b>'+tgEsc(dados.solicitante_nome||'')+'</b> pediu: <b>'+tgEsc(titulo)+'</b> (qtd '+quantidade+')</p>'
+        +'<p>Para quê: '+tgEsc(justificativa||'—')+'</p><p>Prioridade: '+tgEsc(prioridade||'')+'</p>'
+        +'<p>Libere para cotar (ou peça mais informação) em Compras › Solicitações.</p>');
+    }
   }
   ge('modal-compra-sol')?.remove();
   render();
@@ -23700,21 +23862,25 @@ async function salvarSolicitacao(id){
 }
 
 async function aprovarParaCotacao(id){
-  if(!confirm('Aprovar esta solicitação para cotação?'))return;
+  if(!compraSouDiretor()){ alert('Somente o diretor libera para cotação.'); return; }
+  if(!confirm('Liberar esta solicitação para cotação?'))return;
   await dbUpdate('compras_solicitacoes',id,{status:'em_cotacao',aprovado_cotacao_em:new Date().toISOString(),aprovado_cotacao_por:profile?.nome||cu?.email});
   comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,status:'em_cotacao'}:s);
   render();
 }
 
 async function reprovarSolicitacao(id){
+  if(!compraSouDiretor()){ alert('Somente o diretor reprova.'); return; }
   const motivo=prompt('Motivo da reprovação:');
   if(motivo===null)return;
+  compraAvisarSolicitante(id,'Tua solicitação de compra foi reprovada','<p>Motivo: '+tgEsc(motivo||'—')+'</p>');
   await dbUpdate('compras_solicitacoes',id,{status:'reprovado',reprovado_motivo:motivo,reprovado_em:new Date().toISOString()});
   comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,status:'reprovado'}:s);
   render();
 }
 
 async function aprovarCompra(id){
+  if(!compraSouDiretor()){ alert('Somente o diretor aprova a compra.'); return; }
   if(!confirm('Aprovar a compra desta solicitação?'))return;
   await dbUpdate('compras_solicitacoes',id,{status:'aprovado',aprovado_compra_em:new Date().toISOString(),aprovado_compra_por:profile?.nome||cu?.email});
   comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,status:'aprovado'}:s);
@@ -23722,8 +23888,10 @@ async function aprovarCompra(id){
 }
 
 async function reprovarCompra(id){
+  if(!compraSouDiretor()){ alert('Somente o diretor reprova a compra.'); return; }
   const motivo=prompt('Motivo da reprovação da compra:');
   if(motivo===null)return;
+  compraAvisarSolicitante(id,'A compra solicitada foi reprovada','<p>Motivo: '+tgEsc(motivo||'—')+'</p>');
   await dbUpdate('compras_solicitacoes',id,{status:'reprovado',reprovado_motivo:motivo,reprovado_em:new Date().toISOString()});
   comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===id?{...s,status:'reprovado'}:s);
   render();
@@ -23737,7 +23905,7 @@ function openSolicitacaoDetalhe(id){
   const pr=COMPRAS_PRIORIDADE[sol.prioridade]||COMPRAS_PRIORIDADE.media;
   const cot=comprasCotacoes.find(c=>c.solicitacao_id===id);
   const role=profile?.role||'vendedor';
-  const isAprovador=(role==='admin'||role==='gestor');
+  const isAprovador=compraSouDiretor();   // so o diretor libera e aprova
 
   const etapas=[
     {k:'rascunho',lbl:'Solicitação'},
@@ -23785,8 +23953,8 @@ function openSolicitacaoDetalhe(id){
             <span class="bdg" style="${pr.cor};padding:3px 10px;font-size:11px;border-radius:10px">${pr.lbl}</span>
           </div>
           <div style="background:var(--bg2);border-radius:8px;padding:12px">
-            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Categoria</div>
-            <div style="font-size:13px;font-weight:500">${sol.categoria||'—'}</div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Anexo</div>
+            <div style="font-size:13px;font-weight:500">${sol.anexo_url?`<a href="${sol.anexo_url}" target="_blank" style="color:var(--accent)">📎 abrir</a>`:'—'}</div>
           </div>
           <div style="background:var(--bg2);border-radius:8px;padding:12px">
             <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Quantidade</div>
@@ -23802,6 +23970,10 @@ function openSolicitacaoDetalhe(id){
           </div>`:''}
         </div>
 
+        ${sol.info_pergunta?`<div style="background:var(--amber-bg);border-radius:8px;padding:12px;font-size:12.5px;color:var(--amber-text)">
+          <div><b>Pergunta do diretor:</b> ${tgEsc(sol.info_pergunta)}</div>
+          ${sol.info_resposta?`<div style="margin-top:6px"><b>Resposta:</b> ${tgEsc(sol.info_resposta)}</div>`:'<div style="margin-top:6px">Aguardando resposta de quem pediu.</div>'}
+        </div>`:''}
         ${sol.justificativa?`<div style="background:var(--bg2);border-radius:8px;padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Justificativa</div>
           <div style="font-size:13px;color:var(--text)">${sol.justificativa}</div>
@@ -23818,12 +23990,14 @@ function openSolicitacaoDetalhe(id){
           ${sol.status==='aguardando_homologacao'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openHomologacao('${id}')">✅ Homologar Fornecedor</button>`:''}
           ${sol.status==='aprovado'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openRecebimento('${id}')">📦 Registrar Recebimento</button>`:''}
           ${sol.status==='recebido'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openConferencia('${id}')">🔍 Realizar Conferência</button>`:''}
+          ${sol.status==='aguardando_informacao'&&sol.owner_id===cu?.id?`<button class="btn" style="background:var(--amber-bg);color:var(--amber-text)" onclick="ge('modal-sol-detalhe').remove();responderInfoSolicitacao('${id}')">Responder ao diretor</button>`:''}
           ${isAprovador&&sol.status==='aguardando_aprovacao_cotacao'?`
-            <button class="btn" style="background:var(--green);color:#fff" onclick="ge('modal-sol-detalhe').remove();aprovarParaCotacao('${id}')">✓ Aprovar para Cotação</button>
+            <button class="btn" style="background:var(--green);color:#fff" onclick="ge('modal-sol-detalhe').remove();aprovarParaCotacao('${id}')">✓ Pode cotar</button>
+            <button class="btn" style="background:var(--amber-bg);color:var(--amber-text)" onclick="ge('modal-sol-detalhe').remove();pedirInfoSolicitacao('${id}')">Pedir mais informação</button>
             <button class="btn" style="background:var(--red);color:#fff" onclick="ge('modal-sol-detalhe').remove();reprovarSolicitacao('${id}')">✗ Reprovar</button>
           `:''}
           ${isAprovador&&sol.status==='aguardando_aprovacao_compra'?`
-            <button class="btn" style="background:var(--green);color:#fff" onclick="ge('modal-sol-detalhe').remove();aprovarCompra('${id}')">✓ Aprovar Compra</button>
+            <button class="btn" style="background:var(--green);color:#fff" onclick="ge('modal-sol-detalhe').remove();abrirAprovacaoCompra('${id}')">Analisar e aprovar</button>
             <button class="btn" style="background:var(--red);color:#fff" onclick="ge('modal-sol-detalhe').remove();reprovarCompra('${id}')">✗ Reprovar</button>
           `:''}
           <button class="btn" onclick="ge('modal-sol-detalhe').remove()">Fechar</button>
@@ -23897,6 +24071,7 @@ function openCotacaoEditor(solId){
         <input class="fi" id="forn-obs-${i}" placeholder="Especificações, condições..." value="${f.observacoes||''}" style="font-size:12px">
       </div>
     </div>
+    ${cotRespostaHTML(f,i)}
     ${f.sc_enviada?`<div style="font-size:11px;color:var(--green-text);background:var(--green-bg);padding:4px 8px;border-radius:6px">✓ SC enviada em ${f.sc_enviada_em||''}</div>`:''}
   </div>`;
 
@@ -23953,6 +24128,7 @@ function adicionarFornCot(){
       <div><label class="lbl" style="font-size:10px">Prazo de Retorno</label><input class="fi" id="forn-prazo-${i}" type="date" style="font-size:12px"></div>
       <div><label class="lbl" style="font-size:10px">Observações</label><input class="fi" id="forn-obs-${i}" placeholder="Especificações, condições..." style="font-size:12px"></div>
     </div>
+    ${cotRespostaHTML({},i)}
   </div>`;
   ge('fornecedores-list').appendChild(div.firstElementChild);
   window._cotNumForn=i+1;
@@ -24379,11 +24555,18 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
     const idx=row.id.replace('forn-row-','');
     const nome=ge(`forn-nome-${idx}`)?.value?.trim();
     if(nome){
+      const _ant=((comprasCotacoes.find(c=>c.solicitacao_id===solId)||{}).fornecedores||[])[parseInt(idx,10)]||{};
+      const _v=parseFloat(String(ge(`forn-valor-${idx}`)?.value||'').replace(',','.'));
       fns.push({
+        ..._ant,                     // preserva SC enviada e demais campos ja gravados
         nome,
         email:ge(`forn-email-${idx}`)?.value?.trim()||'',
         prazo_retorno:ge(`forn-prazo-${idx}`)?.value?.trim()||'',
         observacoes:ge(`forn-obs-${idx}`)?.value?.trim()||'',
+        valor_total:isNaN(_v)?null:_v,
+        prazo:ge(`forn-entrega-${idx}`)?.value?.trim()||'',
+        condicao_pagamento:ge(`forn-pgto-${idx}`)?.value?.trim()||'',
+        proposta_url:ge(`forn-pdf-${idx}`)?.value||_ant.proposta_url||null,
       });
     }
   });
@@ -24398,10 +24581,16 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
     statusEl.textContent='Adicione pelo menos 1 fornecedor.';return;
   }
 
+  if(enviarHomologacao&&!fns.some(f=>Number(f.valor_total)>0)){
+    statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
+    statusEl.textContent='Informe o valor de pelo menos um fornecedor.';return;
+  }
+  const _precos=fns.map(f=>Number(f.valor_total)).filter(v=>v>0);
   const cid=company?.id;
   const dadosCot={
     solicitacao_id:solId,company_id:cid,...unitPayload(),
     fornecedores:fns,
+    melhor_preco:_precos.length?Math.min.apply(null,_precos):null,
     justificativa_menos3:justificativa,
     status:enviarHomologacao?'aguardando_homologacao':'em_cotacao',
   };
@@ -24443,7 +24632,8 @@ function openHomologacao(solId){
         </div>
         <div style="text-align:right">
           <div style="font-size:16px;font-weight:700;color:${isMelhor?'var(--green)':'var(--text)'}">${fmtV(f.valor_total)}</div>
-          <div style="font-size:11px;color:var(--text3)">${fmtV(f.valor_unitario)} / un.</div>
+          ${f.valor_unitario?`<div style="font-size:11px;color:var(--text3)">${fmtV(f.valor_unitario)} / un.</div>`:''}
+          ${f.proposta_url?`<a href="${f.proposta_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">📄 proposta</a>`:'<div style="font-size:11px;color:var(--amber-text)">sem proposta anexada</div>'}
           ${isMelhor?'<span class="bdg bg" style="font-size:9px;padding:2px 6px;border-radius:10px">Menor preço</span>':''}
         </div>
       </div>
@@ -24522,6 +24712,10 @@ async function confirmarHomologacao(solId,cotId){
 
   await dbUpdate('compras_solicitacoes',solId,{status:'aguardando_aprovacao_compra',valor_total:fornEscolhido?.valor_total});
   comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'aguardando_aprovacao_compra',valor_total:fornEscolhido?.valor_total}:s);
+  const _solH=comprasSolicitacoes.find(x=>x.id===solId);
+  compraAvisarDiretor('Compra aguardando tua aprovação',
+    '<p><b>'+tgEsc((_solH&&_solH.titulo)||'')+'</b></p><p>Vencedor: '+tgEsc((fornEscolhido&&fornEscolhido.nome)||'')+' — '+fmtV(Number((fornEscolhido&&fornEscolhido.valor_total)||0))+'</p>'
+    +'<p>Justificativa: '+tgEsc(justificativa)+'</p><p>Analise as propostas em Compras › Aprovações.</p>');
 
   ge('modal-homologacao')?.remove();
   render();
@@ -24530,7 +24724,7 @@ async function confirmarHomologacao(solId,cotId){
 // ── APROVAÇÕES ──
 function rComprasAprovacoes(){
   const role=profile?.role||'vendedor';
-  const isAprovador=(role==='admin'||role==='gestor');
+  const isAprovador=compraSouDiretor();   // so o diretor libera e aprova
   const pendentes=comprasSolicitacoes.filter(s=>s.status==='aguardando_aprovacao_cotacao'||s.status==='aguardando_aprovacao_compra');
 
   const rows=pendentes.map(sol=>{
@@ -24550,7 +24744,7 @@ function rComprasAprovacoes(){
       <div class="lright">
         ${sol.valor_estimado?`<div style="font-size:13px;font-weight:600">${fmtV(sol.valor_estimado)}</div>`:''}
         ${isAprovador?`<div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`aprovarCompra('${sol.id}')`:`aprovarParaCotacao('${sol.id}')`}">✓ Aprovar</button>
+          <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`abrirAprovacaoCompra('${sol.id}')`:`aprovarParaCotacao('${sol.id}')`}">✓ Aprovar</button>
           <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`reprovarCompra('${sol.id}')`:`reprovarSolicitacao('${sol.id}')`}">✗ Reprovar</button>
         </div>`:'<div style="font-size:12px;color:var(--text3)">Sem permissão</div>'}
       </div>
@@ -24622,7 +24816,11 @@ function openRecebimento(solId){
           <div><label class="lbl">Data de Recebimento *</label><input class="fi" id="rec-data" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
           <div><label class="lbl">Nº da Nota Fiscal</label><input class="fi" id="rec-nf" placeholder="NF-e 000000"></div>
         </div>
-        <div><label class="lbl">Responsável pelo Recebimento</label><input class="fi" id="rec-resp" value="${profile?.nome||cu?.email||''}"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label class="lbl">Valor da NF</label><input class="fi" id="rec-valor" type="number" step="0.01" value="${forn?.valor_total||sol?.valor_total||''}"></div>
+          <div><label class="lbl">Responsável pelo Recebimento</label><input class="fi" id="rec-resp" value="${profile?.nome||cu?.email||''}"></div>
+        </div>
+        ${recCobrancaHTML(sol,forn)}
         <div><label class="lbl">Observações</label><textarea class="fi" id="rec-obs" rows="2" placeholder="Condições de entrega, volumes, etc."></textarea></div>
         <div id="rec-status" style="display:none"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -24641,10 +24839,28 @@ async function confirmarRecebimento(solId){
   const resp=ge('rec-resp')?.value?.trim();
   const obs=ge('rec-obs')?.value?.trim();
   if(!data){ge('rec-status').style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px;border-radius:8px;font-size:12px';ge('rec-status').textContent='Data obrigatória.';return;}
-  await dbUpdate('compras_solicitacoes',solId,{status:'recebido',recebido_em:data,nf_numero:nf,recebido_por:resp,recebimento_obs:obs});
-  comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'recebido',nf_numero:nf,recebido_em:data}:s);
+  const _solR=comprasSolicitacoes.find(x=>x.id===solId)||{};
+  const valorNf=parseFloat(ge('rec-valor')?.value||'')||null;
+  const aprov=Number(_solR.valor_total||0);
+  if(valorNf&&aprov&&Math.abs(valorNf-aprov)>Math.max(0.5,aprov*0.005)){
+    if(!confirm('Valor da NF ('+fmtV(valorNf)+') diferente do aprovado ('+fmtV(aprov)+'). Registrar mesmo assim? A diferença fica anotada no pedido.'))return;
+  }
+  const modo=(document.querySelector('input[name="rec-cob"]:checked')||{}).value||'depois';
+  let cpVinc=null;
+  if(modo==='vincular'){
+    const tid=(document.querySelector('input[name="rec-tit"]:checked')||{}).value;
+    if(!tid){ alert('Escolha o título do contas a pagar a vincular.'); return; }
+    const tit=(contasPagar||[]).find(x=>x.id===tid);
+    const grupo=(tit&&tit.parcela_grupo)?(contasPagar||[]).filter(x=>x.parcela_grupo===tit.parcela_grupo):[tit].filter(Boolean);
+    for(const t of grupo){ try{ await dbUpdate('contas_pagar',t.id,{solicitacao_id:solId}); t.solicitacao_id=solId; }catch(_e){} }
+    cpVinc='vinculado a '+grupo.length+' título(s) do contas a pagar';
+  }
+  await dbUpdate('compras_solicitacoes',solId,{status:'recebido',recebido_em:data,nf_numero:nf,recebido_por:resp,recebimento_obs:obs,valor_nf:valorNf,cp_vinculo:cpVinc||modo});
+  comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'recebido',nf_numero:nf,recebido_em:data,valor_nf:valorNf}:s);
   ge('modal-recebimento')?.remove();
   render();
+  if(modo==='gerar' && typeof gerarContaPagar==='function') gerarContaPagar(solId);
+  else if(cpVinc) showToast('Recebimento registrado · '+cpVinc,'green');
 }
 
 function openConferencia(solId){
