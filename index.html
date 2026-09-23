@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1023 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1024 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1023';
+const APP_VERSION='v1.0.1024';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -26514,6 +26514,8 @@ function rRHOrganograma(){
     <button class="tab ${tab==='estrutura'?'active':''}" onclick="_orgZoomLevel=1;orgTab='estrutura';render()">⚙️ Estrutura</button>
     <button class="tab ${tab==='alocacoes'?'active':''}" onclick="_orgZoomLevel=1;orgTab='alocacoes';render()">👤 Alocações</button>
   </div>`;
+  // v1.0.1024: tela única — estrutura, alocação, afastamento e histórico ficam na própria árvore
+  return rOrgArvore();
   if(tab==='arvore') return tabs+rOrgArvore();
   if(tab==='estrutura') return tabs+rOrgEstrutura();
   const btnSyncResp=orgPodeCriar()?`<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="orgBackfillResponde()">🔗 Sincronizar 'responde para' pelo organograma</button><button class="btn btn-sm" onclick="imprimirOrganograma()">🖨 Imprimir para conferência</button></div>`:'';
@@ -26530,6 +26532,20 @@ function rOrgArvore(){
   const cid=company?.id;
   // Base visível considerando filtro de unidade + recorte por nó
   let visiveis=orgNos.filter(orgNoVisivel);
+  // filtro de unidade: os superiores de outra unidade aparecem como CONTEXTO (apagados),
+  // para a linha de comando não ficar solta; não entram nos KPIs nem nas vagas
+  const _ctx=new Set();
+  if(activeUnit){
+    const _ids=new Set(visiveis.map(n=>n.id));
+    visiveis.slice().forEach(n=>{
+      let pid=n.parent_id, g=0;
+      while(pid&&g++<60){
+        const pn=orgNos.find(x=>x.id===pid); if(!pn) break;
+        if(!_ids.has(pid)){ _ids.add(pid); _ctx.add(pid); visiveis.push(pn); }
+        pid=pn.parent_id;
+      }
+    });
+  }
   // Recorte: se um nó foi escolhido, mostra só ele + descendentes
   if(orgRecorteNo){
     const manter=new Set([orgRecorteNo]);
@@ -26538,20 +26554,22 @@ function rOrgArvore(){
     visiveis=visiveis.filter(n=>manter.has(n.id));
   }
   const visIds=new Set(visiveis.map(n=>n.id));
+  const visUnid=visiveis.filter(n=>!_ctx.has(n.id));
+  const visUnidIds=new Set(visUnid.map(n=>n.id));
   const totalColabs=orgAlocacoes.filter(a=>visIds.has(a.org_no_id)).length;
   const totalVagas=visiveis.reduce((s,n)=>s+n.headcount,0);
-  const totalCusto=visiveis.reduce((s,n)=>s+orgCustoNo(n.id),0);
+  const totalCusto=visUnid.reduce((s,n)=>s+orgCustoNo(n.id),0);
   // cobertura do custo: alocado sem salário cadastrado não entra na soma
   let _semSal=0,_comSal=0;
   orgAlocacoes.forEach(function(a){
-    if(!visIds.has(a.org_no_id))return;
+    if(!visUnidIds.has(a.org_no_id))return;
     var p=orgPessoa(a.pessoa_id);
     if(p&&pessoaAfastada(p))return;              // afastado não soma custo
     if(p&&Number(p.salario||0)>0)_comSal++; else _semSal++;
   });
 
   // v1.0.1022: quadro previsto x efetivo x vagas x sem posicao (+ custo)
-  const resumo='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">'+rOrgKpis(visiveis)
+  const resumo='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">'+rOrgKpis(visUnid)
     +'<div style="flex:1;min-width:130px;border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px;background:var(--bg)">'
     +'<div style="font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text2)">Custo total</div>'
     +'<div style="font-size:22px;font-weight:800;color:'+(_semSal?'var(--amber-text)':'var(--green-text)')+'">'+fmtV(totalCusto)+'</div>'
@@ -26559,7 +26577,9 @@ function rOrgArvore(){
     +'</div></div>';
   const acoes='<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:10px;flex-wrap:wrap">'
     +(orgPodeCriar()?'<button class="btn btn-sm" onclick="orgNoModal(null)">+ Nova caixa</button>':'')
-    +'<button class="btn btn-sm" onclick="orgHistoricoModal()">Histórico</button></div>';
+    +'<button class="btn btn-sm" onclick="imprimirOrganograma()">🖨 Imprimir</button>'
+    +'<button class="btn btn-sm" onclick="orgHistoricoModal()">Histórico</button></div>'
+    +(_ctx.size?'<div style="font-size:11.5px;color:var(--text3);margin:-4px 0 10px">Caixas apagadas são de outra unidade: aparecem só para mostrar a quem a equipe desta unidade responde.</div>':'');
 
   // Seletor de recorte (ver a partir de um nó)
   const opcoesRecorte=orgNos.filter(n=>n.company_id===cid).sort((a,b)=>(a.nivel||6)-(b.nivel||6)||(a.title||'').localeCompare(b.title||''))
@@ -26574,7 +26594,7 @@ function rOrgArvore(){
 
   if(!visiveis.length) return barraRecorte+acoes+resumo+`<div class="empty"><p>Nenhuma estrutura montada${activeUnit?' para esta unidade':''}.<br>Vá em <strong>⚙️ Estrutura</strong> para criar os nós do organograma.</p></div>`;
 
-  const svg=orgRenderSVG(visiveis,visIds);
+  const svg=orgRenderSVG(visiveis,visIds,_ctx);
   const tree=`<div style="position:relative">
     <div style="position:absolute;top:8px;right:8px;z-index:5;display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;box-shadow:0 1px 3px rgba(0,0,0,.1)">
       <button onclick="orgZoom(-0.1)" title="Diminuir" style="width:28px;height:28px;border:none;background:var(--bg2);border-radius:6px;cursor:pointer;font-size:16px;font-weight:700;color:var(--text2)">−</button>
@@ -26588,7 +26608,7 @@ function rOrgArvore(){
 
   return barraRecorte+acoes+resumo
     +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start"><div style="flex:1 1 520px;min-width:0">'+tree+'</div>'
-    +'<div style="flex:0 0 270px;max-width:100%">'+rOrgLado(visiveis)+'</div></div>';
+    +'<div style="flex:0 0 270px;max-width:100%">'+rOrgLado(visUnid)+'</div></div>';
 }
 
 // ── MOTOR DE DESENHO: layout em faixas por nível ──
@@ -26605,7 +26625,7 @@ function orgAbrevia(t){
     .replace(/\bLider\b/gi,'Líder');
 }
 
-function orgRenderSVG(visiveis,visIds){
+function orgRenderSVG(visiveis,visIds,ctx){
   const NIVEL_OPERACIONAL=6;
   const niveisPresentes=[...new Set(visiveis.map(n=>+n.nivel||6))].sort((a,b)=>a-b);
   const CARD_W=158, CARD_H=58, GAP_X=22, GAP_Y=8, PAD=24;
@@ -26628,16 +26648,19 @@ function orgRenderSVG(visiveis,visIds){
 
   // DFS: posiciona folhas em sequência; pai = centro dos filhos.
   // Operacional (nível 6) NÃO entra na varredura horizontal — empilha vertical sob o pai.
+  const opColX={};   // coluna própria da pilha operacional de uma caixa que também tem lideranças abaixo
   function layout(n){
     cardY[n.id]=posY[nivelDe(n)]!=null?posY[nivelDe(n)]:yOperacionalBase;
     const filhos=filhosVis(n.id).filter(f=>nivelDe(f)!==NIVEL_OPERACIONAL)
       .sort((a,b)=>(a.departamento||'').localeCompare(b.departamento||'')||(a.title||'').localeCompare(b.title||''));
+    const temOp=filhosVis(n.id).some(f=>nivelDe(f)===NIVEL_OPERACIONAL);
     if(!filhos.length){
       cardX[n.id]=cursorX; cursorX+=COL;
     }else{
+      // sem esta coluna a pilha operacional ficava no eixo do pai e colidia com a das lideranças filhas
+      if(temOp){ opColX[n.id]=cursorX; cursorX+=COL; }
       filhos.forEach(layout);
-      // centro sobre os filhos
-      const xs=filhos.map(f=>cardX[f.id]);
+      const xs=filhos.map(f=>cardX[f.id]); if(temOp) xs.push(opColX[n.id]);
       cardX[n.id]=(Math.min(...xs)+Math.max(...xs))/2;
     }
   }
@@ -26654,8 +26677,8 @@ function orgRenderSVG(visiveis,visIds){
   });
   Object.keys(opGrupos).forEach(pid=>{
     const arr=opGrupos[pid].sort((a,b)=>(a.title||'').localeCompare(b.title||''));
-    const baseX=cardX[pid]!=null?cardX[pid]:cursorX;
-    if(cardX[pid]==null)cursorX+=COL;
+    const baseX=opColX[pid]!=null?opColX[pid]:(cardX[pid]!=null?cardX[pid]:cursorX);
+    if(opColX[pid]==null&&cardX[pid]==null)cursorX+=COL;
     arr.forEach((n,i)=>{cardX[n.id]=baseX;cardY[n.id]=yOperacionalBase+i*(CARD_H+GAP_Y);});
     maxOperacionalH=Math.max(maxOperacionalH,arr.length*(CARD_H+GAP_Y));
   });
@@ -26672,8 +26695,14 @@ function orgRenderSVG(visiveis,visIds){
     if(!n.parent_id||!visIds.has(n.parent_id))return;
     if(cardX[n.id]==null||cardX[n.parent_id]==null)return;
     if(nivelDe(n)===NIVEL_OPERACIONAL){
-      const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, x2=cardX[n.id]+12, y2=cardY[n.id]+CARD_H/2;
-      linhas+=`<path d="M${x1} ${y1} L${x1} ${y2} L${cardX[n.id]} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
+      const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, y2=cardY[n.id]+CARD_H/2;
+      if(opColX[n.parent_id]!=null){
+        // pilha em coluna própria: desce, vai até o corredor à esquerda da coluna e desce até a caixa
+        const lane=cardX[n.id]-9, ym=y1+10;
+        linhas+=`<path d="M${x1} ${y1} L${x1} ${ym} L${lane} ${ym} L${lane} ${y2} L${cardX[n.id]} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
+      }else{
+        linhas+=`<path d="M${x1} ${y1} L${x1} ${y2} L${cardX[n.id]} ${y2}" fill="none" stroke="var(--border2,#cbd5e1)" stroke-width="1.25"/>`;
+      }
     }else{
       const x1=cx(n.parent_id), y1=cardY[n.parent_id]+CARD_H, x2=cx(n.id), y2=cardY[n.id];
       const ym=y1+(y2-y1)/2;
@@ -26706,7 +26735,8 @@ function orgRenderSVG(visiveis,visIds){
     let l3=`efetivo ${e}/${q}`+(vagas?` · vaga${dv!=null?' '+dv+'d':''}`:'')+(un?` · ${un}`:'');
     if(l3.length>33) l3=l3.slice(0,32)+'…';
     const corV='#b45309';
-    cards+=`<g class="org-svg-card" style="cursor:pointer" onclick="orgCaixaModal('${n.id}')">
+    const _ehCtx=!!(ctx&&ctx.has(n.id));
+    cards+=`<g class="org-svg-card" style="cursor:pointer${_ehCtx?';opacity:.42':''}" onclick="orgCaixaModal('${n.id}')">
       <rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="8" fill="${vagas?'#fffbeb':corClara(info.cor)}" stroke="${vagas?corV:info.cor}" stroke-width="1.25"${vagas?' stroke-dasharray="5 3"':''}/>
       <rect x="${x}" y="${y}" width="4" height="${CARD_H}" rx="2" fill="${info.cor}"/>
       <text x="${x+13}" y="${y+18}" font-size="12" font-weight="700" fill="${info.cor}">${wEsc(tituloFit)}</text>
@@ -27202,6 +27232,17 @@ function rOrgLado(visiveis){
       +'<b>'+wEsc(n.title)+'</b> \u00b7 '+wEsc(orgUnidadeNome(n.unit_id))
       +'<div style="font-size:10.5px;color:var(--amber-text)">'+(v>1?v+' vagas':'1 vaga')+(d!=null?' \u00b7 h\u00e1 '+d+(d===1?' dia':' dias'):'')+'</div></div>';
   });
+  // afastados (antes ficava na aba Alocações)
+  var af=(typeof afastadosLista==='function')?afastadosLista():[];
+  if(af.length){
+    var podeAf=['admin','adm','rh'].indexOf((profile&&profile.role)||'')>=0&&typeof afastModal==='function';
+    h+='<div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text2);margin:14px 0 8px">Afastados ('+af.length+')</div>';
+    af.slice(0,40).forEach(function(p){
+      var ret=p.afastamento_previsao_retorno?'retorno previsto '+orgDataBR(p.afastamento_previsao_retorno):'sem previs\u00e3o de retorno';
+      h+='<div'+(podeAf?' onclick="afastModal(\''+p.id+'\')" style="cursor:pointer;':' style="')+'padding:6px 8px;border:1px solid var(--amber-text);background:var(--amber-bg);border-radius:8px;margin-bottom:5px;font-size:12px">'
+        +'<b>'+wEsc(p.nome)+'</b><div style="font-size:10.5px;color:var(--amber-text)">'+wEsc([p.afastamento_motivo,ret].filter(Boolean).join(' \u00b7 '))+'</div></div>';
+    });
+  }
   return h+'</div>';
 }
 
@@ -27224,6 +27265,7 @@ function orgCaixaModal(noId){
       +(a.is_gestor?' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:var(--blue-bg);color:var(--blue-text);font-weight:600">gestor</span>':'')
       +(p&&pessoaAfastada(p)?' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text);font-weight:600">afastado</span>':'')
       +(a.desde?'<div style="font-size:10.5px;color:var(--text3)">desde '+orgDataBR(a.desde)+'</div>':'')+'</div>'
+      +(['admin','adm','rh'].indexOf((profile&&profile.role)||'')>=0&&typeof afastModal==='function'?'<button class="btn btn-sm" title="'+(p&&pessoaAfastada(p)?'Gerir afastamento':'Registrar afastamento')+'" onclick="afastModal(\''+a.pessoa_id+'\')">\u23f8</button> ':'')
       +(pode?'<button class="btn btn-sm" title="Tirar desta caixa" onclick="orgCaixaTirar(\''+a.id+'\',\''+noId+'\')">\u2715</button>':'')
       +'</div>';
   }).join(''):'<div style="font-size:12px;color:var(--text3);padding:4px 0 8px">Ningu\u00e9m nesta caixa.</div>';
@@ -27261,7 +27303,10 @@ function orgCaixaModal(noId){
     +'<div id="org-caixa-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:10px"></div>'
     +'<div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;border-top:1px solid var(--border);padding-top:10px">'
     +'<button class="btn btn-sm" onclick="orgHistoricoModal(\''+noId+'\')">Hist\u00f3rico desta caixa</button>'
-    +(pode?'<button class="btn btn-sm" onclick="ge(\'org-caixa\').remove();orgNoModal(\''+noId+'\')">\u270e Editar caixa</button>':'')
+    +(pode?'<span style="display:flex;gap:6px;flex-wrap:wrap">'
+      +'<button class="btn btn-sm" onclick="ge(\'org-caixa\').remove();orgNoModal(null,\''+noId+'\')">+ Caixa abaixo</button>'
+      +'<button class="btn btn-sm" onclick="ge(\'org-caixa\').remove();orgNoModal(\''+noId+'\')">\u270e Editar caixa</button>'
+      +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ge(\'org-caixa\').remove();orgExcluirNo(\''+noId+'\')">Excluir</button></span>':'')
     +'</div></div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
   if(pode){ orgCaixaBusca(noId); orgCaixaMoverEfeitos(noId); }
