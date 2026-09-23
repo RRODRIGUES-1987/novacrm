@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1018 | Gerado: 2026-09-17 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1019 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1321,7 +1321,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1018';
+const APP_VERSION='v1.0.1019';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -50749,24 +50749,97 @@ function intgAutorizar(id){
   window.open(url,'_blank');
   showToast('Conclua a autorização na aba do Tiny e depois clique em Sincronizar','blue');
 }
+// ── Modal de sincronizacao com o Olist (vv1.0.1019): trava a tela, barra de progresso lida do log da edge ──
+var _intgSyncTimer=null, _intgSyncPct=0;
+function intgSyncModal(){
+  var m=ge('intg-sync-modal'); if(m) m.remove();
+  var html='<div class="modal-overlay" id="intg-sync-modal"><div class="modal" style="width:380px;max-width:95vw;padding:20px">'
+    +'<div id="isy-tit" style="font-size:15px;font-weight:700;margin-bottom:4px">Sincronizando com o Olist</div>'
+    +'<div id="isy-sub" style="font-size:12px;color:var(--text2);margin-bottom:14px">Aguarde, isso leva de 10 a 60 segundos.</div>'
+    +'<div style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden"><div id="isy-bar" style="height:100%;width:3%;background:var(--blue-text);transition:width .6s"></div></div>'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--text2);margin-top:6px"><span id="isy-etapa">Conectando ao Olist\u2026</span><span id="isy-pct">3%</span></div>'
+    +'<div id="isy-acoes" style="display:none;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="intgSyncFechar()">Fechar</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function intgSyncSet(pct,etapa){
+  if(pct<_intgSyncPct) pct=_intgSyncPct;            // nunca volta para tras
+  _intgSyncPct=Math.min(100,Math.round(pct));
+  var b=ge('isy-bar'), p=ge('isy-pct'), e=ge('isy-etapa');
+  if(b) b.style.width=_intgSyncPct+'%';
+  if(p) p.textContent=_intgSyncPct+'%';
+  if(e&&etapa) e.textContent=etapa;
+}
+function intgSyncFechar(){
+  if(_intgSyncTimer){ clearInterval(_intgSyncTimer); _intgSyncTimer=null; }
+  var m=ge('intg-sync-modal'); if(m) m.remove();
+}
+// etapa a partir da ultima mensagem gravada pela edge
+function intgSyncEtapaDe(msg){
+  var s=String(msg||'');
+  if(/sync conclu/i.test(s)) return [90,'Finalizando no Olist\u2026'];
+  if(/gatilho/i.test(s)) return [86,'Aplicando gatilhos\u2026'];
+  if(/v[\u00edi]nculo/i.test(s)) return [82,'Vinculando pedidos da planilha\u2026'];
+  if(/^NF:/i.test(s)) return [76,'Conferindo notas fiscais\u2026'];
+  if(/kit/i.test(s)) return [68,'Conferindo kits\u2026'];
+  if(/colheita|etiqueta do pedido/i.test(s)) return [40,'Buscando etiquetas\u2026'];
+  if(/agrupamento|concluir/i.test(s)) return [25,'Conferindo agrupamentos\u2026'];
+  return null;
+}
 async function intgSync(id){
-  showToast('Sincronizando…','blue');
+  var t0=Date.now(), desde=new Date(t0-5000).toISOString();
+  _intgSyncPct=0; intgSyncModal(); intgSyncSet(3,'Conectando ao Olist\u2026');
+  var teto=90, lendo=false;
+  // enquanto a edge roda: le o log a cada 2s e avanca devagar entre as etapas
+  _intgSyncTimer=setInterval(async function(){
+    if(_intgSyncPct<teto-12) intgSyncSet(_intgSyncPct+1);
+    if(_intgSyncPct<55&&_intgSyncPct>=40) intgSyncSet(_intgSyncPct,'Importando pedidos do Olist\u2026');
+    if(lendo) return; lendo=true;
+    try{
+      var f=(id?'integracao_id=eq.'+id:'company_id=eq.'+(company&&company.id))
+        +'&created_at=gte.'+encodeURIComponent(desde)+'&select=mensagem,created_at&order=created_at.desc&limit=1';
+      var ult=await dbSelect('intg_logs',f);
+      var et=ult&&ult[0]?intgSyncEtapaDe(ult[0].mensagem):null;
+      if(et) intgSyncSet(et[0],et[1]);
+    }catch(_p){}
+    lendo=false;
+  },2000);
   try{
     var r=await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
       body:JSON.stringify({integracao_id:id||null})});
     var j=await r.json().catch(function(){return{};});
     if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
+    if(_intgSyncTimer){ clearInterval(_intgSyncTimer); _intgSyncTimer=null; }
+    intgSyncSet(92,'Atualizando a tela\u2026');
     _intgLoaded=false; await intgLoadAll();
     // pedido que já entrou pela planilha: vincula, não importa, não dispara gatilho 1
     try{ await intgVincularExistentes(); }catch(_ve){}
+    intgSyncSet(95);
     // gatilho 2: faturados recebem pronto_envio (libera a etiqueta do lado do cliente)
     try{ await intgGatilhoSeparado(); }catch(_g2){}
+    intgSyncSet(97);
     // pedido já importado que virou 'cancelado' no Olist é cancelado aqui também
     try{ var _nc=await intgEspelharCancelados(); if(_nc){ _ecomLoaded=false; await ecomLoadAll(); } }catch(_ce){}
     intgRenderBody();
-    showToast('Sync ok: '+(j.novos||0)+' novo(s), '+(j.atualizados||0)+' atualizado(s)','green');
-  }catch(e){ showToast('Erro no sync: '+(e.message||e),'red'); }
+    var seg=Math.round((Date.now()-t0)/1000);
+    intgSyncSet(100,'');
+    var bar=ge('isy-bar'); if(bar) bar.style.background='var(--green)';
+    var tit=ge('isy-tit'); if(tit) tit.textContent='Sincroniza\u00e7\u00e3o conclu\u00edda';
+    var sub=ge('isy-sub'); if(sub) sub.style.display='none';
+    var e=ge('isy-etapa'); if(e){ e.style.color='var(--green-text)'; e.textContent='\u2713 '+(j.novos||0)+' novo(s), '+(j.atualizados||0)+' atualizado(s)'; }
+    var p=ge('isy-pct'); if(p) p.textContent=seg+'s';
+    var ac=ge('isy-acoes'); if(ac) ac.style.display='flex';
+    setTimeout(function(){ intgSyncFechar(); },4000);
+  }catch(err){
+    if(_intgSyncTimer){ clearInterval(_intgSyncTimer); _intgSyncTimer=null; }
+    var bar2=ge('isy-bar'); if(bar2) bar2.style.background='var(--red)';
+    var tit2=ge('isy-tit'); if(tit2) tit2.textContent='A sincroniza\u00e7\u00e3o falhou';
+    var sub2=ge('isy-sub'); if(sub2) sub2.style.display='none';
+    var e2=ge('isy-etapa'); if(e2){ e2.style.color='var(--red-text)'; e2.textContent='Erro: '+(err.message||err); }
+    var p2=ge('isy-pct'); if(p2) p2.textContent='';
+    var ac2=ge('isy-acoes'); if(ac2) ac2.style.display='flex';
+  }
 }
 async function intgLog(id){
   var logs=[];
