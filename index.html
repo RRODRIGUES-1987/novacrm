@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1022 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1023 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1022';
+const APP_VERSION='v1.0.1023';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15377,11 +15377,26 @@ function podeAvaliar(pessoaId){
   return esc.has(pessoaId);
 }
 
+// v1.0.1023: busca livre por colaborador (filtra enquanto digita, sem recarregar a tela) e status guardado
+let _avalBusca='', _avalStatus=null;
+function avalNorm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim(); }
+function avalFiltrarBusca(q){
+  _avalBusca=q||'';
+  const b=avalNorm(_avalBusca);
+  const linhas=document.querySelectorAll('#aval-lista .aval-row');
+  let vis=0;
+  linhas.forEach(function(el){ const ok=!b||(el.getAttribute('data-nome')||'').indexOf(b)>=0; el.style.display=ok?'':'none'; if(ok)vis++; });
+  const c=ge('aval-count'); if(c) c.textContent=(b?vis+' de '+linhas.length:linhas.length)+' avaliação(ões)';
+  const v=ge('aval-busca-vazio'); if(v) v.style.display=(b&&!vis&&linhas.length)?'':'none';
+}
 function rRHAvaliacoes(){
   // Filtrar: só mostrar avaliações com notas preenchidas ou que foram avaliadas/homologadas
   // Gestor age sobre pendentes; RH acompanha as concluídas.
   const _filtroDefault = escopoAvaliacaoIds()===null?'concluidas':'pendentes';
-  const filtroStatus = ge('aval-filtro')?.value||_filtroDefault;
+  const filtroStatus = ge('aval-filtro')?.value||_avalStatus||_filtroDefault;
+  _avalStatus = filtroStatus;
+  const _busca = avalNorm(_avalBusca);
+  let _visiveis = 0;
   const _escopo = escopoAvaliacaoIds();
   const avalFiltradas = rhAvaliacoes.filter(function(av){
     // Gestor só enxerga a própria cadeia; RH e admin veem tudo.
@@ -15399,7 +15414,10 @@ function rRHAvaliacoes(){
     const perf=_preench?getPerformanceLabel(av.total||0)
       :{label:'Não avaliado',bg:'var(--bg2)',cor:'var(--text3)'};
     const form=av.tipo_formulario==='lideranca'?FORM_LIDERANCA:FORM_FUNCIONARIO;
-    return`<div class="li" style="cursor:pointer" onclick="verAvaliacao('${av.id}')">
+    const _nomeN = avalNorm(pessoa?.nome||'');
+    const _casa = !_busca || _nomeN.indexOf(_busca)>=0;
+    if(_casa) _visiveis++;
+    return`<div class="li aval-row" data-nome="${wEsc(_nomeN)}" style="cursor:pointer;${_casa?'':'display:none'}" onclick="verAvaliacao('${av.id}')">
       <div class="av ${AVC[i%5]}" style="font-size:9px;font-weight:700">${_preench?(av.total||0):'—'}</div>
       <div class="linfo">
         <div class="lname">${pessoa?.nome||'—'}</div>
@@ -15423,19 +15441,23 @@ ${av.total>0?`<button class="bicon btn-sm" title="Imprimir" onclick="imprimirAva
   ${rCicloCobertura()}
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div style="display:flex;align-items:center;gap:8px">
-      <div style="font-size:13px;color:var(--text2)">${avalFiltradas.length} avaliação(ões)</div>
-      <select id="aval-filtro" onchange="render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
-        <option value="concluidas" ${_filtroDefault==='concluidas'?'selected':''}>Concluídas</option>
-        <option value="pendentes" ${_filtroDefault==='pendentes'?'selected':''}>Pendentes (rascunho)</option>
-        <option value="todas">Todas</option>
+      <div id="aval-count" style="font-size:13px;color:var(--text2)">${_busca?_visiveis+' de '+avalFiltradas.length:avalFiltradas.length} avaliação(ões)</div>
+      <select id="aval-filtro" onchange="_avalStatus=this.value;render()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+        <option value="concluidas" ${filtroStatus==='concluidas'?'selected':''}>Concluídas</option>
+        <option value="pendentes" ${filtroStatus==='pendentes'?'selected':''}>Pendentes (rascunho)</option>
+        <option value="todas" ${filtroStatus==='todas'?'selected':''}>Todas</option>
       </select>
+      <div class="swrap" style="min-width:240px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="aval-busca" placeholder="Buscar colaborador..." value="${wEsc(_avalBusca)}" oninput="avalFiltrarBusca(this.value)" autocomplete="off">
+      </div>
     </div>
     <div style="display:flex;gap:8px">
       <button onclick="abrirFormAvaliacao('funcionario')" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">+ Funcionário</button>
       <button onclick="abrirFormAvaliacao('lideranca')" style="padding:7px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Liderança</button>
     </div>
   </div>
-  <div>
+  <div id="aval-busca-vazio" class="empty" style="${(_busca&&!_visiveis&&rows)?'':'display:none'}"><p>Nenhuma avaliação encontrada para essa busca.</p></div>
+  <div id="aval-lista">
     ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><p>Nenhuma avaliação encontrada</p></div>'}
   </div>`;
 }
