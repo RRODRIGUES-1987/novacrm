@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1020 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1021 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1020';
+const APP_VERSION='v1.0.1021';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -10528,7 +10528,7 @@ function rQualDocumentos(){
     if(rev&&rev.arquivo_url){
       rows += '<a href="'+rev.arquivo_url+'" target="_blank" title="Abrir PDF" style="font-size:15px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);text-decoration:none;line-height:1.4" onclick="event.stopPropagation()">📄</a>';
     } else {
-      rows += '<label title="Upload PDF" style="font-size:15px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer;line-height:1.4">📎<input type="file" accept=".pdf,.doc,.docx" style="display:none" onchange="event.stopPropagation();uploadQualRapido(\''+d.id+'\',this.files[0])"></label>';
+      rows += '<button title="Anexar arquivo / revisões" onclick="event.stopPropagation();openQualModal(\''+d.id+'\');switchQualTab(\'revisoes\')" style="font-size:15px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer;line-height:1.4">📎</button>';
     }
     rows += '<button title="Imprimir" onclick="event.stopPropagation();imprimirQualDoc(\''+d.id+'\')" style="font-size:15px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer;line-height:1.4">🖨️</button>';
     rows += '<button title="Editar" onclick="event.stopPropagation();openQualModal(\''+d.id+'\')" style="font-size:15px;padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);cursor:pointer;line-height:1.4">✏️</button>';
@@ -10595,10 +10595,9 @@ function addQualListeners(){
 
 async function uploadQualRapido(docId, arquivo){
   if(!arquivo) return;
-  const path = 'qualidade/'+company.id+'/'+docId+'/rev_'+Date.now()+'_'+arquivo.name;
-  const { error } = await window.supabase.storage.from('qualidade-docs').upload(path, arquivo, {upsert:true});
-  if(error){ alert('Erro no upload: '+error.message); return; }
-  const { data: urlData } = window.supabase.storage.from('qualidade-docs').getPublicUrl(path);
+  let up;
+  try{ up = await qualUploadArquivo(docId, arquivo); }catch(e){ alert('Erro no upload: '+(e.message||e)); return; }
+  const urlData = {publicUrl: up.url};
   // Criar revisão automática como rascunho
   const doc = qualDocumentos.find(function(x){return x.id===docId;});
   const proxRev = Math.max(0, doc?Number(doc.revisao_atual)||0:0, ...qualRevisoes.filter(function(r){return r.documento_id===docId;}).map(function(r){return Number(r.numero_rev)||0;})) + 1;
@@ -10695,6 +10694,7 @@ function openQualModal(docId){
       if(r.descricao) revHtml += '<div style="font-size:12px;color:var(--text2);margin-top:4px">'+r.descricao+'</div>';
       if(r.arquivo_url) revHtml += '<a href="'+r.arquivo_url+'" target="_blank" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block">📄 Abrir documento</a>';
       revHtml += qualLogHtml(r, doc);   // historico: criada, submetida, aprovada/rejeitada
+      if(!r.arquivo_url&&isQual) revHtml += '<label style="display:inline-block;margin-top:8px;margin-right:6px;padding:5px 10px;font-size:12px;border:1px solid var(--blue-text);border-radius:6px;background:var(--blue-bg);color:var(--blue-text);cursor:pointer;font-weight:600">📎 Anexar arquivo a esta revisão<input type="file" id="qual-anexar-'+r.id+'" accept=".pdf,.doc,.docx" style="display:none"></label>';
       if(r.status==='rascunho'&&isQual) revHtml += '<button id="qual-submeter-'+r.id+'" style="margin-top:8px;padding:5px 10px;font-size:12px;border:1px solid var(--amber-text);border-radius:6px;background:var(--amber-bg);color:var(--amber-text);cursor:pointer;font-weight:600">📤 Submeter este rascunho para aprovação</button>';
       if(r.status==='em_aprovacao'&&isAdmin){
         revHtml += '<div style="display:flex;gap:6px;margin-top:8px">';
@@ -10794,6 +10794,8 @@ function openQualModal(docId){
     if(btnR) btnR.addEventListener('click', function(){ qualDecidirModal(r.id, docId, false); });
     const btnS = document.getElementById('qual-submeter-'+r.id);
     if(btnS) btnS.addEventListener('click', function(){ qualSubmeterRascunho(r.id, docId); });
+    const inpA = document.getElementById('qual-anexar-'+r.id);
+    if(inpA) inpA.addEventListener('change', function(){ qualAnexarArquivo(r.id, docId, this.files[0]); });
   });
 }
 
@@ -10863,12 +10865,13 @@ async function salvarQualRevisao(docId, status){
 
   // Upload do arquivo para o Supabase Storage
   if(arquivo){
-    const path = 'qualidade/'+company.id+'/'+docId+'/rev_'+Date.now()+'_'+arquivo.name;
-    const { data: upData, error } = await window.supabase.storage.from('qualidade-docs').upload(path, arquivo, {upsert:true});
-    if(!error){
-      const { data: urlData } = window.supabase.storage.from('qualidade-docs').getPublicUrl(path);
-      arquivo_url  = urlData?.publicUrl;
-      arquivo_nome = arquivo.name;
+    try{
+      const up = await qualUploadArquivo(docId, arquivo);
+      arquivo_url  = up.url;
+      arquivo_nome = up.nome;
+    }catch(e){
+      alert('Não foi possível enviar o arquivo: '+(e.message||e)+'\nA revisão NÃO foi salva. Tente de novo.');
+      return;
     }
   }
 
@@ -10959,6 +10962,7 @@ function qualPendentes(){
 function qualLogHtml(r, doc){
   var L=[];
   if(r.created_at) L.push('<div>\u270f\ufe0f Criada por <b>'+qualEsc(qualNomeUser(r.criado_por))+'</b> em '+qualFmtDH(r.created_at)+'</div>');
+  if(r.arquivo_anexado_em) L.push('<div>\ud83d\udcce Arquivo anexado por <b>'+qualEsc(qualNomeUser(r.arquivo_anexado_por))+'</b> em '+qualFmtDH(r.arquivo_anexado_em)+'</div>');
   if(r.submetido_em) L.push('<div>\ud83d\udce4 Submetida para aprova\u00e7\u00e3o por <b>'+qualEsc(qualNomeUser(r.submetido_por))+'</b> em '+qualFmtDH(r.submetido_em)+'</div>');
   if(r.status==='aprovado'&&r.aprovado_em){
     var val=(doc&&Number(doc.revisao_atual)===Number(r.numero_rev)&&doc.data_validade)?' \u00b7 validade at\u00e9 '+new Date(doc.data_validade+'T00:00:00').toLocaleDateString('pt-BR'):'';
@@ -11054,6 +11058,38 @@ async function qualSubmeterRascunho(revId, docId){
 function qualRerender(docId){
   if(ge('modal-qual')&&docId){ ge('modal-qual').remove(); openQualModal(docId); switchQualTab('revisoes'); }
   if(['qual-documentos','qual-aprovacoes','dashboard'].indexOf(curPage)>=0) render();
+}
+
+// ── Qualidade · envio de arquivos (v1.0.1021) ──
+// O Storage recusa nomes com acento e alguns simbolos, e o erro era engolido em silencio:
+// a revisao ficava salva SEM o arquivo. Agora o nome gravado e seguro e a falha aparece.
+function qualNomeSeguro(nome){
+  var s=String(nome||'arquivo').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  var m=s.match(/^(.*?)(\.[A-Za-z0-9]{1,6})?$/)||[];
+  var base=(m[1]||'arquivo').replace(/[^A-Za-z0-9._-]+/g,'_').replace(/_+/g,'_').replace(/^[_.-]+|[_.-]+$/g,'').slice(0,80)||'arquivo';
+  return base+String(m[2]||'').toLowerCase();
+}
+async function qualUploadArquivo(docId, arquivo){
+  if(!arquivo) throw new Error('nenhum arquivo selecionado');
+  var path='qualidade/'+company.id+'/'+docId+'/rev_'+Date.now()+'_'+qualNomeSeguro(arquivo.name);
+  var res=await window.supabase.storage.from('qualidade-docs').upload(path, arquivo, {upsert:true, contentType:arquivo.type||undefined});
+  if(res&&res.error) throw new Error(res.error.message||'falha no envio');
+  var pub=window.supabase.storage.from('qualidade-docs').getPublicUrl(path);
+  var url=pub&&pub.data&&pub.data.publicUrl;
+  if(!url) throw new Error('arquivo enviado, mas o link não foi gerado');
+  return {url:url, nome:arquivo.name};
+}
+// anexa o arquivo a uma revisao que ficou sem arquivo (nao cria outra revisao)
+async function qualAnexarArquivo(revId, docId, arquivo){
+  if(!arquivo) return;
+  try{
+    var up=await qualUploadArquivo(docId, arquivo);
+    var upd={arquivo_url:up.url, arquivo_nome:up.nome, arquivo_anexado_em:new Date().toISOString(), arquivo_anexado_por:cu.id};
+    await dbUpdate('qualidade_revisoes', revId, upd);
+    qualRevisoes=qualRevisoes.map(function(x){return x.id===revId?Object.assign({},x,upd):x;});
+    showToast('Arquivo anexado \u00e0 revis\u00e3o.','green');
+    qualRerender(docId);
+  }catch(e){ alert('N\u00e3o foi poss\u00edvel anexar o arquivo: '+(e.message||e)); }
 }
 
 // ── RENDER DASHBOARD CRM ──
