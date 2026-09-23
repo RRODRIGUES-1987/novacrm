@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1025 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1026 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1025';
+const APP_VERSION='v1.0.1026';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -10824,7 +10824,8 @@ function openQualModal(docId){
       revHtml += '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">';
       revHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
       revHtml += '<span style="font-size:13px;font-weight:700">Rev. '+r.numero_rev+'</span>';
-      revHtml += '<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+sc[0]+';color:'+sc[1]+';font-weight:600">'+r.status.replace('_',' ')+'</span>';
+      revHtml += '<span style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+sc[0]+';color:'+sc[1]+';font-weight:600">'+r.status.replace('_',' ')+'</span>'
+        +(qualPodeExcluirRev(r)?'<button title="Excluir esta revisão" onclick="qualExcluirRevisao(\''+r.id+'\',\''+docId+'\')" style="border:1px solid var(--border);background:var(--bg);border-radius:6px;cursor:pointer;padding:1px 6px;font-size:13px;color:var(--red-text)">🗑</button>':'')+'</span>';
       revHtml += '</div>';
       if(r.data_revisao) revHtml += '<div style="font-size:11px;color:var(--text3)">'+new Date(r.data_revisao+'T00:00:00').toLocaleDateString('pt-BR')+'</div>';
       if(r.descricao) revHtml += '<div style="font-size:12px;color:var(--text2);margin-top:4px">'+r.descricao+'</div>';
@@ -11226,6 +11227,52 @@ async function qualAnexarArquivo(revId, docId, arquivo){
     showToast('Arquivo anexado \u00e0 revis\u00e3o.','green');
     qualRerender(docId);
   }catch(e){ alert('N\u00e3o foi poss\u00edvel anexar o arquivo: '+(e.message||e)); }
+}
+
+// ── Qualidade · exclusão definitiva de revisão (v1.0.1026) ──
+// rascunho / em aprovação / rejeitada: Qualidade, Admin e ADM. Aprovada: só Admin e ADM.
+function qualPodeExcluirRev(r){
+  var role=(profile&&profile.role)||'';
+  if(r&&r.status==='aprovado') return ['admin','adm'].indexOf(role)>=0;
+  return ['admin','adm','qualidade'].indexOf(role)>=0;
+}
+async function qualExcluirRevisao(revId, docId){
+  var r=(qualRevisoes||[]).find(function(x){return x.id===revId;}); if(!r) return;
+  if(!qualPodeExcluirRev(r)){ alert('Seu perfil não pode excluir esta revisão.'); return; }
+  var d=(qualDocumentos||[]).find(function(x){return x.id===docId;})||{};
+  var msg='Excluir a Rev. '+r.numero_rev+' de '+(d.codigo||'documento')+'?\n\nA revisão'+(r.arquivo_url?' e o arquivo anexado serão apagados':' será apagada')+' definitivamente.';
+  var novaAtual=null;
+  if(r.status==='aprovado'&&Number(d.revisao_atual)===Number(r.numero_rev)){
+    var outras=qualRevisoes.filter(function(x){return x.documento_id===docId&&x.id!==revId&&x.status==='aprovado';});
+    novaAtual=outras.length?Math.max.apply(null,outras.map(function(x){return Number(x.numero_rev)||0;})):0;
+    msg+='\n\nEsta é a revisão atual do documento: ele volta para '+(novaAtual?'a Rev. '+novaAtual:'"sem revisão aprovada"')+'.';
+  }
+  if(!confirm(msg)) return;
+  try{
+    await dbDelete('qualidade_revisoes', revId);
+    // dbDelete não acusa bloqueio de permissão: confere se a linha saiu mesmo
+    var ainda=await dbSelect('qualidade_revisoes','id=eq.'+revId+'&select=id').catch(function(){return [];});
+    if(ainda&&ainda.length) throw new Error('o banco não permitiu excluir (permissão da tabela).');
+    var aviso='';
+    if(r.arquivo_url){
+      var i=r.arquivo_url.indexOf('/qualidade-docs/');
+      if(i>=0){
+        var path=decodeURIComponent(r.arquivo_url.slice(i+'/qualidade-docs/'.length).split('?')[0]);
+        try{
+          var res=await window.supabase.storage.from('qualidade-docs').remove([path]);
+          if(res&&res.error) aviso=' O arquivo não pôde ser apagado do armazenamento ('+res.error.message+').';
+          else if(res&&Array.isArray(res.data)&&!res.data.length) aviso=' O arquivo não foi apagado do armazenamento (permissão).';
+        }catch(e){ aviso=' O arquivo não pôde ser apagado do armazenamento.'; }
+      }
+    }
+    qualRevisoes=qualRevisoes.filter(function(x){return x.id!==revId;});
+    if(novaAtual!==null){
+      await dbUpdate('qualidade_documentos',docId,{revisao_atual:novaAtual});
+      qualDocumentos=qualDocumentos.map(function(x){return x.id===docId?Object.assign({},x,{revisao_atual:novaAtual}):x;});
+    }
+    showToast('Revisão excluída.'+aviso, aviso?'amber':'green');
+    qualRerender(docId);
+  }catch(e){ alert('Não foi possível excluir: '+(e.message||e)); }
 }
 
 // ── RENDER DASHBOARD CRM ──
