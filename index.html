@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1027 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1029 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1027';
+const APP_VERSION='v1.0.1029';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -7329,6 +7329,35 @@ function addLinhaMinimo(){
   renderLinhasFatura();
 }
 // PDF da NFS-e: deixa claro que já está anexado (o campo de arquivo sempre volta vazio ao reabrir)
+
+// v1.0.1029: fatura dividida em várias NFs — lista os PDFs de cada nota (antes só aparecia o da NF 1)
+function fatNfsDe(f){ try{ var a=Array.isArray(f&&f.nfs)?f.nfs:JSON.parse((f&&f.nfs)||'[]'); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+function fatNfsLinhas(f){
+  var nfs=fatNfsDe(f).slice().sort(function(a,b){return Number(a.seq)-Number(b.seq);}), n=nfs.length;
+  return nfs.map(function(x){
+    return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border:1px solid '+(x.pdf_url?'var(--green-text)':'var(--border)')+';background:'+(x.pdf_url?'var(--green-bg)':'var(--bg2)')+';border-radius:8px;margin-bottom:6px;font-size:12.5px">'
+      +'<b>NF '+x.seq+'/'+n+'</b>'
+      +'<span style="color:var(--text2)">'+(x.nfse_numero?'NFS-e '+tgEsc(x.nfse_numero):'NFS-e a registrar')+(x.pedido?' \u00b7 ped. '+tgEsc(x.pedido):'')+' \u00b7 '+fmtV(x.total||0)+'</span>'
+      +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'
+      +(x.pdf_url?'<span style="color:var(--green-text);font-weight:600">\u2713 PDF</span><a class="btn btn-sm" href="'+tgEsc(x.pdf_url)+'" target="_blank" style="text-decoration:none">Ver</a>':'<span style="color:var(--text3)">sem PDF</span>')
+      +'<label class="btn btn-sm" style="cursor:pointer">'+(x.pdf_url?'Substituir':'Anexar PDF')+'<input type="file" accept="application/pdf" style="display:none" onchange="fatNfsAnexar(this,'+x.seq+')"></label>'
+      +'</span></div>';
+  }).join('');
+}
+async function fatNfsAnexar(input,seq){
+  var arq=input.files&&input.files[0]; if(!arq) return;
+  var f=faturaEditando; if(!f||!f.id){ alert('Salve a fatura antes.'); return; }
+  try{
+    var url=await fatUploadDoc(arq,f.id,'nfse'+seq);
+    var nfs=fatNfsDe(f).map(function(x){ return Number(x.seq)===Number(seq)?Object.assign({},x,{pdf_url:url}):x; });
+    var upd={nfs:nfs}; if(Number(seq)===1){ upd.nfse_pdf_url=url; fatNfsePdfUrl=url; }
+    await dbUpdate('faturamento',f.id,upd);
+    Object.assign(faturaEditando,upd);
+    faturamento=faturamento.map(function(x){return x.id===f.id?Object.assign({},x,upd):x;});
+    var el=ge('fat-nfs-lista'); if(el) el.innerHTML=fatNfsLinhas(faturaEditando);
+    showToast('PDF da NF '+seq+' anexado.','green');
+  }catch(e){ showToast('Erro ao anexar: '+(e.message||e),'red'); }
+}
 function fatPdfNome(url){ if(!url) return ''; var n=''; try{ n=decodeURIComponent(String(url).split('?')[0].split('/').pop()||''); }catch(e){ n=String(url).split('/').pop(); } return n.replace(/^nfse_\d+_/,''); }
 function fatPdfMostrar(url){
   var ok=ge('fat-nfse-pdf-ok'), up=ge('fat-nfse-pdf-up'), a=ge('fat-nfse-pdf-link'), nm=ge('fat-nfse-pdf-nome');
@@ -7505,6 +7534,7 @@ async function openFaturaEditor(id=null){
         <div class="fg"><label class="fl">Data NFS-e</label>
           <input class="fi" id="fat-nfse-data" type="date" value="${f?.nfse_em||''}">
         </div>
+        ${fatNfsDe(f).length>1?`<div class="fg" style="grid-column:1/-1"><label class="fl">PDFs das NFS-e (${fatNfsDe(f).length} notas)</label><div id="fat-nfs-lista">${fatNfsLinhas(f)}</div></div>`:`
         <div class="fg" style="grid-column:1/-1"><label class="fl">PDF da NFS-e</label>
           <div id="fat-nfse-pdf-ok" style="display:${f?.nfse_pdf_url?'flex':'none'};gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--green-text);background:var(--green-bg);border-radius:8px;font-size:12.5px">
             <span style="color:var(--green-text);font-weight:600">✓ PDF da NFS-e anexado</span>
@@ -7519,7 +7549,7 @@ async function openFaturaEditor(id=null){
             <input type="file" id="fat-nfse-pdf" accept="application/pdf" style="flex:1;font-size:12px" onchange="uploadNfsePdf(this)">
             <span id="fat-nfse-pdf-status" style="font-size:12px;color:var(--text3)"></span>
           </div>
-        </div>
+        </div>`}
         <div class="fg" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:10px;margin-top:4px">
           <label class="fl" style="display:flex;align-items:center;gap:6px">Nota de Débito
             <span style="font-size:10px;color:var(--text3);font-weight:400">(valor fixo, sem imposto — gerada ao aprovar)</span>
@@ -8706,10 +8736,204 @@ function feVencimento(f,dataRef){
 // v1.0.1027: vencimento alterado na emissão (null = segue o calculado)
 var _feVencManual=null, _feVencMotivo='';
 function feVencSet(v,calc){ _feVencManual=(v&&v!==calc)?v:null; feRender(); }
+
+// ══════════════ EMITIR DOCUMENTOS · FATURA COM MAIS DE UMA NF (v1.0.1028) ══════════════
+// Uma fatura (um número, uma aprovação do cliente); na emissão a parte NF pode ser dividida
+// em N notas, cada uma com as suas linhas, pedido de compra, NFS-e e o próprio título a receber.
+var _feQtdNF=1, _feNFs=[], _feComplNF=1;
+function feNFsInit(f){
+  var salvas=[]; try{ salvas=Array.isArray(f.nfs)?f.nfs:JSON.parse(f.nfs||'[]'); }catch(e){ salvas=[]; }
+  _feQtdNF=Math.max(1,salvas.length||1); _feComplNF=1;
+  _feNFs=[];
+  for(var k=1;k<=6;k++){
+    var s=salvas.find(function(x){return Number(x.seq)===k;})||{};
+    _feNFs.push({seq:k, pedido:s.pedido||(k===1?(f.numero_pedido_cliente||''):''), num:s.nfse_numero||'', data:s.nfse_em||'', pdf:s.pdf_url||null});
+  }
+  (_feLin||[]).forEach(function(l){ if(!l.nf_seq) l.nf_seq=1; });
+}
+function feSetQtdNF(d){
+  var n=Math.min(6,Math.max(1,_feQtdNF+d)); if(n===_feQtdNF) return;
+  _feQtdNF=n;
+  (_feLin||[]).forEach(function(l){ if((l.nf_seq||1)>n) l.nf_seq=n; });
+  if(_feComplNF>n) _feComplNF=1;
+  feRender();
+}
+function feSetNF(i,seq){
+  var l=_feLin&&_feLin[i]; if(!l||l.is_complemento) return;
+  if(seq===0){ l.nota_debito=true; } else { l.nota_debito=false; l.nf_seq=seq; }
+  feRender();
+}
+function feNFCampo(k,campo,v){ var x=_feNFs[k-1]; if(x) x[campo]=v; }
+async function feUploadNfseK(input,k){
+  var a=input.files&&input.files[0]; if(!a) return;
+  var st=ge('fe-nf-st-'+k); if(st){ st.textContent='Enviando\u2026'; st.style.color='var(--text3)'; }
+  try{ _feNFs[k-1].pdf=await fatUploadDoc(a,_feFatId,'nfse'+k); if(st){ st.textContent='\u2713 '+a.name; st.style.color='var(--green-text)'; } }
+  catch(e){ if(st){ st.textContent='Falha no envio'; st.style.color='var(--red-text)'; } showToast('Erro ao anexar: '+(e.message||e),'red'); }
+}
+// cálculo por NF: impostos sobre a base de cada nota; complemento na NF escolhida
+function feCalcMulti(f,lin){
+  var c=feCalc(f,lin), n=_feQtdNF, tab=c.tab, nfs=[];
+  for(var k=1;k<=n;k++){
+    var base=lin.filter(function(l){ return fatFaturavelNF(l)&&Math.min(n,l.nf_seq||1)===k; }).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
+    var compl=(k===_feComplNF)?c.compl:0, baseNF=base+compl;
+    var imp=fatImpostosCalc(baseNF,tab,f.iss_incluso===true);
+    nfs.push({seq:k, base:base, compl:compl, baseNF:baseNF, imp:imp, total:baseNF>0?imp.bruto:0});
+  }
+  var totalNF=nfs.reduce(function(s,x){return s+x.total;},0);
+  return Object.assign({},c,{nfs:nfs, totalNF:totalNF, total:totalNF+c.nd});
+}
+function feRenderMulti(box,f){
+  var c=feCalcMulti(f,_feLin), n=_feQtdNF;
+  var hoje=new Date().toISOString().slice(0,10);
+  var ref=(_feNFs[0].num&&_feNFs[0].data)?_feNFs[0].data:hoje;
+  var venc=feVencimento(f,ref);
+  var cores=[['#e0e7ff','#3730a3'],['#dcfce7','#166534'],['#fce7f3','#9d174d'],['#e0f2fe','#075985'],['#ede9fe','#5b21b6'],['#ffedd5','#9a3412']];
+  var ocultas=0;
+  var linhas=_feLin.map(function(l,i){
+    var v=Number(l.subtotal||0);
+    if(l.so_minimo) return '';
+    if(!l.is_complemento && !(v>0)){ ocultas++; return ''; }
+    var sv=l.is_complemento?c.compl:v, seg;
+    if(l.is_complemento){ seg='<span style="font-size:11px;color:var(--text3)">NF '+_feComplNF+'</span>'; }
+    else{
+      seg='<span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+      for(var k=1;k<=n;k++){ var on=!l.nota_debito&&Math.min(n,l.nf_seq||1)===k;
+        seg+='<span onclick="feSetNF('+i+','+k+')" style="padding:4px 10px;font-size:11.5px;font-weight:700;cursor:pointer;'+(on?'background:'+cores[k-1][0]+';color:'+cores[k-1][1]:'color:var(--text3)')+'">NF '+k+'</span>'; }
+      seg+='<span onclick="feSetNF('+i+',0)" style="padding:4px 10px;font-size:11.5px;font-weight:700;cursor:pointer;'+(l.nota_debito?'background:#fef3c7;color:#92400e':'color:var(--text3)')+'">ND</span></span>';
+    }
+    return '<tr><td style="padding:7px 9px;border-bottom:1px solid var(--border)">'+tgEsc(String(l.servico||(l.is_complemento?'Complemento de faturamento m\u00ednimo':'')))+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:right">'+tgEsc(String(l.quantidade||''))+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'+fmtV(sv)+'</td>'
+      +'<td style="padding:7px 9px;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap">'+seg+'</td></tr>';
+  }).join('');
+  var th=function(t,al){return '<th style="background:#0A2540;color:#fff;font-size:10.5px;padding:7px 9px;text-align:'+(al||'left')+'">'+t+'</th>';};
+  var kv=function(k,v,forte){return '<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0'+(forte?';border-top:1px solid var(--border);margin-top:4px;padding-top:6px':'')+'"><span style="color:var(--text3)">'+k+'</span><b'+(forte?' style="font-size:14px"':'')+'>'+v+'</b></div>';};
+  var cards=c.nfs.map(function(x){
+    var d=_feNFs[x.seq-1], cor=cores[x.seq-1];
+    return '<div style="border:1.5px solid '+cor[1]+';border-radius:12px;padding:12px">'
+      +'<div style="font-size:12px;font-weight:700;letter-spacing:.5px;color:'+cor[1]+';margin-bottom:8px">NF '+x.seq+' DE '+n+'</div>'
+      +'<div style="font-size:11.5px;color:var(--text3)">Pedido de compra</div><input class="fi" id="fe-nf-ped-'+x.seq+'" value="'+tgEsc(d.pedido)+'" oninput="feNFCampo('+x.seq+',\'pedido\',this.value)" placeholder="n\u00ba do pedido do cliente">'
+      +'<div style="display:grid;grid-template-columns:1fr 130px;gap:6px;margin-top:6px"><div><div style="font-size:11.5px;color:var(--text3)">N\u00ba NFS-e</div><input class="fi" id="fe-nf-num-'+x.seq+'" value="'+tgEsc(d.num)+'" oninput="feNFCampo('+x.seq+',\'num\',this.value)" placeholder="depois"></div>'
+      +'<div><div style="font-size:11.5px;color:var(--text3)">Data</div><input class="fi" type="date" id="fe-nf-data-'+x.seq+'" value="'+tgEsc(d.data)+'" onchange="feNFCampo('+x.seq+',\'data\',this.value)"></div></div>'
+      +'<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span id="fe-nf-st-'+x.seq+'" style="flex:1;font-size:11.5px;color:'+(d.pdf?'var(--green-text)':'var(--text3)')+'">'+(d.pdf?'\u2713 PDF anexado':'sem PDF')+'</span>'
+      +'<label class="btn btn-sm" style="cursor:pointer">Anexar PDF<input type="file" accept="application/pdf" style="display:none" onchange="feUploadNfseK(this,'+x.seq+')"></label></div>'
+      +'<div style="margin-top:8px">'+kv('Servi\u00e7os',fmtV(x.base))+(x.compl>0?kv('Complemento m\u00ednimo',fmtV(x.compl)):'')+kv('ISS \u00b7 PIS \u00b7 COFINS',fmtV(x.total>0?x.imp.totalImpostos:0))+kv('Total da NF '+x.seq,fmtV(x.total),true)+'</div>'
+      +(x.base<=0&&x.compl<=0?'<div style="font-size:11.5px;color:var(--red-text);margin-top:6px">Sem linhas: escolha as linhas desta NF ou diminua a quantidade de notas.</div>':'')
+      +'</div>';
+  }).join('');
+  var ndCard='<div style="border:1.5px solid #92400e;border-radius:12px;padding:12px">'
+    +'<div style="font-size:12px;font-weight:700;letter-spacing:.5px;color:#92400e;margin-bottom:8px">NOTA DE D\u00c9BITO</div>'
+    +kv('Itens',fmtV(c.nd))+kv('Impostos','n\u00e3o incidem')+kv('Total da ND',fmtV(c.nd),true)
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">'+(f.nd_numero?'N\u00ba '+tgEsc(f.nd_numero):(c.nd>0?'n\u00famero gerado pelo VERUS ao faturar':'sem itens de ND'))+'</div></div>';
+  var qtdTit=c.nfs.filter(function(x){return x.total>0;}).length+(c.nd>0?1:0);
+  var h='<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<div style="font-size:17px;font-weight:700">Emitir documentos</div>'
+    +'<span style="color:var(--text3);font-size:13px">'+tgEsc((f.numero_fatura||'')+' \u00b7 '+(f.cliente_nome||'')+' \u00b7 '+fatCompetencia(f))+'</span>'
+    +feSeletorQtd()+'</div>'
+    +'<div style="padding:16px 20px">'
+    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>'
+      +th('Servi\u00e7o')+th('Qtd','right')+th('Subtotal','right')+th('Vai para','center')+'</tr></thead><tbody>'+linhas+'</tbody></table></div>'
+    +(ocultas?'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+ocultas+' linha(s) sem valor n\u00e3o aparecem aqui.</div>':'')
+    +(c.compl>0?'<div style="font-size:12px;margin-top:8px">Complemento do faturamento m\u00ednimo ('+fmtV(c.compl)+') vai para: <select class="fi" style="width:auto;height:30px;display:inline-block" onchange="_feComplNF=Number(this.value);feRender()">'+c.nfs.map(function(x){return '<option value="'+x.seq+'"'+(x.seq===_feComplNF?' selected':'')+'>NF '+x.seq+'</option>';}).join('')+'</select></div>':'')
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-top:12px">'+cards+(c.nd>0?ndCard:'')+'</div>'
+    +'<div style="margin-top:12px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;border-radius:10px;padding:10px 13px;font-size:12.5px;color:var(--amber-text,#8a6d1a)">'
+      +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">Vencimento dos t\u00edtulos (o mesmo para todos): '
+      +'<input type="date" class="fi" id="fe-venc" value="'+(_feVencManual||venc)+'" onchange="feVencSet(this.value,\''+venc+'\')" style="width:auto;height:32px">'
+      +'<span>calculado pela regra: <b>'+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+'</b></span></div>'
+      +(_feVencManual?'<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Motivo da altera\u00e7\u00e3o do vencimento *</label>'
+        +'<textarea class="fi" id="fe-venc-motivo" rows="2" oninput="_feVencMotivo=this.value" style="margin-top:4px;resize:vertical">'+tgEsc(_feVencMotivo)+'</textarea></div>':'')
+    +'</div></div>'
+    +'<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg2)">'
+      +'<span style="font-size:13px;color:var(--text3)">Total da fatura <b style="color:var(--text)">'+fmtV(c.total)+'</b> = '
+        +c.nfs.map(function(x){return 'NF '+x.seq+' '+fmtV(x.total);}).join(' + ')+(c.nd>0?' + ND '+fmtV(c.nd):'')+'</span>'
+      +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn" onclick="ge(\'modal-fe\').remove()">Cancelar</button>'
+      +'<button class="btn btn-p" id="fe-btn" onclick="feFaturar()">Faturar \u00b7 gerar '+qtdTit+' t\u00edtulo(s)</button></span></div>';
+  var foco=document.activeElement&&document.activeElement.id, pos=foco&&document.activeElement.selectionStart;
+  box.innerHTML=h;
+  if(foco){ var el=ge(foco); if(el){ el.focus(); try{ if(pos!=null)el.setSelectionRange(pos,pos); }catch(e){} } }
+}
+function feSeletorQtd(){
+  return '<span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2)">Notas fiscais desta fatura '
+    +'<span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">'
+    +'<button class="btn btn-sm" style="border:none;border-radius:0" onclick="feSetQtdNF(-1)"'+(_feQtdNF<=1?' disabled':'')+'>\u2212</button>'
+    +'<span style="padding:4px 12px;font-weight:700;border-left:1px solid var(--border);border-right:1px solid var(--border)">'+_feQtdNF+'</span>'
+    +'<button class="btn btn-sm" style="border:none;border-radius:0" onclick="feSetQtdNF(1)"'+(_feQtdNF>=6?' disabled':'')+'>+</button></span></span>';
+}
+async function feFaturarMulti(f){
+  var c=feCalcMulti(f,_feLin), n=_feQtdNF;
+  var vazia=c.nfs.find(function(x){return !(x.total>0);});
+  if(vazia){ alert('A NF '+vazia.seq+' est\u00e1 sem linhas. Escolha as linhas dela ou diminua a quantidade de notas.'); return; }
+  var hoje=new Date().toISOString().slice(0,10);
+  var ref=(_feNFs[0].num&&_feNFs[0].data)?_feNFs[0].data:hoje;
+  var venc=feVencimento(f,ref), vencCalc=venc;
+  if(_feVencManual){
+    if(!String(_feVencMotivo||'').trim()){ alert('Informe o motivo da altera\u00e7\u00e3o do vencimento.'); return; }
+    venc=_feVencManual;
+  }
+  var resumo=c.nfs.map(function(x){ var d=_feNFs[x.seq-1]; return '\u2022 NF '+x.seq+': '+fmtV(x.total)+(d.pedido?' \u2014 ped. '+d.pedido:'')+(d.num?' \u2014 NFS-e '+d.num:' \u2014 NFS-e a anexar depois'); }).join('\n');
+  if(!confirm('Faturar '+(f.numero_fatura||'')+' em '+n+' notas?\n\n'+resumo+'\n'+(c.nd>0?'\u2022 ND: '+fmtV(c.nd)+'\n':'')
+    +'\nVencimento: '+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+(_feVencManual?' (alterado; calculado: '+new Date(vencCalc+'T00:00').toLocaleDateString('pt-BR')+')':'')
+    +'\nSer\u00e3o criados '+(n+(c.nd>0?1:0))+' t\u00edtulo(s) no contas a receber.')) return;
+  var btn=ge('fe-btn'); if(btn){ btn.disabled=true; btn.textContent='Faturando\u2026'; }
+  try{
+    var lin=_feLin.map(function(l){ var x=Object.assign({},l); if(x.is_complemento){ x.subtotal=c.compl; x.nf_seq=_feComplNF; } else if(!x.nota_debito){ x.nf_seq=Math.min(n,x.nf_seq||1); } return x; })
+                  .filter(function(l){ return !(l.is_complemento&&!(Number(l.subtotal)>0)); });
+    var nfs=c.nfs.map(function(x){ var d=_feNFs[x.seq-1];
+      return {seq:x.seq, pedido:String(d.pedido||'').trim()||null, nfse_numero:String(d.num||'').trim()||null, nfse_em:(d.num&&d.data)?d.data:null, pdf_url:d.pdf||null,
+              base:x.base, compl:x.compl, iss:x.imp.iss, pis:x.imp.pis, cofins:x.imp.cofins, impostos:x.total>0?x.imp.totalImpostos:0, total:x.total}; });
+    var todasComNum=nfs.every(function(x){return !!x.nfse_numero;});
+    var imp={iss:0,pis:0,cofins:0,tot:0}; nfs.forEach(function(x){ imp.iss+=x.iss; imp.pis+=x.pis; imp.cofins+=x.cofins; imp.tot+=x.impostos; });
+    var upd={linhas:JSON.stringify(lin), nfs:nfs, subtotal:c.nfs.reduce(function(s,x){return s+x.baseNF;},0), iss_valor:imp.iss, pis_valor:imp.pis, cofins_valor:imp.cofins,
+             impostos_total:imp.tot, valor_bruto:c.totalNF, total:c.total, nd_valor:c.nd>0?c.nd:null,
+             nfse_numero:nfs.map(function(x){return x.nfse_numero;}).filter(Boolean).join(' / ')||null, nfse_em:nfs[0].nfse_em||null, nfse_pdf_url:nfs[0].pdf_url||null,
+             vencimento:venc, vencimento_calculado:vencCalc, faturado_em:new Date().toISOString(), status:todasComNum?'nfse_emitida':'faturado'};
+    if(_feVencManual){ upd.vencimento_ajuste_motivo=String(_feVencMotivo).trim(); upd.vencimento_ajuste_por=cu.id; upd.vencimento_ajuste_em=new Date().toISOString(); }
+    if(c.nd>0&&!f.nd_numero){
+      var ndNum=await dbRpc('next_numero',{p_company:f.company_id,p_prefixo:'ND'});
+      if(!ndNum) throw new Error('n\u00e3o foi poss\u00edvel gerar o n\u00famero da ND');
+      upd.nd_numero=ndNum; upd.nd_em=hoje;
+    }
+    await dbUpdate('faturamento',f.id,upd);
+    Object.assign(f,upd);
+    faturamento=faturamento.map(function(x){return x.id===f.id?f:x;});
+    var qt=await criarTitulosFatura(f.id);
+    var m=ge('modal-fe'); if(m) m.remove();
+    showToast((f.numero_fatura||'Fatura')+' faturada em '+n+' NFs \u00b7 '+qt+' t\u00edtulo(s) criado(s)'+(upd.nd_numero?' \u00b7 ND '+upd.nd_numero:''),'green');
+    render();
+  }catch(e){
+    alert('N\u00e3o foi poss\u00edvel faturar: '+(e.message||e));
+    if(btn){ btn.disabled=false; btn.textContent='Faturar'; }
+  }
+}
+// registrar depois a NFS-e de UMA das notas de uma fatura dividida
+async function confirmarNFSeMulti(id,seq){
+  var f=(faturamento||[]).find(function(x){return x.id===id;}); if(!f) return;
+  var num=(ge('nfse-num')||{}).value; if(!num){ alert('Informe o n\u00famero da NFS-e.'); return; }
+  var data=(ge('nfse-data')||{}).value||new Date().toISOString().slice(0,10);
+  var nfs=[]; try{ nfs=Array.isArray(f.nfs)?f.nfs.slice():JSON.parse(f.nfs||'[]'); }catch(e){ nfs=[]; }
+  var alvo=nfs.find(function(x){return Number(x.seq)===Number(seq);}); if(!alvo){ alert('NF n\u00e3o encontrada nesta fatura.'); return; }
+  var pdf=null, arq=ge('nfse-pdf')&&ge('nfse-pdf').files&&ge('nfse-pdf').files[0];
+  if(arq){ try{ pdf=await fatUploadDoc(arq,id,'nfse'+seq); }catch(e){ alert('A NFS-e ser\u00e1 registrada, mas o PDF n\u00e3o subiu: '+(e.message||e)); } }
+  alvo.nfse_numero=num; alvo.nfse_em=data; if(pdf) alvo.pdf_url=pdf;
+  var todas=nfs.every(function(x){return !!x.nfse_numero;});
+  var upd={nfs:nfs, nfse_numero:nfs.map(function(x){return x.nfse_numero;}).filter(Boolean).join(' / '), status:todas?'nfse_emitida':(f.status||'faturado')};
+  if(Number(seq)===1){ upd.nfse_em=data; if(pdf) upd.nfse_pdf_url=pdf; }
+  try{
+    await dbUpdate('faturamento',id,upd);
+    faturamento=faturamento.map(function(x){return x.id===id?Object.assign({},x,upd):x;});
+    var crs=[]; try{ crs=await dbSelect('contas_receber','fatura_id=eq.'+id+'&documento_seq=eq.'+seq+'&select=id')||[]; }catch(e){}
+    for(var i=0;i<crs.length;i++){ await dbUpdate('contas_receber',crs[i].id,{documento_numero:num}); contasReceber=(contasReceber||[]).map(function(x){return x.id===crs[i].id?Object.assign({},x,{documento_numero:num}):x;}); }
+    var m=ge('modal-nfse'); if(m) m.remove();
+    showToast('NFS-e '+num+' registrada na NF '+seq+(todas?' \u00b7 todas as notas registradas':''),'green');
+    render();
+  }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+
 function fatEmitirAbrir(id){
   var f=(faturamento||[]).find(function(x){return x.id===id;}); if(!f)return;
   _feFatId=id; _feNfsePdf=f.nfse_pdf_url||null; _feVencManual=null; _feVencMotivo='';
   _feLin=fatLinhasDe(f).map(function(l){return Object.assign({},l);});
+  feNFsInit(f);
   var old=ge('modal-fe'); if(old)old.remove();
   var ov=document.createElement('div'); ov.id='modal-fe';
   ov.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
@@ -8721,6 +8945,7 @@ function feSet(i,nd){ if(!_feLin||!_feLin[i]||_feLin[i].is_complemento)return; _
 function feRender(){
   var box=ge('fe-corpo'); if(!box)return;
   var f=(faturamento||[]).find(function(x){return x.id===_feFatId;}); if(!f)return;
+  if(_feQtdNF>1){ feRenderMulti(box,f); return; }   // v1.0.1028: fatura dividida em mais de uma NF
   var nfse=(ge('fe-nfse-num')?ge('fe-nfse-num').value:(f.nfse_numero||''));
   var nfseData=(ge('fe-nfse-data')?ge('fe-nfse-data').value:(f.nfse_em||new Date().toISOString().slice(0,10)));
   var c=feCalc(f,_feLin);
@@ -8747,7 +8972,7 @@ function feRender(){
   var h='<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
     +'<div style="font-size:17px;font-weight:700">Emitir documentos</div>'
     +'<span style="color:var(--text3);font-size:13px">'+tgEsc((f.numero_fatura||'')+' · '+(f.cliente_nome||'')+' · '+fatCompetencia(f))+'</span>'
-    +'<span style="margin-left:auto;font-size:12px;color:var(--text3)">sugestão inicial vem da tabela tarifária</span></div>'
+    +feSeletorQtd()+'</div>'
     +'<div style="padding:16px 20px">'
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>'
       +th('Serviço')+th('Qtd','right')+th('Subtotal','right')+th('Vai para','center')+'</tr></thead><tbody>'+linhas+'</tbody></table></div>'
@@ -8797,6 +9022,7 @@ async function feUploadNfse(input){
 }
 async function feFaturar(){
   var f=(faturamento||[]).find(function(x){return x.id===_feFatId;}); if(!f)return;
+  if(_feQtdNF>1) return feFaturarMulti(f);
   var c=feCalc(f,_feLin);
   if(!(c.total>0)){ alert('A fatura está sem valor.'); return; }
   var nfse=String((ge('fe-nfse-num')&&ge('fe-nfse-num').value)||'').trim();
@@ -8844,11 +9070,17 @@ async function feFaturar(){
 
 function registrarNFSe(id){
   const old=ge('modal-nfse');if(old)old.remove();
+  // v1.0.1028: fatura dividida: escolhe qual das notas está sendo registrada
+  const _fm=(faturamento||[]).find(x=>x.id===id);
+  let _nfsM=[]; try{ _nfsM=Array.isArray(_fm&&_fm.nfs)?_fm.nfs:JSON.parse((_fm&&_fm.nfs)||'[]'); }catch(e){ _nfsM=[]; }
+  const _pend=_nfsM.length>1?_nfsM.filter(x=>!x.nfse_numero):[];
+  const _seqSel=_pend.length?`<div class="fg"><label class="fl">Qual nota</label><select class="fi" id="nfse-seq">${_pend.map(x=>`<option value="${x.seq}">NF ${x.seq} de ${_nfsM.length} — ${fmtV(x.total)}${x.pedido?' · ped. '+tgEsc(x.pedido):''}</option>`).join('')}</select></div>`:'';
   const modal=document.createElement('div');
   modal.id='modal-nfse';
   modal.style.cssText='position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
   modal.innerHTML=`<div style="background:var(--bg);border-radius:14px;padding:20px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
     <div style="font-size:15px;font-weight:600;margin-bottom:16px">Registrar NFS-e</div>
+    ${_seqSel}
     <div class="fg"><label class="fl">Número da NFS-e</label>
       <input class="fi" id="nfse-num" placeholder="Ex: 000123">
     </div>
@@ -8867,6 +9099,7 @@ function registrarNFSe(id){
 }
 
 async function confirmarNFSe(id){
+  const _selSeq=ge('nfse-seq'); if(_selSeq) return confirmarNFSeMulti(id,_selSeq.value);
   const num=ge('nfse-num')?.value;
   if(!num){alert('Informe o número da NFS-e.');return;}
   const data=ge('nfse-data')?.value||new Date().toISOString().slice(0,10);
@@ -20895,9 +21128,9 @@ function crLisRender(){
       var fat=(contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||'';
       var comp=cp.competencia?new Date(cp.competencia+'T00:00').toLocaleDateString('pt-BR',{month:'2-digit',year:'2-digit'}):'';
       var _dt=String(cp.documento_tipo||'nf'), _dn=cp.documento_numero||'';
-      var _bdg=cp.fatura_id?('<span style="font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;margin-right:5px;'+(_dt==='nd'?'background:#fef3c7;color:#92400e">ND':'background:#e0e7ff;color:#3730a3">NF')+'</span>'):'';
+      var _bdg=cp.fatura_id?('<span style="font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;margin-right:5px;'+(_dt==='nd'?'background:#fef3c7;color:#92400e">ND':'background:#e0e7ff;color:#3730a3">NF'+(Number(cp.documento_total)>1?' '+cp.documento_seq+'/'+cp.documento_total:''))+'</span>'):'';
       var _doc=_dn?(_dt==='nd'?_dn:('NFS-e '+_dn)):((cp.fatura_id&&_dt==='nf')?'NFS-e a anexar':'');
-      var cls=[_doc,fat,comp?'comp '+comp:''].filter(Boolean).join(' · ');
+      var cls=[_doc,fat,cp.pedido_compra?'ped. '+cp.pedido_compra:'',comp?'comp '+comp:''].filter(Boolean).join(' · ');
       var parc='';
       var acao='';
       if(st==='aguardando') acao='<span onclick="novoTituloCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
@@ -21660,18 +21893,26 @@ async function criarTitulosFatura(faturaId){
   let exist=[];
   try{ exist=await dbSelect('contas_receber','fatura_id=eq.'+faturaId+'&select=id,documento_tipo,valor')||[]; }catch(e){ exist=[]; }
   const docs=[];
-  if(nf>0) docs.push({tipo:'nf',valor:nf,numero:f.nfse_numero||null});
+  // v1.0.1028: fatura dividida em mais de uma NF → um título por NF (mesma fatura), com o pedido de compra
+  let _nfs=[]; try{ _nfs=Array.isArray(f.nfs)?f.nfs:JSON.parse(f.nfs||'[]'); }catch(e){ _nfs=[]; }
+  const _multi=_nfs.length>1;
+  if(_multi){
+    try{ exist=await dbSelect('contas_receber','fatura_id=eq.'+faturaId+'&select=id,documento_tipo,documento_seq,valor')||[]; }
+    catch(e){ throw new Error('rode o SQL da versão '+'v1.0.1028'+' (colunas das várias NFs no contas a receber)'); }
+    _nfs.forEach(function(x){ const v=Math.round(Number(x.total||0)*100)/100; if(v>0) docs.push({tipo:'nf',valor:v,numero:x.nfse_numero||null,seq:Number(x.seq),tot:_nfs.length,pedido:x.pedido||null}); });
+  } else if(nf>0) docs.push({tipo:'nf',valor:nf,numero:f.nfse_numero||null});
   if(nd>0) docs.push({tipo:'nd',valor:nd,numero:f.nd_numero||null});
   let n=0;
   for(const d of docs){
-    const ja=exist.find(x=>String(x.documento_tipo||'nf')===d.tipo);
+    const ja=exist.find(x=>String(x.documento_tipo||'nf')===d.tipo&&(!d.seq||Number(x.documento_seq||1)===d.seq));
     if(ja) continue;
     // titulo antigo unico (NF + ND somados): nao duplica a ND — o acerto e feito pelo SQL
-    if(d.tipo==='nd'){ const nfAnt=exist.find(x=>String(x.documento_tipo||'nf')==='nf'); if(nfAnt&&Number(nfAnt.valor||0)>nf+0.05) continue; }
+    if(d.tipo==='nd'&&!_multi){ const nfAnt=exist.find(x=>String(x.documento_tipo||'nf')==='nf'); if(nfAnt&&Number(nfAnt.valor||0)>nf+0.05) continue; }
     const obj=Object.assign({company_id:cid},unitPayload(),{
       fatura_id:faturaId, cliente_id:f.cliente_id||null, cliente_nome:f.cliente_nome||'',
       valor:d.valor, vencimento:f.vencimento, status:'a_vencer',
-      documento_tipo:d.tipo, documento_numero:d.numero, competencia:comp?comp+'-01':null});
+      documento_tipo:d.tipo, documento_numero:d.numero, competencia:comp?comp+'-01':null},
+      d.seq?{documento_seq:d.seq,documento_total:d.tot,pedido_compra:d.pedido}:{});
     const res=await dbInsert('contas_receber',obj);
     if(res){ contasReceber.push(res); n++; }
   }
