@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1026 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1027 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1026';
+const APP_VERSION='v1.0.1027';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5386,7 +5386,7 @@ function frCompetencia(f){
   return String(d).slice(0,7);
 }
 function frLinhas(f){
-  try{ return typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ return []; }
+  try{ var _fl=typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); return _fl.filter(function(l){return !l.so_minimo;}); }catch(e){ return []; }
 }
 // fator para converter bruto -> liquido (desconta ISS/PIS/COFINS da fatura)
 function frFatorLiq(f){
@@ -6733,9 +6733,14 @@ function ttNdMapa(json){
     if(it&&it.nota_debito===true) nd[String(it.servico||'').trim().toUpperCase()]=true; }); });
   return nd;
 }
+function ttSmMapa(json){
+  var sm={}; (json||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){
+    if(it&&it.so_minimo===true) sm[String(it.servico||'').trim().toUpperCase()]=true; }); });
+  return sm;
+}
 // quadros da tela -> JSON no formato das propostas
 function ttJsonDeQuadros(quadros,jsonAntigo){
-  var nd=ttNdMapa(jsonAntigo);
+  var nd=ttNdMapa(jsonAntigo), sm=ttSmMapa(jsonAntigo);
   return (quadros||[]).filter(function(q){return q&&q.nome&&(q.itens||[]).some(function(i){return i&&i.servico;});}).map(function(q){
     return {quadro:q.nome, itens:(q.itens||[]).filter(function(i){return i&&i.servico;}).map(function(it){
       var un=it.unidade_cobranca||it.unidade||'';
@@ -6743,7 +6748,8 @@ function ttJsonDeQuadros(quadros,jsonAntigo){
       var k=String(it.servico).trim().toUpperCase();
       return {servico:it.servico, unidade:un, unidade_cobranca:un, valor:ttValorBR(it.valor,perc),
               qtde_minima:it.qtde_minima?Number(it.qtde_minima):null,
-              nota_debito:(it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true)};
+              nota_debito:(it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true),
+              so_minimo:(it.so_minimo===true)||(it.so_minimo===undefined&&sm[k]===true)};
     })};
   });
 }
@@ -6757,7 +6763,7 @@ function ttQuadrosDeJson(json){
         if(perc&&!/%/.test(un)) un=(un?un+' ':'')+'%';
         var v=parseValorTarifa(it.valor,perc);
         return {servico:it.servico||it.descricao, unidade_cobranca:un, valor:v||'',
-                qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true,
+                qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true,
                 cap_recebimento:false, cap_expedicao:false};
       })};
   });
@@ -6776,9 +6782,10 @@ async function loadTTQuadros(tabelaId){
     if(_js.length) ttQuadros=ttQuadrosDeJson(_js);
   } else {
     // o flag de Nota de Debito so existe na coluna tarifas: traz de la
-    const nd=ttNdMapa(_js);
+    const nd=ttNdMapa(_js), sm=ttSmMapa(_js);
     ttQuadros.forEach(function(q){ (q.itens||[]).forEach(function(it){
-      if(it.nota_debito===undefined) it.nota_debito=nd[String(it.servico||'').trim().toUpperCase()]===true; }); });
+      if(it.nota_debito===undefined) it.nota_debito=nd[String(it.servico||'').trim().toUpperCase()]===true;
+      if(it.so_minimo===undefined) it.so_minimo=sm[String(it.servico||'').trim().toUpperCase()]===true; }); });
   }
   renderTTQuadros();
 }
@@ -6843,6 +6850,7 @@ function renderTTQuadros(){
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Recebimento">Cap.Rec</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Expedição">Cap.Exp</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Esta linha vai para a Nota de Débito (valor fixo, sem imposto)">ND</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Conta só para o cálculo do faturamento mínimo e não é cobrada (ex.: litros expedidos de outro cliente)">Só mín.</th>
             <th style="width:5%"></th>
           </tr>
         </thead>
@@ -6880,6 +6888,9 @@ function renderTTRow(qi, ii, item){
     </td>
     <td style="padding:5px 4px;text-align:center">
       <input type="checkbox" ${item.nota_debito?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].nota_debito=this.checked" style="width:15px;height:15px;cursor:pointer" title="Vai para a Nota de Débito">
+    </td>
+    <td style="padding:5px 4px;text-align:center">
+      <input type="checkbox" ${item.so_minimo?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].so_minimo=this.checked" style="width:15px;height:15px;cursor:pointer" title="Conta só para o faturamento mínimo (não é cobrada)">
     </td>
     <td style="padding:5px 4px;text-align:center">
       <button onclick="removeItemQuadro(${qi},${ii})" style="border:none;background:none;cursor:pointer;color:var(--text3);padding:2px">
@@ -7277,6 +7288,65 @@ let fatNfsePdfUrl=null;
 // Converte o valor de uma tarifa em número.
 // - Percentual: vírgula/ponto é SEMPRE decimal, nunca milhar (ex: "0.1290%%" -> 0.129; "0,0445%" -> 0.0445)
 // - Valor normal: formato brasileiro (ponto=milhar, vírgula=decimal) ex "1.200,00" -> 1200
+
+// v1.0.1027: Ad Valorem / GRIS / seguro cadastrado SEM "%" também é percentual (0,0445 = 0,0445%).
+// Trava: 5 ou mais sem "%" continua valor em R$ (taxa fixa nunca é dividida por 100).
+function tarifaEhPercentual(servico,unidade,valor,tipo){
+  if(tipo==='percentual'||String(valor==null?'':valor).indexOf('%')>=0) return true;
+  var s=String(servico||''), u=String(unidade||'');
+  var seguro=/ad\s*valorem|advalorem|\bgris\b|seguro|gerenciamento\s+de\s+risco/i.test(s);
+  var baseValor=/valor\s*(r\$\s*)?(armazenado|em\s+estoque|estoque|da\s+nf|da\s+mercadoria)|%\s*do\s*valor/i.test(u);
+  if(!seguro&&!baseValor) return false;
+  var n=parseValorTarifa(valor,true);
+  return n>0&&n<5;
+}
+function fatLinhaPercentual(l){ return !!l&&tarifaEhPercentual(l.servico,l.unidade,l.preco_unitario,l.tipo); }
+function fatPrecoExib(l){ var pr=l&&l.preco_unitario; if(pr==null||pr==='') return ''; var s=String(pr); return (fatLinhaPercentual(l)&&s.indexOf('%')<0)?s+'%':s; }
+function fatSubtotalPuro(l){
+  if(!l||l.is_complemento) return Number(l&&l.subtotal||0);
+  var perc=fatLinhaPercentual(l), preco=parseValorTarifa(l.preco_unitario,perc);
+  var qtd=parseFloat(String(l.quantidade==null?'':l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
+  return perc?(preco/100)*qtd:preco*qtd;
+}
+// faturamento mínimo: linha manual (fita, impressão...) fica FORA, salvo se marcada;
+// linha "só para o mínimo" entra na base mas não é cobrada
+function fatEntraNoMinimo(l){
+  if(!l||l.is_complemento||l.nota_debito) return false;
+  if(l.so_minimo) return true;
+  if(l.entra_minimo===true) return true;
+  if(l.entra_minimo===false) return false;
+  return !((l.manual===true)||(l.quadro==='Extras'));
+}
+function fatFaturavelNF(l){ return !!l&&!l.nota_debito&&!l.so_minimo&&!l.is_complemento; }
+function fatBaseMinimo(linhas){ return (linhas||[]).filter(fatEntraNoMinimo).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
+function fatLinhaMinTag(l,gi){
+  if(l.so_minimo) return '<div style="font-size:10.5px;color:var(--text3);margin-top:2px">n\u00e3o faturado \u00b7 conta s\u00f3 para o faturamento m\u00ednimo</div>';
+  if(l.manual===true||l.quadro==='Extras') return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> entra no faturamento m\u00ednimo</label>';
+  return '';
+}
+function addLinhaMinimo(){
+  fatLinhas.push({quadro:'Extras',servico:'',unidade:'',preco_unitario:'',quantidade:'',subtotal:0,tipo:'unitario',manual:true,so_minimo:true});
+  renderLinhasFatura();
+}
+// PDF da NFS-e: deixa claro que já está anexado (o campo de arquivo sempre volta vazio ao reabrir)
+function fatPdfNome(url){ if(!url) return ''; var n=''; try{ n=decodeURIComponent(String(url).split('?')[0].split('/').pop()||''); }catch(e){ n=String(url).split('/').pop(); } return n.replace(/^nfse_\d+_/,''); }
+function fatPdfMostrar(url){
+  var ok=ge('fat-nfse-pdf-ok'), up=ge('fat-nfse-pdf-up'), a=ge('fat-nfse-pdf-link'), nm=ge('fat-nfse-pdf-nome');
+  if(url){ if(a)a.href=url; if(nm)nm.textContent=fatPdfNome(url); if(ok)ok.style.display='flex'; if(up)up.style.display='none'; }
+  else { if(ok)ok.style.display='none'; if(up)up.style.display='flex'; var st=ge('fat-nfse-pdf-status'); if(st)st.textContent=''; }
+  var i=ge('fat-nfse-pdf'); if(i) i.value='';
+}
+function fatPdfSubstituir(){ var up=ge('fat-nfse-pdf-up'); if(up)up.style.display='flex'; var i=ge('fat-nfse-pdf'); if(i)i.click(); }
+async function fatPdfRemover(){
+  if(!confirm('Remover o PDF da NFS-e desta fatura?\n\nO arquivo continua guardado; s\u00f3 deixa de ficar ligado \u00e0 fatura.')) return;
+  if(faturaEditando&&faturaEditando.id){
+    try{ await dbUpdate('faturamento',faturaEditando.id,{nfse_pdf_url:null}); }catch(e){ alert('Erro: '+(e.message||e)); return; }
+    faturaEditando.nfse_pdf_url=null;
+    faturamento=faturamento.map(function(x){return x.id===faturaEditando.id?Object.assign({},x,{nfse_pdf_url:null}):x;});
+  }
+  fatNfsePdfUrl=null; fatPdfMostrar(null);
+}
+
 function parseValorTarifa(valor,isPerc){
   if(valor==null)return 0;
   if(typeof valor==='number')return valor;
@@ -7414,6 +7484,7 @@ async function openFaturaEditor(id=null){
       <div id="fat-linhas-grid"><div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">Selecione o cliente para carregar as linhas</div></div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button onclick="addLinhaFatura()" style="flex:1;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;color:var(--text2)">+ Adicionar linha manual</button>
+        <button onclick="addLinhaMinimo()" title="Linha que conta só para o cálculo do faturamento mínimo (ex.: litros expedidos de outro cliente) e não é cobrada" style="flex:1;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;color:var(--text2)">+ Linha só para o mínimo</button>
         <button onclick="fatRecarregarLinhas()" title="Traz de novo os servicos da tabela tarifaria vigente, mantendo as quantidades ja digitadas" style="flex:1;padding:8px;border:1px dashed var(--border2);border-radius:var(--radius);background:transparent;cursor:pointer;font-size:12px;color:var(--text2)">&#8635; Recarregar da tabela tarifaria</button>
       </div>
     </div>
@@ -7435,10 +7506,18 @@ async function openFaturaEditor(id=null){
           <input class="fi" id="fat-nfse-data" type="date" value="${f?.nfse_em||''}">
         </div>
         <div class="fg" style="grid-column:1/-1"><label class="fl">PDF da NFS-e</label>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div id="fat-nfse-pdf-ok" style="display:${f?.nfse_pdf_url?'flex':'none'};gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--green-text);background:var(--green-bg);border-radius:8px;font-size:12.5px">
+            <span style="color:var(--green-text);font-weight:600">✓ PDF da NFS-e anexado</span>
+            <span id="fat-nfse-pdf-nome" style="color:var(--text2);font-size:11.5px">${fatPdfNome(f?.nfse_pdf_url)}</span>
+            <span style="margin-left:auto;display:flex;gap:6px">
+              <a id="fat-nfse-pdf-link" class="btn btn-sm" href="${f?.nfse_pdf_url||'#'}" target="_blank" style="text-decoration:none">Ver</a>
+              <button type="button" class="btn btn-sm" onclick="fatPdfSubstituir()">Substituir</button>
+              <button type="button" class="btn btn-sm" style="color:var(--red-text)" onclick="fatPdfRemover()">Remover</button>
+            </span>
+          </div>
+          <div id="fat-nfse-pdf-up" style="display:${f?.nfse_pdf_url?'none':'flex'};gap:8px;align-items:center;margin-top:6px">
             <input type="file" id="fat-nfse-pdf" accept="application/pdf" style="flex:1;font-size:12px" onchange="uploadNfsePdf(this)">
             <span id="fat-nfse-pdf-status" style="font-size:12px;color:var(--text3)"></span>
-            <a id="fat-nfse-pdf-link" href="${f?.nfse_pdf_url||'#'}" target="_blank" style="font-size:12px;color:var(--accent);${f?.nfse_pdf_url?'':'display:none'}">📄 Ver PDF</a>
           </div>
         </div>
         <div class="fg" style="grid-column:1/-1;border-top:1px dashed var(--border);padding-top:10px;margin-top:4px">
@@ -7516,6 +7595,9 @@ async function openFaturaEditor(id=null){
           // Se não carregou tabela, usa linhas salvas diretamente
           fatLinhas=linhasSalvas;
         }
+        // v1.0.1027: o complemento é recalculado (não volta como linha) e o rascunho recalcula os subtotais
+        fatLinhas=fatLinhas.filter(l=>!l.is_complemento);
+        if(f.status==='rascunho'||f.status==='aguardando') fatLinhas.forEach(l=>{ l.subtotal=fatSubtotalPuro(l); });
         renderLinhasFatura();
         recalcFatura();
       }
@@ -7558,6 +7640,7 @@ function _imprimirFatura(f,contatoResp){
 
   let linhas=[];
   try{linhas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
+  linhas=linhas.filter(l=>!l.so_minimo);
   const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
@@ -7573,7 +7656,7 @@ function _imprimirFatura(f,contatoResp){
 
   // Formata quantidade: se percentual, mostra como R$; se inteiro, mostra simples
   const fmtQtd=(l)=>{
-    const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
+    const isPerc=fatLinhaPercentual(l);
     const qtd=l.quantidade;
     if(!qtd&&qtd!==0)return'—';
     if(isPerc){
@@ -7600,7 +7683,7 @@ function _imprimirFatura(f,contatoResp){
     <tr>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px">${l.servico}</td>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:center">${l.unidade||''}</td>
-      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:right">${l.preco_unitario||''}</td>
+      <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:right">${fatPrecoExib(l)}</td>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:center">${fmtQtd(l)}</td>
       <td style="padding:5px 8px;border:1px solid #ccc;font-size:11px;text-align:right;font-weight:600">${fmtBRL(l.subtotal||0)}</td>
     </tr>`).join('');
@@ -7866,6 +7949,7 @@ async function confirmarEnvioEmail(id){
   const cli=clientes.find(c=>c.id===f.cliente_id);
   let linhas=[];
   try{linhas=Array.isArray(f.linhas)?f.linhas:JSON.parse(f.linhas||'[]');}catch(e){}
+  linhas=linhas.filter(l=>!l.so_minimo);
   const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
@@ -7888,7 +7972,7 @@ async function confirmarEnvioEmail(id){
     <tr>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px">${l.servico}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">${l.unidade||''}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">${l.preco_unitario||''}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">${fatPrecoExib(l)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:center">${l.quantidade||'—'}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:600">${fmtBRL(l.subtotal||0)}</td>
     </tr>`).join('');
@@ -8115,7 +8199,7 @@ function carregarLinhasFatura(tabelaId){
     quantidade:'',
     subtotal:0,
     tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-    nota_debito:it.nota_debito===true,
+    nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true,
   })));
   renderLinhasFatura();
   recalcFatura();
@@ -8143,7 +8227,7 @@ function renderLinhasFatura(){
         <tbody>
           ${itens.map((l,ri)=>{
             const gi=fatLinhas.indexOf(l);
-            const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
+            const isPerc=fatLinhaPercentual(l);
             // Linha MANUAL (fora da tabela tarifaria): servico, unidade e preco
             // sao editaveis. Antes so a quantidade era, e nao dava para lancar
             // servico que nao esta na proposta (impressao, fita plastica...).
@@ -8151,10 +8235,10 @@ function renderLinhasFatura(){
             const _inp=(campo,val,ali,ph)=>`<input value="${val||''}" placeholder="${ph}"
                 onchange="fatLinhas[${gi}].${campo}=this.value;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
                 style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:${ali};background:var(--amber-bg,#fef3c7)">`;
-            return`<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:4px 8px;font-size:12px">${_man?_inp('servico',l.servico,'left','Descreva o servico'):l.servico}</td>
+            return`<tr style="border-bottom:1px solid var(--border)${l.so_minimo?';background:var(--bg2);color:var(--text3)':''}">
+              <td style="padding:4px 8px;font-size:12px">${_man?_inp('servico',l.servico,'left','Descreva o servico'):l.servico}${fatLinhaMinTag(l,gi)}</td>
               <td style="padding:4px 8px;font-size:12px;text-align:center">${_man?_inp('unidade',l.unidade,'center','Un.'):(l.unidade||'')}</td>
-              <td style="padding:4px 8px;font-size:12px;text-align:right">${_man?_inp('preco_unitario',l.preco_unitario,'right','0,00'):(l.preco_unitario||'')}</td>
+              <td style="padding:4px 8px;font-size:12px;text-align:right">${_man?_inp('preco_unitario',l.preco_unitario,'right','0,00'):fatPrecoExib(l)}</td>
               <td style="padding:4px 6px">
                 <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
                   style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:center"
@@ -8174,7 +8258,7 @@ function renderLinhasFatura(){
 function calcLinhaFatura(idx){
   const l=fatLinhas[idx];
   if(!l)return;
-  const isPerc=l.tipo==='percentual'||String(l.preco_unitario).includes('%');
+  const isPerc=fatLinhaPercentual(l);
   const preco=parseValorTarifa(l.preco_unitario,isPerc);
   let qtd=parseFloat(String(l.quantidade).replace(',','.').replace(/[^\d.]/g,''))||0;
 
@@ -8219,7 +8303,7 @@ function fatRecarregarLinhas(){
               unidade:it.unidade||it.unidade_cobranca||'', preco_unitario:it.valor||'',
               quantidade:'', subtotal:0,
               tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-              nota_debito:it.nota_debito===true, qtde_minima:it.qtde_minima||null};
+              nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, qtde_minima:it.qtde_minima||null};
     });
   });
   if(!novas.length){ alert('A tabela tarifaria selecionada nao tem itens.'); return; }
@@ -8305,9 +8389,11 @@ function fatMinInfo(tabela,baseServicos){
 }
 function recalcFatura(){
   // Separa linhas normais (NF) das de Nota de Débito
-  const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
-  const subtotalND=fatLinhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  // v1.0.1027: faturável NF exclui ND, "só para o mínimo" e complemento; a base do mínimo tem regra própria
+  const subtotalNF=fatLinhas.filter(fatFaturavelNF).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=fatLinhas.filter(l=>l.nota_debito&&!l.so_minimo).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalLinhas=subtotalNF; // o complemento/ISS incide só sobre a parte NF
+  const baseMinimo=fatBaseMinimo(fatLinhas);
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
 
   // Verificar faturamento mínimo da tabela tarifária selecionada
@@ -8318,8 +8404,8 @@ function recalcFatura(){
   if(tabela?.cond_fat_minimo){
     const minStr=String(tabela.cond_fat_minimo).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.');
     fatMinVal=parseFloat(minStr)||0;
-    if(fatMinVal>0 && subtotalLinhas<fatMinVal && fatSubtotalOk){
-      complemento=fatMinVal-subtotalLinhas;   // só entra após "Gerar subtotal"
+    if(fatMinVal>0 && baseMinimo<fatMinVal && fatSubtotalOk){
+      complemento=fatMinVal-baseMinimo;   // só entra após "Gerar subtotal"
     }
   }
 
@@ -8328,7 +8414,7 @@ function recalcFatura(){
   const totalNF=_imp.bruto;                         // NF c/ impostos por dentro
   const total=totalNF+subtotalND;                   // total geral = NF + ND (ND sem imposto)
   window._fatImpostos=_imp;
-  const _minInfo=fatMinInfo(tabela,subtotalNF);
+  const _minInfo=fatMinInfo(tabela,baseMinimo);
   const _extraEl=ge('fat-impostos-extra'),_pisEl=ge('fat-pis-info'),_cofEl=ge('fat-cofins-info');
   if(_extraEl){
     if(_imp.pisPct>0||_imp.cofPct>0){
@@ -8349,6 +8435,7 @@ function recalcFatura(){
   const _temMin=!!(_minInfo&&_minInfo.valor>0);
   const _btnSub=`
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        ${(_temMin&&Math.abs(baseMinimo-subtotalNF)>0.004)?'<span style="font-size:11.5px;color:var(--text3)">base do mínimo: '+fmtV(baseMinimo)+'</span>':''}
         ${(_temMin&&!fatSubtotalOk)?'<span style="font-size:11.5px;color:var(--amber-text)">\u26a1 Fat. mínimo de '+fmtV(_minInfo.valor)+' ainda não aplicado</span>':''}
         ${(_temMin&&fatSubtotalOk)?'<span style="font-size:11.5px;color:var(--text3)">subtotal fechado'+(complemento>0?' \u00b7 mínimo aplicado':' \u00b7 acima do mínimo')+'</span>':''}
         <button class="btn btn-sm${fatSubtotalOk?'':' btn-primary'}" onclick="fatGerarSubtotal()" title="Fecha o pré-cálculo das quantidades e aplica o faturamento mínimo, se houver">&#931; Gerar subtotal</button>
@@ -8411,8 +8498,10 @@ async function uploadNfsePdf(input){
       faturaEditando.nfse_pdf_url=fatNfsePdfUrl;
       faturamento=faturamento.map(f=>f.id===faturaEditando.id?{...f,nfse_pdf_url:fatNfsePdfUrl}:f);
     }
-    if(statusEl){statusEl.textContent='✓ Anexado';statusEl.style.color='var(--green-text)';}
-    if(linkEl&&fatNfsePdfUrl){linkEl.href=fatNfsePdfUrl;linkEl.style.display='';}
+    // v1.0.1027: mostra o PDF anexado com Ver/Substituir/Remover
+    fatPdfMostrar(fatNfsePdfUrl);
+    if(statusEl){statusEl.textContent='';}
+    void linkEl;
   }catch(e){
     if(statusEl){statusEl.textContent='Falha no envio';statusEl.style.color='var(--red-text)';}
     if(typeof showToast==='function')showToast('Erro ao anexar PDF: '+(e.message||e),'red');
@@ -8426,8 +8515,8 @@ async function salvarFatura(status){
   const responsavelId=getFatV('fat-responsavel');
   const tipoOp=getFatV('fat-tipo-op');
   // Separa linhas normais (NF) das de Nota de Débito
-  const subtotalNF=fatLinhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
-  const subtotalND=fatLinhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalNF=fatLinhas.filter(fatFaturavelNF).reduce((s,l)=>s+Number(l.subtotal||0),0);
+  const subtotalND=fatLinhas.filter(l=>l.nota_debito&&!l.so_minimo).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const complemento=window._fatComplemento||0;
   const subtotal=subtotalNF+complemento;            // base NF
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
@@ -8451,7 +8540,7 @@ async function salvarFatura(status){
   // Rateio dos impostos por linha NF (proporcional ao subtotal) — relatório/DRE
   const _baseRat=subtotal>0?subtotal:0;
   linhasParaSalvar.forEach(function(l){
-    if(l.nota_debito){l.imposto_iss=0;l.imposto_pis=0;l.imposto_cofins=0;l.imposto_total=0;return;}
+    if(l.nota_debito||l.so_minimo){l.imposto_iss=0;l.imposto_pis=0;l.imposto_cofins=0;l.imposto_total=0;return;}
     const _sh=_baseRat>0?(Number(l.subtotal||0)/_baseRat):0;
     l.imposto_iss=_imp.iss*_sh;l.imposto_pis=_imp.pis*_sh;l.imposto_cofins=_imp.cofins*_sh;
     l.imposto_total=l.imposto_iss+l.imposto_pis+l.imposto_cofins;
@@ -8596,26 +8685,30 @@ function feMinimo(tab){
 function feCalc(f,lin){
   var tab=feTab(f);
   var temCompl=lin.some(function(l){return l.is_complemento;});
-  var base=lin.filter(function(l){return !l.nota_debito&&!l.is_complemento;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
-  var compl=0; if(temCompl){ var mn=feMinimo(tab); compl=(mn>base)?(mn-base):0; }
+  var base=lin.filter(fatFaturavelNF).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
+  var baseMin=fatBaseMinimo(lin);
+  var compl=0; if(temCompl){ var mn=feMinimo(tab); compl=(mn>baseMin)?(mn-baseMin):0; }
   var baseNF=base+compl;
   var imp=fatImpostosCalc(baseNF,tab,f.iss_incluso===true);
-  var nd=lin.filter(function(l){return l.nota_debito&&!l.is_complemento;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
+  var nd=lin.filter(function(l){return l.nota_debito&&!l.is_complemento&&!l.so_minimo;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
   var totalNF=baseNF>0?imp.bruto:0;
   return {tab:tab,base:base,compl:compl,baseNF:baseNF,imp:imp,totalNF:totalNF,nd:nd,total:totalNF+nd};
 }
 function feVencimento(f,dataRef){
   var v=null;
-  try{ v=crVencPorRegra(f.cliente_id,dataRef,f.periodo_inicio)||null; }catch(e){ v=null; }
+  try{ v=crVencPorRegra(f.cliente_id,dataRef,f.periodo_inicio,f.tabela_id)||null; }catch(e){ v=null; }
   if(!v){
     var d=new Date(dataRef+'T00:00'); d.setDate(d.getDate()+parseInt(f.vencimento_dias||7,10));
     v=(typeof crProxDiaUtil==='function')?crProxDiaUtil(d.toISOString().slice(0,10)):d.toISOString().slice(0,10);
   }
   return v;
 }
+// v1.0.1027: vencimento alterado na emissão (null = segue o calculado)
+var _feVencManual=null, _feVencMotivo='';
+function feVencSet(v,calc){ _feVencManual=(v&&v!==calc)?v:null; feRender(); }
 function fatEmitirAbrir(id){
   var f=(faturamento||[]).find(function(x){return x.id===id;}); if(!f)return;
-  _feFatId=id; _feNfsePdf=f.nfse_pdf_url||null;
+  _feFatId=id; _feNfsePdf=f.nfse_pdf_url||null; _feVencManual=null; _feVencMotivo='';
   _feLin=fatLinhasDe(f).map(function(l){return Object.assign({},l);});
   var old=ge('modal-fe'); if(old)old.remove();
   var ov=document.createElement('div'); ov.id='modal-fe';
@@ -8636,6 +8729,7 @@ function feRender(){
   var ocultas=0;
   var linhas=_feLin.map(function(l,i){
     var v=Number(l.subtotal||0);
+    if(l.so_minimo) return '';
     if(!l.is_complemento && !(v>0)){ ocultas++; return ''; }
     var sv=l.is_complemento?c.compl:v;
     var seg=l.is_complemento
@@ -8678,7 +8772,13 @@ function feRender(){
       +'</div>'
     +'</div>'
     +'<div style="margin-top:12px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;border-radius:10px;padding:10px 13px;font-size:12.5px;color:var(--amber-text,#8a6d1a)">'
-      +'Vencimento dos títulos: <b>'+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+'</b> (regra da proposta'+(nfse?', a partir da data da NFS-e':', recalculado quando a NFS-e for anexada')+').</div>'
+      +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">Vencimento dos títulos: '
+      +'<input type="date" class="fi" id="fe-venc" value="'+(_feVencManual||venc)+'" onchange="feVencSet(this.value,\''+venc+'\')" style="width:auto;height:32px">'
+      +'<span>calculado pela regra: <b>'+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+'</b>'+(_feVencManual?'':(nfse?' (a partir da data da NFS-e)':' (recalculado quando a NFS-e for anexada)'))+'</span></div>'
+      +(_feVencManual?'<div style="margin-top:8px"><label style="font-size:12px;font-weight:600">Motivo da alteração do vencimento *</label>'
+        +'<textarea class="fi" id="fe-venc-motivo" rows="2" oninput="_feVencMotivo=this.value" placeholder="ex.: 1ª quinzena de outubro segue a proposta anterior (prazo de 90 dias)" style="margin-top:4px;resize:vertical">'+tgEsc(_feVencMotivo)+'</textarea>'
+        +'<div style="font-size:11.5px;margin-top:4px">Fica registrado: vencimento calculado, vencimento usado, quem alterou, quando e o motivo. A NFS-e registrada depois não recalcula este vencimento.</div></div>':'')
+      +'</div>'
     +'</div>'
     +'<div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg2)">'
       +'<span style="font-size:13px;color:var(--text3)">Total da fatura <b style="color:var(--text)">'+fmtV(c.total)+'</b>'+(c.nd>0?(' = NF '+fmtV(c.totalNF)+' + ND '+fmtV(c.nd)):'')+'</span>'
@@ -8703,11 +8803,16 @@ async function feFaturar(){
   var nfseData=(ge('fe-nfse-data')&&ge('fe-nfse-data').value)||'';
   var hoje=new Date().toISOString().slice(0,10);
   var venc=feVencimento(f,(nfse&&nfseData)?nfseData:hoje);
+  var vencCalc=venc;
+  if(_feVencManual){
+    if(!String(_feVencMotivo||'').trim()){ alert('Informe o motivo da alteração do vencimento.'); var mt=ge('fe-venc-motivo'); if(mt)mt.focus(); return; }
+    venc=_feVencManual;
+  }
   var qt=(c.totalNF>0?1:0)+(c.nd>0?1:0);
   if(!confirm('Faturar '+(f.numero_fatura||'')+'?\n\n'
     +(c.totalNF>0?('• NF: '+fmtV(c.totalNF)+(nfse?(' — NFS-e '+nfse):' — NFS-e a anexar depois')+'\n'):'')
     +(c.nd>0?('• ND: '+fmtV(c.nd)+' — número gerado agora\n'):'')
-    +'\nVencimento: '+new Date(venc+'T00:00').toLocaleDateString('pt-BR')
+    +'\nVencimento: '+new Date(venc+'T00:00').toLocaleDateString('pt-BR')+(_feVencManual?' (alterado; calculado: '+new Date(vencCalc+'T00:00').toLocaleDateString('pt-BR')+')':'')
     +'\nSerão criados '+qt+' título(s) no contas a receber.'))return;
   var btn=ge('fe-btn'); if(btn){btn.disabled=true;btn.textContent='Faturando…';}
   try{
@@ -8715,7 +8820,8 @@ async function feFaturar(){
                   .filter(function(l){ return !(l.is_complemento&&!(Number(l.subtotal)>0)); });
     var upd={linhas:JSON.stringify(lin), subtotal:c.baseNF, iss_valor:c.imp.iss, pis_valor:c.imp.pis, cofins_valor:c.imp.cofins,
              impostos_total:c.totalNF>0?c.imp.totalImpostos:0, valor_bruto:c.totalNF, total:c.total, nd_valor:c.nd>0?c.nd:null,
-             vencimento:venc, faturado_em:new Date().toISOString(), status:nfse?'nfse_emitida':'faturado'};
+             vencimento:venc, vencimento_calculado:vencCalc, faturado_em:new Date().toISOString(), status:nfse?'nfse_emitida':'faturado'};
+    if(_feVencManual){ upd.vencimento_ajuste_motivo=String(_feVencMotivo).trim(); upd.vencimento_ajuste_por=cu.id; upd.vencimento_ajuste_em=new Date().toISOString(); }
     if(c.nd>0&&!f.nd_numero){
       var ndNum=await dbRpc('next_numero',{p_company:f.company_id,p_prefixo:'ND'});
       if(!ndNum) throw new Error('não foi possível gerar o número da ND');
@@ -8770,7 +8876,7 @@ async function confirmarNFSe(id){
   // regra contratual de pagamento (proposta): datas certas, mes seguinte ou
   // quinzena. Sem regra, cai no ciclo da proposta / dias da fatura.
   let vencimento=null;
-  try{ vencimento=crVencPorRegra(f?.cliente_id,data,f?.periodo_inicio)||null; }catch(_vr){ vencimento=null; }
+  try{ vencimento=crVencPorRegra(f?.cliente_id,data,f?.periodo_inicio,f?.tabela_id)||null; }catch(_vr){ vencimento=null; }
   if(!vencimento){
     const diasVenc=parseInt(f?.vencimento_dias||7);
     const dtNfse=new Date(data+'T00:00');
@@ -8784,6 +8890,9 @@ async function confirmarNFSe(id){
   let _pdfUrl=null;
   const _arq=ge('nfse-pdf')&&ge('nfse-pdf').files&&ge('nfse-pdf').files[0];
   if(_arq){ try{ _pdfUrl=await fatUploadDoc(_arq,id,'nfse'); }catch(_pe){ alert('A NFS-e será registrada, mas o PDF não subiu: '+(_pe.message||_pe)+'\nAnexe de novo depois.'); } }
+  // v1.0.1027: vencimento alterado na emissão (com motivo) é mantido
+  const _vencMantido=!!(f&&f.vencimento_ajuste_motivo&&f.vencimento);
+  if(_vencMantido) vencimento=f.vencimento;
   const _updN={status:'nfse_emitida',nfse_numero:num,nfse_em:data,vencimento};
   if(_pdfUrl)_updN.nfse_pdf_url=_pdfUrl;
   const _eraFaturado=f&&f.status==='faturado';
@@ -8802,7 +8911,7 @@ async function confirmarNFSe(id){
     }
   }
   await criarLancamentoCR(id);   // cobre fatura antiga (sem titulos) — nao duplica
-  alert(`NFS-e registrada! Vencimento calculado: ${new Date(vencimento+'T00:00').toLocaleDateString('pt-BR')}`);
+  alert(`NFS-e registrada! Vencimento ${_vencMantido?'mantido (alterado na emissão)':'calculado'}: ${new Date(vencimento+'T00:00').toLocaleDateString('pt-BR')}`);
   render();
 }
 
@@ -9906,7 +10015,7 @@ function fgLinhasDaTabela(tab){
         quantidade:'',                                   // em branco — é o que vamos digitar
         subtotal:0,
         tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-        nota_debito:it.nota_debito===true
+        nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true
       });
     });
   });
@@ -16721,7 +16830,7 @@ function rDREProjeto(dealId){
 
   // Calcula faturamento bruto da proposta
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
-    const isPerc=String(it.valor||'').includes('%');
+    const isPerc=tarifaEhPercentual(it.servico,it.unidade||it.unidade_cobranca,it.valor,it.tipo);
     const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
@@ -16841,7 +16950,7 @@ function atualizarDRE(dealId){
   let tarifas=[];
   if(proposta?.tarifas){try{tarifas=Array.isArray(proposta.tarifas)?proposta.tarifas:JSON.parse(proposta.tarifas||'[]');}catch(e){}}
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
-    const isPerc=String(it.valor||'').includes('%');
+    const isPerc=tarifaEhPercentual(it.servico,it.unidade||it.unidade_cobranca,it.valor,it.tipo);
     const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
@@ -16917,7 +17026,7 @@ function imprimirDRE(dealId){
   if(proposta?.tarifas){try{tarifas=Array.isArray(proposta.tarifas)?proposta.tarifas:JSON.parse(proposta.tarifas||'[]');}catch(e){}}
 
   const fatBruto=tarifas.flatMap(q=>(q.itens||[]).map(it=>{
-    const isPerc=String(it.valor||'').includes('%');
+    const isPerc=tarifaEhPercentual(it.servico,it.unidade||it.unidade_cobranca,it.valor,it.tipo);
     const preco=parseValorTarifa(it.valor,isPerc);
     const qtd=parseFloat(String(it.quantidade||'0').replace(/\./g,'').replace(',','.'))||0;
     return isPerc?(preco/100)*qtd:preco*qtd;
@@ -17668,11 +17777,12 @@ function crUltimoDiaUtilMes(ano,mes){
   while(!crEhDiaUtil(d)&&g<10){ d.setDate(d.getDate()-1); g++; }
   return d;
 }
-function crVencPorRegra(clienteId,dataEmissao,periodoInicio){
+function crVencPorRegra(clienteId,dataEmissao,periodoInicio,tabelaId){
   if(!dataEmissao)return null;
   var emi=new Date(String(dataEmissao).slice(0,10)+'T00:00');
   if(isNaN(emi))return null;
-  var prop=crPropostaDe(clienteId);
+  // v1.0.1027: a tabela escolhida na fatura manda; sem ela, a proposta do cliente
+  var prop=(tabelaId&&(tabelasTarifarias||[]).find(function(x){return x.id===tabelaId;}))||crPropostaDe(clienteId);
   var tipo=(prop&&prop.venc_regra_tipo)||'prazo';
   var dias=[];
   String((prop&&prop.venc_regra_dias)||'').split(/[\/|,;]/).forEach(function(t){
@@ -19429,8 +19539,8 @@ function rentFamiliaDe(servico){
 // "P. Pallet" (posição-pallet) e "Pallet" medem; "Valor estoque", "Folha",
 // "Carretas", percentual, ND e complemento não medem.
 function rentTemDriver(l){
-  if(l.nota_debito||l.is_complemento)return false;
-  if(String(l.tipo||'')==='percentual')return false;
+  if(l.nota_debito||l.is_complemento||l.so_minimo)return false;
+  if(String(l.tipo||'')==='percentual'||fatLinhaPercentual(l))return false;
   var u=String(l.unidade||'').trim().toLowerCase();
   if(!u)return false;
   if(/valor em estoque|valor estoque|folha|carreta|ve[i\u00ed]culo|hora|m\u00b2|m2|verba/.test(u))return false;
@@ -19454,6 +19564,7 @@ function rentDados(){
     var ym=rentCompetenciaFat(f); if(!noPer(ym))return;
     var m=parseInt(ym.slice(5,7),10)-1;
     var lin; try{ lin=typeof f.linhas==='string'?JSON.parse(f.linhas||'[]'):(f.linhas||[]); }catch(e){ lin=[]; }
+    lin=lin.filter(function(l){return !l.so_minimo;});   // v1.0.1027: linha só p/ mínimo não é receita
     var k=chave(f.cliente_nome)||'\u2014';
     var c=C[k]=C[k]||{nome:f.cliente_nome||'\u2014',rec:0,recArm:0,recMov:0,recAcc:0,recSeg:0,nc:0,picoMes:{},mov:0,recComDriver:0};
     var subNF=lin.filter(function(l){return !l.nota_debito;}).reduce(function(t,l){return t+Number(l.subtotal||0);},0);
@@ -20779,6 +20890,8 @@ function crLisRender(){
     lista.forEach(function(cp,i){
       var st=crLisStatusDe(cp), S=CR_LIS_ST[st];
       var venc=cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'—';
+      var _fva=cp.fatura_id?(faturamento||[]).find(function(x){return x.id===cp.fatura_id;}):null;
+      var _vaj=(_fva&&_fva.vencimento_ajuste_motivo)?' <span title="Vencimento alterado na emissão: calculado '+(_fva.vencimento_calculado?new Date(_fva.vencimento_calculado+'T00:00').toLocaleDateString('pt-BR'):'?')+' · motivo: '+tgEsc(_fva.vencimento_ajuste_motivo)+'" style="cursor:help;color:var(--amber-text)">✎</span>':'';
       var fat=(contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||'';
       var comp=cp.competencia?new Date(cp.competencia+'T00:00').toLocaleDateString('pt-BR',{month:'2-digit',year:'2-digit'}):'';
       var _dt=String(cp.documento_tipo||'nf'), _dn=cp.documento_numero||'';
@@ -20790,7 +20903,7 @@ function crLisRender(){
       if(st==='aguardando') acao='<span onclick="novoTituloCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
       else if(st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCR(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span>';
       h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
-        +'<span style="font-size:12px;color:var(--text2)">'+venc+'</span>'
+        +'<span style="font-size:12px;color:var(--text2)">'+venc+_vaj+'</span>'
         +'<span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(cp.descricao||'').replace(/"/g,'&quot;')+'">'+(cp.cliente_nome||'—')+parc+'</span>'
         +'<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_bdg+(cls||'—')+'</span>'
         +'<span style="font-size:13px;text-align:right;white-space:nowrap">'+fmtV(cp.valor)+'</span>'
