@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1019 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1020 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -791,6 +791,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           <span>Documentos</span>
         </button>
+        <button class="navitem sub" id="nav-qual-aprovacoes" onclick="pg('qual-aprovacoes')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Aprovações</span>
+        </button>
       </div>
     </div>
 
@@ -1321,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1019';
+const APP_VERSION='v1.0.1020';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1960,6 +1964,7 @@ async function loadPermissoes(){
   _navShow('nav-wms-pedidos',['wms-pedidos','wms-separacao','wms-conferencia','wms-romaneio','wms-aprovacoes','fat-capas']);
   _navShow('nav-wms-relatorios',['wms-visao']);
   _navShow('nav-wms-toolbox',['wms-toolbox']);
+  _navShow('nav-qual-aprovacoes',['qual-documentos']);   // Aprovações herda a permissão de Documentos
   var _hdNav=ge('nav-helpdesk');
   if(_hdNav){var _hdM=_hdNav.closest('.nav-module'); if(_hdM)_hdM.style.display=(minhasPermissoes['helpdesk']&&minhasPermissoes['helpdesk'].pode_ver)?'':'none';}
 
@@ -1973,7 +1978,8 @@ function canDo(tela, acao){
     // telas novas herdam a permissão de uma tela-pai já existente
     'wms-toolbox':'wms-visao','wms-estudo-zoneamento':'wms-visao',
     'wms-grupos-prod':'wms-produtos','wms-seq-rota':'wms-enderecamento','admin-hermes':'admin-assistente',
-    'wms-regras-arm':'wms-enderecamento','wms-picking-fixo':'wms-enderecamento'};
+    'wms-regras-arm':'wms-enderecamento','wms-picking-fixo':'wms-enderecamento',
+    'qual-aprovacoes':'qual-documentos'};
   if(_alias[tela])tela=_alias[tela];
   const perm=minhasPermissoes[tela];
   if(!perm)return false;
@@ -2370,6 +2376,7 @@ function pg(p){
     'admin-assistente':'Admin · Assistente conversacional (demo)',
     'admin-hermes':'Hermes · Mapa de perguntas',
     'qual-documentos':'Qualidade · Controle de Documentos',
+    'qual-aprovacoes':'Qualidade · Aprovações',
     'portaria-painel':'Portaria · Painel', 'portaria-entradas':'Portaria · Entrada / Saída', 'portaria-autorizacoes':'Portaria · Autorizações', 'portaria-liberacoes':'Portaria · Liberações', 'veiculos':'Cadastros · Veículos', 'plano-contas':'Cadastros · Plano de Contas DFC',
     'ecom-torre':'E-commerce · Torre de Controle','ecom-pedidos':'E-commerce · Pedidos','ecom-produtos':'E-commerce · Produtos','ecom-checkout':'E-commerce · Check-out','ecom-romaneio':'E-commerce · Carregamento','ecom-relatorios':'E-commerce · Relatórios','ecom-integracoes':'E-commerce · Integrações'
   };
@@ -2419,6 +2426,7 @@ function render(){
       catch(e){console.error('qual erro:',e);c.innerHTML='<div style="padding:24px;color:var(--red-text)">Erro: '+e.message+'</div>';}
     },50);
   }
+  else if(curPage==='qual-aprovacoes'){ try{ c.innerHTML=rQualAprovacoes(); }catch(e){ console.error('qual aprov:',e); c.innerHTML='<div style="padding:24px;color:var(--red-text)">Erro: '+e.message+'</div>'; } }
   else if(curPage==='rh-ferias'){
     if(!pessoas||!pessoas.length){
       c.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)"><div class="spin" style="width:24px;height:24px;margin:0 auto 12px"></div>Carregando...</div>';
@@ -5635,6 +5643,26 @@ AS_TOOLS.push(
   {name:'hmFatTendencia', description:'Se o faturamento medio mensal esta subindo, caindo ou estavel, e quais clientes estao em queda.',
    input_schema:{type:'object',properties:{}}, run:async()=>hmSemFiltro(hmFatTendencia)}
 );
+
+// Qualidade: revisões de documentos aguardando aprovação (v1.0.1020)
+AS_TOOLS.push({
+  name:'qualidade_pendentes',
+  description:'Revisoes de documentos da Qualidade aguardando aprovacao da direcao. Use para "documentos pendentes de aprovacao", "tem revisao para aprovar", "o que esta parado na qualidade".',
+  input_schema:{type:'object',properties:{}},
+  run:async function(){
+    var cid=(company&&company.id)||null;
+    var revs=await dbSelect('qualidade_revisoes','company_id=eq.'+cid+'&status=eq.em_aprovacao&order=created_at.asc').catch(function(){return null;});
+    if(!revs) revs=(qualRevisoes||[]).filter(function(r){return r.status==='em_aprovacao';});
+    if(!revs.length) return {texto_pronto:'Nenhuma revis\u00e3o de documento aguardando aprova\u00e7\u00e3o no momento.'};
+    revs.sort(function(a,b){ return String(a.submetido_em||a.created_at||'').localeCompare(String(b.submetido_em||b.created_at||'')); });
+    var linhas=revs.map(function(r){
+      var d=(qualDocumentos||[]).find(function(x){return x.id===r.documento_id;});
+      return '\u2022 '+(d?d.codigo:'documento')+' Rev. '+r.numero_rev+(d&&d.titulo?' \u2014 '+d.titulo:'')
+        +', submetida por '+qualNomeUser(r.submetido_por||r.criado_por)+' h\u00e1 '+qualHa(r.submetido_em||r.created_at);
+    });
+    return {texto_pronto:(revs.length===1?'Sim, 1 revis\u00e3o aguardando aprova\u00e7\u00e3o:\n':'Sim, '+revs.length+' revis\u00f5es aguardando aprova\u00e7\u00e3o:\n')+linhas.join('\n')};
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════
 //  HERMES · MAPA DE PERGUNTAS (tabela hermes_perguntas)
@@ -9185,6 +9213,12 @@ function avisosCalcular(){
     add('RH',fp,'1 colaborador com f\u00e9rias a vencer em 10 dias','{n} colaboradores com f\u00e9rias a vencer em 10 dias','rh-ferias');
   } }catch(e){console.warn('aviso ferias',e);}
 
+  try{ if(pode('qual-documentos')){
+    var qPend=(qualRevisoes||[]).filter(function(r){return r.status==='em_aprovacao'&&(!r.company_id||r.company_id===cid);}).length;
+    if(role==='admin'||role==='adm') add('Qualidade',qPend,'1 revis\u00e3o de documento aguardando sua aprova\u00e7\u00e3o','{n} revis\u00f5es de documentos aguardando sua aprova\u00e7\u00e3o','qual-aprovacoes');
+    else add('Qualidade',qPend,'1 revis\u00e3o de documento aguardando aprova\u00e7\u00e3o da dire\u00e7\u00e3o','{n} revis\u00f5es de documentos aguardando aprova\u00e7\u00e3o da dire\u00e7\u00e3o','qual-aprovacoes');
+  } }catch(e){console.warn('aviso qualidade',e);}
+
   try{ if(typeof asLiberado==='function'&&asLiberado()){
     add('Hermes',(window._hmNaoCount||0),'1 pergunta que o Hermes não entendeu','{n} perguntas que o Hermes não entendeu','admin-hermes');
   } }catch(e){}
@@ -9202,6 +9236,7 @@ function rAvisosHome(){
     {m:'Compras',cor:'#b45309',vis:pode('compras-solicitacoes')||pode('compras')},
     {m:'RH',cor:'#0f766e',vis:pode('rh-pessoas')},
     {m:'WMS',cor:'#0A2540',vis:pode('wms-visao')},
+    {m:'Qualidade',cor:'#be185d',vis:pode('qual-documentos')},
     {m:'Helpdesk',cor:'#0e7490',vis:isAdmin||pode('helpdesk')},
     {m:'Hermes',cor:'#6d28d9',vis:(function(){try{return typeof asLiberado==='function'&&asLiberado();}catch(e){return false;}})()}
   ].filter(function(c){return c.vis;});
@@ -10566,7 +10601,7 @@ async function uploadQualRapido(docId, arquivo){
   const { data: urlData } = window.supabase.storage.from('qualidade-docs').getPublicUrl(path);
   // Criar revisão automática como rascunho
   const doc = qualDocumentos.find(function(x){return x.id===docId;});
-  const proxRev = Math.max(0, ...qualRevisoes.filter(function(r){return r.documento_id===docId;}).map(function(r){return r.numero_rev;})) + 1;
+  const proxRev = Math.max(0, doc?Number(doc.revisao_atual)||0:0, ...qualRevisoes.filter(function(r){return r.documento_id===docId;}).map(function(r){return Number(r.numero_rev)||0;})) + 1;
   const obj = {
     documento_id: docId, company_id: company.id,
     numero_rev: proxRev, status: 'rascunho',
@@ -10623,6 +10658,8 @@ function openQualModal(docId){
   const revisoes = docId ? qualRevisoes.filter(function(r){return r.documento_id===docId;}).sort(function(a,b){return b.numero_rev-a.numero_rev;}) : [];
   const isAdmin = ['admin','adm'].includes(profile?.role||'');
   const isQual  = profile?.role==='qualidade'||isAdmin;
+  // numero sugerido da proxima revisao: ultima revisao (ou a revisao atual do documento) + 1
+  const proxSug = Math.max(0, doc?Number(doc.revisao_atual)||0:0, ...revisoes.map(function(r){return Number(r.numero_rev)||0;})) + 1;
 
   const old = document.getElementById('modal-qual');
   if(old) old.remove();
@@ -10657,6 +10694,8 @@ function openQualModal(docId){
       if(r.data_revisao) revHtml += '<div style="font-size:11px;color:var(--text3)">'+new Date(r.data_revisao+'T00:00:00').toLocaleDateString('pt-BR')+'</div>';
       if(r.descricao) revHtml += '<div style="font-size:12px;color:var(--text2);margin-top:4px">'+r.descricao+'</div>';
       if(r.arquivo_url) revHtml += '<a href="'+r.arquivo_url+'" target="_blank" style="font-size:11px;color:var(--accent);margin-top:4px;display:inline-block">📄 Abrir documento</a>';
+      revHtml += qualLogHtml(r, doc);   // historico: criada, submetida, aprovada/rejeitada
+      if(r.status==='rascunho'&&isQual) revHtml += '<button id="qual-submeter-'+r.id+'" style="margin-top:8px;padding:5px 10px;font-size:12px;border:1px solid var(--amber-text);border-radius:6px;background:var(--amber-bg);color:var(--amber-text);cursor:pointer;font-weight:600">📤 Submeter este rascunho para aprovação</button>';
       if(r.status==='em_aprovacao'&&isAdmin){
         revHtml += '<div style="display:flex;gap:6px;margin-top:8px">';
         revHtml += '<button id="qual-aprovar-'+r.id+'" style="flex:1;padding:5px;font-size:12px;border:none;border-radius:6px;background:var(--green-bg);color:var(--green-text);cursor:pointer;font-weight:600">✅ Aprovar</button>';
@@ -10712,7 +10751,10 @@ function openQualModal(docId){
     +(isQual?'<div style="padding-top:12px;border-top:1px solid var(--border)">'
     +'<div style="font-size:13px;font-weight:600;margin-bottom:10px">Nova Revisão</div>'
     +'<div class="fg"><label class="fl">Descrição das alterações</label><textarea class="fi" id="qr-descricao" rows="2" style="resize:vertical"></textarea></div>'
-    +'<div class="fg"><label class="fl">Data da revisão</label><input class="fi" type="date" id="qr-data"></div>'
+    +'<div style="display:grid;grid-template-columns:140px 1fr;gap:10px">'
+    +'<div class="fg"><label class="fl">Nº da revisão</label><input class="fi" type="number" min="0" step="1" id="qr-numero" value="'+proxSug+'"></div>'
+    +'<div class="fg"><label class="fl">Data da revisão</label><input class="fi" type="date" id="qr-data"></div></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin:-4px 0 8px">Sugerido: última revisão + 1. Ajuste para seguir a numeração que o documento já tinha antes do VERUS.</div>'
     +'<div class="fg"><label class="fl">Arquivo PDF</label><input type="file" id="qr-arquivo" accept=".pdf,.doc,.docx" class="fi" style="padding:6px"></div>'
     +'<div style="display:flex;gap:8px;margin-top:8px">'
     +'<button id="qual-rev-rascunho" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px">Salvar Rascunho</button>'
@@ -10748,8 +10790,10 @@ function openQualModal(docId){
   revisoes.forEach(function(r){
     const btnA = document.getElementById('qual-aprovar-'+r.id);
     const btnR = document.getElementById('qual-rejeitar-'+r.id);
-    if(btnA) btnA.addEventListener('click', function(){ aprovarQualRevisao(r.id, docId, true); });
-    if(btnR) btnR.addEventListener('click', function(){ aprovarQualRevisao(r.id, docId, false); });
+    if(btnA) btnA.addEventListener('click', function(){ qualDecidirModal(r.id, docId, true); });
+    if(btnR) btnR.addEventListener('click', function(){ qualDecidirModal(r.id, docId, false); });
+    const btnS = document.getElementById('qual-submeter-'+r.id);
+    if(btnS) btnS.addEventListener('click', function(){ qualSubmeterRascunho(r.id, docId); });
   });
 }
 
@@ -10809,6 +10853,10 @@ async function salvarQualRevisao(docId, status){
   const descricao = document.getElementById('qr-descricao')?.value||null;
   const data      = document.getElementById('qr-data')?.value||null;
   const arquivo   = document.getElementById('qr-arquivo')?.files?.[0];
+  // numero informado pelo usuario (documentos antigos ja tem numeracao propria)
+  const numInf = parseInt(document.getElementById('qr-numero')?.value,10);
+  if(isNaN(numInf)||numInf<0){ alert('Informe o número da revisão.'); return; }
+  if(qualRevisoes.some(function(r){return r.documento_id===docId&&Number(r.numero_rev)===numInf;})){ alert('Já existe a Rev. '+numInf+' neste documento. Informe outro número.'); return; }
 
   let arquivo_url  = null;
   let arquivo_nome = null;
@@ -10824,7 +10872,7 @@ async function salvarQualRevisao(docId, status){
     }
   }
 
-  const proxRev = Math.max(0, ...qualRevisoes.filter(function(r){return r.documento_id===docId;}).map(function(r){return r.numero_rev;})) + 1;
+  const proxRev = numInf;
 
   const obj = {
     documento_id: docId,
@@ -10835,40 +10883,38 @@ async function salvarQualRevisao(docId, status){
     status,
     criado_por: cu.id,
   };
+  if(status==='em_aprovacao'){ obj.submetido_em = new Date().toISOString(); obj.submetido_por = cu.id; }
 
   try{
     const nova = await dbInsert('qualidade_revisoes', obj);
     if(nova) qualRevisoes.unshift(nova);
     document.getElementById('modal-qual')?.remove();
     openQualModal(docId); // reabrir para mostrar nova revisão
+    switchQualTab('revisoes');
   }catch(e){ alert('Erro: '+e.message); }
 }
 
-async function aprovarQualRevisao(revId, docId, aprovar){
-  const msg = aprovar ? 'Aprovar esta revisão?' : 'Rejeitar esta revisão?';
-  if(!confirm(msg)) return;
-
+async function aprovarQualRevisao(revId, docId, aprovar, extra){
+  extra = extra||{};
   const novoStatus = aprovar ? 'aprovado' : 'rejeitado';
+  const upd = { status: novoStatus, aprovado_por: cu.id, aprovado_em: new Date().toISOString() };
+  if(!aprovar) upd.motivo_rejeicao = extra.motivo||null;
   try{
-    await dbUpdate('qualidade_revisoes', revId, {
-      status: novoStatus,
-      aprovado_por: cu.id,
-      aprovado_em: new Date().toISOString(),
-    });
-    qualRevisoes = qualRevisoes.map(function(r){return r.id===revId?{...r,status:novoStatus}:r;});
-
-    // Se aprovado, atualizar situacao e revisao_atual no documento
+    await dbUpdate('qualidade_revisoes', revId, upd);
+    qualRevisoes = qualRevisoes.map(function(r){return r.id===revId?{...r,...upd}:r;});
+    // Aprovada: vira a revisao atual, o documento volta a vigente e ganha as datas novas
     if(aprovar&&docId){
       const rev = qualRevisoes.find(function(r){return r.id===revId;});
       const obj = {situacao:'vigente', revisao_atual: rev?.numero_rev||0};
+      if(extra.data_aprovacao) obj.data_aprovacao = extra.data_aprovacao;
+      if(extra.data_validade)  obj.data_validade  = extra.data_validade;
       await dbUpdate('qualidade_documentos', docId, obj);
       qualDocumentos = qualDocumentos.map(function(d){return d.id===docId?{...d,...obj}:d;});
     }
-
-    document.getElementById('modal-qual')?.remove();
-    if(aprovar) openQualModal(docId);
-    else renderQualDoc();
-  }catch(e){ alert('Erro: '+e.message); }
+    showToast(aprovar?'Revisão aprovada.':'Revisão rejeitada.', aprovar?'green':'amber');
+    qualRerender(docId);
+    return true;
+  }catch(e){ alert('Erro: '+(e.message||e)); return false; }
 }
 
 async function salvarQualMatriz(docId){
@@ -10882,6 +10928,132 @@ async function salvarQualMatriz(docId){
     qualDocumentos = qualDocumentos.map(function(d){return d.id===docId?{...d,...obj}:d;});
     alert('Matriz salva!');
   }catch(e){ alert('Erro: '+e.message); }
+}
+
+// ── Qualidade · aprovações pendentes e histórico das revisões (v1.0.1020) ──
+function qualPodeAprovar(){ return ['admin','adm'].indexOf((profile&&profile.role)||'')>=0; }
+function qualEsc(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function qualNomeUser(uid){
+  if(!uid) return 'usuário';
+  var pr=(profiles||[]).find(function(x){return x&&x.id===uid;});
+  if(pr) return pr.full_name||pr.email||'usuário';
+  return 'usuário';
+}
+function qualFmtDH(ts){
+  if(!ts) return ''; var d=new Date(ts); if(isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+function qualHa(ts){
+  if(!ts) return ''; var min=Math.max(0,Math.floor((Date.now()-new Date(ts).getTime())/60000));
+  if(min<60) return min+' min'; var h=Math.floor(min/60); if(h<24) return h+'h';
+  var d=Math.floor(h/24); return d+(d===1?' dia':' dias');
+}
+function qualISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function qualMaisUmAno(iso){ if(!iso) return ''; var d=new Date(iso+'T00:00:00'); d.setFullYear(d.getFullYear()+1); return qualISO(d); }
+function qualPendentes(){
+  return (qualRevisoes||[]).filter(function(r){ return r.status==='em_aprovacao'; })
+    .map(function(r){ return {r:r, d:(qualDocumentos||[]).find(function(x){return x.id===r.documento_id;})||null}; })
+    .sort(function(a,b){ return String(a.r.submetido_em||a.r.created_at||'').localeCompare(String(b.r.submetido_em||b.r.created_at||'')); });
+}
+// histórico (log) exibido no cartão de cada revisão
+function qualLogHtml(r, doc){
+  var L=[];
+  if(r.created_at) L.push('<div>\u270f\ufe0f Criada por <b>'+qualEsc(qualNomeUser(r.criado_por))+'</b> em '+qualFmtDH(r.created_at)+'</div>');
+  if(r.submetido_em) L.push('<div>\ud83d\udce4 Submetida para aprova\u00e7\u00e3o por <b>'+qualEsc(qualNomeUser(r.submetido_por))+'</b> em '+qualFmtDH(r.submetido_em)+'</div>');
+  if(r.status==='aprovado'&&r.aprovado_em){
+    var val=(doc&&Number(doc.revisao_atual)===Number(r.numero_rev)&&doc.data_validade)?' \u00b7 validade at\u00e9 '+new Date(doc.data_validade+'T00:00:00').toLocaleDateString('pt-BR'):'';
+    L.push('<div style="color:var(--green-text)">\u2705 Aprovada por <b>'+qualEsc(qualNomeUser(r.aprovado_por))+'</b> em '+qualFmtDH(r.aprovado_em)+val+'</div>');
+  }
+  if(r.status==='rejeitado'&&r.aprovado_em) L.push('<div style="color:var(--red-text)">\u274c Rejeitada por <b>'+qualEsc(qualNomeUser(r.aprovado_por))+'</b> em '+qualFmtDH(r.aprovado_em)+(r.motivo_rejeicao?': '+qualEsc(r.motivo_rejeicao):'')+'</div>');
+  if(!L.length) return '';
+  return '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--text2);line-height:1.8">'+L.join('')+'</div>';
+}
+// tela Qualidade · Aprovações
+function rQualAprovacoes(){
+  var pend=qualPendentes(), pode=qualPodeAprovar();
+  var h='<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:16px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">'
+    +'<div style="font-size:15px;font-weight:700">Revis\u00f5es aguardando aprova\u00e7\u00e3o</div>'
+    +'<span style="font-size:12px;padding:2px 10px;border-radius:99px;font-weight:600;background:'+(pend.length?'var(--amber-bg)':'var(--green-bg)')+';color:'+(pend.length?'var(--amber-text)':'var(--green-text)')+'">'
+    +(pend.length?pend.length+' pendente'+(pend.length>1?'s':''):'nada pendente')+'</span></div>';
+  if(!pend.length) return h+'<div style="text-align:center;padding:28px;color:var(--text3);font-size:13px">Nenhuma revis\u00e3o aguardando aprova\u00e7\u00e3o.</div></div>';
+  if(!pode) h+='<div style="font-size:12px;color:var(--text3);margin-bottom:10px">A aprova\u00e7\u00e3o \u00e9 feita pela dire\u00e7\u00e3o (perfis Admin e ADM).</div>';
+  var th='padding:6px 8px;font-weight:600;font-size:11px;color:var(--text2);text-align:left';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px"><thead><tr>'
+    +'<th style="'+th+'">Documento</th><th style="'+th+'">Rev.</th><th style="'+th+'">Altera\u00e7\u00e3o</th><th style="'+th+'">Submetida por</th><th style="'+th+'">H\u00e1</th><th style="'+th+'"></th></tr></thead><tbody>';
+  pend.forEach(function(x){
+    var r=x.r, d=x.d||{}, ts=r.submetido_em||r.created_at;
+    var dias=ts?(Date.now()-new Date(ts).getTime())/86400000:0;
+    h+='<tr style="border-top:1px solid var(--border)">'
+      +'<td style="padding:8px"><a href="#" onclick="event.preventDefault();openQualModal(\''+r.documento_id+'\');switchQualTab(\'revisoes\')" style="font-weight:700;color:var(--accent);text-decoration:none">'+qualEsc(d.codigo||'\u2014')+'</a>'
+      +'<div style="color:var(--text3)">'+qualEsc(d.titulo||'')+'</div></td>'
+      +'<td style="padding:8px">'+qualEsc(r.numero_rev)+'</td>'
+      +'<td style="padding:8px">'+qualEsc(r.descricao||'\u2014')+'</td>'
+      +'<td style="padding:8px">'+qualEsc(qualNomeUser(r.submetido_por||r.criado_por))+'<div style="color:var(--text3)">'+qualFmtDH(ts)+'</div></td>'
+      +'<td style="padding:8px;'+(dias>=2?'color:var(--red-text);font-weight:600':'')+'">'+qualHa(ts)+'</td>'
+      +'<td style="padding:8px;white-space:nowrap;text-align:right">'
+      +(r.arquivo_url?'<a href="'+qualEsc(r.arquivo_url)+'" target="_blank" title="Abrir documento" class="btn" style="font-size:12px;text-decoration:none">\ud83d\udcc4</a> ':'<span style="font-size:11px;color:var(--amber-text)">sem arquivo</span> ')
+      +(pode?'<button class="btn" style="font-size:12px;color:var(--green-text)" onclick="qualDecidirModal(\''+r.id+'\',\''+r.documento_id+'\',true)">Aprovar</button> '
+            +'<button class="btn" style="font-size:12px;color:var(--red-text)" onclick="qualDecidirModal(\''+r.id+'\',\''+r.documento_id+'\',false)">Rejeitar</button>':'')
+      +'</td></tr>';
+  });
+  return h+'</tbody></table></div></div>';
+}
+// modal de decisão: aprovar (datas) ou rejeitar (motivo)
+function qualDecidirModal(revId, docId, aprovar){
+  var r=(qualRevisoes||[]).find(function(x){return x.id===revId;}); if(!r) return;
+  var d=(qualDocumentos||[]).find(function(x){return x.id===docId;})||{};
+  var hoje=qualISO(new Date());
+  var old=ge('qual-decidir'); if(old) old.remove();
+  var corpo=aprovar
+    ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div class="fg"><label class="fl">Data de aprova\u00e7\u00e3o</label><input class="fi" type="date" id="qdec-aprov" value="'+hoje+'" onchange="var v=ge(\'qdec-val\');if(v)v.value=qualMaisUmAno(this.value)"></div>'
+      +'<div class="fg"><label class="fl">Nova validade</label><input class="fi" type="date" id="qdec-val" value="'+qualMaisUmAno(hoje)+'"></div></div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-top:4px">A validade vem sugerida em +1 ano e pode ser alterada. O documento volta a "Vigente".</div>'
+    : '<div class="fg"><label class="fl">Motivo da rejei\u00e7\u00e3o *</label><textarea class="fi" id="qdec-motivo" rows="3" style="resize:vertical" placeholder="O que precisa ser corrigido"></textarea></div>';
+  var html='<div class="modal-overlay" id="qual-decidir" style="z-index:400"><div class="modal" style="width:440px;max-width:95vw;padding:20px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">'+(aprovar?'Aprovar':'Rejeitar')+' '+qualEsc(d.codigo||'')+' \u00b7 Rev. '+qualEsc(r.numero_rev)+'</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'+qualEsc(d.titulo||'')+(r.descricao?' \u2014 '+qualEsc(r.descricao):'')+'</div>'
+    +corpo
+    +'<div id="qdec-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:10px"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:16px"><button class="btn" style="flex:1" onclick="ge(\'qual-decidir\').remove()">Cancelar</button>'
+    +'<button id="qdec-ok" style="flex:2;padding:9px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:#fff;background:'+(aprovar?'var(--green)':'var(--red)')+'" onclick="qualDecidirConfirmar(\''+revId+'\',\''+docId+'\','+(aprovar?'true':'false')+')">'+(aprovar?'Aprovar':'Rejeitar')+'</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function qualDecidirConfirmar(revId, docId, aprovar){
+  var err=ge('qdec-err'), extra={};
+  var falha=function(m){ if(err){ err.style.display='block'; err.textContent=m; } };
+  if(aprovar){
+    extra.data_aprovacao=(ge('qdec-aprov')||{}).value||'';
+    extra.data_validade=(ge('qdec-val')||{}).value||'';
+    if(!extra.data_aprovacao) return falha('Informe a data de aprova\u00e7\u00e3o.');
+    if(extra.data_validade&&extra.data_validade<extra.data_aprovacao) return falha('A validade n\u00e3o pode ser anterior \u00e0 aprova\u00e7\u00e3o.');
+  } else {
+    extra.motivo=String((ge('qdec-motivo')||{}).value||'').trim();
+    if(!extra.motivo) return falha('Informe o motivo da rejei\u00e7\u00e3o.');
+  }
+  var b=ge('qdec-ok'); if(b){ b.disabled=true; b.textContent='Salvando\u2026'; }
+  var ok=await aprovarQualRevisao(revId, docId, aprovar, extra);
+  if(ok){ var m=ge('qual-decidir'); if(m) m.remove(); }
+  else if(b){ b.disabled=false; b.textContent=aprovar?'Aprovar':'Rejeitar'; }
+}
+// submete um rascunho que já existe (sem criar outra revisão)
+async function qualSubmeterRascunho(revId, docId){
+  var r=(qualRevisoes||[]).find(function(x){return x.id===revId;}); if(!r) return;
+  if(!r.arquivo_url&&!confirm('Esta revis\u00e3o n\u00e3o tem arquivo anexado. Submeter mesmo assim?')) return;
+  var upd={status:'em_aprovacao', submetido_em:new Date().toISOString(), submetido_por:cu.id};
+  try{
+    await dbUpdate('qualidade_revisoes', revId, upd);
+    qualRevisoes=qualRevisoes.map(function(x){return x.id===revId?Object.assign({},x,upd):x;});
+    showToast('Revis\u00e3o submetida para aprova\u00e7\u00e3o.','green');
+    qualRerender(docId);
+  }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+// redesenha o que estiver aberto (ficha do documento e/ou telas)
+function qualRerender(docId){
+  if(ge('modal-qual')&&docId){ ge('modal-qual').remove(); openQualModal(docId); switchQualTab('revisoes'); }
+  if(['qual-documentos','qual-aprovacoes','dashboard'].indexOf(curPage)>=0) render();
 }
 
 // ── RENDER DASHBOARD CRM ──
