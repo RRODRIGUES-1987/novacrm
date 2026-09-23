@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1024 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1025 | Gerado: 2026-09-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1024';
+const APP_VERSION='v1.0.1025';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4223,6 +4223,7 @@ async function loadHistoricoProfissional(pessoaId){
         ${h.data_vigencia?`<div style="font-size:11px;color:var(--text2)">Vigência: ${new Date(h.data_vigencia+'T00:00:00').toLocaleDateString('pt-BR')}</div>`:''}
       </div>
       ${h.motivo?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px;font-style:italic">"${h.motivo}"</div>`:''}
+      ${h.observacao?`<div style="font-size:12px;color:var(--text2);margin-bottom:8px;white-space:pre-wrap">${wEsc(h.observacao)}</div>`:''}
       ${alteracoes.map(k=>`
         <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px">
           <span style="font-weight:500;min-width:80px">${CAMPOS[k]}:</span>
@@ -4432,6 +4433,9 @@ async function saveCadastro(){
       if(tipo==='clientes') clientes.unshift(d);
       else if(tipo==='fornecedores') fornecedores.unshift(d);
       else pessoas.unshift(d);
+      // v1.0.1025: colaborador novo → oferece as vagas abertas do organograma
+      if(tipo==='pessoas'&&['funcionario','colaborador'].includes(d.tipo_pessoa)&&d.ativo!==false&&typeof orgPosAdmissao==='function')
+        setTimeout(function(){ orgPosAdmissao(d.id); },700);
     }
   }
 }
@@ -8907,8 +8911,137 @@ function filterRHPessoas(q){
 
 function rhPessoasSetFiltro(f){_rhPessoasFiltro=f;render();}
 
+
+// ══════════════ REAJUSTE SALARIAL POR FUNÇÃO (v1.0.1025) ══════════════
+// Seleciona funções, informa % bruto, data-base, motivo e observação; reajusta o salário base da função
+// e o salário de cada colaborador ativo dela (sobre o salário da própria pessoa). Tudo vai para o
+// histórico profissional de cada um (salário anterior/novo, vigência = data-base, motivo, observação).
+let _reajModo=false, _reajSel=new Set(), _reajPessoas=null, _reajBusy=false;
+let _reaj={pct:'',data:'',motivo:'',obs:'',base:true,colab:true};
+function reajPode(){ return ['admin','rh'].indexOf((profile&&profile.role)||'')>=0; }
+function reajR2(v){ return Math.round((Number(v)+Number.EPSILON)*100)/100; }
+function reajPct(){ var s=String(_reaj.pct||'').trim().replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
+function reajMoeda(v){ return 'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+async function reajAbrir(){
+  if(!reajPode()) return;
+  if(_reajModo){ reajFechar(); return; }
+  _reajModo=true; _reajSel=new Set();
+  var d=new Date(); _reaj={pct:'',data:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01',motivo:'',obs:'',base:true,colab:true};
+  _reajPessoas=null; render();
+  // todas as unidades: o reajuste é por função, não por unidade
+  try{ _reajPessoas=await dbSelect('pessoas','company_id=eq.'+company.id+'&select=id,nome,salario,funcao_id,ativo,tipo_pessoa&order=nome.asc'); }
+  catch(e){ _reajPessoas=(pessoas||[]).slice(); }
+  render();
+}
+function reajFechar(){ _reajModo=false; _reajSel=new Set(); _reajPessoas=null; render(); }
+function reajToggle(fid){ if(_reajSel.has(fid)) _reajSel.delete(fid); else _reajSel.add(fid); render(); }
+function reajTodas(marcar){ _reajSel=new Set(marcar?rhFuncoes.filter(function(f){return f.ativo!==false;}).map(function(f){return f.id;}):[]); render(); }
+function reajCampo(k,v){ _reaj[k]=v; reajPrevia(); }
+function reajColabsDe(fid){
+  return (_reajPessoas||[]).filter(function(p){ return p.funcao_id===fid && p.ativo!==false && ['funcionario','colaborador'].indexOf(p.tipo_pessoa)>=0; });
+}
+function reajCalculo(){
+  var pct=reajPct(), f1=1+pct/100, linhas=[], tot={colab:0,sem:0,delta:0};
+  rhFuncoes.filter(function(f){return _reajSel.has(f.id);}).forEach(function(f){
+    var cs=reajColabsDe(f.id), com=cs.filter(function(p){return Number(p.salario)>0;}), sem=cs.length-com.length;
+    var delta=_reaj.colab?com.reduce(function(s,p){ return s+(reajR2(Number(p.salario)*f1)-Number(p.salario)); },0):0;
+    var base=Number(f.salario_base)||0;
+    linhas.push({f:f, base:base, nova:base?reajR2(base*f1):0, com:com, sem:sem, delta:delta});
+    tot.colab+=com.length; tot.sem+=sem; tot.delta+=delta;
+  });
+  return {pct:pct, linhas:linhas, tot:tot};
+}
+function reajPrevia(){
+  var el=ge('reaj-previa'); if(!el) return;
+  var c=reajCalculo();
+  if(!_reajSel.size){ el.innerHTML='<div style="font-size:12px;color:var(--text3);margin-top:8px">Marque as funções na lista abaixo.</div>'; return; }
+  if(!_reajPessoas){ el.innerHTML='<div style="font-size:12px;color:var(--text3);margin-top:8px">Carregando colaboradores\u2026</div>'; return; }
+  var th='padding:5px 6px;font-weight:600;font-size:11px;color:var(--text2);text-align:left';
+  var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;min-width:520px"><tr><th style="'+th+'">Fun\u00e7\u00e3o</th><th style="'+th+'">Base atual \u2192 nova</th><th style="'+th+'">Colaboradores</th><th style="'+th+'">Folha/m\u00eas</th></tr>';
+  c.linhas.forEach(function(l){
+    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 6px">'+wEsc(l.f.funcao)+'</td>'
+      +'<td style="padding:5px 6px">'+(l.base?reajMoeda(l.base)+(c.pct&&_reaj.base?' \u2192 <b>'+reajMoeda(l.nova)+'</b>':''):'<span style="color:var(--text3)">sem base</span>')+'</td>'
+      +'<td style="padding:5px 6px">'+l.com.length+(l.sem?' <span style="color:var(--amber-text)">('+l.sem+' sem sal\u00e1rio)</span>':'')+'</td>'
+      +'<td style="padding:5px 6px">'+(c.pct&&_reaj.colab?'+ '+reajMoeda(l.delta):'\u2014')+'</td></tr>';
+  });
+  h+='<tr style="border-top:1px solid var(--border);font-weight:700"><td style="padding:5px 6px" colspan="2">Total</td><td style="padding:5px 6px">'+c.tot.colab+'</td><td style="padding:5px 6px">'+(c.pct&&_reaj.colab?'+ '+reajMoeda(c.tot.delta)+' / m\u00eas':'\u2014')+'</td></tr></table></div>';
+  if(c.tot.sem) h+='<div style="font-size:11px;color:var(--amber-text);margin-top:6px">'+c.tot.sem+' colaborador(es) sem sal\u00e1rio cadastrado ficam de fora do reajuste.</div>';
+  el.innerHTML=h;
+}
+function rReajPainel(){
+  var n=_reajSel.size;
+  return '<div style="border:1px solid var(--blue-text);background:var(--blue-bg);border-radius:12px;padding:14px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<div style="font-size:14px;font-weight:700;color:var(--blue-text)">Reajuste salarial \u00b7 '+n+' fun\u00e7'+(n===1?'\u00e3o selecionada':'\u00f5es selecionadas')+'</div>'
+    +'<div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="reajTodas(true)">Selecionar todas</button><button class="btn btn-sm" onclick="reajTodas(false)">Limpar</button></div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">'
+    +'<div class="fg" style="margin:0"><label class="fl">Percentual bruto (%) *</label><input class="fi" id="reaj-pct" inputmode="decimal" placeholder="ex.: 5,50" value="'+wEsc(_reaj.pct)+'" oninput="reajCampo(\'pct\',this.value)"></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Data-base (vig\u00eancia) *</label><input class="fi" type="date" id="reaj-data" value="'+wEsc(_reaj.data)+'" onchange="reajCampo(\'data\',this.value)"></div>'
+    +'<div class="fg" style="margin:0;grid-column:span 2"><label class="fl">Motivo *</label><input class="fi" id="reaj-motivo" placeholder="ex.: Diss\u00eddio 2026" value="'+wEsc(_reaj.motivo)+'" oninput="reajCampo(\'motivo\',this.value)"></div>'
+    +'</div>'
+    +'<div class="fg" style="margin:10px 0 0"><label class="fl">Observa\u00e7\u00e3o (por que do reajuste)</label><textarea class="fi" id="reaj-obs" rows="2" style="resize:vertical" placeholder="ex.: Diss\u00eddio anual conforme conven\u00e7\u00e3o coletiva, vig\u00eancia a partir de 01/10" oninput="reajCampo(\'obs\',this.value)">'+wEsc(_reaj.obs)+'</textarea></div>'
+    +'<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;margin-top:8px">'
+    +'<label style="display:flex;gap:6px;align-items:center"><input type="checkbox"'+(_reaj.base?' checked':'')+' onchange="reajCampo(\'base\',this.checked)"> Atualizar o sal\u00e1rio base da fun\u00e7\u00e3o</label>'
+    +'<label style="display:flex;gap:6px;align-items:center"><input type="checkbox"'+(_reaj.colab?' checked':'')+' onchange="reajCampo(\'colab\',this.checked)"> Atualizar o sal\u00e1rio dos colaboradores ativos da fun\u00e7\u00e3o</label></div>'
+    +'<div id="reaj-previa"></div>'
+    +'<div style="font-size:11px;color:var(--text2);margin-top:8px;line-height:1.5">Vale para todas as unidades. Cada colaborador recebe o reajuste sobre o pr\u00f3prio sal\u00e1rio e ganha uma linha no hist\u00f3rico profissional, com a data-base, o motivo e a observa\u00e7\u00e3o.</div>'
+    +'<div id="reaj-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:8px"></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn" onclick="reajFechar()">Cancelar</button><button class="btn btn-p" id="reaj-ok" onclick="reajAplicar()">Aplicar reajuste</button></div>'
+    +'</div>';
+}
+async function reajAplicar(){
+  if(_reajBusy) return;
+  var err=ge('reaj-err'), falha=function(m){ if(err){ err.style.display='block'; err.textContent=m; } };
+  var c=reajCalculo();
+  if(!_reajSel.size) return falha('Selecione ao menos uma fun\u00e7\u00e3o.');
+  if(!(c.pct>0)||c.pct>100) return falha('Informe um percentual entre 0 e 100.');
+  if(!_reaj.data) return falha('Informe a data-base.');
+  if(!String(_reaj.motivo||'').trim()) return falha('Informe o motivo.');
+  if(!_reaj.base&&!_reaj.colab) return falha('Marque o que deve ser atualizado (base da fun\u00e7\u00e3o e/ou colaboradores).');
+  if(!_reajPessoas) return falha('Aguarde carregar os colaboradores.');
+  var hoje=new Date().toISOString().slice(0,10);
+  var msg='Aplicar reajuste de '+String(c.pct).replace('.',',')+'% em '+c.linhas.length+' fun\u00e7\u00e3o(\u00f5es)'
+    +(_reaj.colab?' e '+c.tot.colab+' colaborador(es) (+ '+reajMoeda(c.tot.delta)+'/m\u00eas)':'')+'?\n\nData-base: '+new Date(_reaj.data+'T00:00:00').toLocaleDateString('pt-BR')+'\nMotivo: '+_reaj.motivo;
+  if(_reaj.data>hoje) msg+='\n\nAten\u00e7\u00e3o: a data-base \u00e9 futura. O sal\u00e1rio muda AGORA; a data-base fica registrada como vig\u00eancia.';
+  if(!confirm(msg)) return;
+  _reajBusy=true; var b=ge('reaj-ok'); var f1=1+c.pct/100, ok=0, erros=[], feitas=0;
+  var total=(_reaj.base?c.linhas.filter(function(l){return l.base;}).length:0)+(_reaj.colab?c.tot.colab:0);
+  var passo=function(){ feitas++; if(b){ b.disabled=true; b.textContent='Aplicando '+feitas+'/'+total+'\u2026'; } };
+  try{
+    for(var i=0;i<c.linhas.length;i++){
+      var l=c.linhas[i];
+      if(_reaj.base&&l.base){
+        try{ await dbUpdate('rh_funcoes',l.f.id,{salario_base:l.nova}); rhFuncoes=rhFuncoes.map(function(f){return f.id===l.f.id?Object.assign({},f,{salario_base:l.nova}):f;}); }
+        catch(e){ erros.push('Base de '+l.f.funcao+': '+(e.message||e)); }
+        passo();
+      }
+      if(_reaj.colab){
+        for(var j=0;j<l.com.length;j++){
+          var p=l.com[j], ant=Number(p.salario), novo=reajR2(ant*f1);
+          try{
+            await dbUpdate('pessoas',p.id,{salario:novo});
+            var hist={pessoa_id:p.id,company_id:company.id,alterado_por:cu.id,alterado_por_nome:(profile&&profile.full_name)||cu.email,
+              motivo:String(_reaj.motivo).trim()+' ('+String(c.pct).replace('.',',')+'%)',observacao:String(_reaj.obs||'').trim()||null,
+              data_vigencia:_reaj.data,salario_anterior:ant,salario_novo:novo};
+            var rh=await dbInsert('historico_profissional',hist);
+            if(rh) historicoProfissional.push(rh);
+            [pessoas,orgPessoasAll].forEach(function(arr){ (arr||[]).forEach(function(x){ if(x&&x.id===p.id) x.salario=novo; }); });
+            ok++;
+          }catch(e){ erros.push(p.nome+': '+(e.message||e)); }
+          passo();
+        }
+      }
+    }
+  } finally { _reajBusy=false; }
+  _reajModo=false; _reajSel=new Set(); _reajPessoas=null; render();
+  if(erros.length) alert('Reajuste aplicado com '+erros.length+' falha(s):\n\n'+erros.slice(0,15).join('\n')+(erros.length>15?'\n\u2026':''));
+  showToast('Reajuste aplicado: '+ok+' colaborador(es) atualizado(s).', erros.length?'amber':'green');
+}
+
 function rRHFuncoes(){
-  const rows=rhFuncoes.map((f,i)=>`<div class="li">
+  const _sel=_reajModo;
+  const rows=rhFuncoes.map((f,i)=>`<div class="li"${_sel?` onclick="reajToggle('${f.id}')" style="cursor:pointer;${_reajSel.has(f.id)?'outline:2px solid var(--blue-text);outline-offset:-2px;background:var(--blue-bg)':''}"`:''}>
+    ${_sel?`<input type="checkbox" ${_reajSel.has(f.id)?'checked':''} onclick="event.stopPropagation();reajToggle('${f.id}')" style="width:16px;height:16px;margin-right:6px;flex:none;cursor:pointer">`:''}
     <div class="av ${AVC[i%5]}" style="font-size:10px">${f.funcao.slice(0,2).toUpperCase()}</div>
     <div class="linfo">
       <div class="lname" style="display:flex;align-items:center;gap:6px">
@@ -8919,6 +9052,7 @@ function rRHFuncoes(){
         ${f.departamento?`<span>${f.departamento}</span>`:''}
         ${f.cbo?`<span>· CBO: ${f.cbo}</span>`:''}
         ${f.salario_base?`<span>· ${fmtV(f.salario_base)}</span>`:''}
+        ${_sel&&_reajPessoas?`<span>· ${reajColabsDe(f.id).length} colaborador(es)</span>`:''}
       </div>
     </div>
     <div class="lright">
@@ -8930,7 +9064,9 @@ function rRHFuncoes(){
       </div>
     </div>
   </div>`).join('');
-  return`<div class="sechdr"><span class="sectitle">Funções (${rhFuncoes.length})</span><button class="btn btn-p btn-sm" onclick="openRH('rh-funcoes')">+ Nova função</button></div>
+  if(_sel) setTimeout(reajPrevia,0);
+  return`<div class="sechdr"><span class="sectitle">Funções (${rhFuncoes.length})</span><span style="display:flex;gap:8px">${reajPode()?`<button class="btn btn-sm" style="${_sel?'background:var(--blue-bg);':''}border-color:var(--blue-text);color:var(--blue-text)" onclick="reajAbrir()">% Reajuste salarial</button>`:''}<button class="btn btn-p btn-sm" onclick="openRH('rh-funcoes')">+ Nova função</button></span></div>
+  ${_sel?rReajPainel():''}
   ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg><p>Nenhuma função cadastrada</p></div>'}`;
 }
 
@@ -26586,7 +26722,7 @@ function rOrgArvore(){
     .map(n=>`<option value="${n.id}" ${orgRecorteNo===n.id?'selected':''}>${n.title} (${orgNivelInfo(n.nivel).label})</option>`).join('');
   const barraRecorte=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
     <span style="font-size:12px;color:var(--text2)">Ver a partir de:</span>
-    <select class="fi" style="height:32px;width:auto;min-width:200px" onchange="orgRecorteNo=this.value;render()">
+    <select class="fi" style="height:auto;min-height:36px;padding:6px 10px;width:auto;min-width:220px" onchange="orgRecorteNo=this.value;render()">
       <option value="">Organograma completo</option>${opcoesRecorte}
     </select>
     ${orgRecorteNo?`<button class="btn btn-sm" onclick="orgRecorteNo='';render()">✕ Limpar recorte</button>`:''}
@@ -27218,7 +27354,7 @@ function rOrgLado(visiveis){
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text2);margin-bottom:8px">Sem posi\u00e7\u00e3o ('+sem.length+')</div>';
   if(!sem.length) h+='<div style="font-size:12px;color:var(--green-text)">\u2713 Todos est\u00e3o em alguma caixa</div>';
   sem.slice(0,40).forEach(function(p){
-    var f=(typeof funcaoDaPessoa==='function'?(funcaoDaPessoa(p)||{}).nome:'')||p.cargo||'';
+    var f=(typeof funcaoDaPessoa==='function'?(funcaoDaPessoa(p)||{}).funcao:'')||p.cargo||'';
     h+='<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;margin-bottom:5px;font-size:12px">'
       +'<div style="width:24px;height:24px;border-radius:50%;background:#0A2540;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;flex:none">'+orgIni(p.nome)+'</div>'
       +'<div style="min-width:0"><b>'+wEsc(p.nome)+'</b><div style="font-size:10.5px;color:var(--text3)">'+wEsc([f,p.data_admissao?'admitido '+orgDataBR(p.data_admissao):''].filter(Boolean).join(' \u00b7 '))+'</div></div></div>';
@@ -27463,6 +27599,75 @@ async function orgHistoricoModal(noId){
       +'<div style="flex:1"><div>'+wEsc(r.detalhe||r.tipo)+'</div>'
       +'<div style="font-size:11px;color:var(--text3)">'+(r.data_efetiva?'a partir de '+orgDataBR(r.data_efetiva)+' \u00b7 ':'')+'registrado por '+wEsc(nomeU(r.user_id))+' em '+new Date(r.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})+'</div></div></div>';
   }).join('')+'</div>';
+}
+
+// ══════════════ ORGANOGRAMA · FASE 3: VAGA NA ADMISSÃO (v1.0.1025) ══════════════
+// Depois de salvar um colaborador NOVO, oferece as vagas abertas da unidade dele (e as corporativas).
+var _admSel=null;
+async function orgPosAdmissao(pid){
+  try{
+    if(!orgPodeCriar()) return;
+    if(!orgNos.length){ await loadOrgData(company.id); }
+    var p=(pessoas||[]).find(function(x){return x.id===pid;})||orgPessoa(pid);
+    if(!p||p.ativo===false) return;
+    if(orgAlocacoes.some(function(a){return a.pessoa_id===pid;})) return;
+    var fn=(typeof funcaoDaPessoa==='function'?(funcaoDaPessoa(p)||{}).funcao:'')||p.cargo||'';
+    var raiz=orgNorm(fn).split(' ')[0]||''; raiz=raiz.length>5?raiz.slice(0,5):raiz;
+    var vagas=orgNos.filter(function(n){ return n.company_id===company.id && orgVagasNo(n)>0 && (!n.unit_id||!p.unit_id||n.unit_id===p.unit_id); })
+      .map(function(n){ return {n:n, sug:!!(raiz&&raiz.length>=3&&orgNorm(n.title).indexOf(raiz)>=0)}; })
+      .sort(function(a,b){ return (b.sug?1:0)-(a.sug?1:0)||String(a.n.vaga_desde||'9999').localeCompare(String(b.n.vaga_desde||'9999')); })
+      .slice(0,12);
+    if(!vagas.length){ showToast(p.nome+' ficou em "Sem posição" no organograma (não há vaga aberta na unidade).','amber'); return; }
+    _admSel=vagas[0].sug?vagas[0].n.id:null;
+    var old=ge('org-adm'); if(old) old.remove();
+    var opts=vagas.map(function(v){
+      var n=v.n, chefe=orgGestorAscendente(n.id,null), dv=orgDiasDesde(n.vaga_desde);
+      return '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:12.5px;cursor:pointer">'
+        +'<input type="radio" name="org-adm-op" value="'+n.id+'"'+(_admSel===n.id?' checked':'')+' onchange="_admSel=this.value;orgAdmEfeitos(\''+pid+'\')">'
+        +'<div style="flex:1"><b>'+wEsc(orgNoNome(n.id))+'</b>'+(v.sug?' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:var(--green-bg);color:var(--green-text);font-weight:600">sugerida \u00b7 mesma fun\u00e7\u00e3o</span>':'')
+        +'<div style="font-size:11px;color:var(--text3)">'+(chefe?'responde a '+wEsc(orgPessoaNome(chefe))+' \u00b7 ':'')+'efetivo '+orgEfetivo(n.id)+'/'+orgQuadro(n)+(dv!=null?' \u00b7 vaga h\u00e1 '+dv+(dv===1?' dia':' dias'):'')+'</div></div></label>';
+    }).join('')
+      +'<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:12.5px;cursor:pointer">'
+      +'<input type="radio" name="org-adm-op" value=""'+(!_admSel?' checked':'')+' onchange="_admSel=null;orgAdmEfeitos(\''+pid+'\')">'
+      +'<div>Deixar sem posi\u00e7\u00e3o por enquanto <span style="font-size:11px;color:var(--text3)">(aparece em "Sem posi\u00e7\u00e3o" no organograma)</span></div></label>';
+    var html='<div class="modal-overlay" id="org-adm" style="z-index:450"><div class="modal" style="width:540px;max-width:96vw;padding:20px">'
+      +'<div style="font-size:16px;font-weight:700">Colocar '+wEsc(p.nome)+' no organograma</div>'
+      +'<div style="font-size:12px;color:var(--text3);margin:3px 0 12px">'+wEsc([fn,orgUnidadeNome(p.unit_id),p.data_admissao?'admitido em '+orgDataBR(p.data_admissao):''].filter(Boolean).join(' \u00b7 '))+'</div>'
+      +'<div style="font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text2);margin-bottom:6px">Vagas abertas</div>'
+      +'<div style="max-height:46vh;overflow:auto">'+opts+'</div>'
+      +'<div id="org-adm-ef"></div>'
+      +'<div id="org-adm-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px;margin-top:8px"></div>'
+      +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'org-adm\').remove()">Depois</button>'
+      +'<button class="btn btn-p" id="org-adm-ok" onclick="orgAdmColocar(\''+pid+'\')">Colocar</button></div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',html);
+    orgAdmEfeitos(pid);
+  }catch(e){ console.warn('orgPosAdmissao',e); }
+}
+function orgAdmEfeitos(pid){
+  var el=ge('org-adm-ef'); if(!el) return;
+  if(!_admSel){ el.innerHTML=''; return; }
+  var n=orgNos.find(function(x){return x.id===_admSel;}); if(!n){ el.innerHTML=''; return; }
+  var p=orgPessoa(pid)||(pessoas||[]).find(function(x){return x.id===pid;})||{};
+  var e=orgEfetivo(n.id)+1, q=orgQuadro(n), chefe=orgGestorAscendente(n.id,pid);
+  el.innerHTML='<div style="font-size:11.5px;color:#3730a3;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.6"><b>Efeitos:</b> '
+    +(e>=q?'a vaga de '+wEsc(orgNoNome(n.id))+' fecha':'continua com '+(q-e)+' vaga'+(q-e>1?'s':'')+' em '+wEsc(orgNoNome(n.id)))
+    +' \u00b7 '+wEsc(p.nome||'')+' passa a responder a '+(chefe?wEsc(orgPessoaNome(chefe)):'ningu\u00e9m (topo)')+' \u00b7 fica no hist\u00f3rico como admiss\u00e3o</div>';
+}
+async function orgAdmColocar(pid){
+  var err=ge('org-adm-err');
+  if(!_admSel){ var m0=ge('org-adm'); if(m0) m0.remove(); showToast('Ficou em "Sem posição" no organograma.','amber'); return; }
+  var b=ge('org-adm-ok'); if(b){ b.disabled=true; b.textContent='Salvando\u2026'; }
+  try{
+    var p=orgPessoa(pid)||(pessoas||[]).find(function(x){return x.id===pid;})||{};
+    var desde=p.data_admissao||orgHojeISO();
+    var salvo=await dbInsert('org_alocacoes',{org_no_id:_admSel,pessoa_id:pid,is_gestor:false,company_id:company.id,owner_id:cu&&cu.id,desde:desde});
+    if(!salvo) throw new Error('n\u00e3o foi poss\u00edvel gravar a aloca\u00e7\u00e3o');
+    await orgHist({tipo:'alocou',pessoa_id:pid,org_no_id:_admSel,para_no_id:_admSel,data_efetiva:desde,detalhe:(p.nome||'Colaborador')+' colocado(a) em '+orgNoNome(_admSel)+' (admiss\u00e3o)'});
+    await orgRecarregar();
+    var m=ge('org-adm'); if(m) m.remove();
+    showToast((p.nome||'Colaborador')+' colocado(a) em '+orgNoNome(_admSel)+'.','green');
+    if(['rh-organograma','dashboard'].indexOf(curPage)>=0) render();
+  }catch(e){ if(err){ err.style.display='block'; err.textContent='Erro: '+(e.message||e); } if(b){ b.disabled=false; b.textContent='Colocar'; } }
 }
 
 // ========================== FIM ORGANOGRAMA ==========================
@@ -28998,11 +29203,24 @@ async function demAprovarAdmin(id,pessoaId){
     await dbUpdate('pessoas',pessoaId,{ativo:false});
     pessoas=pessoas.map(p=>p.id===pessoaId?{...p,ativo:false}:p);
     // 3) Remove TODAS as alocações no organograma (inclusive onde era gestor) — vaga fica aberta
-    const alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId);
-    await Promise.all(alocacoesPessoa.map(a=>dbDelete('org_alocacoes',a.id)));
+    //    lê do banco: se o organograma não foi aberto nesta sessão, a lista em memória vem vazia
+    let alocacoesPessoa=await dbSelect('org_alocacoes',`pessoa_id=eq.${pessoaId}&order=id.asc`).catch(()=>null);
+    if(!alocacoesPessoa) alocacoesPessoa=orgAlocacoes.filter(a=>a.pessoa_id===pessoaId);
+    if(!orgNos.length) await loadOrgData(company.id).catch(()=>{});
+    const _nomeDem=(pessoas.find(p=>p.id===pessoaId)||orgPessoa(pessoaId)||{}).nome||'Colaborador';
+    for(const a of alocacoesPessoa){
+      await dbDelete('org_alocacoes',a.id);
+      await orgHist({tipo:'saiu',pessoa_id:pessoaId,org_no_id:a.org_no_id,de_no_id:a.org_no_id,data_efetiva:dataISO,detalhe:_nomeDem+' saiu de '+orgNoNome(a.org_no_id)+' (desligamento)'});
+    }
     orgAlocacoes=orgAlocacoes.filter(a=>a.pessoa_id!==pessoaId);
     // 4) Recalcula "responde para" — subordinados sobem para o nó superior
     await orgRecalcResponde(true);
+    // a vaga conta a partir da data do desligamento (o banco marca a data de hoje)
+    await orgRecarregar();
+    for(const a of alocacoesPessoa){
+      const _no=orgNos.find(n=>n.id===a.org_no_id);
+      if(_no&&_no.vaga_desde&&dataISO<_no.vaga_desde){ await dbUpdate('org_nos',_no.id,{vaga_desde:dataISO}).catch(()=>{}); _no.vaga_desde=dataISO; }
+    }
     render();
     demRefreshCadastro(pessoaId);
     showToast&&showToast('Colaborador desligado. Vaga aberta no organograma.','green');
