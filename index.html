@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1032 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1033 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1032';
+const APP_VERSION='v1.0.1033';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48218,7 +48218,7 @@ function ecomPanelPedidos(){
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
     +chip(!ecomFiltroOrigem,'Todos',"ecomPedFiltro('origem','')")+chip(ecomFiltroOrigem==='integracao','Integra\u00e7\u00e3o',"ecomPedFiltro('origem','integracao')")+chip(ecomFiltroOrigem==='planilha','Planilha',"ecomPedFiltro('origem','planilha')")
     +'<span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>'+chipsSt
-    +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer\u00eancias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
+    +'<span style="margin-left:auto;display:flex;gap:6px">'+((profile&&profile.role)==='admin'?'<button class="btn btn-sm" onclick="ecomMigrarEtiqAbrir()" title="Tira as imagens das etiquetas do banco e guarda no armazenamento">Mover etiquetas p/ armazenamento</button>':'')+'<button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer\u00eancias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
     +'<div id="ecom-ped-tabela">'+ecomPedTabelaHTML()+'</div>';
 }
 async function ecomImportLogModal(){
@@ -48435,6 +48435,10 @@ function ecomDetEtiq(){
   var D=ecomDet, e=D.etiq, p=D.ped;
   if(!e) return '<div style="color:var(--text3);font-size:13px;padding:20px;text-align:center">Nenhuma etiqueta vinculada.<br><span style="font-size:12px">O pedido só é liberado para separação depois que a etiqueta casar.</span></div>';
   var img=e.img?('<div style="text-align:center;margin-top:12px"><img src="'+ecomEsc(e.img)+'" style="max-width:100%;max-height:420px;border:1px solid var(--border);border-radius:8px"></div>'):'';
+  if(!e.img&&e.arquivo_path){   // v1.0.1033: etiqueta guardada como arquivo
+    img='<div style="text-align:center;margin-top:12px"><img id="ecom-det-etq-img" alt="carregando a etiqueta\u2026" style="max-width:100%;max-height:420px;min-height:60px;border:1px solid var(--border);border-radius:8px"></div>';
+    setTimeout(function(){ ecomEtiqImgDoArquivo(e.arquivo_path).then(function(u){ var el=ge('ecom-det-etq-img'); if(el) el.src=u; }).catch(function(){ var el=ge('ecom-det-etq-img'); if(el) el.alt='n\u00e3o foi poss\u00edvel carregar a etiqueta'; }); },0);
+  }
   return '<div style="display:flex;gap:18px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:12px">'
     +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Tracking</div><div style="font-family:monospace;font-size:13px;font-weight:700">'+ecomEsc(e.tracking||p.tracking||'—')+'</div></div>'
     +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Transportadora</div><div style="font-size:13px;font-weight:600">'+ecomEsc(p.transportadora||'—')+'</div></div>'
@@ -50119,7 +50123,7 @@ async function ecomEtiqBlob(path){
 async function ecomEtiqImgDoArquivo(path){
   if(_etqCacheImg[path]) return _etqCacheImg[path];
   var blob=await ecomEtiqBlob(path);
-  if(/\.png$/i.test(path)){
+  if(/\.(png|jpe?g|webp)$/i.test(path)){
     var png=await new Promise(function(res,rej){ var fr=new FileReader(); fr.onload=function(){res(fr.result);}; fr.onerror=rej; fr.readAsDataURL(blob); });
     _etqCacheImg[path]=png; return png;
   }
@@ -50131,6 +50135,74 @@ async function ecomEtiqImgDoArquivo(path){
   var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
   await page.render({canvasContext:ctx,viewport:vp}).promise;
   var url=cv.toDataURL('image/png'); _etqCacheImg[path]=url; return url;
+}
+// ══════════════ v1.0.1033: ETIQUETAS IMPORTADAS À MÃO VÃO PARA O ARMAZENAMENTO ══════════════
+// A imagem da etiqueta deixa de ficar no banco (coluna img: ~300 MB). Vai para o Storage privado
+// "ecom-etiquetas"; o banco guarda só o caminho. Se o envio falhar, grava no banco como antes
+// (a etiqueta nunca se perde). A impressão lê do arquivo (ecomEtiqImgDoArquivo).
+function ecomDataUrlBlob(du){
+  var m=String(du||'').match(/^data:([^;,]+)(;base64)?,(.*)$/); if(!m) return null;
+  if(!m[2]) return new Blob([decodeURIComponent(m[3])],{type:m[1]});
+  var bin=atob(m[3]), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  return new Blob([u8],{type:m[1]});
+}
+function ecomExtDeMime(t){ return /png/i.test(t)?'png':/jpe?g/i.test(t)?'jpg':/webp/i.test(t)?'webp':/pdf/i.test(t)?'pdf':'bin'; }
+async function ecomEtiqSubir(cid,pid,img,pg){
+  var b=ecomDataUrlBlob(img); if(!b||!b.size) throw new Error('imagem inválida');
+  var path=cid+'/'+(pid||'sem-pedido')+'/manual_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)+'_p'+(pg||1)+'.'+ecomExtDeMime(b.type);
+  var r=await window.supabase.storage.from('ecom-etiquetas').upload(path,b,{contentType:b.type,upsert:true});
+  if(r&&r.error) throw new Error(r.error.message||'falha no armazenamento');
+  return path;
+}
+async function ecomEtiqLinha(cid,pid,base,img,pg){
+  try{ var path=await ecomEtiqSubir(cid,pid,img,pg); return Object.assign({},base,{img:null,arquivo_path:path}); }
+  catch(e){ console.warn('etiqueta gravada no banco (armazenamento falhou):',e); return Object.assign({},base,{img:img}); }
+}
+// migração das etiquetas que já estão no banco (Admin) — em lotes, retomável
+var _migEtq={rodando:false,parar:false,ok:0,falha:0,total:0,falhas:[]};
+async function ecomMigrarEtiqAbrir(){
+  if((profile&&profile.role)!=='admin'){ showToast('Só o perfil Admin pode fazer a migração.','red'); return; }
+  var ids=[]; try{ ids=await dbSelectAll('ecom_etiquetas','company_id=eq.'+ecomCid()+'&img=not.is.null&select=id'); }catch(e){ showToast('Erro: '+(e.message||e),'red'); return; }
+  _migEtq.total=ids.length; _migEtq.ok=0; _migEtq.falha=0; _migEtq.falhas=[];
+  var old=ge('modal-mig-etq'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-mig-etq" style="z-index:400"><div class="modal" style="width:460px;max-width:95vw;padding:20px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Mover etiquetas para o armazenamento</div>'
+    +'<div style="font-size:12.5px;color:var(--text2);margin-bottom:12px;line-height:1.5"><b>'+ids.length+'</b> etiqueta(s) ainda t\u00eam a imagem guardada no banco. Cada uma \u00e9 enviada ao armazenamento e s\u00f3 depois apagada do banco. Pode parar e continuar depois.</div>'
+    +'<div style="height:8px;background:var(--bg3);border-radius:4px;overflow:hidden"><div id="mig-bar" style="height:100%;width:0%;background:var(--blue-text);transition:width .3s"></div></div>'
+    +'<div id="mig-txt" style="font-size:12px;color:var(--text2);margin-top:6px">Pronto para come\u00e7ar.</div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn" id="mig-fechar" onclick="_migEtq.parar=true;ge(\'modal-mig-etq\').remove()">Fechar</button>'
+    +'<button class="btn btn-p" id="mig-btn" onclick="ecomMigrarEtiqRodar()"'+(ids.length?'':' disabled')+'>'+(ids.length?'Iniciar':'Nada a mover')+'</button></div></div></div>');
+}
+function ecomMigrarEtiqUI(fim){
+  var t=_migEtq.total||1, feito=_migEtq.ok+_migEtq.falha;
+  var bar=ge('mig-bar'); if(bar) bar.style.width=Math.min(100,Math.round(feito/t*100))+'%';
+  var tx=ge('mig-txt'); if(tx) tx.innerHTML=(fim?'<b>'+fim+'</b> \u00b7 ':'')+_migEtq.ok+' movida(s)'+(_migEtq.falha?' \u00b7 <span style="color:var(--red-text)">'+_migEtq.falha+' com falha</span>':'')+' de '+_migEtq.total;
+}
+async function ecomMigrarEtiqRodar(){
+  if(_migEtq.rodando){ _migEtq.parar=true; return; }
+  _migEtq.rodando=true; _migEtq.parar=false;
+  var b=ge('mig-btn'); if(b) b.textContent='Parar';
+  var cid=ecomCid();
+  try{
+    while(!_migEtq.parar){
+      var f='company_id=eq.'+cid+'&img=not.is.null&select=id,pedido_id,pagina,img&order=id.asc&limit=10';
+      if(_migEtq.falhas.length) f+='&id=not.in.('+_migEtq.falhas.join(',')+')';
+      var lote=await dbSelect('ecom_etiquetas',f);
+      if(!lote||!lote.length) break;
+      for(var i=0;i<lote.length&&!_migEtq.parar;i++){
+        var r=lote[i];
+        try{
+          var path=await ecomEtiqSubir(cid,r.pedido_id,r.img,r.pagina);
+          await dbUpdate('ecom_etiquetas',r.id,{arquivo_path:path,img:null});
+          _migEtq.ok++;
+        }catch(e){ _migEtq.falha++; _migEtq.falhas.push(r.id); console.warn('migrar etiqueta',r.id,e); }
+        ecomMigrarEtiqUI();
+      }
+    }
+    ecomMigrarEtiqUI(_migEtq.parar?'Pausado':'Conclu\u00eddo');
+    if(!_migEtq.parar) showToast('Etiquetas movidas: '+_migEtq.ok+(_migEtq.falha?' \u00b7 '+_migEtq.falha+' com falha':'')+'. Rode o SQL que devolve o espa\u00e7o do banco.','green');
+  }catch(e){ ecomMigrarEtiqUI('Erro: '+(e.message||e)); }
+  finally{ _migEtq.rodando=false; var b2=ge('mig-btn'); if(b2) b2.textContent=_migEtq.parar?'Continuar':'Conclu\u00eddo'; if(b2&&!_migEtq.parar) b2.disabled=true; }
 }
 // visualizador da etiqueta (PDF do Storage) com botão de imprimir — sem window.open
 async function intgAbrirEtiqueta(path){
@@ -50951,7 +51023,8 @@ async function ecomQzTest(){
     var achou=printers.some(function(p){ return String(p)===_qzPrinter || /zebra|zt231/i.test(String(p)); });
     var alvo=printers.find(function(p){ return String(p)===_qzPrinter; }) || printers.find(function(p){ return /zebra|zt231/i.test(String(p)); }) || _qzPrinter;
     // tenta imprimir uma etiqueta já importada; se não houver, imprime um ZPL de teste
-    var rows=[]; try{ rows=await dbSelect('ecom_etiquetas','company_id=eq.'+ecomCid()+'&select=img&limit=1'); }catch(e){}
+    var rows=[]; try{ rows=await dbSelect('ecom_etiquetas','company_id=eq.'+ecomCid()+'&select=img,arquivo_path&limit=1'); }catch(e){}
+    if(rows.length && !rows[0].img && rows[0].arquivo_path){ try{ rows[0].img=await ecomEtiqImgDoArquivo(rows[0].arquivo_path); }catch(e){} }
     if(rows.length && rows[0].img){
       await ecomQzPrintImg(alvo, rows[0].img);
       showToast('QZ OK · etiqueta enviada para '+alvo,'green');
@@ -51378,7 +51451,7 @@ async function ecomEtiqPendSalvar(){
     // continua com a etiqueta anterior em vez de ficar sem nenhuma
     var _antA=[]; try{ _antA=await dbSelect('ecom_etiquetas','company_id=eq.'+cid+'&pedido_id=eq.'+pid+'&select=id'); }catch(e){}
     try{
-      await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:pid,order_id:it.oid||null,tracking:cod,nfe_chave:it.chNfe||null,img:it.img,pagina:it.pg});
+      await dbInsert('ecom_etiquetas',await ecomEtiqLinha(cid,pid,{company_id:cid,pedido_id:pid,order_id:it.oid||null,tracking:cod,nfe_chave:it.chNfe||null,pagina:it.pg},it.img,it.pg));   // v1.0.1033: imagem no armazenamento
       for(var _ka=0;_ka<_antA.length;_ka++){ try{ await dbDelete('ecom_etiquetas',_antA[_ka].id); }catch(e){} }
       var _u2={};
       if(cod && !ped.tracking) _u2.tracking=cod;
@@ -51717,7 +51790,7 @@ async function ecomEtiqImportFile(input){
         var _trkFinal=(trk||jt||cor||mlTrk||oid||null);
         _diagTrk.push({pg:pg, trk:_trkFinal||'SEM TRACKING', via:(trk?'xpress':jt?'j&t':cor?'correios':oid?'order id':'-'),
                        amostra:String(txt||'').replace(/\s+/g,' ').slice(0,90)});
-        await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:_trkFinal,nfe_chave:chNfe||null,img:img,pagina:pg});
+        await dbInsert('ecom_etiquetas',await ecomEtiqLinha(cid,ped.id,{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:_trkFinal,nfe_chave:chNfe||null,pagina:pg},img,pg));   // v1.0.1033: imagem no armazenamento
         // sobe o tracking para o pedido, para o romaneio e o checkout acharem
         try{ if(_trkFinal && !ped.tracking){ await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkFinal}); ped.tracking=_trkFinal; } }catch(_et){}
         for(var _kb=0;_kb<_antB.length;_kb++){ try{ await dbDelete('ecom_etiquetas',_antB[_kb].id); }catch(e){} }
