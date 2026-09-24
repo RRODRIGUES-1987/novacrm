@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1031 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1032 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1031';
+const APP_VERSION='v1.0.1032';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -47083,7 +47083,46 @@ function ecomOper(){return (profile&&(profile.full_name||profile.email))||'opera
 function ecomN(v){v=parseFloat(v);return isNaN(v)?0:v;}
 function ecomFmtD(d){if(!d)return'—';try{var p=String(d).slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}catch(e){return String(d);}}
 function ecomLojNome(id){var l=ecomLojistas.find(function(x){return x.id===id;});return l?l.nome:'—';}
-function ecomItensDo(pid){return ecomItensDoLojista().filter(function(i){return i.pedido_id===pid;});}
+// ══════════════ v1.0.1032: DESEMPENHO — índices para as listas grandes (e-commerce e integração) ══════════════
+// Antes cada linha percorria todas as tabelas (itens, notas, etiquetas, pedidos): dezenas de milhões de
+// comparações por render. Os índices são refeitos só quando a tabela muda (outra referência ou outro tamanho).
+function _idxRef(cache,arr){ return cache.ref===arr && cache.len===(arr?arr.length:-1); }
+var _ixItens={ref:null,len:-1,m:null}, _ixNfe={ref:null,len:-1,m:null}, _ixEtq={ref:null,len:-1,m:null}, _ixDepara={ref:null,len:-1,m:null};
+function ecomIdxItens(){
+  if(!_idxRef(_ixItens,ecomPedidoItens)){ var m=new Map(); (ecomPedidoItens||[]).forEach(function(i){ var a=m.get(i.pedido_id); if(!a){a=[];m.set(i.pedido_id,a);} a.push(i); });
+    _ixItens={ref:ecomPedidoItens,len:(ecomPedidoItens||[]).length,m:m}; }
+  return _ixItens.m;
+}
+function ecomIdxNfe(){
+  if(!_idxRef(_ixNfe,ecomNfes)){ var m=new Map(); (ecomNfes||[]).forEach(function(n){ if(n.pedido_id&&!m.has(n.pedido_id)) m.set(n.pedido_id,n); });
+    _ixNfe={ref:ecomNfes,len:(ecomNfes||[]).length,m:m}; }
+  return _ixNfe.m;
+}
+function ecomIdxEtq(){
+  if(!_idxRef(_ixEtq,ecomEtiquetas)){ var m=new Map(); (ecomEtiquetas||[]).forEach(function(e){ var a=m.get(e.pedido_id); if(!a){a=[];m.set(e.pedido_id,a);} a.push(e); });
+    _ixEtq={ref:ecomEtiquetas,len:(ecomEtiquetas||[]).length,m:m}; }
+  return _ixEtq.m;
+}
+function intgIdxDepara(){
+  if(!_idxRef(_ixDepara,intgDepara)){ var m=new Map(); (intgDepara||[]).forEach(function(d){ var k=d.integracao_id+'|'+String(d.sku_externo||'').toLowerCase(); if(!m.has(k)) m.set(k,d); });
+    _ixDepara={ref:intgDepara,len:(intgDepara||[]).length,m:m}; }
+  return _ixDepara.m;
+}
+var _ixBase={ref:null,len:-1,byId:null,byNum:null,byPre:null};
+function intgIdxBase(){
+  if(!_idxRef(_ixBase,ecomPedidos)){
+    var byId=new Map(), byNum=new Map(), byPre=new Map();
+    (ecomPedidos||[]).forEach(function(x){
+      byId.set(x.id,x);
+      var n=intgNormId(x.numero_pedido); if(!n) return;
+      if(!byNum.has(n)) byNum.set(n,x);
+      if(n.length>=10){ var k=n.slice(0,10), a=byPre.get(k); if(!a){a=[];byPre.set(k,a);} a.push({n:n,x:x}); }
+    });
+    _ixBase={ref:ecomPedidos,len:(ecomPedidos||[]).length,byId:byId,byNum:byNum,byPre:byPre};
+  }
+  return _ixBase;
+}
+function ecomItensDo(pid){ return (ecomIdxItens().get(pid)||[]).slice(); }   // v1.0.1032: índice (antes varria todos os itens)
 const ECOM_STATUS_LBL={aguardando_etiqueta:'Aguardando etiqueta',importado:'Importado',separando:'Separando',separado:'Separado',conferindo:'Conferindo',conferido:'Conferido',carregado:'Carregado',romaneado:'Romaneado',expedido:'Expedido',cancelado:'Cancelado'};
 // selo de responsabilidade: o volume estava pronto e romaneado; a coleta é que falhou
 function ecomSeloNaoColetado(p){
@@ -47102,18 +47141,23 @@ function ecomBadge(st){
 async function ecomLoadAll(){
   var cid=ecomCid(); if(!cid){_ecomLoaded=true;return;}
   try{
-    ecomLojistas    = await dbSelectAll('ecom_lojistas',    'company_id=eq.'+cid+'&order=nome.asc');
+    // v1.0.1032: as tabelas carregam ao mesmo tempo (antes, uma depois da outra)
+    var _r=await Promise.all([
+      dbSelectAll('ecom_lojistas',    'company_id=eq.'+cid+'&order=nome.asc'),
+      dbSelectAll('ecom_produtos',    'company_id=eq.'+cid+'&order=descricao.asc'),
+      dbSelectAll('ecom_pedidos',     'company_id=eq.'+cid+'&order=numero_interno.desc'),
+      dbSelectAll('ecom_pedido_itens','company_id=eq.'+cid),
+      dbSelectAll('ecom_ordens_sep',  'company_id=eq.'+cid+'&order=numero.desc'),
+      dbSelectAll('ecom_os_pedidos',  'company_id=eq.'+cid),
+      dbSelectAll('ecom_kit_itens',   'company_id=eq.'+cid).catch(function(){return [];}),
+      dbSelectAll('ecom_romaneios',   'company_id=eq.'+cid+'&order=numero.desc'),
+      dbSelectAll('ecom_etiquetas',   'company_id=eq.'+cid+'&select=id,pedido_id,order_id,tracking,pagina,nfe_chave'),
+      dbSelectAll('ecom_nfe','company_id=eq.'+cid+'&select=id,chave,numero,order_id,pedido_id').catch(function(){return [];})
+    ]);
+    ecomLojistas=_r[0]; ecomProdutos=_r[1]; ecomPedidos=_r[2]; ecomPedidoItens=_r[3]; ecomOrdensSep=_r[4];
+    ecomOsPedidos=_r[5]; ecomKitItens=_r[6]||[]; ecomRomaneios=_r[7]; ecomEtiquetas=_r[8]; ecomNfes=_r[9]||[];
     if(!ecomLojistaId){ try{ var _sv=localStorage.getItem('ecomLojistaId'); if(_sv) ecomLojistaId=_sv; }catch(_e){} }
     if((!ecomLojistaId||!ecomLojistas.find(function(l){return l.id===ecomLojistaId;})) && ecomLojistas.length) ecomLojistaId=ecomLojistas[0].id;
-    ecomProdutos    = await dbSelectAll('ecom_produtos',    'company_id=eq.'+cid+'&order=descricao.asc');
-    ecomPedidos     = await dbSelectAll('ecom_pedidos',     'company_id=eq.'+cid+'&order=numero_interno.desc');
-    ecomPedidoItens = await dbSelectAll('ecom_pedido_itens','company_id=eq.'+cid);
-    ecomOrdensSep   = await dbSelectAll('ecom_ordens_sep',  'company_id=eq.'+cid+'&order=numero.desc');
-    ecomOsPedidos   = await dbSelectAll('ecom_os_pedidos',  'company_id=eq.'+cid);
-    try{ ecomKitItens = await dbSelectAll('ecom_kit_itens', 'company_id=eq.'+cid); }catch(_k){ ecomKitItens=[]; }
-    ecomRomaneios   = await dbSelectAll('ecom_romaneios',   'company_id=eq.'+cid+'&order=numero.desc');
-    ecomEtiquetas   = await dbSelectAll('ecom_etiquetas',   'company_id=eq.'+cid+'&select=id,pedido_id,order_id,tracking,pagina,nfe_chave');
-    try{ ecomNfes = await dbSelectAll('ecom_nfe','company_id=eq.'+cid+'&select=id,chave,numero,order_id,pedido_id'); }catch(_n){ ecomNfes=[]; }
     _ecomLoaded=true;
   }catch(e){ showToast('Erro ao carregar E-commerce: '+(e.message||e),'red'); }
 }
@@ -48102,42 +48146,80 @@ function ecomOrigemHTML(p){
     +(mk?('<span style="font-size:10px;padding:1px 7px;border-radius:5px;margin-left:4px;font-weight:700;background:'+mk.bg+';color:'+mk.cor+'">'+mk.nome+'</span>'):'')
     +((o==='planilha'&&_ecomNoOlist&&_ecomNoOlist[p.id])?'<div style="font-size:10px;color:var(--text3);margin-top:2px">também no Olist</div>':'');
 }
+// ══════════════ v1.0.1032: LISTA DE PEDIDOS no padrão da tela de integração ══════════════
+var _ecomPedBusca='', _ecomPedStatus='', _ecomPedLimite=150, _ecomPedTimer=null;
+function ecomPedNorm(t){ return String(t==null?'':t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function ecomPedLista(){
+  var base=ecomPedidosDoLojista();
+  if(ecomFiltroOrigem) base=base.filter(function(p){ return ecomOrigem(p)===ecomFiltroOrigem; });
+  if(_ecomFiltroSemBipe){ var ids={}; ecomEmFolhaSemBipe().forEach(function(p){ids[p.id]=1;}); base=base.filter(function(p){return ids[p.id];}); }
+  if(_ecomPedStatus) base=base.filter(function(p){ return p.status===_ecomPedStatus; });
+  var q=ecomPedNorm(_ecomPedBusca).trim();
+  if(q){
+    var nfe=ecomIdxNfe(), etq=ecomIdxEtq();
+    base=base.filter(function(p){
+      var n=nfe.get(p.id), tr=(etq.get(p.id)||[]).map(function(e){return e.tracking||'';}).join(' ');
+      return ecomPedNorm(['e-'+String(p.numero_interno||0).padStart(6,'0'),p.numero_interno,p.numero_pedido,p.destinatario_nome,p.tracking,p.transportadora,n&&n.numero,tr].join(' ')).indexOf(q)>=0;
+    });
+  }
+  return base;
+}
+function ecomPedTabelaHTML(){
+  var lista=ecomPedLista(), mostra=lista.slice(0,_ecomPedLimite), nfe=ecomIdxNfe(), etq=ecomIdxEtq(), itx=ecomIdxItens();
+  var th='padding:7px 9px;font-weight:600;font-size:11.5px;white-space:nowrap';
+  var rows=mostra.map(function(p){
+    var its=itx.get(p.id)||[], qi=its.reduce(function(a,b){return a+ecomN(b.qtd);},0), n=nfe.get(p.id), temEt=etq.has(p.id);
+    var pend=(p.status==='importado'||p.status==='aguardando_etiqueta');
+    return '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="if(!event.target.closest(\'button\'))ecomPedAbrir(\''+p.id+'\')" title="Ver detalhes do pedido">'
+      +'<td style="padding:7px 9px;font-family:monospace;font-size:11.5px;color:var(--text2);white-space:nowrap">E-'+String(p.numero_interno||0).padStart(6,'0')+'</td>'
+      +'<td style="padding:7px 9px">'+ecomEsc(p.numero_pedido||'\u2014')+'<div style="margin-top:2px;line-height:1.6">'+ecomOrigemHTML(p)+'</div></td>'
+      +'<td style="padding:7px 9px;white-space:nowrap">'+ecomFmtD(p.created_at)+'</td>'
+      +'<td style="padding:7px 9px">'+ecomEsc(p.destinatario_nome||'\u2014')+'</td>'
+      +'<td style="padding:7px 9px;white-space:nowrap">'+its.length+' SKU \u00b7 '+qi+' un</td>'
+      +'<td style="padding:7px 9px;white-space:nowrap">'+(n?('<span title="NF '+ecomEsc(n.numero||'')+'">'+ecomEsc(n.numero||'')+'</span>'):(pend?'<span style="color:var(--amber-text,#b45309);font-weight:600">falta</span>':'<span style="color:var(--text3)">\u2014</span>'))+'</td>'
+      +'<td style="padding:7px 9px;text-align:center">'+(temEt?'&#127991;&#65039;':(pend?'<span style="color:var(--amber-text,#b45309);font-weight:600">falta</span>':'<span style="color:var(--text3)">\u2014</span>'))+'</td>'
+      +'<td style="padding:7px 9px">'+ecomBadge(p.status)+ecomSeloNaoColetado(p)+'</td>'
+      +'<td style="padding:7px 9px;text-align:right;white-space:nowrap">'+((p.status==='conferido'||p.status==='conferindo'||p.status==='romaneado')?'<button class="btn btn-sm" onclick="ecomEstornarConf(\''+p.id+'\')">Estornar</button> ':'')
+        +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomPedidoExcluir(\''+p.id+'\')">Excluir</button></td></tr>';
+  }).join('');
+  if(!rows) rows='<tr><td colspan="9" style="padding:22px;text-align:center;color:var(--text3)">Nenhum pedido encontrado.</td></tr>';
+  var c=ge('ecom-ped-cont'); if(c) c.textContent=Math.min(_ecomPedLimite,lista.length)+' de '+lista.length;
+  return '<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="'+th+'">N\u00ba interno</th><th style="'+th+'">Pedido</th><th style="'+th+'">Data</th><th style="'+th+'">Destinat\u00e1rio</th><th style="'+th+'">Itens</th><th style="'+th+'">NF</th><th style="'+th+';text-align:center">Etq.</th><th style="'+th+'">Status</th><th style="'+th+'"></th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +(lista.length>_ecomPedLimite?'<div style="text-align:center;padding:10px;border-top:1px solid var(--border)"><button class="btn btn-sm" onclick="ecomPedMais()">Mostrar mais '+Math.min(150,lista.length-_ecomPedLimite)+'</button></div>':'')
+    +'</div>';
+}
+function ecomPedRefresh(){ var el=ge('ecom-ped-tabela'); if(el) el.innerHTML=ecomPedTabelaHTML(); }
+function ecomPedBuscaSet(v){ _ecomPedBusca=v||''; _ecomPedLimite=150; clearTimeout(_ecomPedTimer); _ecomPedTimer=setTimeout(ecomPedRefresh,180); }
+function ecomPedMais(){ _ecomPedLimite+=150; ecomPedRefresh(); }
+function ecomPedFiltro(tipo,v){
+  if(tipo==='origem') ecomFiltroOrigem=v||''; else _ecomPedStatus=v||'';
+  _ecomPedLimite=150; var el=ge('ecom-body'); if(el) el.innerHTML=ecomPanelPedidos();
+}
 function ecomPanelPedidos(){
   if(!ecomPedidosDoLojista().length) return '<div class="empty"><p>Nenhum pedido importado ainda</p></div>';
   ecomCarregarNoOlist();
-  var _base=ecomPedidosDoLojista();
-  if(ecomFiltroOrigem) _base=_base.filter(function(p){ return ecomOrigem(p)===ecomFiltroOrigem; });
-  if(_ecomFiltroSemBipe){ var _ids={}; ecomEmFolhaSemBipe().forEach(function(p){_ids[p.id]=1;});
-                          _base=_base.filter(function(p){return _ids[p.id];}); }
-  var rows=_base.map(function(p){
-    var its=ecomItensDo(p.id); var qi=its.reduce(function(a,b){return a+ecomN(b.qtd);},0);
-    var _bk=('e-'+String(p.numero_interno||0).padStart(6,'0')+' '+(p.numero_pedido||'')+' '+(p.destinatario_nome||'')+' '+(p.tracking||'')+' '+(p.transportadora||'')).toLowerCase();
-    return '<tr class="ecom-ped-tr" data-busca="'+ecomEsc(_bk)+'" style="border-top:1px solid var(--border);cursor:pointer" '
-      +'onclick="if(!event.target.closest(\'button\'))ecomPedAbrir(\''+p.id+'\')" title="Ver detalhes do pedido">'
-      +'<td style="padding:8px;font-family:monospace">E-'+String(p.numero_interno||0).padStart(6,'0')+'</td>'
-      +'<td style="padding:8px">'+ecomEsc(p.numero_pedido||'—')+'</td>'
-      +'<td style="padding:8px">'+ecomOrigemHTML(p)+'</td>'
-      +'<td style="padding:8px;white-space:nowrap">'+ecomFmtD(p.created_at)+'</td>'
-      +'<td style="padding:8px">'+ecomEsc(p.destinatario_nome||'—')+'</td>'
-      +'<td style="padding:8px">'+ecomEsc(p.transportadora||'—')+'</td>'
-      +'<td style="padding:8px">'+its.length+' SKU · '+qi+' un</td>'
-      +'<td style="padding:8px;white-space:nowrap">'+(function(){var _n=ecomNfes.find(function(n){return n.pedido_id===p.id;});return _n?('<span title="NF '+(_n.numero||'')+'" style="font-size:11px;padding:2px 7px;border-radius:99px;background:#dcfce7;color:#059669;font-weight:700">NF '+(_n.numero||'')+' &#10003;</span>'):'<span style="font-size:11px;color:var(--text3)">&mdash;</span>';})()+'</td>'
-      +'<td style="padding:8px">'+ecomBadge(p.status)+ecomSeloNaoColetado(p)+'</td>'+'<td style="padding:8px;text-align:right">'+((p.status==='conferido'||p.status==='conferindo'||p.status==='romaneado')?'<button class="btn btn-sm" onclick="ecomEstornarConf(\''+p.id+'\')">Estornar</button> ':'')+'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomPedidoExcluir(\''+p.id+'\')">Excluir</button></td></tr>';
+  var chip=function(on,lbl,oc){ return '<button class="btn" style="font-size:12px;'+(on?'background:var(--accent);color:#fff':'')+'" onclick="'+oc+'">'+lbl+'</button>'; };
+  var cont={}; ecomPedidosDoLojista().forEach(function(p){ cont[p.status]=(cont[p.status]||0)+1; });
+  var ordem=['aguardando_etiqueta','importado','separando','separado','conferindo','conferido','romaneado','carregado','expedido','cancelado'];
+  Object.keys(cont).forEach(function(k){ if(ordem.indexOf(k)<0) ordem.push(k); });
+  var chipsSt=ordem.filter(function(k){return cont[k];}).map(function(k){
+    return chip(_ecomPedStatus===k,ecomEsc((ECOM_STATUS_LBL&&ECOM_STATUS_LBL[k])||k)+' <span style="opacity:.7">'+cont[k]+'</span>',"ecomPedFiltro('status','"+(_ecomPedStatus===k?'':k)+"')");
   }).join('');
   return ecomPedCards()
-    +(_ecomFiltroSemBipe?('<div style="margin-bottom:8px;padding:8px 11px;border-radius:9px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;font-size:12.5px;color:var(--amber-text,#8a6d1a);display:flex;align-items:center;gap:10px">'
+    +(_ecomFiltroSemBipe?('<div style="margin-bottom:8px;padding:8px 11px;border-radius:9px;background:var(--amber-bg,#fef3c7);border:1px solid #f0d9a8;font-size:12.5px;color:var(--amber-text,#8a6d1a);display:flex;align-items:center;gap:8px">'
       +'<span>\u26a0 Mostrando apenas pedidos <b>em folha e sem bipe no checkout</b> \u2014 sa\u00edram para separa\u00e7\u00e3o e n\u00e3o voltaram.</span>'
       +'<button class="btn btn-sm" style="margin-left:auto" onclick="ecomToggleSemBipe()">Ver todos</button></div>'):'')
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-    +'<input id="ecom-ped-busca" placeholder="&#128269; Buscar pedido (n&ordm;, Order ID, destinat&aacute;rio, tracking&hellip;)" oninput="ecomBuscaTbl(this.value,\'ecom-ped-tr\',\'ecom-ped-busca-info\')" style="flex:1;max-width:380px">'
-    +'<select onchange="ecomSetOrigem(this.value)" style="height:32px;font-size:12.5px;border:1px solid var(--border);border-radius:8px;padding:0 8px;background:var(--bg)">'
-      +[['','Todas as origens'],['integracao','Integração Olist'],['planilha','Planilha']].map(function(o){return '<option value="'+o[0]+'"'+(ecomFiltroOrigem===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')
-    +'</select>'
-    +'<span id="ecom-ped-busca-info" style="font-size:12px;color:var(--text3)"></span>'
-    +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer&ecirc;ncias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
-    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:8px">Nº interno</th><th style="padding:8px">Nº pedido</th><th style="padding:8px">Origem</th><th style="padding:8px">Data</th><th style="padding:8px">Destinatário</th><th style="padding:8px">Transp.</th><th style="padding:8px">Itens</th><th style="padding:8px">NF</th><th style="padding:8px">Status</th><th style="padding:8px"></th></tr></thead>'
-    +'<tbody>'+rows+'</tbody></table></div>';
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">'
+    +'<input id="ecom-ped-busca" class="fi" value="'+ecomEsc(_ecomPedBusca)+'" placeholder="\ud83d\udd0d Buscar por n\u00ba interno, n\u00ba do pedido, destinat\u00e1rio, rastreio ou NF\u2026" oninput="ecomPedBuscaSet(this.value)" autocomplete="off" style="flex:1;font-size:13px">'
+    +(_ecomPedBusca?'<button class="btn btn-sm" onclick="var i=ge(\'ecom-ped-busca\');if(i)i.value=\'\';ecomPedBuscaSet(\'\')">Limpar</button>':'')
+    +'<span id="ecom-ped-cont" style="font-size:12px;color:var(--text3);white-space:nowrap">'+(function(){var t=ecomPedLista().length;return Math.min(_ecomPedLimite,t)+' de '+t;})()+'</span></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    +chip(!ecomFiltroOrigem,'Todos',"ecomPedFiltro('origem','')")+chip(ecomFiltroOrigem==='integracao','Integra\u00e7\u00e3o',"ecomPedFiltro('origem','integracao')")+chip(ecomFiltroOrigem==='planilha','Planilha',"ecomPedFiltro('origem','planilha')")
+    +'<span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>'+chipsSt
+    +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer\u00eancias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
+    +'<div id="ecom-ped-tabela">'+ecomPedTabelaHTML()+'</div>';
 }
 async function ecomImportLogModal(){
   var logs=[];
@@ -48381,8 +48463,8 @@ function ecomDetLeituras(){
 }
 
 // aptidão para OS: precisa de etiqueta (que promove o status) E de nota fiscal
-function ecomTemNf(pid){ return (ecomNfes||[]).some(function(n){ return n.pedido_id===pid; }); }
-function ecomTemEtiq(pid){ return ecomEtiquetas.some(function(e){ return e.pedido_id===pid; }); }
+function ecomTemNf(pid){ return ecomIdxNfe().has(pid); }
+function ecomTemEtiq(pid){ return ecomIdxEtq().has(pid); }
 function ecomAptoSep(p){ return p.status==='importado' && ecomTemEtiq(p.id) && ecomTemNf(p.id); }
 function ecomFaltaDe(p){
   var f=[];
@@ -51939,11 +52021,17 @@ function intgBadgePedido(p){
 async function intgLoadAll(){
   var cid=ecomCid(); if(!cid){_intgLoaded=true;return;}
   try{
-    intgList   = await dbSelect('integracoes','company_id=eq.'+cid+'&order=created_at.desc');
-    // 300 fixos escondiam os pedidos mais antigos: a busca nao achava e os
-    // cards mostravam so uma fatia. Carrega a janela recente inteira.
-    intgPedidos= await dbSelectAll('intg_pedidos','company_id=eq.'+cid+'&order=created_at.desc');
-    intgDepara = await dbSelect('intg_depara_produtos','company_id=eq.'+cid);
+    // v1.0.1032: sem o payload (pedido completo do Olist, o maior peso da tela) e tudo em paralelo;
+    // o payload é baixado só ao clicar em "Ver"
+    var _cols='id,company_id,integracao_id,pedido_externo_id,numero,data_pedido,situacao_tiny,destinatario_nome,destinatario_doc,cep,endereco,cidade,uf,transportadora,tracking,itens,nf_numero,etiqueta_url,etiqueta_formato,status_importacao,erro_msg,pedido_verus_id,situacao_enviada,created_at,updated_at,pronto_envio_em,nf_id,nf_chave,agrupamento_id,etiqueta_urls,etiqueta_em,alerta,nf_situacao,etiqueta_arquivo';
+    var _ri=await Promise.all([
+      dbSelect('integracoes','company_id=eq.'+cid+'&order=created_at.desc'),
+      dbSelectAll('intg_pedidos','company_id=eq.'+cid+'&select='+_cols+'&order=created_at.desc')
+        .then(function(r){ return (r&&r.length)?r:dbSelectAll('intg_pedidos','company_id=eq.'+cid+'&order=created_at.desc'); })
+        .catch(function(){ return dbSelectAll('intg_pedidos','company_id=eq.'+cid+'&order=created_at.desc'); }),
+      dbSelect('intg_depara_produtos','company_id=eq.'+cid)
+    ]);
+    intgList=_ri[0]; intgPedidos=_ri[1]||[]; intgDepara=_ri[2]||[];
     _intgLoaded=true;
   }catch(e){ showToast('Erro ao carregar Integrações: '+(e.message||e),'red'); }
 }
@@ -52154,7 +52242,7 @@ async function intgLog(id){
 }
 // ───── ABA PEDIDOS SINCRONIZADOS ─────
 function intgItens(p){ try{ return Array.isArray(p.itens)?p.itens:(p.itens?JSON.parse(p.itens):[]); }catch(e){ return []; } }
-function intgDeparaDe(gId,sku){ sku=String(sku||'').toLowerCase(); return intgDepara.find(function(d){return d.integracao_id===gId&&String(d.sku_externo||'').toLowerCase()===sku;}); }
+function intgDeparaDe(gId,sku){ return intgIdxDepara().get(gId+'|'+String(sku||'').toLowerCase()); }
 // Item resolvido: tem vinculo no De-Para OU e um kit cuja composicao inteira
 // existe (a importacao desmonta o kit nos componentes).
 function intgItemOk(gId,sku){
@@ -52226,7 +52314,7 @@ var INTG_SIT={
 };
 function intgSitDe(p){ return String(p.situacao_tiny||'').toLowerCase().replace(/\s+/g,'_'); }
 function intgSitCfg(p){ return INTG_SIT[intgSitDe(p)]||{lbl:p.situacao_tiny||'\u2014',acao:'aguardar',cor:'var(--text3)',bg:'var(--bg2)',bd:'var(--border)',sub:'sem regra'}; }
-var intgSitFiltro=null, _intgSel={}, intgBusca='';
+var intgSitFiltro=null, _intgSel={}, intgBusca='', _intgLimite=150;
 // Busca direto no banco quando o termo nao aparece no que esta carregado —
 // assim o operador acha qualquer pedido, inclusive fora da janela recente.
 async function intgBuscaRemota(){
@@ -52311,7 +52399,7 @@ function intgPanelPed(){
     return true; });
   var impIds={}; intgImportaveis().forEach(function(p){impIds[p.id]=1;});
   var nSel=Object.keys(_intgSel).length;
-  var rows=lista.map(function(p){
+  var rows=lista.slice(0,_intgLimite).map(function(p){   // v1.0.1032: 150 por vez
     var st=intgStatusCalc(p); var its=intgItens(p);
     var mp=its.filter(function(i){return intgItemOk(p.integracao_id,i.sku);}).length;
     var et=p.etiqueta_url?'&#127991;&#65039;':'—';
@@ -52350,10 +52438,22 @@ function intgPanelPed(){
     +'<span style="margin-left:auto"><button class="btn" style="font-size:12px" onclick="intgSync(null)">&#128260; Sincronizar tudo</button></span></div>'
     +lote
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +(lista.length>_intgLimite?'<div style="text-align:center;padding:10px;border-top:1px solid var(--border)"><button class="btn btn-sm" onclick="_intgLimite+=150;intgRenderBody()">Mostrar mais '+Math.min(150,lista.length-_intgLimite)+' (mostrando '+_intgLimite+' de '+lista.length+')</button></div>':'')
+    +'</div>';
 }
 var _intgAberto=null;
-function intgVerPayload(id){ _intgAberto=(_intgAberto===id)?null:id; intgRenderBody(); }
+async function intgVerPayload(id){
+  _intgAberto=(_intgAberto===id)?null:id;
+  if(_intgAberto){
+    var p=(intgPedidos||[]).find(function(x){return x.id===id;});
+    if(p&&p.payload===undefined){   // v1.0.1032: payload sob demanda
+      p.payload=null; intgRenderBody();
+      try{ var r=await dbSelect('intg_pedidos','id=eq.'+id+'&select=payload'); p.payload=(r&&r[0]&&r[0].payload)||{}; }catch(e){ p.payload={}; }
+    }
+  }
+  intgRenderBody();
+}
 function _intgDT(d){
   if(!d)return '';
   var x=new Date(d); if(isNaN(x))return '';
@@ -52572,13 +52672,15 @@ async function intgImportarLoteExec(){
 function intgNormId(v){ return String(v||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase(); }
 function intgJaNaBase(p){
   if(!p)return null;
-  if(p.pedido_verus_id){ var l=ecomPedidos.find(function(x){return x.id===p.pedido_verus_id;}); if(l)return l; }
+  var I=intgIdxBase();   // v1.0.1032: índice (antes percorria todos os pedidos da base, várias vezes por linha)
+  if(p.pedido_verus_id){ var l=I.byId.get(p.pedido_verus_id); if(l)return l; }
   var cands=[p.pedido_externo_id,p.numero].map(intgNormId).filter(function(x){return x&&x.length>=5;});
   if(!cands.length)return null;
-  return ecomPedidos.find(function(x){
-    var n=intgNormId(x.numero_pedido); if(!n)return false;
-    return cands.some(function(c){ return c===n || (c.length>=10&&n.length>=10&&(c.indexOf(n)===0||n.indexOf(c)===0)); });
-  })||null;
+  for(var a=0;a<cands.length;a++){ var e=I.byNum.get(cands[a]); if(e) return e; }
+  for(var b=0;b<cands.length;b++){ var c=cands[b]; if(c.length<10) continue;
+    var arr=I.byPre.get(c.slice(0,10))||[];
+    for(var k=0;k<arr.length;k++){ var n=arr[k].n; if(c.indexOf(n)===0||n.indexOf(c)===0) return arr[k].x; } }
+  return null;
 }
 // na sincronização: staging pendente cujo pedido já está na base -> vincula e marca
 async function intgVincularExistentes(){
