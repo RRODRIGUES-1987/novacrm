@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1035 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1036 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1035';
+const APP_VERSION='v1.0.1036';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -18997,21 +18997,32 @@ async function cpNegarExclusao(id){
 }
 
 // ============ CP · ABA LISTA DE LANÇAMENTOS ============
-var cpLisBusca='', cpLisStatus='todos', cpLisMes=null, cpLisOrd='venc';
+var cpLisBusca='', cpLisStatus='todos', cpLisMes=null, cpLisOrd='venc', cpLisLimite=200;
+// v1.0.1036: Limpar filtros (volta busca, período do mês atual, status e ordenação ao padrão)
+function cpLisMesAtual(){ return (new Date()).getFullYear()+'-'+('0'+((new Date()).getMonth()+1)).slice(-2); }
+function cpLisFiltroAtivo(){ return !!cpLisBusca || cpLisStatus!=='todos' || (cpLisMes!==null&&cpLisMes!==cpLisMesAtual()) || cpLisOrd!=='venc'; }
+function cpLisLimpar(){
+  cpLisBusca=''; cpLisStatus='todos'; cpLisMes=cpLisMesAtual(); cpLisOrd='venc'; cpLisLimite=200;
+  var b=ge('cp-lis-busca'); if(b) b.value='';
+  var m=ge('cp-lis-mes'); if(m) m.value=cpLisMes;
+  var s=ge('cp-lis-st'); if(s) s.value='todos';
+  cpLisRender();
+}
+function cpLisChip(k){ cpLisStatus=(cpLisStatus===k)?'todos':k; cpLisLimite=200; var s=ge('cp-lis-st'); if(s) s.value=cpLisStatus; cpLisRender(); }
 
 function cpLisMesRef(){
   if(cpLisMes===null) cpLisMes=(new Date()).getFullYear()+'-'+('0'+((new Date()).getMonth()+1)).slice(-2);
   return cpLisMes;
 }
-function cpLisSetBusca(v){cpLisBusca=(v||'').toLowerCase();cpLisRender();}
-function cpLisSetStatus(v){cpLisStatus=v;cpLisRender();}
+function cpLisSetBusca(v){cpLisBusca=(v||'').toLowerCase();cpLisLimite=200;cpLisRender();}
+function cpLisSetStatus(v){cpLisStatus=v;cpLisLimite=200;cpLisRender();}
 // atalho dos cartoes: abre a Lista filtrada, em todos os meses
 function cpLisIr(st){
   cpLisStatus=st; cpLisMes='todos'; cpLisBusca=''; cpTab='lista';
   if(curPage!=='contas-pagar') pg('contas-pagar');   // vindo da tela inicial / Hermes
   else cpSetTab('lista');
 }
-function cpLisSetMes(v){cpLisMes=v;cpLisRender();}
+function cpLisSetMes(v){cpLisMes=v;cpLisLimite=200;cpLisRender();}
 function cpLisSetOrd(v){cpLisOrd=(cpLisOrd===v)?(v+'_desc'):v;cpLisRender();}
 
 function cpLisStatusDe(cp){
@@ -19073,8 +19084,9 @@ function rCPLista(){
   var h='';
   h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
   h+='<input class="fi" id="cp-lis-busca" placeholder="Buscar beneficiário, descrição, NF…" value="'+cpLisBusca.replace(/"/g,'&quot;')+'" oninput="cpLisSetBusca(this.value)" style="flex:1;min-width:220px">';
-  h+='<select class="fi" onchange="cpLisSetMes(this.value)" style="width:auto">'+meses+'</select>';
-  h+='<select class="fi" onchange="cpLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
+  h+='<select class="fi" id="cp-lis-mes" onchange="cpLisSetMes(this.value)" style="width:auto">'+meses+'</select>';
+  h+='<select class="fi" id="cp-lis-st" onchange="cpLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
+  h+='<button id="cp-lis-limpar" onclick="cpLisLimpar()" title="Volta busca, período, status e ordenação ao padrão" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:12.5px;color:var(--red-text)">\u2715 Limpar filtros</button>';
   h+='<button onclick="novoTituloCP()" style="padding:8px 14px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">+ Novo título</button>';
   var _nDup=(typeof cpDuplicidades==='function')?cpDuplicidades().length:0;
   h+='<button onclick="cpRcModal()" title="Trocar a conta contábil de vários títulos de uma vez, com rastro" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text2);cursor:pointer;font-size:13px;margin-left:8px">🔀 Reclassificar</button>';
@@ -19089,6 +19101,7 @@ function rCPLista(){
 function cpLisRender(){
   var box=ge('cp-lis-box');if(!box)return;
   var lista=cpLisFiltrados();
+  var _lb=ge('cp-lis-limpar'); if(_lb){ var _on=cpLisFiltroAtivo(); _lb.disabled=!_on; _lb.style.opacity=_on?'1':'.45'; _lb.style.cursor=_on?'pointer':'default'; }
   var cnt={aguardando:0,apagar:0,vencido:0,pago:0,recusado:0};
   var mes=cpLisMesRef();
   (contasPagar||[]).forEach(function(cp){
@@ -19096,7 +19109,7 @@ function cpLisRender(){
     if(mes!=='todos'&&(cp.vencimento||cp.data_pagamento||'').slice(0,7)!==mes)return;
     cnt[cpLisStatusDe(cp)]++;
   });
-  var chip=function(k,cor,bg){return cnt[k]?'<span onclick="cpLisSetStatus(\''+k+'\')" style="font-size:12px;padding:4px 10px;border-radius:99px;background:'+bg+';color:'+cor+';cursor:pointer">'+cnt[k]+' '+CP_LIS_ST[k][0].toLowerCase()+'</span>':'';};
+  var chip=function(k,cor,bg){return cnt[k]?'<span onclick="cpLisChip(\''+k+'\')" title="'+(cpLisStatus===k?'Clique de novo para tirar o filtro':'Filtrar')+'" style="font-size:12px;padding:4px 10px;border-radius:99px;background:'+bg+';color:'+cor+';cursor:pointer'+(cpLisStatus===k?';outline:1.5px solid '+cor+';font-weight:600':'')+'">'+cnt[k]+' '+CP_LIS_ST[k][0].toLowerCase()+'</span>':'';};
   var _pedEx=cpSouDiretor()?(contasPagar||[]).filter(function(cp){return !!cp.exclusao_solicitada_em;}).length:0;
   var h=(_pedEx?('<div onclick="cpExclusoesPainel()" style="cursor:pointer;display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #f0d9a8;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#8a6d1a">'
       +'\ud83d\udd12 <b>'+_pedEx+' pedido(s) de exclusão a autorizar</b><span style="margin-left:auto;text-decoration:underline">ver</span></div>'):'')
@@ -19104,43 +19117,47 @@ function cpLisRender(){
     +chip('aguardando','#854d0e','#fef9c3')+chip('vencido','#991b1b','#fee2e2')
     +chip('apagar','var(--text2)','var(--bg2)')+chip('pago','#166534','#dcfce7')+chip('recusado','#991b1b','#fee2e2')+'</div>';
 
-  var COLS='84px 1.4fr 1.1fr 110px 96px 66px';
+  var COLS='62px minmax(0,1.5fr) minmax(0,1.3fr) 118px 84px 184px';   // v1.0.1036: ações numa linha só
   var seta=function(k){return cpLisOrd.indexOf(k)===0?(cpLisOrd.indexOf('_desc')>=0?' ▾':' ▴'):'';};
   h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden">';
   h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">'
     +'<span onclick="cpLisSetOrd(\'venc\')" style="cursor:pointer">Vencto'+seta('venc')+'</span>'
-    +'<span onclick="cpLisSetOrd(\'benef\')" style="cursor:pointer">Beneficiário'+seta('benef')+'</span>'
+    +'<span onclick="cpLisSetOrd(\'benef\')" style="cursor:pointer">Beneficiário \u00b7 descrição'+seta('benef')+'</span>'
     +'<span>Bloco › conta</span>'
     +'<span onclick="cpLisSetOrd(\'valor\')" style="cursor:pointer;text-align:right">Valor'+seta('valor')+'</span>'
-    +'<span>Status</span><span></span></div>';
+    +'<span>Status</span><span style="text-align:right">Ações</span></div>';
 
   if(!lista.length){
     h+='<div style="padding:26px;text-align:center;color:var(--text3);font-size:13px">Nenhum título neste filtro</div>';
   }else{
-    lista.forEach(function(cp,i){
+    lista.slice(0,cpLisLimite).forEach(function(cp,i){
       var st=cpLisStatusDe(cp), S=CP_LIS_ST[st];
       var venc=cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'—';
       var cls=[(cp.agrupamento||''),(cp.categoria||'')].filter(Boolean).join(' › ');
       var parc=(cp.parcela_total>1)?(' <span style="font-size:10px;color:var(--text3)">'+cp.parcela_num+'/'+cp.parcela_total+'</span>'):'';
       if(cp.sem_movimento===true)parc+=' <span title="N\u00e3o entra no relat\u00f3rio Contabilidade \u00b7 pagamentos" style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:#ede7f6;color:#4527a0">sem movimento</span>';
-      var acao='<span onclick="novoTituloCP(\''+cp.id+'\')" title="Editar título (unidade, conta, descrição…)" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
-      if(st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span> <span style="color:var(--border)">|</span> '+acao;
-      else if(['pago','pago_atraso'].includes(cp.status)) acao='<span onclick="cpEstornoModal(\''+cp.id+'\')" title="Estornar pagamento e voltar o título para em aberto" style="cursor:pointer;color:var(--red-text);font-size:11px">estornar</span> <span style="color:var(--border)">|</span> '+acao;
-      acao='<span onclick="cpAnexosModal(\''+cp.id+'\')" title="Anexos" style="cursor:pointer;color:var(--text3);margin-right:8px">\ud83d\udcce</span>'+acao
-        +' <span onclick="cpExcluirAbrir(\''+cp.id+'\')" title="Excluir título" style="cursor:pointer;color:var(--text3);margin-left:6px">\ud83d\uddd1</span>';
+      // v1.0.1036: ações numa linha só (antes quebravam em três linhas)
+      var _bt='font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;white-space:nowrap';
+      var acao='<button onclick="cpAnexosModal(\''+cp.id+'\')" title="Anexos" style="'+_bt+'">\ud83d\udcce</button>';
+      if(st==='apagar'||st==='vencido') acao+='<button onclick="abrirBaixaCP(\''+cp.id+'\')" title="Dar baixa (pagar)" style="'+_bt+';color:var(--accent)">Baixar</button>';
+      else if(['pago','pago_atraso'].includes(cp.status)) acao+='<button onclick="cpEstornoModal(\''+cp.id+'\')" title="Estornar pagamento e voltar o título para em aberto" style="'+_bt+';color:var(--red-text)">Estornar</button>';
+      acao+='<button onclick="novoTituloCP(\''+cp.id+'\')" title="Editar título (unidade, conta, descrição…)" style="'+_bt+'">\u270e</button>'
+        +'<button onclick="cpExcluirAbrir(\''+cp.id+'\')" title="Excluir título" style="'+_bt+'">\ud83d\uddd1</button>';
       if(cp.exclusao_solicitada_em) parc+=' <span title="'+String(cp.exclusao_motivo||'').replace(/"/g,'&quot;')+'" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#fef3c7;color:#92400e">exclusão solicitada</span>';
-      h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
-        +'<span style="font-size:12px;color:var(--text2)">'+venc+'</span>'
-        +'<span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(cp.descricao||'').replace(/"/g,'&quot;')+'">'+(cp.fornecedor_nome||'—')+parc+'</span>'
-        +'<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(cls||'—')+'</span>'
+      var _desc=String(cp.descricao||'').replace(/"/g,'&quot;');
+      h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:10px;padding:7px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
+        +'<span style="font-size:12px;'+(st==='vencido'?'color:var(--red-text);font-weight:700':'color:var(--text2)')+'">'+venc+'</span>'
+        +'<span style="min-width:0" title="'+_desc+'"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(cp.fornecedor_nome||'—')+parc+'</div>'
+          +(cp.descricao?'<div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_desc+'</div>':'')+'</span>'
+        +'<span style="font-size:11.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+String(cls||'').replace(/"/g,'&quot;')+'">'+(cls||'—')+'</span>'
         +'<span style="font-size:13px;text-align:right;white-space:nowrap">'+fmtV(cp.valor)+'</span>'
         +'<span><span style="font-size:11px;padding:2px 8px;border-radius:99px;background:'+S[1]+';color:'+S[2]+';white-space:nowrap">'+S[0]+'</span></span>'
-        +'<span style="text-align:right">'+acao+'</span></div>';
+        +'<span style="display:flex;gap:4px;justify-content:flex-end;align-items:center">'+acao+'</span></div>';
     });
   }
   var soma=lista.reduce(function(s,x){return s+Number(x.valor||0);},0);
   h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg2);border-top:1px solid var(--border)">'
-    +'<span style="font-size:12px;color:var(--text2)">'+lista.length+' título(s) no filtro</span>'
+    +'<span style="font-size:12px;color:var(--text2)">'+lista.length+' título(s) no filtro'+(lista.length>cpLisLimite?' \u00b7 mostrando '+cpLisLimite+' <button onclick="cpLisLimite+=200;cpLisRender()" style="margin-left:8px;font-size:11.5px;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Mostrar mais '+Math.min(200,lista.length-cpLisLimite)+'</button>':'')+'</span>'
     +'<span style="font-size:14px;font-weight:700;color:#0A2540">'+fmtV(soma)+'</span></div>';
   h+='</div>';
   box.innerHTML=h;
