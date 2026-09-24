@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1037 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1038 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1330,7 +1330,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1037';
+const APP_VERSION='v1.0.1038';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2092,6 +2092,170 @@ async function ccCriarPadrao(unitId){
   }catch(e){ showToast('Erro ao criar: '+(e.message||e),'red'); }
 }
 
+// ══════════════ CONTAS A PAGAR · CABEÇALHO E CORPO (v1.0.1038) ══════════════
+// Cabeçalho = o documento que se paga (aprovação, baixa, estorno e anexos: uma vez só).
+// Corpo = como o valor se distribui: linhas com unidade, conta do plano, centro de custo e valor.
+// Título de uma linha: o cabeçalho continua mandando (a linha só guarda o centro de custo).
+// Título sem linhas gravadas (antigo ou criado por outra rotina) = uma linha implícita.
+let contasPagarItens=[];
+var _ixCpItens={ref:null,len:-1,m:null};
+function cpItensIdx(){
+  if(!(_ixCpItens.ref===contasPagarItens&&_ixCpItens.len===contasPagarItens.length)){
+    var m=new Map();
+    (contasPagarItens||[]).forEach(function(l){ var a=m.get(l.conta_pagar_id); if(!a){a=[];m.set(l.conta_pagar_id,a);} a.push(l); });
+    m.forEach(function(a){ a.sort(function(x,y){return (x.ordem||0)-(y.ordem||0);}); });
+    _ixCpItens={ref:contasPagarItens,len:contasPagarItens.length,m:m};
+  }
+  return _ixCpItens.m;
+}
+function cpLinhas(cp){
+  var a=cp&&cpItensIdx().get(cp.id);
+  if(a&&a.length>1) return a;
+  return [{conta_pagar_id:cp.id,unit_id:cp.unit_id,dfc_conta_id:cp.dfc_conta_id,agrupamento:cp.agrupamento,categoria:cp.categoria,
+           centro_custo_id:(a&&a[0])?a[0].centro_custo_id:null,valor:Number(cp.valor||0)}];
+}
+function cpMultiLinhas(cp){ var a=cp&&cpItensIdx().get(cp.id); return !!(a&&a.length>1); }
+function cpNaUnidade(cp){ return !activeUnit||cpLinhas(cp).some(function(l){ return !l.unit_id||l.unit_id===activeUnit; }); }
+function ccNome(id){ var c=id&&(centrosCusto||[]).find(function(x){return x.id===id;}); return c?((c.codigo?c.codigo+' ':'')+(c.nome||'')):''; }
+var CP_CAMPOS_VALOR=['valor_pago','juros','multa','desconto','valor_juros','valor_multa','valor_desconto','acrescimo'];
+// abre cada título nas linhas do corpo, para os relatórios somarem por unidade/conta/centro de custo
+function cpExpandir(lista){
+  var out=[];
+  (lista||[]).forEach(function(cp){
+    var ls=cpItensIdx().get(cp.id);
+    if(!ls||ls.length<=1){ out.push((ls&&ls[0])?Object.assign({},cp,{centro_custo_id:ls[0].centro_custo_id}):cp); return; }
+    var tot=Number(cp.valor||0)||ls.reduce(function(s,l){return s+Number(l.valor||0);},0)||1;
+    ls.forEach(function(l){
+      if(activeUnit&&l.unit_id&&l.unit_id!==activeUnit) return;
+      var f=Number(l.valor||0)/tot;
+      var r=Object.assign({},cp,{unit_id:l.unit_id,dfc_conta_id:l.dfc_conta_id,agrupamento:l.agrupamento,categoria:l.categoria,
+                                 centro_custo_id:l.centro_custo_id,valor:Number(l.valor||0),_linha:l,_titulo:cp});
+      CP_CAMPOS_VALOR.forEach(function(k){ if(cp[k]!=null&&cp[k]!==''&&!isNaN(Number(cp[k]))) r[k]=Math.round(Number(cp[k])*f*100)/100; });
+      out.push(r);
+    });
+  });
+  return out;
+}
+// carga: linhas do corpo + títulos rateados que tocam a unidade ativa (o cabeçalho é de outra unidade)
+async function cpComRateio(lista,cid){
+  lista=lista||[];
+  if(!cid) return lista;
+  try{ contasPagarItens=await dbSelectAll('contas_pagar_itens','company_id=eq.'+cid+'&order=id.asc')||[]; }
+  catch(e){ contasPagarItens=[]; return lista; }
+  if(typeof _ccLoaded!=='undefined'&&!_ccLoaded){ try{ await ccCarregar(); }catch(e){} }
+  if(!activeUnit) return lista;
+  var tem=new Set(lista.map(function(x){return x.id;}));
+  var faltam=Array.from(new Set(contasPagarItens.filter(function(l){ return l.unit_id===activeUnit&&!tem.has(l.conta_pagar_id); }).map(function(l){return l.conta_pagar_id;})));
+  for(var c=0;c<faltam.length;c+=100){
+    var r=await dbSelect('contas_pagar','id=in.('+faltam.slice(c,c+100).join(',')+')&order=vencimento.asc').catch(function(){return [];});
+    lista=lista.concat(r||[]);
+  }
+  return lista;
+}
+async function cpItensGravar(cpId,base,valorTitulo){
+  var tot=base.reduce(function(s,l){return s+Number(l.valor||0);},0)||1;
+  var linhas=base.map(function(l,i){ return {company_id:company.id,conta_pagar_id:cpId,unit_id:l.unit_id||null,dfc_conta_id:l.dfc_conta_id||null,
+    agrupamento:l.agrupamento||'',categoria:l.categoria||'',centro_custo_id:l.centro_custo_id||null,
+    valor:reajR2(Number(l.valor||0)*Number(valorTitulo||0)/tot),ordem:i+1}; });
+  var dif=reajR2(Number(valorTitulo||0)-linhas.reduce(function(s,l){return s+l.valor;},0));
+  if(linhas.length&&dif) linhas[linhas.length-1].valor=reajR2(linhas[linhas.length-1].valor+dif);
+  var d=await sbFetch('DELETE','/rest/v1/contas_pagar_itens?conta_pagar_id=eq.'+cpId,null,tok);
+  if(!d.ok) throw new Error('corpo do t\u00edtulo: '+((d.data&&d.data.message)||('HTTP '+d.status)));
+  var r=await sbFetch('POST','/rest/v1/contas_pagar_itens',linhas,tok);
+  if(!r.ok) throw new Error('corpo do t\u00edtulo: '+((r.data&&r.data.message)||('HTTP '+r.status)));
+  contasPagarItens=(contasPagarItens||[]).filter(function(l){return l.conta_pagar_id!==cpId;}).concat(Array.isArray(r.data)?r.data:linhas);
+}
+// ── formulário: corpo ──
+var cpCorpo={multi:false,linhas:[]};
+function cpContasOpts(sel){
+  return '<option value="">Conta\u2026</option>'+(dfcBlocos||[]).filter(function(b){return b.ativo!==false;}).map(function(b){
+    var cs=(dfcContas||[]).filter(function(c){ return c.bloco_id===b.id&&(c.ativo!==false||c.id===sel); });
+    if(!cs.length) return '';
+    return '<optgroup label="'+String(b.nome||'').replace(/"/g,'&quot;')+'">'+cs.map(function(c){ return '<option value="'+c.id+'"'+(c.id===sel?' selected':'')+'>'+String(c.nome||'').replace(/</g,'&lt;')+'</option>'; }).join('')+'</optgroup>';
+  }).join('');
+}
+function cpUnitsOpts(sel){
+  return '<option value="">Unidade\u2026</option>'+(userUnits||[]).filter(function(u){return u.company_id===(company&&company.id);}).map(function(u){ return '<option value="'+u.id+'"'+(u.id===sel?' selected':'')+'>'+String(u.name||'').replace(/</g,'&lt;')+'</option>'; }).join('');
+}
+function cpCcOpts(unitId,sel){
+  var lista=(centrosCusto||[]).filter(function(c){ return c.unit_id===unitId&&(c.ativo!==false||c.id===sel); });
+  return '<option value="">\u2014 sem centro de custo \u2014</option>'+lista.map(function(c){ return '<option value="'+c.id+'"'+(c.id===sel?' selected':'')+'>'+String((c.codigo?c.codigo+' \u00b7 ':'')+(c.nome||'')).replace(/</g,'&lt;')+'</option>'; }).join('');
+}
+function cpCcAtualizar(sel){ var s=ge('cp-cc'); if(!s) return; var v=sel!==undefined?sel:s.value; s.innerHTML=cpCcOpts((ge('cp-unit')||{}).value,v); }
+function cpCorpoTotal(){ return parseFloat((ge('cp-valor')||{}).value||'0')||0; }
+function cpCorpoSoma(){ return reajR2(cpCorpo.linhas.reduce(function(s,l){ return s+(parseFloat(String(l.valor).replace(',','.'))||0); },0)); }
+function cpCorpoSaldo(){
+  var el=ge('cp-corpo-saldo'); if(!el||!cpCorpo.multi) return;
+  var t=cpCorpoTotal(), s=cpCorpoSoma(), sd=reajR2(t-s), ok=Math.abs(sd)<0.005&&t>0;
+  el.style.background=ok?'var(--green-bg)':'var(--amber-bg,#fef3c7)'; el.style.color=ok?'var(--green-text)':'var(--amber-text,#8a6d1a)';
+  el.innerHTML=(ok?'\u2713 ':'')+'Distribu\u00eddo: <b>'+fmtV(s)+'</b> de '+fmtV(t)+' \u00b7 saldo <b>'+fmtV(sd)+'</b>'+(ok?'':' \u2014 o t\u00edtulo s\u00f3 salva com saldo zero');
+}
+function cpCorpoRender(){
+  var box=ge('cp-corpo'); if(!box) return;
+  var mostra=function(id,on){ var e=ge(id); if(e) e.style.display=on?'':'none'; };
+  mostra('cp-hdr-unit',!cpCorpo.multi); mostra('cp-hdr-conta',!cpCorpo.multi); mostra('cp-cc-simples',!cpCorpo.multi); mostra('cp-hint-conta',!cpCorpo.multi);
+  if(!cpCorpo.multi){
+    box.innerHTML='<button type="button" onclick="cpCorpoDividir()" style="padding:6px 12px;border:1px dashed var(--border);border-radius:8px;background:transparent;cursor:pointer;font-size:12px;color:var(--text2)">\u21c6 Dividir entre unidades, contas ou centros de custo</button>';
+    return;
+  }
+  var sel='width:100%;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)';
+  var rows=cpCorpo.linhas.map(function(l,i){
+    return '<tr style="border-top:1px solid var(--border)">'
+      +'<td style="padding:4px"><select style="'+sel+'" onchange="cpCorpoSet('+i+',\'unit_id\',this.value)">'+cpUnitsOpts(l.unit_id)+'</select></td>'
+      +'<td style="padding:4px"><select style="'+sel+'" onchange="cpCorpoSet('+i+',\'dfc_conta_id\',this.value)">'+cpContasOpts(l.dfc_conta_id)+'</select></td>'
+      +'<td style="padding:4px"><select style="'+sel+'" onchange="cpCorpoSet('+i+',\'centro_custo_id\',this.value)">'+cpCcOpts(l.unit_id,l.centro_custo_id)+'</select></td>'
+      +'<td style="padding:4px"><input type="number" step="0.01" value="'+(l.valor===''||l.valor==null?'':l.valor)+'" oninput="cpCorpoSet('+i+',\'valor\',this.value)" style="'+sel+';text-align:right;width:100px"></td>'
+      +'<td style="padding:4px;text-align:center"><span onclick="cpCorpoDel('+i+')" title="Tirar a linha" style="cursor:pointer;color:var(--text3)">\u2715</span></td></tr>';
+  }).join('');
+  box.innerHTML='<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12px;letter-spacing:.4px;color:var(--text2)">CORPO \u00b7 COMO O VALOR SE DISTRIBUI</b>'
+    +'<span style="display:flex;gap:6px"><button type="button" onclick="cpCorpoAdd()" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">+ Linha</button>'
+    +(cpCorpo.linhas.length<=1?'<button type="button" onclick="cpCorpoUnica()" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Voltar para linha \u00fanica</button>':'')+'</span></div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th style="padding:4px">Unidade</th><th style="padding:4px">Bloco \u203a conta</th><th style="padding:4px">Centro de custo</th><th style="padding:4px;text-align:right">Valor</th><th></th></tr>'+rows+'</table></div>'
+    +'<div id="cp-corpo-saldo" style="margin-top:8px;padding:6px 10px;border-radius:8px;font-size:12px"></div></div>';
+  cpCorpoSaldo();
+}
+function cpCorpoDividir(){
+  var u=(ge('cp-unit')||{}).value||activeUnit||'', c=(ge('cp-conta')||{}).value||'', cc=(ge('cp-cc')||{}).value||'', t=cpCorpoTotal();
+  cpCorpo={multi:true,linhas:[{unit_id:u,dfc_conta_id:c,centro_custo_id:cc,valor:t?reajR2(t):''},{unit_id:u,dfc_conta_id:c,centro_custo_id:'',valor:''}]};
+  cpCorpoRender();
+}
+function cpCorpoSet(i,k,v){
+  var l=cpCorpo.linhas[i]; if(!l) return; l[k]=v;
+  if(k==='unit_id'){ l.centro_custo_id=''; cpCorpoRender(); } else if(k==='valor'){ cpCorpoSaldo(); }
+}
+function cpCorpoAdd(){
+  var ult=cpCorpo.linhas[cpCorpo.linhas.length-1]||{}, sd=reajR2(cpCorpoTotal()-cpCorpoSoma());
+  cpCorpo.linhas.push({unit_id:ult.unit_id||'',dfc_conta_id:ult.dfc_conta_id||'',centro_custo_id:'',valor:sd>0?sd:''});
+  cpCorpoRender();
+}
+function cpCorpoDel(i){ cpCorpo.linhas.splice(i,1); if(!cpCorpo.linhas.length){ cpCorpo={multi:false,linhas:[]}; } cpCorpoRender(); }
+function cpCorpoUnica(){
+  var l=cpCorpo.linhas[0]||{};
+  cpCorpo={multi:false,linhas:[]};
+  var su=ge('cp-unit'); if(su&&l.unit_id) su.value=l.unit_id;
+  var conta=(dfcContas||[]).find(function(c){return c.id===l.dfc_conta_id;});
+  if(conta){ var sb=ge('cp-bloco'); if(sb){ sb.value=conta.bloco_id; cpFillContas(); } var sc=ge('cp-conta'); if(sc) sc.value=conta.id; }
+  cpCcAtualizar(l.centro_custo_id||'');
+  cpCorpoRender();
+}
+function cpCorpoColetar(total){
+  if(!cpCorpo.multi) return null;
+  var ls=[];
+  for(var i=0;i<cpCorpo.linhas.length;i++){
+    var l=cpCorpo.linhas[i], v=reajR2(parseFloat(String(l.valor).replace(',','.'))||0);
+    if(!l.unit_id) return {erro:'Linha '+(i+1)+' do corpo: escolha a unidade.'};
+    if(!l.dfc_conta_id) return {erro:'Linha '+(i+1)+' do corpo: escolha a conta.'};
+    if(!(v>0)) return {erro:'Linha '+(i+1)+' do corpo: informe o valor.'};
+    var conta=(dfcContas||[]).find(function(c){return c.id===l.dfc_conta_id;}), bloco=(dfcBlocos||[]).find(function(b){return b.id===(conta?conta.bloco_id:null);});
+    ls.push({unit_id:l.unit_id,dfc_conta_id:l.dfc_conta_id,agrupamento:bloco?bloco.nome:'',categoria:conta?conta.nome:'',centro_custo_id:l.centro_custo_id||null,valor:v});
+  }
+  if(!ls.length) return null;
+  var soma=reajR2(ls.reduce(function(s,l){return s+l.valor;},0));
+  if(Math.abs(soma-reajR2(total))>=0.005) return {erro:'O corpo soma '+fmtV(soma)+' e o valor total do t\u00edtulo \u00e9 '+fmtV(total)+'. Ajuste as linhas at\u00e9 o saldo ficar zero.'};
+  return {linhas:ls};
+}
+
 function canDo(tela, acao){
   const role=profile?.role||'vendedor';
   if(role==='admin')return true;
@@ -2174,8 +2338,8 @@ async function loadData(){
         dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]),
       ]);
       contasReceber=await dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`).catch(()=>[]);
-    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]);
-      contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]);
+    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
+      contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
       [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
         dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
         dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
@@ -2214,7 +2378,7 @@ async function loadData(){
       ]);
       workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*');
       contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc');
-      contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc').catch(()=>[]);
+      contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc').catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
     }
   } else if((role==='gestor'||role==='adm'||role==='operacao'||role==='rh'||role==='controladoria'||role==='qualidade')&&cid){
     [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao]=await Promise.all([
@@ -2236,7 +2400,7 @@ async function loadData(){
     workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]);
     await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
     contasReceber=await dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`).catch(()=>[]);
-    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]);
+    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
     [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
       dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
       dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
@@ -2305,7 +2469,7 @@ async function loadData(){
     ]);
     workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*');
     contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`);
-    contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`).catch(()=>[]);
+    contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
   }
   if(cid){ try{ await loadPortariaData(cid); }catch(e){ console.warn('portaria load',e); } }
   // Garante que o usuário logado está sempre no array de profiles
@@ -18543,7 +18707,7 @@ var _cpRc={busca:'',forn:'',conta:'',status:'',de:'',ate:'',sel:{}};
 function cpRcSet(k,v){_cpRc[k]=v;cpRcRender();}
 function cpRcLista(){
   var cid=company?.id;
-  var l=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status!=='cancelado';});
+  var l=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status!=='cancelado'&&!cpMultiLinhas(x);});   // v1.0.1038: rateados se corrigem pela edição
   if(_cpRc.forn)l=l.filter(function(x){return x.fornecedor_id===_cpRc.forn;});
   if(_cpRc.conta)l=l.filter(function(x){return String(x.dfc_conta_id||'')===_cpRc.conta;});
   if(_cpRc.status)l=l.filter(function(x){return x.status===_cpRc.status;});
@@ -18782,7 +18946,7 @@ function renderCPMatrix(){
   var hoje=new Date();hoje.setHours(0,0,0,0);
   var y=cpPeriodo.ano, mo=cpPeriodo.mes;
   var agrupEff = cpEixo==='competencia' ? 'mes' : cpAgrup;
-  var cpMes=contasPagar.filter(function(cp){if(!cpValido(cp))return false;var ds=cpDataStr(cp);if(!ds)return false;var v=new Date(ds+'T00:00');return v.getFullYear()===y&&v.getMonth()===mo;});
+  var cpMes=cpExpandir(contasPagar).filter(function(cp){if(!cpValido(cp))return false;var ds=cpDataStr(cp);if(!ds)return false;var v=new Date(ds+'T00:00');return v.getFullYear()===y&&v.getMonth()===mo;});
   var lastDay=new Date(y,mo+1,0).getDate();
   var firstStr=cpISO(new Date(y,mo,1)), lastStr=cpISO(new Date(y,mo,lastDay));
   var hojeStr=cpISO(hoje);
@@ -19168,7 +19332,7 @@ var CP_LIS_ST={
 function cpLisFiltrados(){
   var mes=cpLisMesRef();
   return (contasPagar||[]).filter(function(cp){
-    if(activeUnit&&cp.unit_id&&cp.unit_id!==activeUnit)return false;
+    if(!cpNaUnidade(cp))return false;
     if(mes!=='todos'){
       var ds=(cp.vencimento||cp.data_pagamento||'');
       if(ds.slice(0,7)!==mes)return false;
@@ -19177,7 +19341,7 @@ function cpLisFiltrados(){
     if(cpLisStatus==='aberto'){ if(st!=='apagar'&&st!=='vencido')return false; }
     else if(cpLisStatus!=='todos'&&st!==cpLisStatus)return false;
     if(cpLisBusca){
-      var alvo=[(cp.fornecedor_nome||''),(cp.descricao||''),(cp.nf_numero||''),(cp.categoria||''),(cp.agrupamento||'')].join(' ').toLowerCase();
+      var alvo=[(cp.fornecedor_nome||''),(cp.descricao||''),(cp.nf_numero||''),(cp.categoria||''),(cp.agrupamento||''),cpLinhas(cp).map(function(l){return (l.categoria||'')+' '+ccNome(l.centro_custo_id);}).join(' ')].join(' ').toLowerCase();
       if(alvo.indexOf(cpLisBusca)<0)return false;
     }
     return true;
@@ -19228,7 +19392,7 @@ function cpLisRender(){
   var cnt={aguardando:0,apagar:0,vencido:0,pago:0,recusado:0};
   var mes=cpLisMesRef();
   (contasPagar||[]).forEach(function(cp){
-    if(activeUnit&&cp.unit_id&&cp.unit_id!==activeUnit)return;
+    if(!cpNaUnidade(cp))return;
     if(mes!=='todos'&&(cp.vencimento||cp.data_pagamento||'').slice(0,7)!==mes)return;
     cnt[cpLisStatusDe(cp)]++;
   });
@@ -19257,6 +19421,10 @@ function cpLisRender(){
       var st=cpLisStatusDe(cp), S=CP_LIS_ST[st];
       var venc=cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'—';
       var cls=[(cp.agrupamento||''),(cp.categoria||'')].filter(Boolean).join(' › ');
+      var _lsT=cpLinhas(cp);
+      if(_lsT.length>1){ var _us=[]; _lsT.forEach(function(l){ var n=(typeof orgUnidadeNome==='function')?orgUnidadeNome(l.unit_id):''; if(n&&_us.indexOf(n)<0)_us.push(n); });
+        cls='Rateado \u00b7 '+_lsT.length+' linhas'+(_us.length?' \u00b7 '+_us.join(' + '):''); }
+      else if(_lsT[0]&&_lsT[0].centro_custo_id){ cls+=' \u00b7 '+ccNome(_lsT[0].centro_custo_id); }
       var parc=(cp.parcela_total>1)?(' <span style="font-size:10px;color:var(--text3)">'+cp.parcela_num+'/'+cp.parcela_total+'</span>'):'';
       if(cp.sem_movimento===true)parc+=' <span title="N\u00e3o entra no relat\u00f3rio Contabilidade \u00b7 pagamentos" style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:#ede7f6;color:#4527a0">sem movimento</span>';
       // v1.0.1036: ações numa linha só (antes quebravam em três linhas)
@@ -19482,7 +19650,7 @@ function ctrlDadosDFC(perX){
     per.forEach(function(p,i){if(ctrlNoPeriodo(s,p))ent[i]+=v;});
   });
 
-  (contasPagar||[]).forEach(function(cp){
+  cpExpandir(contasPagar).forEach(function(cp){   // v1.0.1038: linhas do corpo
     if(!ctrlPagoCP(cp))return;
     if((cp.aprovacao_status||'aprovado')==='reprovado')return;
     if(unit&&cp.unit_id&&cp.unit_id!==unit)return;
@@ -19828,7 +19996,7 @@ function dreDados(){
     }
   });
   var cus={}, des={}, dedB={}, irB={}, fora={};
-  (contasPagar||[]).forEach(function(cp){
+  cpExpandir(contasPagar).forEach(function(cp){   // v1.0.1038: linhas do corpo
     if((cp.aprovacao_status||'aprovado')==='reprovado')return;
     if(unit&&cp.unit_id&&cp.unit_id!==unit)return;
     var sc2=cp.competencia||cp.vencimento||''; if(!sc2||sc2.slice(0,4)!==ano)return;
@@ -20437,8 +20605,9 @@ function cpAddMeses(iso,n){var d=new Date(iso+'T00:00');var dia=d.getDate();d.se
 // ---------- MODAL LANÇAMENTO / EDIÇÃO ----------
 async function novoTituloCP(editId){
   await cpEnsureDfc();
+  if(!_ccLoaded){ try{ await ccCarregar(); }catch(e){} }
   var old=ge('modal-novo-cp');if(old)old.remove();
-  cpNovoSel={forn:null};cpParcelas=[];cpEditId=editId||null;
+  cpNovoSel={forn:null};cpParcelas=[];cpEditId=editId||null;cpCorpo={multi:false,linhas:[]};
   var ed=editId?(contasPagar||[]).find(function(x){return x.id===editId;}):null;
   if(editId&&!ed){alert('T\u00edtulo n\u00e3o encontrado.');return;}
   if(ed&&!cpEditavel(ed)){alert('T\u00edtulo j\u00e1 pago n\u00e3o pode ser editado.');return;}
@@ -20454,7 +20623,7 @@ async function novoTituloCP(editId){
    +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:16px;font-weight:600">'+(ed?'Editar t\u00edtulo':'Novo t\u00edtulo a pagar')+'</div>'
    +'<span onclick="ge(\'modal-novo-cp\').remove()" style="cursor:pointer;color:var(--text3);font-size:20px">\u00d7</span></div>'
    +'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'+(ed&&cpAprovado(ed)?'Ao salvar, o t\u00edtulo volta para aprova\u00e7\u00e3o':'Vai para aprova\u00e7\u00e3o antes do pagamento')+'</div>'
-   +'<div class="fg"><label class="fl">Unidade *</label><select class="fi" id="cp-unit"><option value="">Selecione a unidade\u2026</option>'+unitsOpt+'</select></div>'
+   +'<div class="fg" id="cp-hdr-unit"><label class="fl">Unidade *</label><select class="fi" id="cp-unit" onchange="cpCcAtualizar()"><option value="">Selecione a unidade\u2026</option>'+unitsOpt+'</select></div>'
    +(ed?'':'<div style="display:flex;gap:6px;margin-bottom:14px">'
      +'<button type="button" id="cp-tg-apagar" onclick="cpToggleJaPago(false)" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:#e6eef5;color:#0A2540;font-weight:600;font-size:13px;cursor:pointer">A pagar</button>'
      +'<button type="button" id="cp-tg-pago" onclick="cpToggleJaPago(true)" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text2);font-size:13px;cursor:pointer">J\u00e1 pago</button></div>')
@@ -20462,12 +20631,14 @@ async function novoTituloCP(editId){
    +'<input class="fi" id="cp-forn-busca" placeholder="Digite para buscar\u2026" oninput="cpBuscaForn(this.value)" autocomplete="off" value="'+(ed?(ed.fornecedor_nome||'').replace(/"/g,'&quot;'):'')+'">'
    +'<div id="cp-forn-lista" style="border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:150px;overflow-y:auto;display:none"></div>'
    +'<input type="hidden" id="cp-forn" value="'+(ed?(ed.fornecedor_id||''):'')+'"></div>'
-   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+   +'<div id="cp-hdr-conta" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
    +'<div class="fg"><label class="fl">Bloco (DFC) *</label><select class="fi" id="cp-bloco" onchange="cpFillContas()"><option value="">Selecione\u2026</option>'+blocosOpt+'</select></div>'
    +'<div class="fg"><label class="fl">Conta (DFC) *</label><select class="fi" id="cp-conta"><option value="">Selecione o bloco</option></select></div></div>'
    +'<div id="cp-hint-conta" style="font-size:11px;color:var(--text3);margin:-6px 0 10px"></div>'
+   +'<div class="fg" id="cp-cc-simples"><label class="fl">Centro de custo</label><select class="fi" id="cp-cc"></select></div>'
+   +'<div id="cp-corpo" style="margin:-2px 0 12px"></div>'
    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-   +'<div class="fg"><label class="fl">Valor total (R$) *</label><input class="fi" id="cp-valor" type="number" step="0.0001" placeholder="0,00" value="'+(ed?(ed.valor||''):'')+'" oninput="cpParcRecalcAviso()"></div>'
+   +'<div class="fg"><label class="fl">Valor total (R$) *</label><input class="fi" id="cp-valor" type="number" step="0.0001" placeholder="0,00" value="'+(ed?(ed.valor||''):'')+'" oninput="cpParcRecalcAviso();cpCorpoSaldo()"></div>'
    +'<div class="fg"><label class="fl">NF / Documento</label><input class="fi" id="cp-nf" value="'+(ed?(ed.nf_numero||'').replace(/"/g,'&quot;'):'')+'"></div>'
    +'<div class="fg"><label class="fl">Vencimento *</label><input class="fi" id="cp-venc" type="date" value="'+vBase+'"></div>'
    +'<div class="fg"><label class="fl">Compet\u00eancia</label><input class="fi" id="cp-comp" type="month" value="'+cBase+'"></div>'
@@ -20502,6 +20673,11 @@ async function novoTituloCP(editId){
     if(!conta) conta=(dfcContas||[]).find(function(c){return c.nome===(ed.categoria||'');});
     if(conta){var sb=ge('cp-bloco');if(sb){sb.value=conta.bloco_id;cpFillContas();}var sc=ge('cp-conta');if(sc)sc.value=conta.id;}
   }
+  // v1.0.1038: corpo do título (linha única com centro de custo, ou várias linhas)
+  var _lsEd=ed?(cpItensIdx().get(ed.id)||[]):[];
+  if(_lsEd.length>1) cpCorpo={multi:true,linhas:_lsEd.map(function(l){ return {unit_id:l.unit_id||'',dfc_conta_id:l.dfc_conta_id||'',centro_custo_id:l.centro_custo_id||'',valor:Number(l.valor||0)}; })};
+  cpCcAtualizar((_lsEd.length===1&&_lsEd[0].centro_custo_id)?_lsEd[0].centro_custo_id:'');
+  cpCorpoRender();
   setTimeout(function(){var i=ge(ed?'cp-valor':'cp-forn-busca');if(i)i.focus();},60);
 }
 
@@ -20630,6 +20806,10 @@ async function salvarTituloCP(novo){
   var valor=parseFloat((ge('cp-valor')?ge('cp-valor').value:'')||'0');
   var venc=ge('cp-venc')?ge('cp-venc').value:'';
   var contaId=ge('cp-conta')?ge('cp-conta').value:'';
+  // v1.0.1038: corpo com várias linhas — a 1ª linha vira a unidade/conta do cabeçalho
+  var _corpo=cpCorpoColetar(valor); if(_corpo&&_corpo.erro){alert(_corpo.erro);return;}
+  if(_corpo){ unitSel=_corpo.linhas[0].unit_id; contaId=_corpo.linhas[0].dfc_conta_id; }
+  var _ccSimples=(ge('cp-cc')||{}).value||null;
   if(!unitSel){alert('Selecione a unidade do t\u00edtulo.');return;}
   if(!fid){alert('Selecione o benefici\u00e1rio.');return;}
   if(!contaId){alert('Selecione o bloco e a conta do plano de contas.');return;}
@@ -20638,6 +20818,7 @@ async function salvarTituloCP(novo){
   var forn=(fornecedores||[]).find(function(f){return f.id===fid;});
   var conta=(dfcContas||[]).find(function(c){return c.id===contaId;});
   var bloco=(dfcBlocos||[]).find(function(b){return b.id===(conta?conta.bloco_id:null);});
+  var _baseCorpo=_corpo?_corpo.linhas:[{unit_id:unitSel,dfc_conta_id:contaId,agrupamento:bloco?bloco.nome:'',categoria:conta?conta.nome:'',centro_custo_id:_ccSimples,valor:valor}];
   var compV=ge('cp-comp')?ge('cp-comp').value:'';
   var comp=compV?(compV+'-01'):(venc.slice(0,8)+'01');
   var uid=(profile&&profile.id)||null;
@@ -20681,6 +20862,7 @@ async function salvarTituloCP(novo){
     if(mudouSensivel)Object.assign(patch,{aprovacao_status:'pendente',aprovado_por:null,aprovado_em:null});
     try{
       await dbUpdate('contas_pagar',cpEditId,patch);
+      await cpItensGravar(cpEditId,_baseCorpo,valor);
       contasPagar=contasPagar.map(function(x){return x.id===cpEditId?Object.assign({},x,patch):x;});
       var mo=ge('modal-novo-cp');if(mo)mo.remove();
       cpEditId=null;
@@ -20722,6 +20904,7 @@ async function salvarTituloCP(novo){
       if(grupoId){body.parcela_grupo=grupoId;body.parcela_num=i+1;body.parcela_total=linhas.length;}
       var r=await dbInsert('contas_pagar',body);
       criados.push(r||body);
+      if(r&&r.id) await cpItensGravar(r.id,_baseCorpo,L.valor);
     }
     criados.forEach(function(x){contasPagar.unshift(x);});
     var msg='\u2713 T\u00edtulo lan\u00e7ado'+(linhas.length>1?' em '+linhas.length+' parcelas':'')+'. Aguardando aprova\u00e7\u00e3o.';
@@ -20730,6 +20913,7 @@ async function salvarTituloCP(novo){
       var fb=ge('cp-forn-busca');if(fb){fb.value='';fb.focus();}
       var fh=ge('cp-forn');if(fh)fh.value='';
       var pc=ge('cp-parc');if(pc&&pc.checked){pc.checked=false;cpParcToggle(false);}
+      cpCorpo={multi:false,linhas:[]};cpCorpoRender();
       alert(msg);
     }else{
       var mo2=ge('modal-novo-cp');if(mo2)mo2.remove();
@@ -21017,7 +21201,7 @@ function cpRelData(unitId){
     return null;
   }
   var semmap={}, meses=new Array(12).fill(0);
-  contasPagar.forEach(function(cp){
+  cpExpandir(contasPagar).forEach(function(cp){   // v1.0.1038: linhas do corpo
     if(!cpValido(cp))return;
     var ds=cpDataStr(cp);if(!ds)return;var d=new Date(ds+'T00:00');if(d.getFullYear()!==y)return;
     if(unitId&&cp.unit_id!==unitId)return;
@@ -21113,7 +21297,7 @@ function cpRelDrill(bi,ci,m){
   if(bi==='sem'){isSem=true;if(ci>=0){var sr=cpRelDataCache.sem[ci];semAgr=sr._agr;semCat=sr._cat;titulo=sr.nome;}else{titulo='(sem classificação)';}}
   else{var b=cpRelDataCache.blocos[bi];blocoNome=b.nome;if(ci>=0){contaNome=b.contas[ci].nome;titulo=b.nome+' › '+contaNome;}else{titulo=b.nome+' (bloco)';}}
   var mesesN=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  var itens=contasPagar.filter(function(cp){
+  var itens=cpExpandir(contasPagar).filter(function(cp){
     if(!cpValido(cp))return false;
     var ds=cpDataStr(cp);if(!ds)return false;var d=new Date(ds+'T00:00');if(d.getFullYear()!==y||d.getMonth()!==m)return false;
     if(unit&&cp.unit_id!==unit)return false;
@@ -21250,7 +21434,8 @@ function finRelBenef(cp){
 function finRelPagamentos(){
   finRelPeriodoPadrao();
   var un=cpRelUnitId();
-  return (contasPagar||[]).filter(function(cp){
+  // v1.0.1038: filtrado por unidade, soma só a parte da unidade (sem filtro: uma linha por pagamento)
+  return (un?cpExpandir(contasPagar):(contasPagar||[])).filter(function(cp){
     if(!cpValido(cp))return false;
     if(cp.sem_movimento===true)return false;   // flag "nao gerar movimento"
     if(!['pago','pago_atraso'].includes(cp.status))return false;
