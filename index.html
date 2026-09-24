@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1034 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1035 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1034';
+const APP_VERSION='v1.0.1035';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -9380,6 +9380,222 @@ async function reajAplicar(){
   showToast('Reajuste aplicado: '+ok+' colaborador(es) atualizado(s).', erros.length?'amber':'green');
 }
 
+// ══════════════ RETROATIVO DO REAJUSTE (v1.0.1035) ══════════════
+// Regra (convenção): reajuste cheio para todos. O retroativo vai da data-base até o mês anterior ao que a
+// folha passou a pagar o salário novo. Começa na admissão, se for depois da data-base, e termina no
+// desligamento (rescisão complementar). Mês incompleto: diferença ÷ dias corridos do mês × dias corridos
+// trabalhados (nunca dias úteis). Salário de cada dia pelo histórico profissional (promoção no meio conta).
+var _retro={pct:'',dataBase:'2026-02-01',folhaDesde:'',funcoes:null,lin:null,dados:null,aberto:null,busy:false};
+function retroISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function retroDt(iso){ return new Date(String(iso).slice(0,10)+'T00:00:00'); }
+function retroDiasMes(ano,mes){ return new Date(ano,mes+1,0).getDate(); }
+function retroMesLbl(ym){ var m=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; return m[Number(ym.slice(5,7))-1]+'/'+ym.slice(0,4); }
+function retroPct(){ var s=String(_retro.pct||'').trim().replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
+async function retroAbrir(){
+  if(!reajPode()) return;
+  var d=new Date(); if(!_retro.folhaDesde) _retro.folhaDesde=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  if(!_retro.funcoes) _retro.funcoes=new Set(rhFuncoes.filter(function(f){return f.ativo!==false;}).map(function(f){return f.id;}));
+  _retro.lin=null; _retro.aberto=null;
+  var old=ge('modal-retro'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-retro" style="z-index:300"><div class="modal" style="width:1040px;max-width:97vw;padding:18px;max-height:92vh;overflow:auto"><div id="retro-body">'+ecomSpinner()+'</div></div></div>');
+  try{
+    var cid=company.id;
+    var r=await Promise.all([
+      dbSelectAll('pessoas','company_id=eq.'+cid+'&select=id,nome,cpf_cnpj,funcao_id,salario,ativo,tipo_pessoa,unit_id,data_admissao'),
+      dbSelectAll('historico_profissional','company_id=eq.'+cid+'&salario_novo=not.is.null&select=pessoa_id,salario_anterior,salario_novo,data_vigencia,created_at'),
+      dbSelectAll('rh_demissoes','company_id=eq.'+cid+'&status=eq.concluido&select=pessoa_id,data_desligamento').catch(function(){return [];})
+    ]);
+    _retro.dados={pessoas:r[0]||[],hist:r[1]||[],dem:r[2]||[]};
+  }catch(e){ var b0=ge('retro-body'); if(b0) b0.innerHTML='<div style="color:var(--red-text)">Erro ao carregar: '+ecomEsc(e.message||e)+'</div>'; return; }
+  retroRender();
+}
+function retroCampo(k,v){ _retro[k]=v; _retro.lin=null; retroRender(); }
+function retroFuncao(fid,on){ if(on) _retro.funcoes.add(fid); else _retro.funcoes.delete(fid); _retro.lin=null; retroRender(); }
+// linha do tempo do salário ANTES do reajuste, por data
+function retroSalarioFn(p,dataBase,pct){
+  var ev=_retro.dados.hist.filter(function(h){ return h.pessoa_id===p.id&&h.data_vigencia&&h.salario_novo!=null; });
+  var f1=1+pct/100;
+  var reaj=ev.filter(function(h){ return String(h.data_vigencia).slice(0,10)===dataBase && Math.abs(Number(h.salario_novo)-reajR2(Number(h.salario_anterior)*f1))<=0.02; });
+  var outros=ev.filter(function(h){ return reaj.indexOf(h)<0; }).sort(function(a,b){ return String(a.data_vigencia).localeCompare(String(b.data_vigencia)); });
+  var reajFeito=reaj.length?reaj[reaj.length-1]:null;
+  var conferir=!!(reajFeito&&outros.some(function(h){ return String(h.created_at||'')>String(reajFeito.created_at||''); }));
+  var atualPre=reajFeito?Number(reajFeito.salario_anterior):Number(p.salario||0);
+  return { conferir:conferir, reajusteJaAplicado:!!reajFeito, sal:function(iso){
+    if(!outros.length) return atualPre;
+    var v=null; for(var i=0;i<outros.length;i++){ if(String(outros[i].data_vigencia).slice(0,10)<=iso) v=Number(outros[i].salario_novo); }
+    return v!=null?v:Number(outros[0].salario_anterior||atualPre);
+  }};
+}
+function retroCalcular(){
+  var pct=retroPct(), base=_retro.dataBase, fd=_retro.folhaDesde;
+  if(!(pct>0)||!base||!fd) return [];
+  var fimGeral=retroDt(fd+'-01'); fimGeral.setDate(fimGeral.getDate()-1);    // último dia antes da folha nova
+  var dem={}; _retro.dados.dem.forEach(function(d){ if(d.data_desligamento) dem[d.pessoa_id]=String(d.data_desligamento).slice(0,10); });
+  var f1=1+pct/100, out=[];
+  _retro.dados.pessoas.forEach(function(p){
+    if(['funcionario','colaborador'].indexOf(p.tipo_pessoa)<0) return;
+    if(!p.funcao_id||!_retro.funcoes.has(p.funcao_id)) return;
+    var desl=p.ativo===false?(dem[p.id]||null):null;
+    if(p.ativo===false&&!desl) return;                                   // inativo sem data de desligamento
+    var ini=retroDt(base); if(p.data_admissao&&retroDt(p.data_admissao)>ini) ini=retroDt(p.data_admissao);
+    var fim=new Date(fimGeral); if(desl&&retroDt(desl)<fim) fim=retroDt(desl);
+    if(ini>fim) return;
+    var S=retroSalarioFn(p,base,pct), meses=[], total=0;
+    var cur=new Date(ini.getFullYear(),ini.getMonth(),1);
+    while(cur<=fim){
+      var y=cur.getFullYear(), m=cur.getMonth(), dm=retroDiasMes(y,m);
+      var d0=Math.max(1,(ini.getFullYear()===y&&ini.getMonth()===m)?ini.getDate():1);
+      var d1=Math.min(dm,(fim.getFullYear()===y&&fim.getMonth()===m)?fim.getDate():dm);
+      var soma=0, salRef=null;
+      for(var d=d0; d<=d1; d++){ var iso=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); var s=S.sal(iso); if(salRef==null) salRef=s; soma+=(reajR2(s*f1)-s)/dm; }
+      var dif=reajR2(soma), dias=d1-d0+1;
+      meses.push({mes:y+'-'+String(m+1).padStart(2,'0'), dias:dias, diasMes:dm, salario:salRef, novo:reajR2(salRef*f1), dif:dif});
+      total+=dif; cur=new Date(y,m+1,1);
+    }
+    var fn=(rhFuncoes||[]).find(function(x){return x.id===p.funcao_id;});
+    out.push({p:p, funcao:fn?fn.funcao:'', desl:desl, meses:meses, total:reajR2(total), eqMeses:meses.reduce(function(s,x){return s+x.dias/x.diasMes;},0),
+              conferir:S.conferir, jaAplicado:S.reajusteJaAplicado, salAtual:Number(p.salario||0)});
+  });
+  out.sort(function(a,b){ return (a.desl?1:0)-(b.desl?1:0)||String(a.p.nome).localeCompare(String(b.p.nome)); });
+  return out;
+}
+function retroRender(){
+  var box=ge('retro-body'); if(!box) return;
+  if(!_retro.lin) _retro.lin=retroCalcular();
+  var L=_retro.lin, pct=retroPct(), tot=L.reduce(function(s,x){return s+x.total;},0), nDesl=L.filter(function(x){return x.desl;}).length, nConf=L.filter(function(x){return x.conferir;}).length;
+  var fim=_retro.folhaDesde?(function(){ var d=retroDt(_retro.folhaDesde+'-01'); d.setMonth(d.getMonth()-1); return retroMesLbl(retroISO(d).slice(0,7)); })():'';
+  var fchk=rhFuncoes.filter(function(f){return f.ativo!==false;}).map(function(f){
+    return '<label style="display:inline-flex;gap:5px;align-items:center;font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:99px;margin:0 4px 4px 0;cursor:pointer;'+(_retro.funcoes.has(f.id)?'background:var(--blue-bg)':'')+'"><input type="checkbox" '+(_retro.funcoes.has(f.id)?'checked':'')+' onchange="retroFuncao(\''+f.id+'\',this.checked)" style="width:13px;height:13px">'+ecomEsc(f.funcao)+'</label>';
+  }).join('');
+  var card=function(t,v,s,estilo){ return '<div style="flex:1;min-width:150px;border:1px solid var(--border);border-radius:10px;padding:9px 12px;'+(estilo||'')+'"><div style="font-size:10.5px;color:var(--text3);letter-spacing:.4px;text-transform:uppercase">'+t+'</div><div style="font-size:20px;font-weight:800">'+v+'</div><div style="font-size:11px;color:var(--text3)">'+s+'</div></div>'; };
+  var th='padding:7px 8px;font-weight:600;font-size:11px;color:var(--text2);text-align:left;white-space:nowrap';
+  var rows=L.map(function(x,i){
+    var aberto=_retro.aberto===i;
+    var det=aberto?'<tr><td colspan="6" style="padding:6px 8px 10px 30px;background:var(--bg2)"><table style="border-collapse:collapse;font-size:11.5px">'
+      +'<tr style="color:var(--text3)"><td style="padding:2px 10px 2px 0">M\u00eas</td><td style="padding:2px 10px">Dias</td><td style="padding:2px 10px">Sal\u00e1rio \u2192 novo</td><td style="padding:2px 10px;text-align:right">Diferen\u00e7a</td></tr>'
+      +x.meses.map(function(m){ return '<tr><td style="padding:2px 10px 2px 0">'+retroMesLbl(m.mes)+'</td><td style="padding:2px 10px">'+(m.dias===m.diasMes?'m\u00eas cheio':m.dias+'/'+m.diasMes)+'</td><td style="padding:2px 10px">'+fmtV(m.salario)+' \u2192 '+fmtV(m.novo)+'</td><td style="padding:2px 10px;text-align:right">'+fmtV(m.dif)+'</td></tr>'; }).join('')
+      +'</table></td></tr>':'';
+    return '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="_retro.aberto=('+(aberto?'null':i)+');retroRender()">'
+      +'<td style="padding:7px 8px">'+(aberto?'\u25be ':'\u25b8 ')+'<b>'+ecomEsc(x.p.nome)+'</b>'+(x.desl?' <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:var(--red-bg);color:var(--red-text);font-weight:600">desligado '+orgDataBR(x.desl)+'</span>':'')
+        +(x.conferir?' <span title="Houve mudan\u00e7a de sal\u00e1rio lan\u00e7ada depois do reajuste: confira o m\u00eas a m\u00eas" style="font-size:10px;padding:1px 7px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text);font-weight:600">conferir</span>':'')
+        +'<div style="font-size:10.5px;color:var(--text3)">'+ecomEsc(x.funcao)+(x.desl?' \u00b7 rescis\u00e3o complementar':'')+'</div></td>'
+      +'<td style="padding:7px 8px;white-space:nowrap">'+(x.p.data_admissao?orgDataBR(x.p.data_admissao):'\u2014')+'</td>'
+      +'<td style="padding:7px 8px;white-space:nowrap">'+retroMesLbl(x.meses[0].mes)+' a '+retroMesLbl(x.meses[x.meses.length-1].mes)+'</td>'
+      +'<td style="padding:7px 8px;white-space:nowrap">'+x.eqMeses.toFixed(2).replace('.',',')+'</td>'
+      +'<td style="padding:7px 8px;white-space:nowrap">'+fmtV(x.meses[x.meses.length-1].salario)+' \u2192 '+fmtV(x.meses[x.meses.length-1].novo)+'</td>'
+      +'<td style="padding:7px 8px;text-align:right;white-space:nowrap"><b>'+fmtV(x.total)+'</b></td></tr>'+det;
+  }).join('')||'<tr><td colspan="6" style="padding:22px;text-align:center;color:var(--text3)">'+(pct>0?'Nenhum colaborador com retroativo nesses par\u00e2metros.':'Informe o percentual para calcular.')+'</td></tr>';
+  box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px"><div style="font-size:16px;font-weight:700">Retroativo do reajuste</div><button class="btn btn-sm" onclick="ge(\'modal-retro\').remove()">\u2715</button></div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">'
+    +'<div class="fg" style="margin:0"><label class="fl">Percentual (%) *</label><input class="fi" inputmode="decimal" value="'+ecomEsc(_retro.pct)+'" placeholder="ex.: 5,50" onchange="retroCampo(\'pct\',this.value)"></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Data-base *</label><input class="fi" type="date" value="'+ecomEsc(_retro.dataBase)+'" onchange="retroCampo(\'dataBase\',this.value)"></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Folha paga o novo a partir de *</label><input class="fi" type="month" value="'+ecomEsc(_retro.folhaDesde)+'" onchange="retroCampo(\'folhaDesde\',this.value)"></div></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin:8px 0">Devido: '+(_retro.dataBase?retroMesLbl(_retro.dataBase.slice(0,7)):'?')+' a '+(fim||'?')+' \u00b7 come\u00e7a na admiss\u00e3o, se for depois da data-base \u00b7 m\u00eas incompleto = diferen\u00e7a \u00f7 dias corridos do m\u00eas \u00d7 dias corridos trabalhados</div>'
+    +'<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:12.5px;font-weight:600">Fun\u00e7\u00f5es inclu\u00eddas ('+_retro.funcoes.size+')</summary><div style="margin-top:8px">'+fchk+'</div></details>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +card('Colaboradores',L.length,(L.length-nDesl)+' ativos \u00b7 '+nDesl+' desligados')
+      +card('Retroativo total',fmtV(tot),'diferen\u00e7a de sal\u00e1rio')
+      +card('Desligados',nDesl,'rescis\u00e3o complementar',nDesl?'background:var(--red-bg)':'')
+      +(nConf?card('Conferir',nConf,'mudan\u00e7a de sal\u00e1rio ap\u00f3s o reajuste','background:var(--amber-bg)'):'')+'</div>'
+    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px;max-height:46vh"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead style="position:sticky;top:0;background:var(--bg2)"><tr><th style="'+th+'">Colaborador</th><th style="'+th+'">Admiss\u00e3o</th><th style="'+th+'">Per\u00edodo</th><th style="'+th+'">Meses</th><th style="'+th+'">Sal\u00e1rio \u2192 novo</th><th style="'+th+';text-align:right">Retroativo</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:8px">Horas extras, adicionais e os reflexos da rescis\u00e3o complementar ficam com a contabilidade: o VERUS entrega a diferen\u00e7a de sal\u00e1rio, que \u00e9 a base deles.</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">'
+    +'<button class="btn" '+(L.length?'':'disabled')+' onclick="retroExcel()">Exportar Excel</button>'
+    +'<button class="btn" '+(L.length?'':'disabled')+' onclick="retroPdf()">PDF</button>'
+    +'<button class="btn btn-p" '+(L.length?'':'disabled')+' onclick="retroCpAbrir()">Lan\u00e7ar no Contas a Pagar</button></div>';
+}
+async function retroExcel(){
+  var L=_retro.lin||[]; if(!L.length) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var resumo=L.map(function(x){ return {Colaborador:x.p.nome, Funcao:x.funcao, Admissao:x.p.data_admissao?orgDataBR(x.p.data_admissao):'', Desligamento:x.desl?orgDataBR(x.desl):'',
+      Situacao:x.desl?'Rescisao complementar':'Ativo', De:retroMesLbl(x.meses[0].mes), Ate:retroMesLbl(x.meses[x.meses.length-1].mes),
+      Meses_equivalentes:Number(x.eqMeses.toFixed(4)), Salario_anterior:x.meses[x.meses.length-1].salario, Salario_novo:x.meses[x.meses.length-1].novo, Retroativo:x.total, Conferir:x.conferir?'sim':''}; });
+    var mes=[]; L.forEach(function(x){ x.meses.forEach(function(m){ mes.push({Colaborador:x.p.nome, Funcao:x.funcao, Mes:retroMesLbl(m.mes), Dias_trabalhados:m.dias, Dias_do_mes:m.diasMes, Salario:m.salario, Salario_novo:m.novo, Diferenca:m.dif}); }); });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(resumo),'Resumo');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mes),'Mes a mes');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([{Percentual:retroPct()+'%',Data_base:orgDataBR(_retro.dataBase),Folha_nova_desde:retroMesLbl(_retro.folhaDesde),Colaboradores:L.length,Total:reajR2(L.reduce(function(s,x){return s+x.total;},0)),Gerado_em:new Date().toLocaleString('pt-BR'),Gerado_por:(profile&&profile.full_name)||''}]),'Parametros');
+    XLSX.writeFile(wb,'Retroativo_reajuste_'+_retro.dataBase+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
+}
+function retroPdf(){
+  var L=_retro.lin||[]; if(!L.length) return;
+  var tot=L.reduce(function(s,x){return s+x.total;},0);
+  var linhas=L.map(function(x){ return '<tr><td>'+ecomEsc(x.p.nome)+(x.desl?' <i>(desligado '+orgDataBR(x.desl)+' \u00b7 rescis\u00e3o complementar)</i>':'')+'<br><small>'+ecomEsc(x.funcao)+'</small></td><td>'+(x.p.data_admissao?orgDataBR(x.p.data_admissao):'')+'</td><td>'
+    +x.meses.map(function(m){return retroMesLbl(m.mes)+(m.dias===m.diasMes?'':' ('+m.dias+'/'+m.diasMes+')')+': '+fmtV(m.dif);}).join('<br>')+'</td><td style="text-align:right"><b>'+fmtV(x.total)+'</b></td></tr>'; }).join('');
+  var html='<html><head><meta charset="utf-8"><title>Retroativo do reajuste</title><style>body{font-family:Arial,sans-serif;font-size:11px;margin:18px}h1{font-size:16px;margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ccc;padding:5px;vertical-align:top}th{background:#0A2540;color:#fff;text-align:left}small{color:#666}</style></head><body>'
+    +'<h1>Retroativo do reajuste \u2014 '+ecomEsc((company&&company.name)||'')+'</h1>'
+    +'<div>Percentual '+String(retroPct()).replace('.',',')+'% \u00b7 data-base '+orgDataBR(_retro.dataBase)+' \u00b7 folha nova desde '+retroMesLbl(_retro.folhaDesde)+' \u00b7 '+L.length+' colaborador(es) \u00b7 total <b>'+fmtV(tot)+'</b></div>'
+    +'<table><tr><th>Colaborador</th><th>Admiss\u00e3o</th><th>M\u00eas a m\u00eas</th><th>Retroativo</th></tr>'+linhas+'<tr><td colspan="3" style="text-align:right"><b>Total</b></td><td style="text-align:right"><b>'+fmtV(tot)+'</b></td></tr></table>'
+    +'<p style="color:#666;margin-top:10px">M\u00eas incompleto: diferen\u00e7a \u00f7 dias corridos do m\u00eas \u00d7 dias corridos trabalhados. Horas extras, adicionais e reflexos da rescis\u00e3o complementar ficam com a contabilidade.</p></body></html>';
+  var fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(fr);
+  fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+  setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} setTimeout(function(){ fr.remove(); },60000); },400);
+}
+// 5º dia útil do mês seguinte
+function retroQuintoUtil(){
+  var d=new Date(); d=new Date(d.getFullYear(),d.getMonth()+1,1); var n=0, g=0;
+  while(g++<40){ if(crEhDiaUtil(d)){ n++; if(n===5) break; } d.setDate(d.getDate()+1); }
+  return retroISO(d);
+}
+async function retroCpAbrir(){
+  await cpEnsureDfc();
+  var old=ge('modal-retro-cp'); if(old) old.remove();
+  var L=(_retro.lin||[]).filter(function(x){return x.total>0;});
+  var contas=(dfcContas||[]).map(function(c){ var b=(dfcBlocos||[]).find(function(x){return x.id===c.bloco_id;}); return '<option value="'+c.id+'">'+ecomEsc((b?b.nome+' \u203a ':'')+c.nome)+'</option>'; }).join('');
+  var forns=(fornecedores||[]).slice().sort(function(a,b){return String(a.nome).localeCompare(String(b.nome));}).map(function(f){return '<option value="'+f.id+'">'+ecomEsc(f.nome)+'</option>';}).join('');
+  var semBenef=L.filter(function(x){ return !retroFornDe(x.p); }).length;
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-retro-cp" style="z-index:350"><div class="modal" style="width:500px;max-width:95vw;padding:18px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Lan\u00e7ar no Contas a Pagar</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:12px">'+L.length+' t\u00edtulo(s), um por colaborador \u00b7 total '+fmtV(L.reduce(function(s,x){return s+x.total;},0))+'</div>'
+    +'<div class="fg"><label class="fl">Conta do plano de contas *</label><select class="fi" id="rcp-conta"><option value="">Selecione\u2026</option>'+contas+'</select></div>'
+    +'<div class="fg"><label class="fl">Vencimento *</label><input class="fi" type="date" id="rcp-venc" value="'+retroQuintoUtil()+'"></div>'
+    +'<div class="fg"><label class="fl">Benefici\u00e1rio para quem n\u00e3o tem cadastro de benefici\u00e1rio'+(semBenef?' ('+semBenef+')':'')+'</label><select class="fi" id="rcp-benef"><option value="">'+(semBenef?'Selecione\u2026':'\u2014 todos t\u00eam cadastro \u2014')+'</option>'+forns+'</select>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:3px">O colaborador \u00e9 o benefici\u00e1rio quando existe um cadastro com o mesmo CPF; sen\u00e3o, usa este. O nome do colaborador vai na descri\u00e7\u00e3o.</div></div>'
+    +'<div id="rcp-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px"></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'modal-retro-cp\').remove()">Cancelar</button><button class="btn btn-p" id="rcp-ok" onclick="retroCpLancar()">Lan\u00e7ar '+L.length+' t\u00edtulo(s)</button></div></div></div>');
+}
+function retroFornDe(p){
+  var cpf=String(p.cpf_cnpj||'').replace(/\D/g,''); if(!cpf) return null;
+  return (fornecedores||[]).find(function(f){ return String(f.cpf_cnpj||'').replace(/\D/g,'')===cpf; })||null;
+}
+async function retroCpLancar(){
+  if(_retro.busy) return;
+  var err=ge('rcp-err'), falha=function(m){ if(err){ err.style.display='block'; err.textContent=m; } };
+  var contaId=(ge('rcp-conta')||{}).value, venc=(ge('rcp-venc')||{}).value, benefPad=(ge('rcp-benef')||{}).value;
+  var L=(_retro.lin||[]).filter(function(x){return x.total>0;});
+  if(!contaId) return falha('Escolha a conta do plano de contas.');
+  if(!venc) return falha('Informe o vencimento.');
+  var semB=L.filter(function(x){return !retroFornDe(x.p);});
+  if(semB.length&&!benefPad) return falha(semB.length+' colaborador(es) sem cadastro de benefici\u00e1rio: escolha o benefici\u00e1rio padr\u00e3o.');
+  var conta=(dfcContas||[]).find(function(c){return c.id===contaId;}), bloco=(dfcBlocos||[]).find(function(b){return b.id===(conta?conta.bloco_id:null);});
+  var fPad=(fornecedores||[]).find(function(f){return f.id===benefPad;});
+  var chave='Retroativo reajuste '+orgDataBR(_retro.dataBase);
+  var ja=new Set((contasPagar||[]).filter(function(x){return x.status!=='cancelado'&&String(x.descricao||'').indexOf(chave)===0;}).map(function(x){return x.descricao;}));
+  _retro.busy=true; var b=ge('rcp-ok'); if(b){ b.disabled=true; b.textContent='Lan\u00e7ando\u2026'; }
+  var ok=0, pul=0, erros=[];
+  try{
+    for(var i=0;i<L.length;i++){
+      var x=L[i], f=retroFornDe(x.p)||fPad;
+      var desc=chave+' \u00b7 '+x.p.nome+' ('+retroMesLbl(x.meses[0].mes)+' a '+retroMesLbl(x.meses[x.meses.length-1].mes)+(x.desl?' \u00b7 rescis\u00e3o complementar':'')+')';
+      if(ja.has(desc)){ pul++; continue; }
+      var body={company_id:company.id,unit_id:x.p.unit_id||null,fornecedor_id:f?f.id:null,fornecedor_nome:f?f.nome:x.p.nome,
+        grupo:'Despesas',agrupamento:bloco?bloco.nome:'',categoria:conta?conta.nome:'',dfc_conta_id:contaId,forma_pagamento:'',nf_numero:'',
+        descricao:desc,valor:x.total,valor_pago:0,vencimento:venc,competencia:venc.slice(0,7)+'-01',status:'pendente',
+        aprovacao_status:'pendente',criado_por:cu&&cu.id,origem:'retroativo_reajuste'};
+      try{ var r=await dbInsert('contas_pagar',body); if(r) contasPagar=(contasPagar||[]).concat([r]); ok++; }
+      catch(e){ erros.push(x.p.nome+': '+(e.message||e)); }
+      if(b) b.textContent='Lan\u00e7ando '+(i+1)+'/'+L.length+'\u2026';
+    }
+  } finally { _retro.busy=false; }
+  var m=ge('modal-retro-cp'); if(m) m.remove();
+  if(erros.length) alert('Lan\u00e7ados '+ok+' t\u00edtulo(s), com '+erros.length+' falha(s):\n\n'+erros.slice(0,12).join('\n'));
+  showToast(ok+' t\u00edtulo(s) lan\u00e7ado(s) no Contas a Pagar'+(pul?' \u00b7 '+pul+' j\u00e1 existiam e foram pulados':'')+'. Eles entram para aprova\u00e7\u00e3o.',erros.length?'amber':'green');
+}
+
 function rRHFuncoes(){
   const _sel=_reajModo;
   const rows=rhFuncoes.map((f,i)=>`<div class="li"${_sel?` onclick="reajToggle('${f.id}')" style="cursor:pointer;${_reajSel.has(f.id)?'outline:2px solid var(--blue-text);outline-offset:-2px;background:var(--blue-bg)':''}"`:''}>
@@ -9407,7 +9623,7 @@ function rRHFuncoes(){
     </div>
   </div>`).join('');
   if(_sel) setTimeout(reajPrevia,0);
-  return`<div class="sechdr"><span class="sectitle">Funções (${rhFuncoes.length})</span><span style="display:flex;gap:8px">${reajPode()?`<button class="btn btn-sm" style="${_sel?'background:var(--blue-bg);':''}border-color:var(--blue-text);color:var(--blue-text)" onclick="reajAbrir()">% Reajuste salarial</button>`:''}<button class="btn btn-p btn-sm" onclick="openRH('rh-funcoes')">+ Nova função</button></span></div>
+  return`<div class="sechdr"><span class="sectitle">Funções (${rhFuncoes.length})</span><span style="display:flex;gap:8px">${reajPode()?`<button class="btn btn-sm" style="${_sel?'background:var(--blue-bg);':''}border-color:var(--blue-text);color:var(--blue-text)" onclick="reajAbrir()">% Reajuste salarial</button><button class="btn btn-sm" onclick="retroAbrir()">Retroativo</button>`:''}<button class="btn btn-p btn-sm" onclick="openRH('rh-funcoes')">+ Nova função</button></span></div>
   ${_sel?rReajPainel():''}
   ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg><p>Nenhuma função cadastrada</p></div>'}`;
 }
