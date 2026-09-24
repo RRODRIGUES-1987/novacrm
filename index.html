@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1033 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1034 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1325,7 +1325,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1033';
+const APP_VERSION='v1.0.1034';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48504,14 +48504,19 @@ function ecomPanelSep(){
   }).join('') : '<div style="padding:16px;color:var(--text3);font-size:13px">Nenhum pedido aguardando separação.</div>';
 
   var abertas=ecomOrdensDoLojista().slice();
+  var _dup=ecomOsDuplicados();
   var listaOS=abertas.length? abertas.map(function(o){
     var sep=o.status==='separada';
+    var dd=_dup.porOs[o.id];
+    var alerta=dd?'<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--red-bg);color:var(--red-text)" title="Pedidos repetidos em outra OS">\u26a0 '+dd.n+' pedido(s) tamb\u00e9m em '+Object.keys(dd.outras).map(function(x){var ox=_dup.vivas[x];return 'OS-'+String((ox&&ox.numero)||0).padStart(4,'0');}).join(', ')+'</span>':'';
+    var quando=o.created_at?new Date(o.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border-top:1px solid var(--border)">'
       +'<span style="font-family:monospace;font-weight:600">OS-'+String(o.numero||0).padStart(4,'0')+'</span>'
       +'<span style="font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bg3)">'+(o.tipo==='sku'?'Consolidado SKU':'Por pedido')+'</span>'
       +(sep?'<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--green-bg,#dcfce7);color:var(--green-text,#059669)">separada</span>':'')
-      +'<span style="flex:1;font-size:12px;color:var(--text3)">'+(o.qtd_pedidos||0)+' pedido(s) · '+ecomN(o.qtd_itens)+' un</span>'
-      +'<button class="btn btn-sm" onclick="ecomOsPrint(\''+o.id+'\')">Imprimir</button>'
+      +alerta
+      +'<span style="flex:1;font-size:12px;color:var(--text3)">'+(o.qtd_pedidos||0)+' pedido(s) · '+ecomN(o.qtd_itens)+' un'+(quando?' \u00b7 gerada '+quando:'')+(o.operador?' \u00b7 '+ecomEsc(o.operador):'')+'</span>'
+      +'<button class="btn btn-sm" onclick="ecomOsPrintEscolher(\''+o.id+'\')">Imprimir</button>'
       +(sep?'':(function(){
           var G=ecomOsProgresso(o.id);
           var pc=G.total?Math.round(G.bipado*100/G.total):0;
@@ -48533,7 +48538,7 @@ function ecomPanelSep(){
     +'<div style="display:grid;grid-template-columns:1fr;gap:16px">'
     +'<div><div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-size:13px;font-weight:600">Pedidos a separar</div>'
     +'<button class="btn btn-sm" style="margin-left:auto" onclick="ecomSepMarcarTodas()">Marcar todas</button>'
-    +'<button class="btn btn-sm btn-p" onclick="ecomGerarOS()">Gerar ordem de separação</button></div>'
+    +'<button class="btn btn-sm btn-p" id="ecom-btn-gerar-os" onclick="ecomGerarOS()"'+(_ecomGerandoOS?' disabled':'')+'>'+(_ecomGerandoOS?'Gerando OS\u2026':'Gerar ordem de separação')+'</button></div>'
     +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'+listaPend+'</div></div>'
     +(bloq.length?('<div><div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--amber-text,#b45309)">Travados &mdash; n&atilde;o entram na OS ('+bloq.length+')</div>'
       +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
@@ -48560,23 +48565,81 @@ function ecomSepMarcarTodas(){
   pend.forEach(function(p){ ecomSepSel[p.id]=!allsel; });
   ecomRenderBody();
 }
+// v1.0.1034: GERAR OS com trava. Antes: 2 gravações por pedido em sequência (~20 s com 69 pedidos), botão
+// liberado e a tela ainda vendo os pedidos como "a separar" — um segundo clique criou a OS-0083 com os
+// mesmos 69 pedidos da OS-0082. Agora: botão travado, releitura no banco e reserva atômica
+// (só entra na OS o pedido que AINDA está "importado" no momento da gravação).
+var _ecomGerandoOS=false;
 async function ecomGerarOS(){
-  var cid=ecomCid();
+  if(_ecomGerandoOS){ showToast('Aguarde: a OS anterior ainda está sendo gerada.','amber'); return; }
+  var cid=ecomCid(), tipoOS=ecomSepTipo;   // o tipo vale o do momento do clique
   var pids=Object.keys(ecomSepSel).filter(function(k){return ecomSepSel[k];});
   var _antes=pids.length;
   pids=pids.filter(function(id){var p=ecomPedidos.find(function(x){return x.id===id;});return p&&ecomAptoSep(p);});
   if(_antes>pids.length){ showToast((_antes-pids.length)+' pedido(s) fora da OS: sem nota ou sem etiqueta','amber'); }
   if(!pids.length){showToast('Selecione ao menos um pedido apto','amber');return;}
-  var qi=0; pids.forEach(function(id){ ecomItensDo(id).forEach(function(it){qi+=ecomN(it.qtd);}); });
+  _ecomGerandoOS=true;
+  var btn=ge('ecom-btn-gerar-os'); if(btn){ btn.disabled=true; btn.textContent='Gerando OS\u2026'; }
+  var chunks=function(a){ var r=[]; for(var c=0;c<a.length;c+=100) r.push(a.slice(c,c+100)); return r; };
   try{
-    var os=await dbInsert('ecom_ordens_sep',{company_id:cid,tipo:ecomSepTipo,status:'separando',operador:ecomOper(),qtd_pedidos:pids.length,qtd_itens:qi});
-    for(var i=0;i<pids.length;i++){
-      await dbInsert('ecom_os_pedidos',{company_id:cid,os_id:os.id,pedido_id:pids[i]});
-      await dbUpdate('ecom_pedidos',pids[i],{status:'separando',os_id:os.id});
+    // 1) relê no banco: outra tela/pessoa pode ter gerado OS com esses pedidos
+    var livres=new Set();
+    for(var ch of chunks(pids)){
+      var at=await dbSelect('ecom_pedidos','id=in.('+ch.join(',')+')&select=id,status&order=id.asc');
+      (at||[]).forEach(function(x){ if(x.status==='importado') livres.add(x.id); });
     }
+    var jaEmOS=pids.filter(function(id){return !livres.has(id);});
+    pids=pids.filter(function(id){return livres.has(id);});
+    if(!pids.length){
+      showToast('Esses pedidos j\u00e1 est\u00e3o em outra OS (gerada por outra tela ou pessoa). Nada foi gerado.','amber');
+      ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody(); return;
+    }
+    var somaUn=function(ids){ var q=0; ids.forEach(function(id){ ecomItensDo(id).forEach(function(it){ q+=ecomN(it.qtd); }); }); return q; };
+    var os=await dbInsert('ecom_ordens_sep',{company_id:cid,tipo:tipoOS,status:'separando',operador:ecomOper(),qtd_pedidos:pids.length,qtd_itens:somaUn(pids)});
+    // 2) reserva atômica: só muda (e entra na OS) quem ainda está "importado"
+    var ganhos=[];
+    for(var ch2 of chunks(pids)){
+      var rr=await sbFetch('PATCH','/rest/v1/ecom_pedidos?id=in.('+ch2.join(',')+')&status=eq.importado',{status:'separando',os_id:os.id},tok);
+      if(!rr.ok) throw new Error('pedidos: '+((rr.data&&rr.data.message)||rr.status));
+      (rr.data||[]).forEach(function(x){ ganhos.push(x.id); });
+    }
+    if(!ganhos.length){
+      await dbDelete('ecom_ordens_sep',os.id);
+      showToast('Outra OS pegou esses pedidos segundos antes. Nada foi gerado.','amber');
+      ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody(); return;
+    }
+    // 3) vínculos da OS numa gravação só
+    var ins=await sbFetch('POST','/rest/v1/ecom_os_pedidos',ganhos.map(function(id){return {company_id:cid,os_id:os.id,pedido_id:id};}),tok);
+    if(!ins.ok) throw new Error('v\u00ednculos da OS: '+((ins.data&&ins.data.message)||ins.status));
+    var perdeu=pids.length-ganhos.length;
+    if(perdeu) await dbUpdate('ecom_ordens_sep',os.id,{qtd_pedidos:ganhos.length,qtd_itens:somaUn(ganhos)});
     ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody();
-    showToast('OS-'+String(os.numero||0).padStart(4,'0')+' gerada','green');
+    var fora=jaEmOS.length+perdeu;
+    showToast('OS-'+String(os.numero||0).padStart(4,'0')+' gerada com '+ganhos.length+' pedido(s)'+(fora?' \u00b7 '+fora+' j\u00e1 estavam em outra OS e ficaram de fora':''),fora?'amber':'green');
   }catch(e){ showToast('Erro ao gerar OS: '+(e.message||e),'red'); }
+  finally{ _ecomGerandoOS=false; var b2=ge('ecom-btn-gerar-os'); if(b2){ b2.disabled=false; b2.textContent='Gerar ordem de separa\u00e7\u00e3o'; } }
+}
+// v1.0.1034: imprimir qualquer OS nos dois formatos (evita gerar outra OS só para ver a lista consolidada)
+function ecomOsPrintEscolher(osId){
+  var os=(ecomOrdensSep||[]).find(function(o){return o.id===osId;}); if(!os) return;
+  var old=ge('modal-os-fmt'); if(old) old.remove();
+  var n='OS-'+String(os.numero||0).padStart(4,'0');
+  var bt=function(t,tit,sub){ return '<button class="btn" style="flex:1;text-align:left;padding:10px 12px;'+(os.tipo===t?'border:2px solid var(--accent)':'')+'" onclick="ge(\'modal-os-fmt\').remove();ecomOsPrint(\''+osId+'\',\''+t+'\')"><b>'+tit+'</b><div style="font-size:11px;color:var(--text3);margin-top:2px">'+sub+'</div></button>'; };
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-os-fmt" style="z-index:400" onclick="if(event.target===this)this.remove()"><div class="modal" style="width:440px;max-width:95vw;padding:18px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Imprimir '+n+'</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:12px">O formato muda s\u00f3 a impress\u00e3o: a OS \u00e9 a mesma, com os mesmos pedidos.</div>'
+    +'<div style="display:flex;gap:8px">'+bt('pedido','Por pedido','uma lista por pedido')+bt('sku','Consolidado SKU','soma o total por SKU')+'</div>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" onclick="ge(\'modal-os-fmt\').remove()">Cancelar</button></div></div></div>');
+}
+// v1.0.1034: pedido que está em mais de uma OS (não cancelada)
+function ecomOsDuplicados(){
+  var vivas={}; (ecomOrdensSep||[]).forEach(function(o){ if(o.status!=='cancelada') vivas[o.id]=o; });
+  var porPed={};
+  (ecomOsPedidos||[]).forEach(function(l){ if(!vivas[l.os_id]) return; (porPed[l.pedido_id]=porPed[l.pedido_id]||[]).push(l.os_id); });
+  var porOs={};
+  Object.keys(porPed).forEach(function(pid){ var oss=porPed[pid]; if(oss.length<2) return;
+    oss.forEach(function(oid){ var d=porOs[oid]||(porOs[oid]={n:0,outras:{}}); d.n++; oss.forEach(function(x){ if(x!==oid) d.outras[x]=1; }); }); });
+  return {porOs:porOs, vivas:vivas};
 }
 function ecomOsItens(osId){
   var os=ecomOrdensSep.find(function(o){return o.id===osId;}); if(!os)return{os:null,linhas:[]};
@@ -49378,12 +49441,13 @@ function ecomOsSemEndereco(osId){
   });
   return Object.keys(m);
 }
-function ecomOsPrint(osId){
+function ecomOsPrint(osId,fmt){
   var os=ecomOrdensSep.find(function(o){return o.id===osId;}); if(!os)return;
+  var _tipo=fmt||os.tipo;   // v1.0.1034: formato de impressão escolhido (a OS continua a mesma)
   var pids=ecomOsPedidos.filter(function(l){return l.os_id===osId;}).map(function(l){return l.pedido_id;});
   var peds=pids.map(function(id){return ecomPedidos.find(function(p){return p.id===id;});}).filter(Boolean);
   var sheets=[];
-  if(os.tipo==='sku'){
+  if(_tipo==='sku'){
     var multi=peds.filter(function(p){return ecomPedDistinctSkus(p.id)>1;});
     var single=peds.filter(function(p){return ecomPedDistinctSkus(p.id)<=1;});
     var agg={}, ordk=[];
