@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1036 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1037 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -461,6 +461,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <button class="navitem sub" id="nav-plano-contas" onclick="pg('plano-contas')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v4H3z"/><path d="M3 10h11v4H3z"/><path d="M3 17h7v4H3z"/></svg>
           <span>Plano de Contas DFC</span>
+        </button>
+        <button class="navitem sub" id="nav-centros-custo" onclick="pg('centros-custo')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 3"/></svg>
+          <span>Centros de custo</span>
         </button>
       </div>
     </div>
@@ -1166,6 +1170,7 @@ const TELAS=[
   {id:'pessoas',               label:'Cadastros · Pessoas',                     modulo:'Cadastros'},
   {id:'veiculos',              label:'Cadastros · Veículos',                    modulo:'Cadastros'},
   {id:'plano-contas',          label:'Cadastros · Plano de Contas DFC',         modulo:'Cadastros'},
+  {id:'centros-custo',         label:'Cadastros · Centros de custo',            modulo:'Cadastros'},
   // CRM
   {id:'crm-dashboard',         label:'CRM · Dashboard',                         modulo:'CRM'},
   {id:'contatos',              label:'CRM · Contatos',                          modulo:'CRM'},
@@ -1302,8 +1307,8 @@ function permModuloTodos(el,mod,forte){
 const ROLE_PRESETS={
   admin:null, // vê tudo, não usa tabela permissoes
   // Controladoria: enxerga o resultado e os dados que o alimentam, sem operar o dia a dia.
-  controladoria:['controladoria','fat-relatorios','financeiro-dashboard','contas-receber','contas-pagar','faturamento','fin-relatorios','plano-contas'],
-  adm:['financeiro-dashboard','faturamento','fat-programacao','tabelas-tarifarias','contas-receber','contas-pagar','fin-relatorios','clientes','fornecedores','veiculos','plano-contas'],
+  controladoria:['controladoria','fat-relatorios','financeiro-dashboard','contas-receber','contas-pagar','faturamento','fin-relatorios','plano-contas','centros-custo'],
+  adm:['financeiro-dashboard','faturamento','fat-programacao','tabelas-tarifarias','contas-receber','contas-pagar','fin-relatorios','clientes','fornecedores','veiculos','plano-contas','centros-custo'],
   rh:['rh-pessoas','rh-funcoes','rh-horarios','rh-ferias','rh-experiencia','rh-avaliacoes','rh-performance','rh-organograma','rh-pendencias','rh-relatorios','clientes','fornecedores','veiculos'],
   compras:['compras-solicitacoes','compras-cotacoes','compras-aprovacoes','compras-pedidos','clientes','fornecedores','veiculos'],
   portaria:['portaria-painel','portaria-entradas','portaria-autorizacoes','portaria-liberacoes'],
@@ -1325,7 +1330,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1036';
+const APP_VERSION='v1.0.1037';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1915,7 +1920,7 @@ async function loadPermissoes(){
 
   // Mapa completo módulo → telas da sidebar
   const modulos={
-    cadastros:['clientes','fornecedores','veiculos','pessoas','plano-contas'],
+    cadastros:['clientes','fornecedores','veiculos','pessoas','plano-contas','centros-custo'],
     gestao:['tarefas-gestao','atas','plano-acao'],
     financeiro:['financeiro-dashboard','faturamento','fat-programacao','tabelas-tarifarias','contas-receber','contas-pagar','fin-relatorios'],
     controladoria:['controladoria','fat-relatorios'],
@@ -1968,6 +1973,123 @@ async function loadPermissoes(){
   var _hdNav=ge('nav-helpdesk');
   if(_hdNav){var _hdM=_hdNav.closest('.nav-module'); if(_hdM)_hdM.style.display=(minhasPermissoes['helpdesk']&&minhasPermissoes['helpdesk'].pode_ver)?'':'none';}
 
+}
+
+// ══════════════ CENTROS DE CUSTO (v1.0.1037) ══════════════
+// 4 por unidade (ADM, Operação, Manutenção, Acionistas). Usados nas linhas do corpo dos títulos do
+// Contas a Pagar (fase 2). Sem exclusão: desativar tira das listas de lançamento, o histórico fica.
+var centrosCusto=[], _ccLoaded=false;
+var CC_PADRAO=[['ADM','ADM'],['Operação','OPE'],['Manutenção','MAN'],['Acionistas','ACI']];
+function ccPodeEditar(){ return podeFazer('centros-custo','pode_editar',['admin','adm']); }
+async function ccCarregar(){
+  try{ centrosCusto=await dbSelectAll('centros_custo','company_id=eq.'+company.id+'&order=nome.asc')||[]; _ccLoaded=true; }
+  catch(e){ centrosCusto=[]; }
+  return centrosCusto;
+}
+function ccPrefixo(u){
+  var n=String((u&&(u.name||u.nome))||'');
+  if(/\bitu\b/i.test(n)) return 'ITU';
+  if(/salto/i.test(n)) return 'SAL';
+  var s=n.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+  return (s.slice(0,3)||'UNI');
+}
+function ccDaUnidade(unitId,soAtivos){ return (centrosCusto||[]).filter(function(c){ return c.unit_id===unitId&&(!soAtivos||c.ativo!==false); }); }
+function rCentrosCusto(){ setTimeout(ccInit,0); return '<div id="cc-body">'+(typeof ecomSpinner==='function'?ecomSpinner():'Carregando\u2026')+'</div>'; }
+async function ccInit(){ await ccCarregar(); ccRender(); }
+function ccRender(){
+  var box=ge('cc-body'); if(!box) return;
+  var pode=ccPodeEditar();
+  var unidades=(userUnits||[]).filter(function(u){ return u.active!==false; });
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">'
+    +'<div><div style="font-size:17px;font-weight:700">Centros de custo</div><div style="font-size:12.5px;color:var(--text3)">Usados nas linhas dos t\u00edtulos do Contas a Pagar. Cada centro pertence a uma unidade.</div></div>'
+    +(pode?'<button class="btn btn-p" onclick="ccModal(null)">+ Novo centro</button>':'')+'</div>';
+  if(!unidades.length) h+='<div class="empty"><p>Nenhuma unidade cadastrada.</p></div>';
+  unidades.forEach(function(u){
+    var lista=ccDaUnidade(u.id,false).sort(function(a,b){ return String(a.codigo||'').localeCompare(String(b.codigo||'')); });
+    h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 14px;background:var(--bg2);font-size:13px"><b>'+ecomEsc(u.name||u.nome||'Unidade')+'</b>'
+      +'<span style="font-size:12px;color:var(--text3)">'+lista.filter(function(c){return c.ativo!==false;}).length+' ativo(s)</span></div>';
+    if(!lista.length){
+      h+='<div style="padding:14px;font-size:12.5px;color:var(--text3);display:flex;align-items:center;gap:10px;flex-wrap:wrap">Nenhum centro nesta unidade.'
+        +(pode?'<button class="btn btn-sm" onclick="ccCriarPadrao(\''+u.id+'\')">Criar os 4 padr\u00e3o (ADM, Opera\u00e7\u00e3o, Manuten\u00e7\u00e3o, Acionistas)</button>':'')+'</div>';
+    }
+    lista.forEach(function(c){
+      var at=c.ativo!==false;
+      h+='<div style="display:grid;grid-template-columns:100px 1fr 90px 170px;gap:8px;align-items:center;padding:8px 14px;border-top:1px solid var(--border);font-size:13px'+(at?'':';opacity:.55')+'">'
+        +'<span style="font-family:monospace;font-size:12px;color:var(--text2)">'+ecomEsc(c.codigo||'')+'</span>'
+        +'<span>'+ecomEsc(c.nome||'')+'</span>'
+        +'<span><span style="font-size:10.5px;padding:2px 8px;border-radius:99px;'+(at?'background:var(--green-bg);color:var(--green-text)':'background:var(--bg3);color:var(--text3)')+'">'+(at?'ativo':'inativo')+'</span></span>'
+        +'<span style="text-align:right">'+(pode?'<button class="btn btn-sm" title="Editar" onclick="ccModal(\''+c.id+'\')">\u270e</button> <button class="btn btn-sm" onclick="ccAtivar(\''+c.id+'\','+(!at)+')">'+(at?'Desativar':'Ativar')+'</button>':'')+'</span></div>';
+    });
+    h+='</div>';
+  });
+  h+='<div style="font-size:11.5px;color:var(--text3)">Centro desativado n\u00e3o aparece para novos lan\u00e7amentos, mas continua nos t\u00edtulos e relat\u00f3rios antigos. N\u00e3o h\u00e1 exclus\u00e3o, para n\u00e3o perder o hist\u00f3rico.</div>';
+  box.innerHTML=h;
+}
+function ccModal(id){
+  if(!ccPodeEditar()) return;
+  var c=id?(centrosCusto||[]).find(function(x){return x.id===id;}):null;
+  var unidades=(userUnits||[]).filter(function(u){ return u.active!==false||(c&&u.id===c.unit_id); });
+  var uSel=c?c.unit_id:(activeUnit||((unidades[0]||{}).id||''));
+  var old=ge('modal-cc'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-cc" style="z-index:300"><div class="modal" style="width:440px;max-width:95vw;padding:18px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:12px">'+(c?'Editar centro de custo':'Novo centro de custo')+'</div>'
+    +'<div class="fg"><label class="fl">Unidade *</label><select class="fi" id="cc-unit" onchange="ccSugerirCodigo()">'+unidades.map(function(u){ return '<option value="'+u.id+'"'+(u.id===uSel?' selected':'')+'>'+ecomEsc(u.name||u.nome||'')+'</option>'; }).join('')+'</select></div>'
+    +'<div class="fg"><label class="fl">Nome *</label><input class="fi" id="cc-nome" value="'+ecomEsc(c?c.nome:'')+'" oninput="ccSugerirCodigo()" placeholder="ex.: Opera\u00e7\u00e3o"></div>'
+    +'<div class="fg"><label class="fl">C\u00f3digo *</label><input class="fi" id="cc-cod" value="'+ecomEsc(c?c.codigo:'')+'" data-manual="'+(c?'1':'')+'" oninput="this.setAttribute(\'data-manual\',\'1\')" placeholder="ex.: SAL-OPE" style="text-transform:uppercase"></div>'
+    +'<div id="cc-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px"></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'modal-cc\').remove()">Cancelar</button><button class="btn btn-p" id="cc-ok" onclick="ccSalvar('+(c?'\''+c.id+'\'':'null')+')">Salvar</button></div></div></div>');
+  if(!c) ccSugerirCodigo();
+}
+function ccSugerirCodigo(){
+  var cod=ge('cc-cod'); if(!cod||cod.getAttribute('data-manual')==='1') return;
+  var u=(userUnits||[]).find(function(x){return x.id===(ge('cc-unit')||{}).value;});
+  var n=String((ge('cc-nome')||{}).value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,3);
+  cod.value=ccPrefixo(u)+(n?'-'+n:'');
+}
+async function ccSalvar(id){
+  var err=ge('cc-err'), falha=function(m){ if(err){ err.style.display='block'; err.textContent=m; } };
+  var unit=(ge('cc-unit')||{}).value, nome=String((ge('cc-nome')||{}).value||'').trim(), cod=String((ge('cc-cod')||{}).value||'').trim().toUpperCase();
+  if(!unit) return falha('Escolha a unidade.');
+  if(!nome) return falha('Informe o nome.');
+  if(!cod) return falha('Informe o c\u00f3digo.');
+  if((centrosCusto||[]).some(function(c){ return c.id!==id&&String(c.codigo||'').toUpperCase()===cod; })) return falha('J\u00e1 existe um centro com o c\u00f3digo '+cod+'.');
+  if((centrosCusto||[]).some(function(c){ return c.id!==id&&c.unit_id===unit&&String(c.nome||'').trim().toLowerCase()===nome.toLowerCase(); })) return falha('Esta unidade j\u00e1 tem um centro com esse nome.');
+  var b=ge('cc-ok'); if(b){ b.disabled=true; b.textContent='Salvando\u2026'; }
+  try{
+    var dados={unit_id:unit,nome:nome,codigo:cod};
+    if(id) await dbUpdate('centros_custo',id,dados);
+    else await dbInsert('centros_custo',Object.assign({company_id:company.id,ativo:true},dados));
+    var m=ge('modal-cc'); if(m) m.remove();
+    await ccCarregar(); ccRender(); showToast('Centro de custo salvo.','green');
+  }catch(e){ falha('Erro: '+(e.message||e)); if(b){ b.disabled=false; b.textContent='Salvar'; } }
+}
+async function ccAtivar(id,ativo){
+  if(!ccPodeEditar()) return;
+  var c=(centrosCusto||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!ativo&&!confirm('Desativar o centro '+(c.codigo||'')+' \u00b7 '+(c.nome||'')+'?\n\nEle deixa de aparecer em novos lan\u00e7amentos, mas continua nos t\u00edtulos e relat\u00f3rios antigos.')) return;
+  try{ await dbUpdate('centros_custo',id,{ativo:!!ativo}); await ccCarregar(); ccRender(); }
+  catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function ccCriarPadrao(unitId){
+  if(!ccPodeEditar()) return;
+  var u=(userUnits||[]).find(function(x){return x.id===unitId;});
+  var _nomes=ccDaUnidade(unitId,false).map(function(c){return String(c.nome||'').toLowerCase();});
+  if(CC_PADRAO.every(function(p){ return _nomes.indexOf(p[0].toLowerCase())>=0; })){ showToast('Esta unidade j\u00e1 tem os centros padr\u00e3o.','amber'); return; }
+  // o nome da unidade nem sempre diz a cidade (ex.: a matriz com a razão social): confirma o prefixo
+  var pre=prompt('Prefixo dos c\u00f3digos para '+((u&&(u.name||u.nome))||'a unidade')+' (ex.: SAL, ITU):',ccPrefixo(u));
+  if(pre===null) return;
+  pre=String(pre).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,6)||ccPrefixo(u);
+  var jaTem=ccDaUnidade(unitId,false).map(function(c){return String(c.nome||'').toLowerCase();});
+  var novos=CC_PADRAO.filter(function(p){ return jaTem.indexOf(p[0].toLowerCase())<0; })
+    .map(function(p){ return {company_id:company.id,unit_id:unitId,nome:p[0],codigo:pre+'-'+p[1],ativo:true}; })
+    .filter(function(n){ return !(centrosCusto||[]).some(function(c){ return String(c.codigo||'').toUpperCase()===n.codigo; }); });
+  if(!novos.length){ showToast('Esta unidade j\u00e1 tem os centros padr\u00e3o.','amber'); return; }
+  try{
+    var r=await sbFetch('POST','/rest/v1/centros_custo',novos,tok);
+    if(!r.ok) throw new Error((r.data&&r.data.message)||('HTTP '+r.status));
+    await ccCarregar(); ccRender(); showToast(novos.length+' centro(s) criado(s) em '+(u?(u.name||u.nome):'')+'.','green');
+  }catch(e){ showToast('Erro ao criar: '+(e.message||e),'red'); }
 }
 
 function canDo(tela, acao){
@@ -2237,7 +2359,7 @@ const MODULE_MAP={
     'wms-separacao':'wms', 'wms-conferencia':'wms', 'wms-romaneio':'wms', 'wms-expedicao':'wms',
   admin:'admin-sub', 'admin-sessoes':'admin-sub', 'admin-assistente':'hermes', 'admin-hermes':'hermes',
   'tabelas-tarifarias':'financeiro', 'fin-relatorios':'financeiro',
-  'portaria-painel':'portaria','portaria-entradas':'portaria','portaria-autorizacoes':'portaria','portaria-liberacoes':'portaria','veiculos':'cadastros','plano-contas':'cadastros',
+  'portaria-painel':'portaria','portaria-entradas':'portaria','portaria-autorizacoes':'portaria','portaria-liberacoes':'portaria','veiculos':'cadastros','plano-contas':'cadastros','centros-custo':'cadastros',
   'ecom-torre':'ecom','ecom-pedidos':'ecom','ecom-produtos':'ecom','ecom-checkout':'ecom','ecom-romaneio':'ecom','ecom-relatorios':'ecom','ecom-integracoes':'ecom',
 };
 
@@ -2377,7 +2499,7 @@ function pg(p){
     'admin-hermes':'Hermes · Mapa de perguntas',
     'qual-documentos':'Qualidade · Controle de Documentos',
     'qual-aprovacoes':'Qualidade · Aprovações',
-    'portaria-painel':'Portaria · Painel', 'portaria-entradas':'Portaria · Entrada / Saída', 'portaria-autorizacoes':'Portaria · Autorizações', 'portaria-liberacoes':'Portaria · Liberações', 'veiculos':'Cadastros · Veículos', 'plano-contas':'Cadastros · Plano de Contas DFC',
+    'portaria-painel':'Portaria · Painel', 'portaria-entradas':'Portaria · Entrada / Saída', 'portaria-autorizacoes':'Portaria · Autorizações', 'portaria-liberacoes':'Portaria · Liberações', 'veiculos':'Cadastros · Veículos', 'plano-contas':'Cadastros · Plano de Contas DFC','centros-custo':'Cadastros · Centros de custo',
     'ecom-torre':'E-commerce · Torre de Controle','ecom-pedidos':'E-commerce · Pedidos','ecom-produtos':'E-commerce · Produtos','ecom-checkout':'E-commerce · Check-out','ecom-romaneio':'E-commerce · Carregamento','ecom-relatorios':'E-commerce · Relatórios','ecom-integracoes':'E-commerce · Integrações'
   };
   const dt=ge('dtitle');if(dt){var _lbl=titles[p]||((typeof TELAS!=='undefined'&&(TELAS.find(function(t){return t.id===p;})||{}).label))||p;dt.textContent=String(_lbl).split('\u00b7').pop().trim();}
@@ -2517,6 +2639,7 @@ function render(){
   else if(curPage==='portaria-liberacoes')c.innerHTML=rPortariaLiberacoes();
   else if(curPage==='veiculos')c.innerHTML=rCadastrosVeiculos();
   else if(curPage==='plano-contas'){c.innerHTML=rPlanoContasDFC();initPlanoContasDFC();}
+  else if(curPage==='centros-custo'){c.innerHTML=rCentrosCusto();}
   else if(curPage==='ecom-pedidos'){c.innerHTML=rEcomPedidos();ecomInitPedidos();}
   else if(curPage==='ecom-produtos'){c.innerHTML=rEcomProdutos();ecomInitProdutos();}
   else if(curPage==='ecom-checkout'){c.innerHTML=rEcomCheckout();ecomInitCheckout();}
