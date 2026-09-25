@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1044 | Gerado: 2026-09-25 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1045 | Gerado: 2026-09-25 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1362,7 +1362,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1044';
+const APP_VERSION='v1.0.1045';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -40607,6 +40607,8 @@ function wmsConfBipe(codigo){
   if(idx<0){
     wmsBeep(true); if(navigator.vibrate)navigator.vibrate([80,50,80,50,80]);
     var _num=(_ped&&(_ped.numero_pedido||_ped.numero))||'';
+    var _ign=usaEtiq?'':wmsEtiqIgnoradaMsg(itens,raw);
+    if(_ign){ showToast('\u26a0 Etiqueta reconhecida, mas o depositante confere s\u00f3 pelo SKU','amber'); wmsConfErroShow('\u26a0 Etiqueta reconhecida \u2014 confer\u00eancia s\u00f3 por SKU',_ign,raw,_num,true); return; }
     var _achou=wmsAchaNoCatalogo(raw,cod,(_ped&&_ped.cliente_id)||null);
     var _tit='', _det='', _amber=false, _toast='';
     if(_achou){
@@ -40908,6 +40910,14 @@ function wmsPalletQtdInput(sku,val,saldoMax){
   if(v>saldoMax){v=saldoMax;showToast('Limitado ao saldo: '+saldoMax,'amber');}
   if(v>0)wmsPalletAtual[sku]=v;else delete wmsPalletAtual[sku];
 }
+// v1.0.1045: o código bate com a etiqueta de um produto do pedido, mas o depositante confere só pelo SKU
+function wmsEtiqIgnoradaMsg(itens,raw){
+  for(var i=0;i<(itens||[]).length;i++){
+    var pr=wmsProdutos.find(function(x){return x.id===itens[i].produto_id;});
+    if(pr&&wmsEtiquetaTipoCasa(raw,pr)) return 'Etiqueta do '+(pr.sku||itens[i].sku)+' reconhecida, mas este depositante confere s\u00f3 pelo SKU. Ligue "Utiliza etiqueta do cliente" em Configurar \u2192 depositante \u2192 Sa\u00edda, ou bipe o SKU.';
+  }
+  return '';
+}
 function wmsPalletBipe(codigo){
   const saldo=window._wmsPalletSaldo||[];
   const sugestao=window._wmsPalletSugestao||'codigo_qtd';
@@ -40928,7 +40938,7 @@ function wmsPalletBipe(codigo){
     if(wmsNorm(s.sku)===cod){tipoCasa='sku';return true;}
     return false;
   });
-  if(!item){showToast('⛔ Código não pertence ao saldo deste pedido: '+cod,'red');return;}
+  if(!item){ var _ign=usaEtiq?'':wmsEtiqIgnoradaMsg(saldo,raw); if(_ign){ showToast('\u26a0 '+_ign,'amber'); return; } showToast('⛔ Código não pertence ao saldo deste pedido: '+cod,'red');return;}
   // pallet cheio lança o múltiplo (respeitando o saldo); caixa/SKU lança a qtd informada/1
   let qtd;
   if(tipoCasa==='pallet'){
@@ -52663,6 +52673,8 @@ async function ecomEtiqImportFile(input){
   var f=input.files&&input.files[0]; if(!f)return; input.value='';
   var cid=ecomCid();
   if(!ecomPedidosDoLojista().length){ showToast('Importe os pedidos antes das etiquetas','amber'); return; }
+  // v1.0.1045: recarrega as notas antes de casar — XML importado na mesma sessão (sem recarregar a página) não era visto
+  try{ ecomNfes=await dbSelectAll('ecom_nfe','company_id=eq.'+cid+'&select=id,chave,numero,order_id,pedido_id')||ecomNfes; }catch(_rn){}
   // etiqueta por PDF permanece liberada (backup da integração)
   var _trkFix=0, _trkVazio=0;
   try{
