@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1042 | Gerado: 2026-09-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1044 | Gerado: 2026-09-25 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1277,7 +1277,7 @@ const TELAS=[
   {id:'wms-romaneios-entrada',  label:'WMS · Romaneios de Entrada',              modulo:'WMS'},
   {id:'wms-pedidos',           label:'WMS · Pedidos',                           modulo:'WMS'},
   {id:'wms-importar-pedidos',  label:'WMS · Importar Pedidos',                  modulo:'WMS'},
-  {id:'wms-separacao',         label:'WMS · Separação',                         modulo:'WMS'},
+  {id:'wms-separacao',         label:'WMS · Separação (editar = concluir · excluir = excluir listas)', modulo:'WMS'},
   {id:'wms-conferencia',       label:'WMS · Conferência',                       modulo:'WMS'},
   {id:'wms-romaneio',          label:'WMS · Romaneio de Carga',                 modulo:'WMS'},
   {id:'wms-expedicao',         label:'WMS · Expedição / Embarque',              modulo:'WMS'},
@@ -1296,7 +1296,7 @@ const TELAS=[
   // E-commerce (ecom_*)
   {id:'ecom-torre',            label:'E-commerce · Torre de Controle',          modulo:'E-commerce'},
   {id:'ecom-relatorios',       label:'E-commerce · Relatórios',                 modulo:'E-commerce'},
-  {id:'ecom-pedidos',          label:'E-commerce · Pedidos',                    modulo:'E-commerce'},
+  {id:'ecom-pedidos',          label:'E-commerce · Pedidos (excluir = excluir pedido, limpar base e cancelar OS)', modulo:'E-commerce'},
   {id:'ecom-produtos',         label:'E-commerce · Produtos',                   modulo:'E-commerce'},
   {id:'ecom-checkout',         label:'E-commerce · Check-out',                  modulo:'E-commerce'},
   {id:'ecom-checkout-super',   label:'Check-out · Funções restritas',           modulo:'E-commerce'},
@@ -1362,7 +1362,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1042';
+const APP_VERSION='v1.0.1044';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -7918,7 +7918,9 @@ function rFaturamento(){
       default:       return faturamento;
     }
   })();
-  const rows=_lista.map((f,i)=>fatRowHTML(f,i)).join('');
+  window._fatLista=_lista;   // v1.0.1044: busca e período aplicam sobre o filtro dos cards
+  const _compsOpts=Array.from(new Set(faturamento.map(fatCompISO).filter(Boolean))).sort().reverse();
+  const rows=fatAplicarBusca(_lista).map((f,i)=>fatRowHTML(f,i)).join('');
 
   return`
   ${(function(){
@@ -7946,8 +7948,13 @@ function rFaturamento(){
       <button class="btn btn-sm btn-p" style="margin-left:auto" onclick="fatCardFiltro('')">Ver todas as ${faturamento.length}</button></div>`:''}
   <div class="sechdr">
     <div class="swrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input placeholder="Buscar cliente, fatura..." oninput="filterFaturamento(this.value)">
+      <input id="fat-busca-q" placeholder="Buscar cliente, nº da fatura ou valor..." value="${String(window._fatBusca||'').replace(/"/g,'&quot;')}" oninput="filterFaturamento(this.value)">
     </div>
+    <span style="font-size:12px;color:var(--text3);white-space:nowrap">Competência</span>
+    <select class="fi" id="fat-comp-de" style="width:auto;height:34px" onchange="fatSetComp('de',this.value)"><option value="">de…</option>${_compsOpts.map(c=>`<option value="${c}" ${window._fatCompDe===c?'selected':''}>${c.slice(5,7)}/${c.slice(0,4)}</option>`).join('')}</select>
+    <select class="fi" id="fat-comp-ate" style="width:auto;height:34px" onchange="fatSetComp('ate',this.value)"><option value="">até…</option>${_compsOpts.map(c=>`<option value="${c}" ${window._fatCompAte===c?'selected':''}>${c.slice(5,7)}/${c.slice(0,4)}</option>`).join('')}</select>
+    <button class="btn btn-sm" id="fat-busca-limpar" onclick="fatLimparBusca()" style="color:var(--red-text);${(window._fatBusca||window._fatCompDe||window._fatCompAte)?'':'display:none'}">✕ Limpar</button>
+    <span id="fat-busca-cont" style="font-size:12px;color:var(--text3);white-space:nowrap"></span>
     <button class="btn btn-p btn-sm" onclick="openFaturaEditor()">+ Nova fatura</button>
   </div>
   <div id="fat-list">
@@ -7959,16 +7966,32 @@ function fatCardFiltro(k){
   window._fatFiltro=(window._fatFiltro===k)?'':k;
   var c=ge('content'); if(c) c.innerHTML=rFaturamento();
 }
-function filterFaturamento(q){
-  const f=faturamento.filter(f=>{
-    const cli=clientes.find(c=>c.id===f.cliente_id);
-    return(cli?.nome||f.cliente_nome||'').toLowerCase().includes(q.toLowerCase())||
-      (f.numero_fatura||'').toLowerCase().includes(q.toLowerCase());
+// v1.0.1044: busca das faturas também por valor + período por competência (de/até), junto com os cards de filtro
+function fatCompISO(f){ var c=fatCompetencia(f); return c?c.slice(3)+'-'+c.slice(0,2):''; }
+function fatAplicarBusca(lista){
+  var q=String(window._fatBusca||'').trim().toLowerCase(), de=window._fatCompDe||'', ate=window._fatCompAte||'';
+  var soNum=/^[\d\s.,r$]+$/i.test(q), dig=q.replace(/\D/g,'');
+  return (lista||[]).filter(function(f){
+    if(de||ate){ var c=fatCompISO(f); if(!c) return false; if(de&&c<de) return false; if(ate&&c>ate) return false; }
+    if(!q) return true;
+    var cli=(clientes||[]).find(function(c){return c.id===f.cliente_id;});
+    if(String((cli&&cli.nome)||f.cliente_nome||'').toLowerCase().indexOf(q)>=0) return true;
+    if(String(f.numero_fatura||'').toLowerCase().indexOf(q)>=0) return true;
+    if(soNum&&dig.length>=3){
+      return [f.total,f.valor_bruto,f.subtotal].some(function(v){ return v!=null&&String(Math.round(Number(v)*100)).indexOf(dig)>=0; });
+    }
+    return false;
   });
-  const el=ge('fat-list');if(!el)return;
-  if(!f.length){el.innerHTML='<div class="empty"><p>Nenhum resultado</p></div>';return;}
-  el.innerHTML=f.map((f,i)=>fatRowHTML(f,i)).join('');
 }
+function fatBuscaRender(){
+  var base=window._fatLista||faturamento, f=fatAplicarBusca(base);
+  var el=ge('fat-list'); if(el) el.innerHTML=f.length?f.map(function(x,i){return fatRowHTML(x,i);}).join(''):'<div class="empty"><p>Nenhum resultado</p></div>';
+  var c=ge('fat-busca-cont'); if(c) c.textContent=(window._fatBusca||window._fatCompDe||window._fatCompAte)?(f.length+' de '+base.length+' faturas'):'';
+  var lb=ge('fat-busca-limpar'); if(lb) lb.style.display=(window._fatBusca||window._fatCompDe||window._fatCompAte)?'':'none';
+}
+function fatSetComp(k,v){ if(k==='de') window._fatCompDe=v||''; else window._fatCompAte=v||''; fatBuscaRender(); }
+function fatLimparBusca(){ window._fatBusca=''; window._fatCompDe=''; window._fatCompAte=''; var i=ge('fat-busca-q'); if(i) i.value=''; ['fat-comp-de','fat-comp-ate'].forEach(function(id){ var s=ge(id); if(s) s.value=''; }); fatBuscaRender(); }
+function filterFaturamento(q){ window._fatBusca=q||''; fatBuscaRender(); }
 
 // Editor de fatura em overlay
 let faturaEditando=null;
@@ -11614,7 +11637,7 @@ async function iniciarSessao(){
     try{
       // Remover sessões antigas (last_seen > 5 minutos)
       const antigas = await dbSelect('user_sessions',
-        'user_id=eq.'+cu.id+'&last_seen=lt.'+new Date(Date.now()-300000).toISOString()
+        'user_id=eq.'+cu.id+'&last_seen=lt.'+new Date(Date.now()-SESSAO_EXPIRA_MS).toISOString()
       );
       if(antigas&&antigas.length){
         await Promise.all(antigas.map(function(s){ return dbDelete('user_sessions', s.id); }));
@@ -11636,24 +11659,26 @@ async function iniciarSessao(){
     }catch(e){ console.warn('iniciarSessao:', e); }
   }
 
-  // Heartbeat a cada 60s (reduz ~50% das escritas de last_seen em user_sessions)
+  // v1.0.1043: heartbeat a cada 3 min, só com a aba visível, e UMA chamada (antes: leitura + gravação a cada 60 s).
+  // O "derrubado pelo administrador" chega na hora pelo Realtime; a leitura de conferência roda a cada 5 batidas (~15 min).
   if(_heartbeatTimer) clearInterval(_heartbeatTimer); // evita timers empilhados = escritas duplicadas
+  var _hbN=0;
   _heartbeatTimer = setInterval(async function(){
     try{
-      // Verificar se foi derrubado
-      const rows = await dbSelect('user_sessions', 'session_token=eq.'+_sessionToken);
-      if(rows&&rows[0]&&rows[0].force_logout){
-        await encerrarSessao();
-        alert('Sua sessão foi encerrada pelo administrador.');
-        window.location.reload();
-        return;
+      if(document.hidden) return;                 // aba em segundo plano não conta como uso
+      _hbN++;
+      if(_hbN%5===0){
+        const rows = await dbSelect('user_sessions', 'session_token=eq.'+_sessionToken+'&select=id,force_logout');
+        if(rows&&rows[0]&&rows[0].force_logout){
+          await encerrarSessao();
+          alert('Sua sessão foi encerrada pelo administrador.');
+          window.location.reload();
+          return;
+        }
       }
-      // Atualizar last_seen
-      if(rows&&rows[0]){
-        await dbUpdate('user_sessions', rows[0].id, {last_seen: new Date().toISOString()});
-      }
+      await sbFetch('PATCH','/rest/v1/user_sessions?session_token=eq.'+encodeURIComponent(_sessionToken),{last_seen: new Date().toISOString()},tok);
     }catch(e){ console.warn('heartbeat:', e); }
-  }, 60000);
+  }, SESSAO_HEARTBEAT_MS);
 
   // Realtime — detectar force_logout instantaneamente
   if(window.supabase&&window.supabase.channel){
@@ -11674,6 +11699,8 @@ async function iniciarSessao(){
   }
 }
 
+// v1.0.1043: ritmo da sessão
+var SESSAO_HEARTBEAT_MS=180000, SESSAO_ONLINE_MS=420000, SESSAO_EXPIRA_MS=600000;
 async function encerrarSessao(){
   if(_heartbeatTimer) clearInterval(_heartbeatTimer);
   if(_sessionChannel) _sessionChannel.unsubscribe();
@@ -11690,7 +11717,7 @@ async function verificarLimiteSessoes(){
   if(!cu) return true;
   if(typeof HERMES_BOLSO!=='undefined'&&HERMES_BOLSO) return {bloqueado:false};
   try{
-    const limite90s = new Date(Date.now()-90000).toISOString();
+    const limite90s = new Date(Date.now()-SESSAO_ONLINE_MS).toISOString();   // v1.0.1043: 7 min (heartbeat de 3 min)
 
     // 1. Verificar sessão duplicada — derrubar sessão anterior automaticamente
     const tokenExistente = safeSession.getItem('verus_session_token');
@@ -11742,7 +11769,7 @@ async function renderAdminSessoes(){
   if(!el) return;
   try{
     const agora = new Date();
-    const limite = new Date(agora - 90000).toISOString(); // 90s = 3 heartbeats
+    const limite = new Date(agora - SESSAO_ONLINE_MS).toISOString(); // v1.0.1043: 7 min = ~2 batidas de 3 min
     const rows = await dbSelect('user_sessions',
       'last_seen=gte.'+limite+'&order=company_id.asc,last_seen.desc'
     );
@@ -11788,7 +11815,7 @@ async function renderAdminSessoes(){
 function rAdminSessoes(){
   // Iniciar polling de atualização
   if(window._sessoesTimer) clearInterval(window._sessoesTimer);
-  window._sessoesTimer = setInterval(renderAdminSessoes, 15000);
+  window._sessoesTimer = setInterval(renderAdminSessoes, 60000);   // v1.0.1043: 60 s (antes 15 s)
   setTimeout(renderAdminSessoes, 100);
 
   return '<div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">'
@@ -31408,11 +31435,94 @@ function wmsSelHint(sc){
   if(!n)return '';
   return '<div style="font-size:11px;font-weight:700;color:var(--blue-text);background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:7px 12px;margin-bottom:10px">Cards mostrando a sele\u00e7\u00e3o ('+n+' marcada(s)) \u00b7 <a href="javascript:void(0)" onclick="wmsSelClear(&apos;'+sc+'&apos;)" style="color:var(--blue-text);font-weight:800">limpar sele\u00e7\u00e3o</a></div>';
 }
+// v1.0.1044: separação do WMS — concluir e excluir várias listas de uma vez
+function wmsSepPodeConcluir(){ return podeFazer('wms-separacao','pode_editar',['admin','adm','gestor','operacao']); }
+function wmsSepPodeExcluir(){ return podeFazer('wms-separacao','pode_excluir',['admin','gestor']); }
+function wmsListasConcluirLote(){
+  if(!wmsSepPodeConcluir()){ showToast('Sem permiss\u00e3o para concluir listas (WMS \u00b7 Separa\u00e7\u00e3o \u2192 Editar).','red'); return; }
+  var ls=[..._wmsSel.sep].map(function(id){return wmsListasSeparacao.find(function(l){return l.id===id;});}).filter(Boolean);
+  var pend=0, alvo=ls.filter(function(l){ var p=wmsTarefasSeparacao.filter(function(t){return t.lista_id===l.id&&t.status!=='concluida';}).length; pend+=p; return p>0; });
+  if(!alvo.length){ showToast('As listas marcadas j\u00e1 est\u00e3o conclu\u00eddas.','amber'); return; }
+  portClose();
+  portModal('Concluir '+alvo.length+' lista(s)',
+    '<div style="font-size:13px;margin-bottom:10px"><b>'+pend+'</b> tarefa(s) pendente(s) ser\u00e3o confirmadas com a quantidade prevista. Os pedidos passam para "separado".'
+    +(alvo.length<ls.length?'<div style="font-size:12px;color:var(--text3);margin-top:4px">'+(ls.length-alvo.length)+' lista(s) j\u00e1 conclu\u00edda(s) ficam como est\u00e3o.</div>':'')+'</div>'
+    +'<label class="fl">Separador (opcional)</label><input class="fi" id="wms-lote-sep" placeholder="nome de quem separou">',
+    'wmsListasConcluirLoteSalvar()',{width:'460px',saveLabel:'Concluir '+alvo.length+' lista(s)'});
+}
+async function wmsListasConcluirLoteSalvar(){
+  var sepInf=String((ge('wms-lote-sep')||{}).value||'').trim()||null, agora=new Date().toISOString();
+  var ids=[..._wmsSel.sep], feitas=0, tarefasN=0;
+  portSaving();
+  try{
+    for(var i=0;i<ids.length;i++){
+      var listaId=ids[i], tarefas=wmsTarefasSeparacao.filter(function(x){return x.lista_id===listaId;});
+      var pend=tarefas.filter(function(t){return t.status!=='concluida';});
+      if(!pend.length) continue;
+      for(var k=0;k<pend.length;k++){
+        var t=pend[k];
+        await dbUpdate('wms_tarefas_separacao',t.id,{status:'concluida',qtd_separada:t.quantidade,separador_id:cu?.id||null,separador_nome:profile?.full_name||cu?.email||null,separador_informado_nome:sepInf,concluido_em:agora,houve_falta:false});
+        t.status='concluida'; t.qtd_separada=t.quantidade; t.concluido_em=agora; t.separador_informado_nome=sepInf;
+        await wmsRegistrarLeituras('separacao',[{sku:t.sku,descricao:t.descricao,produto_id:t.produto_id,tipo_volume:t.tipo_volume,quantidade:t.quantidade}],
+          {pedido_id:t.pedido_id,lista_id:listaId,tarefa_id:t.id,unit_id:t.unit_id,modo:'lote'});
+        tarefasN++;
+      }
+      await dbUpdate('wms_listas_separacao',listaId,{status:'concluida'});
+      var l=wmsListasSeparacao.find(function(x){return x.id===listaId;}); if(l) l.status='concluida';
+      var pedIds=[...new Set(tarefas.map(function(t){return t.pedido_id;}).filter(Boolean).concat(wmsListaPedidos.filter(function(lp){return lp.lista_id===listaId;}).map(function(lp){return lp.pedido_id;})))];
+      for(var j=0;j<pedIds.length;j++){
+        var p=wmsPedidos.find(function(x){return x.id===pedIds[j];});
+        if(p&&wmsSeparacaoConcluidaPedido(p.id)&&(p.status==='em_separacao'||p.status==='importado')){ await dbUpdate('wms_pedidos',p.id,{status:'separado'}); p.status='separado'; }
+      }
+      feitas++;
+    }
+    portClose(); _wmsSel.sep.clear();
+    showToast(feitas+' lista(s) conclu\u00edda(s) \u00b7 '+tarefasN+' tarefa(s) confirmada(s).','green');
+    render();
+  }catch(e){ portErr((e&&e.message)||'Erro ao concluir.'); }
+}
+async function wmsListasExcluirLote(){
+  if(!wmsSepPodeExcluir()){ showToast('Sem permiss\u00e3o: pe\u00e7a a libera\u00e7\u00e3o "WMS \u00b7 Separa\u00e7\u00e3o \u2192 Excluir" ao administrador.','red'); return; }
+  var ls=[..._wmsSel.sep].map(function(id){return wmsListasSeparacao.find(function(l){return l.id===id;});}).filter(Boolean);
+  if(!ls.length) return;
+  // lista com pedido que já entrou em conferência fica de fora
+  var ok=[], fora=[];
+  ls.forEach(function(l){
+    var peds=wmsListaPedidos.filter(function(lp){return lp.lista_id===l.id;}).map(function(lp){return lp.pedido_id;});
+    if(peds.some(function(pid){ return wmsPedidoTemConferencia(pid); })) fora.push(l); else ok.push(l);
+  });
+  if(!ok.length){ showToast('Nenhuma lista pode ser exclu\u00edda: todas t\u00eam pedido em confer\u00eancia. Estorne a confer\u00eancia antes.','amber'); return; }
+  if(!confirm('Excluir '+ok.length+' lista(s) de separa\u00e7\u00e3o?\n\n'+ok.map(function(l){return '\u2022 '+(l.numero_lista||l.id);}).join('\n')
+    +'\n\nOs pedidos voltam para "importado" e as tarefas s\u00e3o apagadas. N\u00e3o tem volta.'
+    +(fora.length?'\n\n'+fora.length+' lista(s) com pedido em confer\u00eancia ficam de fora: '+fora.map(function(l){return l.numero_lista||'';}).join(', '):''))) return;
+  var n=0;
+  try{
+    for(var i=0;i<ok.length;i++){
+      var id=ok[i].id, vinculos=wmsListaPedidos.filter(function(lp){return lp.lista_id===id;});
+      for(var v=0;v<vinculos.length;v++){
+        var p=wmsPedidos.find(function(x){return x.id===vinculos[v].pedido_id;});
+        if(p&&['em_separacao','em_conferencia','conferido','separado'].includes(p.status)){ await dbUpdate('wms_pedidos',p.id,{status:'importado'}); p.status='importado'; }
+      }
+      var tarefas=wmsTarefasSeparacao.filter(function(t){return t.lista_id===id;});
+      for(var t=0;t<tarefas.length;t++){ await dbDelete('wms_tarefas_separacao',tarefas[t].id); }
+      wmsTarefasSeparacao=wmsTarefasSeparacao.filter(function(t){return t.lista_id!==id;});
+      for(var w=0;w<vinculos.length;w++){ await dbDelete('wms_lista_pedidos',vinculos[w].id); }
+      wmsListaPedidos=wmsListaPedidos.filter(function(lp){return lp.lista_id!==id;});
+      await dbDelete('wms_listas_separacao',id);
+      wmsListasSeparacao=wmsListasSeparacao.filter(function(x){return x.id!==id;});
+      _wmsSel.sep.delete(id); n++;
+    }
+    showToast(n+' lista(s) exclu\u00edda(s). Pedidos voltaram para importado.'+(fora.length?' '+fora.length+' ficaram (pedido em confer\u00eancia).':''),fora.length?'amber':'green');
+  }catch(e){ showToast('Erro ao excluir ('+n+' j\u00e1 exclu\u00edda(s)): '+(e.message||e),'red'); }
+  render();
+}
 function wmsSelBarHtml(sc){
   return '<div id="wms-'+sc+'-selbar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:9px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
     +'<span id="wms-'+sc+'-seltxt" style="font-size:12px;font-weight:700;color:var(--blue-text)"></span>'
     +'<div style="display:flex;gap:8px">'
-    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button>':'')
+    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button>'
+      +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
+      +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
 }
 function wmsSelTotais(sc,ids){
@@ -49171,7 +49281,7 @@ function ecomPedTabelaHTML(){
       +'<td style="padding:7px 9px;text-align:center">'+(temEt?'&#127991;&#65039;':(pend?'<span style="color:var(--amber-text,#b45309);font-weight:600">falta</span>':'<span style="color:var(--text3)">\u2014</span>'))+'</td>'
       +'<td style="padding:7px 9px">'+ecomBadge(p.status)+ecomSeloNaoColetado(p)+'</td>'
       +'<td style="padding:7px 9px;text-align:right;white-space:nowrap">'+((p.status==='conferido'||p.status==='conferindo'||p.status==='romaneado')?'<button class="btn btn-sm" onclick="ecomEstornarConf(\''+p.id+'\')">Estornar</button> ':'')
-        +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomPedidoExcluir(\''+p.id+'\')">Excluir</button></td></tr>';
+        +(ecomPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomPedidoExcluir(\''+p.id+'\')">Excluir</button>':'')+'</td></tr>';
   }).join('');
   if(!rows) rows='<tr><td colspan="9" style="padding:22px;text-align:center;color:var(--text3)">Nenhum pedido encontrado.</td></tr>';
   var c=ge('ecom-ped-cont'); if(c) c.textContent=Math.min(_ecomPedLimite,lista.length)+' de '+lista.length;
@@ -49209,7 +49319,7 @@ function ecomPanelPedidos(){
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
     +chip(!ecomFiltroOrigem,'Todos',"ecomPedFiltro('origem','')")+chip(ecomFiltroOrigem==='integracao','Integra\u00e7\u00e3o',"ecomPedFiltro('origem','integracao')")+chip(ecomFiltroOrigem==='planilha','Planilha',"ecomPedFiltro('origem','planilha')")
     +'<span style="width:1px;height:18px;background:var(--border);margin:0 4px"></span>'+chipsSt
-    +'<span style="margin-left:auto;display:flex;gap:6px">'+((profile&&profile.role)==='admin'?'<button class="btn btn-sm" onclick="ecomMigrarEtiqAbrir()" title="Tira as imagens das etiquetas do banco e guarda no armazenamento">Mover etiquetas p/ armazenamento</button>':'')+'<button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer\u00eancias</button><button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button></span></div>'
+    +'<span style="margin-left:auto;display:flex;gap:6px">'+((profile&&profile.role)==='admin'?'<button class="btn btn-sm" onclick="ecomMigrarEtiqAbrir()" title="Tira as imagens das etiquetas do banco e guarda no armazenamento">Mover etiquetas p/ armazenamento</button>':'')+'<button class="btn btn-sm" onclick="ecomEstornarConfTodas()">Estornar confer\u00eancias</button>'+(ecomPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomLimparBase()">Limpar base (pedidos)</button>':'')+'</span></div>'
     +'<div id="ecom-ped-tabela">'+ecomPedTabelaHTML()+'</div>';
 }
 async function ecomImportLogModal(){
@@ -49517,7 +49627,7 @@ function ecomPanelSep(){
             +'<button class="btn btn-sm btn-p" onclick="ecomSepAbrir(\''+o.id+'\')">Bipar</button>'
             +'<button class="btn btn-sm" onclick="ecomSepConcluir(\''+o.id+'\')">Concluir</button>';
         })())
-      +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomOsCancelar(\''+o.id+'\')">Cancelar</button></div>';
+      +(ecomPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomOsCancelar(\''+o.id+'\')">Cancelar</button>':'')+'</div>';
   }).join('') : '<div style="padding:16px;color:var(--text3);font-size:13px">Nenhuma ordem de separação.</div>';
 
   return '<div style="display:flex;gap:8px;margin-bottom:14px">'
@@ -49674,6 +49784,7 @@ async function ecomEstornarConfTodas(){
   }catch(e){ showToast('Erro ao estornar: '+(e.message||e),'red'); }
 }
 async function ecomOsCancelar(osId){
+  if(!ecomPodeExcluir()){ ecomSemPermExcluir(); return; }
   var os=ecomOrdensSep.find(function(o){return o.id===osId;}); if(!os)return;
   if(!confirm('Cancelar OS-'+String(os.numero||0).padStart(4,'0')+'? Os pedidos voltam para "importado" e a OS será removida.')) return;
   var pids=ecomOsPedidos.filter(function(l){return l.os_id===osId;}).map(function(l){return l.pedido_id;});
@@ -49688,7 +49799,11 @@ async function ecomOsCancelar(osId){
     showToast('OS cancelada · pedidos voltaram para importado','green');
   }catch(e){ showToast('Erro ao cancelar OS: '+(e.message||e),'red'); }
 }
+// v1.0.1043: excluir pedido, limpar base e cancelar OS seguem a liberação de acesso (E-commerce · Pedidos → Excluir)
+function ecomPodeExcluir(){ return podeFazer('ecom-pedidos','pode_excluir',['admin']); }
+function ecomSemPermExcluir(){ showToast('Sem permissão: pe\u00e7a a libera\u00e7\u00e3o "E-commerce \u00b7 Pedidos \u2192 Excluir" ao administrador.','red'); }
 async function ecomPedidoExcluir(pid){
+  if(!ecomPodeExcluir()){ ecomSemPermExcluir(); return; }
   var p=ecomPedidos.find(function(x){return x.id===pid;}); if(!p)return;
   if(!confirm('Excluir o pedido E-'+String(p.numero_interno||0).padStart(6,'0')+' ('+(p.destinatario_nome||'')+')? Itens e leituras vão junto.')) return;
   try{
@@ -49698,6 +49813,7 @@ async function ecomPedidoExcluir(pid){
   }catch(e){ showToast('Erro ao excluir: '+(e.message||e),'red'); }
 }
 async function ecomLimparBase(){
+  if(!ecomPodeExcluir()){ ecomSemPermExcluir(); return; }
   if(!confirm('LIMPAR A BASE: apaga TODOS os pedidos, ordens de separação e romaneios desta empresa (produtos e lojista são mantidos). Continuar?')) return;
   if(!confirm('Tem certeza? Esta ação não tem volta.')) return;
   try{
