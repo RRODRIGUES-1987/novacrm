@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1045 | Gerado: 2026-09-25 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1046 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1362,7 +1362,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1045';
+const APP_VERSION='v1.0.1046';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51322,7 +51322,10 @@ async function ecomEtiqImgDoArquivo(path){
 // "ecom-etiquetas"; o banco guarda só o caminho. Se o envio falhar, grava no banco como antes
 // (a etiqueta nunca se perde). A impressão lê do arquivo (ecomEtiqImgDoArquivo).
 function ecomDataUrlBlob(du){
-  var m=String(du||'').match(/^data:([^;,]+)(;base64)?,(.*)$/); if(!m) return null;
+  var s0=String(du||'').trim();
+  // v1.0.1046: etiquetas antigas podem estar em base64 puro, sem o prefixo data:
+  if(s0&&!/^data:/i.test(s0)&&/^[A-Za-z0-9+\/=\s]+$/.test(s0.slice(0,200))){ var mt=s0.slice(0,4)==='/9j/'?'image/jpeg':(s0.slice(0,5)==='JVBER'?'application/pdf':'image/png'); s0='data:'+mt+';base64,'+s0.replace(/\s+/g,''); }
+  var m=s0.match(/^data:([^;,]+)(;base64)?,(.*)$/s); if(!m) return null;
   if(!m[2]) return new Blob([decodeURIComponent(m[3])],{type:m[1]});
   var bin=atob(m[3]), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
   return new Blob([u8],{type:m[1]});
@@ -51340,11 +51343,11 @@ async function ecomEtiqLinha(cid,pid,base,img,pg){
   catch(e){ console.warn('etiqueta gravada no banco (armazenamento falhou):',e); return Object.assign({},base,{img:img}); }
 }
 // migração das etiquetas que já estão no banco (Admin) — em lotes, retomável
-var _migEtq={rodando:false,parar:false,ok:0,falha:0,total:0,falhas:[]};
+var _migEtq={rodando:false,parar:false,ok:0,falha:0,total:0,falhas:[],cursor:'',erro:''};
 async function ecomMigrarEtiqAbrir(){
   if((profile&&profile.role)!=='admin'){ showToast('Só o perfil Admin pode fazer a migração.','red'); return; }
   var ids=[]; try{ ids=await dbSelectAll('ecom_etiquetas','company_id=eq.'+ecomCid()+'&img=not.is.null&select=id'); }catch(e){ showToast('Erro: '+(e.message||e),'red'); return; }
-  _migEtq.total=ids.length; _migEtq.ok=0; _migEtq.falha=0; _migEtq.falhas=[];
+  _migEtq.total=ids.length; _migEtq.ok=0; _migEtq.falha=0; _migEtq.falhas=[]; _migEtq.cursor=''; _migEtq.erro='';
   var old=ge('modal-mig-etq'); if(old) old.remove();
   document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-mig-etq" style="z-index:400"><div class="modal" style="width:460px;max-width:95vw;padding:20px">'
     +'<div style="font-size:15px;font-weight:700;margin-bottom:4px">Mover etiquetas para o armazenamento</div>'
@@ -51357,7 +51360,8 @@ async function ecomMigrarEtiqAbrir(){
 function ecomMigrarEtiqUI(fim){
   var t=_migEtq.total||1, feito=_migEtq.ok+_migEtq.falha;
   var bar=ge('mig-bar'); if(bar) bar.style.width=Math.min(100,Math.round(feito/t*100))+'%';
-  var tx=ge('mig-txt'); if(tx) tx.innerHTML=(fim?'<b>'+fim+'</b> \u00b7 ':'')+_migEtq.ok+' movida(s)'+(_migEtq.falha?' \u00b7 <span style="color:var(--red-text)">'+_migEtq.falha+' com falha</span>':'')+' de '+_migEtq.total;
+  var tx=ge('mig-txt'); if(tx) tx.innerHTML=(fim?'<b>'+fim+'</b> \u00b7 ':'')+_migEtq.ok+' movida(s)'+(_migEtq.falha?' \u00b7 <span style="color:var(--red-text)">'+_migEtq.falha+' com falha</span>':'')+' de '+_migEtq.total
+    +(_migEtq.erro?'<div style="margin-top:6px;font-size:11.5px;color:var(--red-text);word-break:break-word">Motivo da falha: '+ecomEsc(_migEtq.erro)+'</div>':'');
 }
 async function ecomMigrarEtiqRodar(){
   if(_migEtq.rodando){ _migEtq.parar=true; return; }
@@ -51366,18 +51370,20 @@ async function ecomMigrarEtiqRodar(){
   var cid=ecomCid();
   try{
     while(!_migEtq.parar){
-      var f='company_id=eq.'+cid+'&img=not.is.null&select=id,pedido_id,pagina,img&order=id.asc&limit=10';
-      if(_migEtq.falhas.length) f+='&id=not.in.('+_migEtq.falhas.join(',')+')';
+      // v1.0.1046: anda por cursor (id maior que o último visto) — a lista de falhas na URL estourava o tamanho
+      var f='company_id=eq.'+cid+'&img=not.is.null&select=id,pedido_id,pagina,img&order=id.asc&limit=10'+(_migEtq.cursor?'&id=gt.'+_migEtq.cursor:'');
       var lote=await dbSelect('ecom_etiquetas',f);
       if(!lote||!lote.length) break;
+      _migEtq.cursor=lote[lote.length-1].id;
       for(var i=0;i<lote.length&&!_migEtq.parar;i++){
         var r=lote[i];
         try{
           var path=await ecomEtiqSubir(cid,r.pedido_id,r.img,r.pagina);
           await dbUpdate('ecom_etiquetas',r.id,{arquivo_path:path,img:null});
           _migEtq.ok++;
-        }catch(e){ _migEtq.falha++; _migEtq.falhas.push(r.id); console.warn('migrar etiqueta',r.id,e); }
+        }catch(e){ _migEtq.falha++; _migEtq.falhas.push(r.id); if(!_migEtq.erro) _migEtq.erro=String((e&&e.message)||e); console.warn('migrar etiqueta',r.id,e); }
         ecomMigrarEtiqUI();
+        if(_migEtq.falha>=5&&_migEtq.ok===0){ _migEtq.parar=true; break; }   // v1.0.1046: falhas seguidas sem nenhum sucesso = problema geral; para e mostra o motivo
       }
     }
     ecomMigrarEtiqUI(_migEtq.parar?'Pausado':'Conclu\u00eddo');
