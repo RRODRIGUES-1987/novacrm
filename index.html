@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1047 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1048 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1047';
+const APP_VERSION='v1.0.1048';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2788,6 +2788,45 @@ async function capasDesligarFatura(fatId){
   await sbFetch('PATCH','/rest/v1/processo_capas?fatura_id=eq.'+fatId,{status:'digitada',fatura_id:null},tok);
   (capasProcesso||[]).forEach(function(c){ if(c.fatura_id===fatId){ c.status='digitada'; c.fatura_id=null; } });
 }
+// v1.0.1048: modelo da capa de processo no cadastro do cliente (só visualizar — sem criar capa, sem movimentação)
+function capaModeloBlocoHtml(clienteId){
+  return '<div id="cad-capa-modelo" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--text2);letter-spacing:.4px;margin-bottom:8px">CAPA DE PROCESSO (MODELO)</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +'<button type="button" class="btn btn-sm" onclick="capaModeloVer(\''+clienteId+'\',\'recebimento\')">\ud83d\udcc4 Ver modelo \u00b7 Recebimento</button>'
+    +'<button type="button" class="btn btn-sm" onclick="capaModeloVer(\''+clienteId+'\',\'expedicao\')">\ud83d\udcc4 Ver modelo \u00b7 Expedi\u00e7\u00e3o</button></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Os servi\u00e7os s\u00e3o as linhas da tabela tarif\u00e1ria marcadas como "Cap. Rec." ou "Cap. Exp.".</div></div>';
+}
+async function capaModeloVer(clienteId,tipo){
+  if(typeof pdfMake==='undefined'){ showToast('Biblioteca de PDF ainda carregando, tente de novo em instantes.','amber'); return; }
+  var cli=(clientes||[]).find(function(c){return c.id===clienteId;})||{};
+  var tabs=(tabelasTarifarias&&tabelasTarifarias.length)?tabelasTarifarias:(await dbSelect('tabelas_tarifarias','company_id=eq.'+company.id).catch(function(){return [];})||[]);
+  var tab=tabs.find(function(t){ return t.status!=='pendente'&&(t.cliente_id===clienteId||(cli.nome&&t.cliente_nome&&String(t.cliente_nome).toLowerCase()===String(cli.nome).toLowerCase())); });
+  var servicos=[];
+  if(tab){
+    var campo=tipo==='expedicao'?'cap_expedicao':'cap_recebimento';
+    var quadros=await dbSelect('tabelas_quadros','tabela_id=eq.'+tab.id+'&order=ordem.asc').catch(function(){return [];})||[];
+    for(var i=0;i<quadros.length;i++){
+      var itens=await dbSelect('tabelas_itens','quadro_id=eq.'+quadros[i].id+'&order=ordem.asc').catch(function(){return [];})||[];
+      itens.forEach(function(it){ if(it[campo]) servicos.push({servico:it.servico||'',unidade_cobranca:it.unidade_cobranca||null,realizado:false,quantidade:null}); });
+    }
+  }
+  var c={numero:'MODELO',tipo:tipo,cliente_nome:cli.nome||'',cliente_cnpj:cli.cpf_cnpj||'',data_operacao:null,_modelo:true};
+  var def=capaBuildPdfDef(c,servicos,capaGetParams());
+  var titulo='Modelo \u00b7 capa de '+(tipo==='expedicao'?'expedi\u00e7\u00e3o':'recebimento')+' \u00b7 '+(cli.nome||'');
+  var aviso=!tab?'Cliente sem tabela tarif\u00e1ria ativa: o modelo sai sem servi\u00e7os.':(!servicos.length?'Nenhuma linha da tabela marcada como "'+(tipo==='expedicao'?'Cap. Exp.':'Cap. Rec.')+'": o modelo sai sem servi\u00e7os.':servicos.length+' servi\u00e7o(s) da tabela '+(tab.nome||'')+'.');
+  pdfMake.createPdf(def).getBlob(function(blob){ capaPdfViewer(URL.createObjectURL(blob),titulo,aviso,'capa-modelo-'+(tipo==='expedicao'?'expedicao':'recebimento')+'.pdf'); });
+}
+function capaPdfViewer(url,titulo,aviso,nomeArq){
+  var old=ge('capa-pdf-viewer'); if(old) old.remove();
+  var esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');};
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="capa-pdf-viewer" style="z-index:400;display:flex"><div class="modal" style="width:880px;max-width:96vw;height:90vh;display:flex;flex-direction:column;padding:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><div><div style="font-size:14px;font-weight:700">'+esc(titulo)+'</div><div style="font-size:11.5px;color:var(--text3)">'+esc(aviso)+'</div></div>'
+    +'<div style="display:flex;gap:6px"><a class="btn btn-sm" href="'+url+'" download="'+esc(nomeArq)+'">\u2b07 Baixar</a>'
+    +'<button class="btn btn-sm" onclick="var f=ge(\'capa-pdf-frame\');try{f.contentWindow.focus();f.contentWindow.print();}catch(e){}">\ud83d\udda8 Imprimir</button>'
+    +'<button class="btn btn-sm" onclick="var v=ge(\'capa-pdf-viewer\');if(v)v.remove();">\u2715</button></div></div>'
+    +'<iframe id="capa-pdf-frame" src="'+url+'" title="'+esc(titulo)+'" style="flex:1;width:100%;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe></div></div>');
+}
 
 function canDo(tela, acao){
   const role=profile?.role||'vendedor';
@@ -4149,6 +4188,7 @@ function openCadastro(tipo, id=null){
     const formHtml=buildCadastroForm(tipo,record,id);
     ge('mbody').innerHTML=formHtml;
     loadClienteContatos(id);
+    try{ ge('mbody').insertAdjacentHTML('beforeend',capaModeloBlocoHtml(id)); }catch(_cm){}   // v1.0.1048: modelo da capa
   } else {
     ge('mbody').innerHTML=buildCadastroForm(tipo,record,id);
   }
@@ -47461,7 +47501,7 @@ function capaBuildPdfDef(c, servicos, P){
       LOGO?{image:LOGO,width:64,alignment:'center',margin:[0,4,0,0]}:{text:'MK log',bold:true,fontSize:14,alignment:'center',margin:[0,12,0,0]},
       {stack:[{text:cab,bold:true,fontSize:P.fonte_cabecalho,alignment:'center'},
         c.cliente_cnpj?{text:c.cliente_cnpj,fontSize:9,alignment:'center'}:{text:''}],margin:[0,8,0,0]},
-      (function(){ var bc=(typeof capaBarcodeDataUrl==='function')?capaBarcodeDataUrl(c.numero):null;   // v1.0.1047: código de barras para abrir a digitação
+      (function(){ var bc=(typeof capaBarcodeDataUrl==='function'&&!c._modelo)?capaBarcodeDataUrl(c.numero):null;   // v1.0.1047: código de barras para abrir a digitação
         return {stack:[{text:[{text:'IDENTIFICAÇÃO: MKFOR040   '},{text:'REV. 01'}],fontSize:Math.max(6,P.fonte_id-1)},
           bc?{image:bc,width:128,height:22,margin:[0,2,0,0]}:{text:''},{text:c.numero||'',fontSize:P.fonte_id,bold:true}],margin:[0,3,0,0]}; })(),
     ]]},
