@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1048 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1049 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1048';
+const APP_VERSION='v1.0.1049';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2826,6 +2826,222 @@ function capaPdfViewer(url,titulo,aviso,nomeArq){
     +'<button class="btn btn-sm" onclick="var f=ge(\'capa-pdf-frame\');try{f.contentWindow.focus();f.contentWindow.print();}catch(e){}">\ud83d\udda8 Imprimir</button>'
     +'<button class="btn btn-sm" onclick="var v=ge(\'capa-pdf-viewer\');if(v)v.remove();">\u2715</button></div></div>'
     +'<iframe id="capa-pdf-frame" src="'+url+'" title="'+esc(titulo)+'" style="flex:1;width:100%;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe></div></div>');
+}
+// ══════════════ E-COMMERCE · EMBARQUE FULL (SHOPEE) (v1.0.1049) ══════════════
+// Um pedido Full = uma ASN (transferência de estoque para o armazém da Shopee). Tratado por dentro das
+// telas de sempre: importação (ASN no lugar da planilha; etiquetas no passo das etiquetas), OS por pedido,
+// checkout (bipa cada etiqueta de unidade; caixa cheia imprime a master) e embarque (bipa as caixas).
+function ecomEhFull(p){ return !!(p&&p.tipo_envio==='full'); }
+function ecomFullMeta(p){ var m=p&&p.full_meta; if(typeof m==='string'){ try{ m=JSON.parse(m); }catch(e){ m=null; } } return m||{}; }
+function ecomFullDaOs(osId){ var p=(ecomPedidos||[]).find(function(x){ return x.os_id===osId&&ecomEhFull(x); }); return p?p.id:''; }
+function ecomFullNormQr(s){ return String(s||'').toUpperCase().replace(/\s+/g,''); }
+// ── 1) lista de separação (ASN) → um pedido com os SKUs da remessa ──
+function ecomEhTextoAsn(t){ var s=String(t||'').replace(/\s+/g,''); return /Armaz[eé]mdaShopee/i.test(s)&&/ASN/.test(s); }
+function ecomParseFullAsn(text){
+  var t=String(text||'').replace(/\s+/g,' ');
+  var sj=t.replace(/\s+/g,'');
+  var asn=(sj.match(/INBR[A-Z]{2,4}\d{8,14}/)||[])[0]||'';
+  var arm=(sj.match(/(BR[A-Z]{2,3}\d)(?=IDdoArmaz)/)||[])[1]||(sj.match(/IDdoArmaz[eé]mdaShopee(BR[A-Z]{2,3}\d)/i)||[])[1]||'';
+  var totAsn=parseInt((sj.match(/Total(\d{1,6})/)||[])[1],10)||0;
+  var loja=(sj.match(/(\d{8,12})-([A-Za-zÀ-ú]+(?:[A-Za-zÀ-ú]+)*)/)||[]);
+  var re=/(?:^|\s)(\d{1,3})\s+([A-Z][A-Z0-9._-]*\d[A-Z0-9._-]*)\s+(\d{9,12})\s*_\s*(\d{6,12})\s*(\d{0,4})\s+/g, m, ini=[];
+  while((m=re.exec(t))){ ini.push({i:m.index, fim:re.lastIndex, sku:m[2].toUpperCase(), skuid:m[3]+'_'+m[4]+(m[5]||'')}); }
+  if(!ini.length) return null;
+  var itens=[], total=0;
+  ini.forEach(function(r,k){
+    var seg=t.slice(r.fim, k+1<ini.length?ini[k+1].i:t.length).replace(/\sT\s*o\s*t\s*a\s*l\s[\s\S]*$/,'').trim();   // o PDF quebra "Total" em "Tota l"
+    var toks=seg.split(' ');
+    var qtd=parseInt(toks[toks.length-1],10)||0;
+    var nome=seg.replace(/\s+Item without GTIN\s+\d+$/i,'').replace(/(\s+\d+)+$/,'').trim();
+    if(qtd>0){ itens.push({sku:r.sku,ean:'',descricao:nome||r.sku,qtd:qtd,full_skuid:r.skuid}); total+=qtd; }
+  });
+  if(!itens.length) return null;
+  var skuids={}; itens.forEach(function(i){ skuids[i.sku]=i.full_skuid; });
+  if(totAsn&&totAsn!==total) showToast('Aten\u00e7\u00e3o: a soma lida ('+total+') difere do total da ASN ('+totAsn+').','amber');
+  return {asn:asn, armazem:arm, loja_id:loja[1]||'', itens:itens, total:total, skuids:skuids};
+}
+function ecomFullRowsDaAsn(a){
+  var dest='Shopee Full \u00b7 '+(a.armazem||'armaz\u00e9m Shopee');
+  ecomImportRows={pedidos:[{numero_pedido:a.asn||('FULL-'+Date.now()),tracking:'',destinatario_nome:dest,transportadora:'Shopee (coleta)',canal:'Shopee Full',
+    itens:a.itens.map(function(i){ return {sku:i.sku,ean:'',descricao:i.descricao,qtd:i.qtd}; }),
+    _full:{asn:a.asn,armazem:a.armazem,loja_id:a.loja_id,total:a.total,skuids:a.skuids,caixas:[],cx_atual:1}}],totalItens:a.itens.length};
+  showToast('ASN '+(a.asn||'')+' lida: '+a.itens.length+' SKU(s), '+a.total+' unidade(s). Importe a NF e as etiquetas (unidade e caixa) nos pr\u00f3ximos passos.','green');
+}
+// ── 2) etiquetas do Full (unidade 60×40 e caixa master) no passo das etiquetas ──
+async function ecomFullPdfTexto(pdf,pg){ var tc=await (await pdf.getPage(pg)).getTextContent(); return tc.items.map(function(i){return i.str;}).join(' ').replace(/\s+/g,' '); }
+async function ecomFullEtiqDetectar(file){
+  await ecomLoadPdfjs();
+  var buf=await file.arrayBuffer();
+  var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise;
+  var t1=await ecomFullPdfTexto(pdf,1);
+  var tipo=/seller sku\s*:/i.test(t1)?'unidade':(/ETIQUETA DA CAIXA/i.test(t1)?'master':'');
+  return tipo?{tipo:tipo,pdf:pdf,buf:buf}:null;
+}
+async function ecomFullEtiqImportar(file,det){
+  var cid=ecomCid(), pdf=det.pdf, pags=[];
+  for(var pg=1;pg<=pdf.numPages;pg++){ pags.push(await ecomFullPdfTexto(pdf,pg)); if(pg%50===0) showToast('Lendo etiquetas\u2026 '+pg+'/'+pdf.numPages,'blue'); }
+  var cands=ecomPedidosDoLojista().filter(function(p){ return ecomEhFull(p)&&['aguardando_etiqueta','importado'].indexOf(p.status)>=0; });
+  var ped=null, meta=null;
+  if(det.tipo==='master'){
+    var asn=(pags[0].replace(/\s+/g,'').match(/INBR[A-Z]{2,4}\d{8,14}/)||[])[0]||'';
+    ped=cands.find(function(p){ return String(p.numero_pedido||'').toUpperCase()===asn; });
+    if(!ped){ showToast('Etiquetas de caixa da ASN '+asn+': pedido Full n\u00e3o encontrado. Importe a lista de separa\u00e7\u00e3o antes.','red'); return; }
+    meta=ecomFullMeta(ped);
+    meta.caixas=pags.map(function(t,i){
+      var n=(t.match(/Total de\s+Caixas\s+[\s\S]*?\s(\d{1,3})\s+(\d{1,3})\s+Pickup/i)||[]);
+      var spx=(t.match(/SPXBR\d{8,}/)||[])[0]||'';
+      var dc=(t.match(/Data da Coleta:\s*(\d{4}-\d{2}-\d{2})/)||[])[1]||'';
+      if(dc) meta.data_coleta=dc;
+      var lj=(t.match(/(\d{8,12})\s+(.+?)\s+Nome da Loja/)||[]); if(lj[2]) meta.loja_nome=lj[2].trim();
+      var wh=(t.match(/INBR[A-Z]{2,4}\d{8,14}\s+(BR[A-Z]{2,3}\d)\s/)||[])[1]; if(wh) meta.armazem=wh;
+      return {n:parseInt(n[1],10)||(i+1), spx:spx, pagina:i+1, itens:{}, qtd:0, fechada_em:null};
+    }).sort(function(a,b){return a.n-b.n;});
+    meta.caixas_total=meta.caixas.length;
+  } else {
+    var porSku={}, skuids={};
+    pags.forEach(function(t,i){
+      var sk=((t.match(/seller sku\s*:\s*([A-Z0-9._-]+)/i)||[])[1]||'').toUpperCase();
+      var id=(t.match(/whs skuid\s*:\s*([0-9_]+)/i)||t.match(/barcode\s*:\s*([0-9_]+)/i)||[])[1]||'';
+      if(!sk) return; (porSku[sk]=porSku[sk]||[]).push(i+1); if(id) skuids[sk]=id;
+    });
+    // pedido Full cujas quantidades por SKU batem com as etiquetas
+    ped=cands.find(function(p){ var its=ecomItensDo(p.id); return its.length&&its.every(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length===ecomN(it.qtd); }); })
+      ||(cands.length===1?cands[0]:null);
+    if(!ped){ showToast('Etiquetas de unidade: nenhum pedido Full com as mesmas quantidades por SKU. Confira a lista de separa\u00e7\u00e3o importada.','red'); return; }
+    meta=ecomFullMeta(ped);
+    meta.unidades_paginas=porSku; meta.skuids=Object.assign(meta.skuids||{},skuids);
+    var its=ecomItensDo(ped.id), div=its.filter(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length!==ecomN(it.qtd); });
+    if(div.length) showToast('Aten\u00e7\u00e3o: '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(d){return d.sku;}).join(', '),'amber');
+  }
+  var path=cid+'/full/'+String(ped.numero_pedido||ped.id).replace(/[^A-Za-z0-9_-]/g,'_')+'/'+det.tipo+'.pdf';
+  var up=await window.supabase.storage.from('ecom-etiquetas').upload(path,new Blob([det.buf],{type:'application/pdf'}),{contentType:'application/pdf',upsert:true});
+  if(up&&up.error){ showToast('Erro ao guardar o PDF: '+up.error.message,'red'); return; }
+  if(det.tipo==='master') meta.master_pdf=path; else meta.unidades_pdf=path;
+  var upd={full_meta:meta};
+  if(meta.master_pdf&&meta.unidades_pdf){
+    // libera para a separação como qualquer pedido com etiqueta
+    if(!(ecomEtiquetas||[]).some(function(e){return e.pedido_id===ped.id;})){
+      try{ var er=await dbInsert('ecom_etiquetas',{company_id:cid,pedido_id:ped.id,order_id:ped.numero_pedido||null,tracking:null,arquivo_path:meta.master_pdf,pagina:1});
+           if(er) ecomEtiquetas.push(Array.isArray(er)?er[0]:er); }catch(e){}
+    }
+    if(ped.status==='aguardando_etiqueta') upd.status='importado';
+  }
+  await dbUpdate('ecom_pedidos',ped.id,upd); Object.assign(ped,upd);
+  showToast((det.tipo==='master'?meta.caixas_total+' etiqueta(s) de caixa':pags.length+' etiqueta(s) de unidade')+' ligada(s) ao Full '+(ped.numero_pedido||'')+(upd.status==='importado'?' \u00b7 liberado para a separa\u00e7\u00e3o':''),'green');
+  ecomRenderBody();
+}
+// ── 3) impressão (páginas do PDF guardado, sem abrir outra tela) ──
+var _ecomFullPdfCache={};
+async function ecomFullPdfLib(){ if(window.PDFLib) return window.PDFLib; await new Promise(function(ok,err){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; s.onload=ok; s.onerror=err; document.head.appendChild(s); }); return window.PDFLib; }
+async function ecomFullImprimirPaginas(path,paginas){
+  if(!path||!paginas||!paginas.length){ showToast('Etiquetas n\u00e3o encontradas para imprimir.','red'); return false; }
+  var PDFLib=await ecomFullPdfLib();
+  var buf=_ecomFullPdfCache[path];
+  if(!buf){ var r=await window.supabase.storage.from('ecom-etiquetas').download(path); if(!r||r.error||!r.data){ showToast('N\u00e3o consegui baixar as etiquetas.','red'); return false; } buf=await r.data.arrayBuffer(); _ecomFullPdfCache[path]=buf; }
+  var src=await PDFLib.PDFDocument.load(buf), out=await PDFLib.PDFDocument.create();
+  var cps=await out.copyPages(src,paginas.map(function(p){return p-1;})); cps.forEach(function(p){out.addPage(p);});
+  var url=URL.createObjectURL(new Blob([await out.save()],{type:'application/pdf'}));
+  var fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'; fr.src=url;
+  fr.onload=function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} setTimeout(function(){ fr.remove(); URL.revokeObjectURL(url); },60000); };
+  document.body.appendChild(fr); return true;
+}
+function ecomFullEtiqUnidades(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), pg=meta.unidades_paginas||{};
+  var its=ecomItensDo(pid);
+  var old=ge('ecom-full-etq'); if(old) old.remove();
+  var linhas=its.map(function(it){ var sk=String(it.sku||'').toUpperCase(), n=(pg[sk]||[]).length;
+    return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:13px"><b style="min-width:80px">'+ecomEsc(it.sku)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(it.descricao||'')+'</span><span>'+n+' etiqueta(s)</span>'
+      +(n?'<button class="btn btn-sm" onclick="ecomFullImprimirPaginas(\''+meta.unidades_pdf+'\','+JSON.stringify(pg[sk]).replace(/"/g,'')+')">\ud83d\udda8 Imprimir</button>':'')+'</div>'; }).join('');
+  var todas=[]; Object.keys(pg).forEach(function(k){ todas=todas.concat(pg[k]); }); todas.sort(function(a,b){return a-b;});
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-full-etq" style="z-index:300;display:flex"><div class="modal" style="width:620px;max-width:95vw;padding:16px">'
+    +'<div style="font-size:15px;font-weight:700">Etiquetas de unidade \u00b7 Full '+ecomEsc(p.numero_pedido||'')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Bobina 60 \u00d7 40 mm na Zebra. Uma etiqueta por unidade, colada antes do checkout.</div>'
+    +linhas+'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'ecom-full-etq\').remove()">Fechar</button>'
+    +(todas.length?'<button class="btn btn-p" onclick="ecomFullImprimirPaginas(\''+meta.unidades_pdf+'\',['+todas.join(',')+'])">\ud83d\udda8 Imprimir todas ('+todas.length+')</button>':'')+'</div></div></div>');
+}
+// ── 4) checkout: cada bipe = uma etiqueta de unidade; caixa cheia imprime a master ──
+function ecomFullUpc(p,meta){
+  if(meta.upc) return meta.upc;
+  var tot=ecomItensDo(p.id).reduce(function(s,i){return s+ecomN(i.qtd);},0), cx=meta.caixas_total||(meta.caixas||[]).length||1;
+  return Math.max(1,Math.ceil(tot/cx));
+}
+function ecomFullSetUpc(pid,v){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), n=parseInt(v,10); if(!(n>0)) return;
+  meta.upc=n; p.full_meta=meta; dbUpdate('ecom_pedidos',pid,{full_meta:meta}).catch(function(){});
+  var tot=ecomItensDo(pid).reduce(function(s,i){return s+ecomN(i.qtd);},0), cx=meta.caixas_total||0;
+  if(cx&&Math.ceil(tot/n)!==cx) showToast('Com '+n+' por caixa ficam '+Math.ceil(tot/n)+' caixa(s), mas a Shopee mandou '+cx+' etiquetas de caixa.','amber');
+  ecomCxRender();
+}
+async function ecomFullBip(p,its,code){
+  var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
+  Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
+  if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
+  if(!sk){ ecomBeep(); ecomCxFlash('Etiqueta n\u00e3o \u00e9 deste Full: '+code,'red'); ecomCxRender(); return; }
+  var it=its.find(function(i){ return String(i.sku||'').toUpperCase()===sk; });
+  if(!it){ ecomBeep(); ecomCxFlash('SKU '+sk+' n\u00e3o est\u00e1 neste Full','red'); ecomCxRender(); return; }
+  if(ecomN(it.qtd_conferida)>=ecomN(it.qtd)){ ecomBeep(); ecomCxFlash('SKU '+sk+' j\u00e1 completo ('+ecomN(it.qtd)+') \u2014 etiqueta a mais ou bipada duas vezes','red'); ecomCxRender(); return; }
+  var nova=ecomN(it.qtd_conferida)+1;
+  await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+  if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
+  await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
+  meta.caixas=meta.caixas||[]; var n=meta.cx_atual||1;
+  var cx=meta.caixas.find(function(c){return c.n===n;}); if(!cx){ cx={n:n,spx:'',pagina:null,itens:{},qtd:0,fechada_em:null}; meta.caixas.push(cx); }
+  cx.itens[sk]=(cx.itens[sk]||0)+1; cx.qtd=(cx.qtd||0)+1;
+  var completo=its.every(function(i){ return ecomN(i.qtd_conferida)>=ecomN(i.qtd); });
+  var msg='Unidade OK \u00b7 caixa '+n+': '+cx.qtd+'/'+ecomFullUpc(p,meta);
+  if(cx.qtd>=ecomFullUpc(p,meta)||completo){ msg=await ecomFullFecharCaixa(p,meta,cx,completo); }
+  p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta});
+  if(completo){
+    var _upd={status:'conferido',data_conferencia:new Date().toISOString()}; if(!p.data_separacao){ _upd.data_separacao=_upd.data_conferencia; p.data_separacao=_upd.data_separacao; }
+    await dbUpdate('ecom_pedidos',p.id,_upd); p.status='conferido'; ecomCxAutoConcluiOS(p.id); ecomCx.pendingLabel=null;
+    msg='Full '+(p.numero_pedido||'')+' CONFERIDO \u00b7 '+(meta.caixas||[]).filter(function(c){return c.fechada_em;}).length+' caixa(s) fechada(s)';
+  }
+  ecomCxFlash(msg,'green'); ecomCxRender();
+}
+async function ecomFullFecharCaixa(p,meta,cx,ultima){
+  cx.fechada_em=new Date().toISOString();
+  var pg=cx.pagina||((meta.caixas||[]).find(function(c){return c.n===cx.n&&c.pagina;})||{}).pagina;
+  var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,pg?[pg]:[]); }catch(e){}
+  if(!ultima) meta.cx_atual=cx.n+1;
+  return 'Caixa '+cx.n+' fechada ('+cx.qtd+' un)'+(ok?' \u00b7 etiqueta master '+cx.n+'/'+(meta.caixas_total||'?')+' impressa':' \u00b7 SEM etiqueta master para imprimir')+(cx.spx?' \u00b7 '+cx.spx:'');
+}
+async function ecomFullFecharAgora(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), cx=(meta.caixas||[]).find(function(c){return c.n===(meta.cx_atual||1);});
+  if(!cx||!cx.qtd){ showToast('A caixa atual est\u00e1 vazia.','amber'); return; }
+  if(!confirm('Fechar a caixa '+cx.n+' com '+cx.qtd+' unidade(s) e imprimir a etiqueta master?')) return;
+  var msg=await ecomFullFecharCaixa(p,meta,cx,false); p.full_meta=meta; await dbUpdate('ecom_pedidos',pid,{full_meta:meta});
+  ecomCxFlash(msg,'green'); ecomCxRender();
+}
+function ecomFullReimprimirMaster(pid,n){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), cx=(meta.caixas||[]).find(function(c){return c.n===n&&c.pagina;});
+  ecomFullImprimirPaginas(meta.master_pdf,cx?[cx.pagina]:[]);
+}
+function ecomFullPainelCheckout(p){
+  var meta=ecomFullMeta(p), its=ecomItensDo(p.id), upc=ecomFullUpc(p,meta);
+  var tot=its.reduce(function(s,i){return s+ecomN(i.qtd);},0), feito=its.reduce(function(s,i){return s+ecomN(i.qtd_conferida);},0);
+  var n=meta.cx_atual||1, cx=(meta.caixas||[]).find(function(c){return c.n===n;})||{qtd:0}, fech=(meta.caixas||[]).filter(function(c){return c.fechada_em;});
+  var pc=Math.min(100,Math.round((cx.qtd||0)/upc*100));
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0">'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg)"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">CAIXA ATUAL \u00b7 FULL '+ecomEsc(p.numero_pedido||'')+'</div>'
+    +'<div style="font-size:28px;font-weight:800">'+n+' <span style="font-size:15px;color:var(--text3)">de '+(meta.caixas_total||'?')+'</span></div>'
+    +'<div style="height:8px;background:var(--bg3);border-radius:99px;margin:6px 0;overflow:hidden"><div style="width:'+pc+'%;height:8px;background:var(--blue-text)"></div></div>'
+    +'<div style="font-size:12.5px">'+(cx.qtd||0)+' de '+upc+' unidades \u00b7 unidades por caixa <input type="number" min="1" value="'+upc+'" onchange="ecomFullSetUpc(\''+p.id+'\',this.value)" style="width:56px"></div>'
+    +'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomFullFecharAgora(\''+p.id+'\')">Fechar caixa agora</button>'
+    +(fech.length?'<button class="btn btn-sm" onclick="ecomFullReimprimirMaster(\''+p.id+'\','+fech[fech.length-1].n+')">Reimprimir master '+fech[fech.length-1].n+'</button>':'')+'</div></div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">TOTAL \u00b7 '+feito+' de '+tot+'</div>'
+    +its.map(function(i){ var ok=ecomN(i.qtd_conferida)>=ecomN(i.qtd); return '<div style="display:flex;justify-content:space-between;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(i.sku)+'</span><span>'+ecomN(i.qtd_conferida)+'/'+ecomN(i.qtd)+(ok?' \u2713':'')+'</span></div>'; }).join('')
+    +'</div></div>';
+}
+// ── 5) embarque: o Full embarca quando todas as caixas (QR SPXBR) forem bipadas ──
+function ecomFullEmbCaixa(code,romId){
+  var c=ecomFullNormQr(code); if(!/^SPXBR\d+/.test(c)) return null;
+  var ped=(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&(ecomFullMeta(p).caixas||[]).some(function(x){return ecomFullNormQr(x.spx)===c;}); });
+  if(!ped) return null;
+  var cx=(ecomFullMeta(ped).caixas||[]).find(function(x){return ecomFullNormQr(x.spx)===c;});
+  return {ped:ped,cx:cx};
 }
 
 function canDo(tela, acao){
@@ -49116,6 +49332,7 @@ async function ecomPdfParse(file){
     var tc=await page.getTextContent();
     full+=' '+tc.items.map(function(it){return it.str;}).join(' ');
   }
+  if(ecomEhTextoAsn(full)){ var _asn=ecomParseFullAsn(full); if(_asn){ ecomFullRowsDaAsn(_asn); return; } showToast('ASN da Shopee reconhecida, mas n\u00e3o consegui ler os SKUs','red'); ecomImportRows=null; return; }   // v1.0.1049: Embarque Full
   ecomParseSepText(full);
 }
 function ecomKitComp(sku){
@@ -49312,7 +49529,7 @@ async function ecomImportConfirm(){
       var ped=await dbInsert('ecom_pedidos',{company_id:cid,lojista_id:ecomLojistaId,numero_pedido:P.numero_pedido&&P.numero_pedido.indexOf('(sem-')===0?null:P.numero_pedido,
         canal:P.canal||null,destinatario_ref:P.destinatario_ref||null,destinatario_nome:P.destinatario_nome||null,destinatario_doc:P.destinatario_doc||null,
         cep:P.cep||null,endereco:P.endereco||null,cidade:P.cidade||null,uf:P.uf||null,transportadora:(P.transportadora||_bt||null),tracking:P.tracking||null,
-        previsao_coleta:P.previsao_coleta||null,status:'aguardando_etiqueta'});
+        previsao_coleta:P.previsao_coleta||null,status:'aguardando_etiqueta',tipo_envio:P._full?'full':null,full_meta:P._full||null});
       for(var j=0;j<P.itens.length;j++){
         var it=P.itens[j];
         var key=(it.ean||it.sku||it.descricao||'').toLowerCase();
@@ -49826,6 +50043,7 @@ function ecomPanelSep(){
             +'<button class="btn btn-sm btn-p" onclick="ecomSepAbrir(\''+o.id+'\')">Bipar</button>'
             +'<button class="btn btn-sm" onclick="ecomSepConcluir(\''+o.id+'\')">Concluir</button>';
         })())
+      +(ecomFullDaOs(o.id)?'<button class="btn btn-sm" onclick="ecomFullEtiqUnidades(\''+ecomFullDaOs(o.id)+'\')">&#127991; Etiquetas de unidade</button>':'')
       +(ecomPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomOsCancelar(\''+o.id+'\')">Cancelar</button>':'')+'</div>';
   }).join('') : '<div style="padding:16px;color:var(--text3);font-size:13px">Nenhuma ordem de separação.</div>';
 
@@ -51341,6 +51559,8 @@ async function ecomCxBip(code){
   try{
   var pid=ecomCxCurrentPid();
   if(!pid){ ecomCxFlash('Folha concluida','green'); ecomCxRender(); return; }
+  var _pf=ecomPedidos.find(function(x){return x.id===pid;});
+  if(ecomEhFull(_pf)){ await ecomFullBip(_pf,ecomItensDo(pid),code); return; }   // v1.0.1049: Embarque Full
   var prod=ecomProdByCode(code);
   if(!prod){ ecomBeep(); ecomCxFlash('Produto nao cadastrado: '+code,'red'); ecomCxRender(); return; }
   var its=ecomItensDo(pid);
@@ -51391,6 +51611,7 @@ function ecomCxMsgHtml(){
 }
 // Indicador de BOX: em qual monte a caixa vai, por transportadora
 function ecomCxBoxHtml(p){
+  if(ecomEhFull(p)) return ecomFullPainelCheckout(p);   // v1.0.1049: Embarque Full
   var t=ecomTranspInfo(p);
   return '<div style="margin-top:18px;border-radius:16px;padding:20px 28px;background:'+t.bg+';border:3px solid '+t.cor+'">'
     +'<div style="font-size:13px;letter-spacing:2px;color:'+t.cor+';opacity:.85">COLOCAR NO</div>'
@@ -51907,6 +52128,13 @@ async function ecomEmbCarregar(romId){
   try{
     var rows=await dbSelect('ecom_embarque_conf','company_id=eq.'+ecomCid()+'&romaneio_id=eq.'+romId);
     var o={}; (rows||[]).forEach(function(x){ o[x.pedido_id]=1; });
+    // v1.0.1049: Full só conta como embarcado com todas as caixas bipadas
+    var _fcx={};
+    (rows||[]).forEach(function(x){ var fp=(ecomPedidos||[]).find(function(p){return p.id===x.pedido_id;}); if(!ecomEhFull(fp)) return;
+      var cx=(ecomFullMeta(fp).caixas||[]).find(function(c){ return ecomFullNormQr(c.spx)===ecomFullNormQr(x.codigo_lido); }); if(cx){ (_fcx[fp.id]=_fcx[fp.id]||{})[cx.n]=1; } });
+    Object.keys(o).forEach(function(pid){ var fp=(ecomPedidos||[]).find(function(p){return p.id===pid;}); if(!ecomEhFull(fp)) return;
+      var tot=ecomFullMeta(fp).caixas_total||0; if(Object.keys(_fcx[pid]||{}).length<tot) delete o[pid]; });
+    if(ecomEmb && ecomEmb.romId===romId) ecomEmb.fullCx=Object.assign(_fcx, ecomEmb.fullCx||{});
     // mescla: bipe feito durante o carregamento não pode ser apagado pelo snapshot
     if(ecomEmb && ecomEmb.romId===romId){ ecomEmb.ok=Object.assign(o, ecomEmb.ok||{}); ecomEmb.carregado=true; ecomEmbRender(); }
   }catch(e){ if(ecomEmb&&ecomEmb.romId===romId){ ecomEmb.carregado=false; ecomEmbRender(); } console.warn('[embarque] nao recuperou o ja bipado:',e); }
@@ -52007,6 +52235,23 @@ async function ecomEmbBip(code){
   _ecomEmbBusy=true;
   try{
   var lc=code.toLowerCase();
+  // v1.0.1049: Embarque Full — cada caixa (QR SPXBR) é bipada; o pedido embarca com todas
+  var _fx=ecomFullEmbCaixa(code,ecomEmb.romId);
+  if(_fx){
+    var _fp=_fx.ped, _fm=ecomFullMeta(_fp), _tot=_fm.caixas_total||(_fm.caixas||[]).length, _lb='Full '+ecomEsc(_fp.numero_pedido||'')+' \u00b7 caixa '+_fx.cx.n+'/'+_tot;
+    if(_fp.romaneio_id!==ecomEmb.romId){ ecomBeep(); ecomEmb.cor='erro'; ecomEmb.msg='RETIRAR \u2014 nao e deste romaneio'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
+    ecomEmb.fullCx=ecomEmb.fullCx||{}; var _set=ecomEmb.fullCx[_fp.id]=ecomEmb.fullCx[_fp.id]||{};
+    if(_set[_fx.cx.n]){ ecomEmb.cor='dup'; ecomEmb.msg='CAIXA JA BIPADA'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
+    try{ await dbInsert('ecom_embarque_conf',{company_id:ecomCid(),romaneio_id:ecomEmb.romId,pedido_id:_fp.id,codigo_lido:code,operador:ecomOper()}); }
+    catch(e){ ecomBeep(); ecomEmb.cor='erro'; ecomEmb.msg='NAO SALVO \u2014 bipe de novo'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
+    _set[_fx.cx.n]=1; var _feitas=Object.keys(_set).length;
+    var _falt=(_fm.caixas||[]).filter(function(c){return !_set[c.n];}).map(function(c){return c.n;});
+    if(_feitas>=_tot){ ecomEmb.ok[_fp.id]=1; ecomEmb.msg='EMBARCAR \u2713 Full completo ('+_tot+' caixas)'; }
+    else ecomEmb.msg='CAIXA '+_fx.cx.n+' \u2713 \u00b7 '+_feitas+' de '+_tot;
+    ecomEmb.cor='ok'; ecomEmb.det=_lb+(_falt.length?' \u00b7 faltam: '+_falt.join(', '):'');
+    if(_ecomEmbCount) _ecomEmbCount[ecomEmb.romId]=Object.keys(ecomEmb.ok).length;
+    ecomEmbRender(); ecomEmbFocus(); return;
+  }
   var _norm=lc.replace(/[^a-z0-9]/g,'');
   function _hit(v){
     if(!v)return false;
@@ -52037,6 +52282,7 @@ async function ecomEmbBip(code){
     ecomEmb.det=lbl+' &middot; status: '+ecomEsc(ped.status||'');
     ecomEmbRender(); ecomEmbFocus(); return;
   }
+  if(ecomEhFull(ped)){ var _fm2=ecomFullMeta(ped), _st2=(ecomEmb.fullCx||{})[ped.id]||{}; ecomBeep(); ecomEmb.cor='dup'; ecomEmb.msg='FULL: BIPE AS CAIXAS'; ecomEmb.det=lbl+' \u00b7 '+Object.keys(_st2).length+' de '+(_fm2.caixas_total||'?')+' caixas bipadas'; ecomEmbRender(); ecomEmbFocus(); return; }
   if(ecomEmb.ok[ped.id]){ ecomEmb.cor='dup'; ecomEmb.msg='JA BIPADO'; ecomEmb.det=lbl; ecomEmbRender(); ecomEmbFocus(); return; }
   // grava PRIMEIRO: o check verde só pode aparecer depois que o registro existe
   try{
@@ -52870,6 +53116,7 @@ async function ecomEtiqImportFile(input){
   if(!ecomPedidosDoLojista().length){ showToast('Importe os pedidos antes das etiquetas','amber'); return; }
   // v1.0.1045: recarrega as notas antes de casar — XML importado na mesma sessão (sem recarregar a página) não era visto
   try{ ecomNfes=await dbSelectAll('ecom_nfe','company_id=eq.'+cid+'&select=id,chave,numero,order_id,pedido_id')||ecomNfes; }catch(_rn){}
+  try{ var _fd=await ecomFullEtiqDetectar(f); if(_fd){ await ecomFullEtiqImportar(f,_fd); return; } }catch(_fe){ console.warn('etiquetas full',_fe); }   // v1.0.1049: Embarque Full
   // etiqueta por PDF permanece liberada (backup da integração)
   var _trkFix=0, _trkVazio=0;
   try{
