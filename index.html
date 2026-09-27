@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1054 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1055 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1054';
+const APP_VERSION='v1.0.1055';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -7962,6 +7962,11 @@ function ttNdMapa(json){
     if(it&&it.nota_debito===true) nd[String(it.servico||'').trim().toUpperCase()]=true; }); });
   return nd;
 }
+function ttEmMapa(json){
+  var em={}; (json||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){
+    if(it&&it.entra_minimo===true) em[String(it.servico||'').trim().toUpperCase()]=true; }); });
+  return em;
+}
 function ttSmMapa(json){
   var sm={}; (json||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){
     if(it&&it.so_minimo===true) sm[String(it.servico||'').trim().toUpperCase()]=true; }); });
@@ -7969,7 +7974,7 @@ function ttSmMapa(json){
 }
 // quadros da tela -> JSON no formato das propostas
 function ttJsonDeQuadros(quadros,jsonAntigo){
-  var nd=ttNdMapa(jsonAntigo), sm=ttSmMapa(jsonAntigo);
+  var nd=ttNdMapa(jsonAntigo), sm=ttSmMapa(jsonAntigo), em=ttEmMapa(jsonAntigo);
   return (quadros||[]).filter(function(q){return q&&q.nome&&(q.itens||[]).some(function(i){return i&&i.servico;});}).map(function(q){
     return {quadro:q.nome, itens:(q.itens||[]).filter(function(i){return i&&i.servico;}).map(function(it){
       var un=it.unidade_cobranca||it.unidade||'';
@@ -7978,7 +7983,8 @@ function ttJsonDeQuadros(quadros,jsonAntigo){
       return {servico:it.servico, unidade:un, unidade_cobranca:un, valor:ttValorBR(it.valor,perc),
               qtde_minima:it.qtde_minima?Number(it.qtde_minima):null,
               nota_debito:(it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true),
-              so_minimo:(it.so_minimo===true)||(it.so_minimo===undefined&&sm[k]===true)};
+              so_minimo:(it.so_minimo===true)||(it.so_minimo===undefined&&sm[k]===true),
+              entra_minimo:((it.entra_minimo===true)||(it.entra_minimo===undefined&&em[k]===true))&&((it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true))};
     })};
   });
 }
@@ -7992,7 +7998,7 @@ function ttQuadrosDeJson(json){
         if(perc&&!/%/.test(un)) un=(un?un+' ':'')+'%';
         var v=parseValorTarifa(it.valor,perc);
         return {servico:it.servico||it.descricao, unidade_cobranca:un, valor:v||'',
-                qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true,
+                qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true), entra_minimo:it.entra_minimo===true,
                 cap_recebimento:false, cap_expedicao:false};
       })};
   });
@@ -8011,8 +8017,9 @@ async function loadTTQuadros(tabelaId){
     if(_js.length) ttQuadros=ttQuadrosDeJson(_js);
   } else {
     // o flag de Nota de Debito so existe na coluna tarifas: traz de la
-    const nd=ttNdMapa(_js), sm=ttSmMapa(_js);
+    const nd=ttNdMapa(_js), sm=ttSmMapa(_js), em=ttEmMapa(_js);
     ttQuadros.forEach(function(q){ (q.itens||[]).forEach(function(it){
+      if(it.entra_minimo===undefined) it.entra_minimo=em[String(it.servico||'').trim().toUpperCase()]===true;
       if(it.nota_debito===undefined) it.nota_debito=nd[String(it.servico||'').trim().toUpperCase()]===true;
       if(it.so_minimo===undefined) it.so_minimo=sm[String(it.servico||'').trim().toUpperCase()]===true; }); });
   }
@@ -8079,6 +8086,7 @@ function renderTTQuadros(){
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Recebimento">Cap.Rec</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Expedição">Cap.Exp</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Esta linha vai para a Nota de Débito (valor fixo, sem imposto)">ND</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:6%" title="Linha de ND que conta para o faturamento mínimo (ex.: locação que é o mínimo do contrato)">Mín.</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Conta só para o cálculo do faturamento mínimo e não é cobrada (ex.: litros expedidos de outro cliente)">Só mín.</th>
             <th style="width:5%"></th>
           </tr>
@@ -8116,7 +8124,10 @@ function renderTTRow(qi, ii, item){
       <input type="checkbox" ${item.cap_expedicao?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].cap_expedicao=this.checked" style="width:15px;height:15px;cursor:pointer">
     </td>
     <td style="padding:5px 4px;text-align:center">
-      <input type="checkbox" ${item.nota_debito?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].nota_debito=this.checked" style="width:15px;height:15px;cursor:pointer" title="Vai para a Nota de Débito">
+      <input type="checkbox" ${item.nota_debito?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].nota_debito=this.checked;if(!this.checked)ttQuadros[${qi}].itens[${ii}].entra_minimo=false;renderTTQuadros()" style="width:15px;height:15px;cursor:pointer" title="Vai para a Nota de Débito">
+    </td>
+    <td style="padding:5px 4px;text-align:center">
+      ${item.nota_debito?`<input type="checkbox" ${item.entra_minimo?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].entra_minimo=this.checked" style="width:15px;height:15px;cursor:pointer" title="Esta ND conta para o faturamento mínimo">`:'<span style="color:var(--text3)">\u2014</span>'}
     </td>
     <td style="padding:5px 4px;text-align:center">
       <input type="checkbox" ${item.so_minimo?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].so_minimo=this.checked" style="width:15px;height:15px;cursor:pointer" title="Conta só para o faturamento mínimo (não é cobrada)">
@@ -8563,7 +8574,8 @@ function fatSubtotalPuro(l){
 // faturamento mínimo: linha manual (fita, impressão...) fica FORA, salvo se marcada;
 // linha "só para o mínimo" entra na base mas não é cobrada
 function fatEntraNoMinimo(l){
-  if(!l||l.is_complemento||l.nota_debito) return false;
+  if(!l||l.is_complemento) return false;
+  if(l.nota_debito) return l.entra_minimo===true;   // v1.0.1055: ex.: locação que É o mínimo do contrato (Viscofan)
   if(l.so_minimo) return true;
   if(l.entra_minimo===true) return true;
   if(l.entra_minimo===false) return false;
@@ -8573,6 +8585,7 @@ function fatFaturavelNF(l){ return !!l&&!l.nota_debito&&!l.so_minimo&&!l.is_comp
 function fatBaseMinimo(linhas){ return (linhas||[]).filter(fatEntraNoMinimo).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
 function fatLinhaMinTag(l,gi){
   if(l.so_minimo) return '<div style="font-size:10.5px;color:var(--text3);margin-top:2px">n\u00e3o faturado \u00b7 conta s\u00f3 para o faturamento m\u00ednimo</div>';
+  if(l.nota_debito) return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> ND \u00b7 conta para o faturamento m\u00ednimo</label>';   // v1.0.1055
   if(l.manual===true||l.quadro==='Extras') return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> entra no faturamento m\u00ednimo</label>';
   return '';
 }
@@ -9481,7 +9494,7 @@ function carregarLinhasFatura(tabelaId){
     quantidade:'',
     subtotal:0,
     tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-    nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true,
+    nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true),
   })));
   renderLinhasFatura();
   recalcFatura();
@@ -9585,7 +9598,7 @@ function fatRecarregarLinhas(){
               unidade:it.unidade||it.unidade_cobranca||'', preco_unitario:it.valor||'',
               quantidade:'', subtotal:0,
               tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-              nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, qtde_minima:it.qtde_minima||null};
+              nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true), qtde_minima:it.qtde_minima||null};
     });
   });
   if(!novas.length){ alert('A tabela tarifaria selecionada nao tem itens.'); return; }
@@ -11720,7 +11733,7 @@ function fgLinhasDaTabela(tab){
         quantidade:'',                                   // em branco — é o que vamos digitar
         subtotal:0,
         tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-        nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true
+        nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true)
       });
     });
   });
