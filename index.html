@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1051 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1052 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1051';
+const APP_VERSION='v1.0.1052';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3080,6 +3080,57 @@ async function ecomNfeDoDanfe(file){
           order_id:oid, destinatario:dest, cep:null, cidade:null, uf:null, endereco:null, bairro:null,
           emit_nome:null, emit_cnpj:chave.slice(6,20), emit_uf:null, protocolo:null,
           emissao:emissao, valor:vt, itens:itens, _danfe:true};
+}
+// v1.0.1052: aba "Etiqueta" do pedido Full — etiquetas de unidade (por SKU) e de caixa, com ver e imprimir
+async function ecomFullPdfSub(path,paginas){
+  var PDFLib=await ecomFullPdfLib();
+  var buf=_ecomFullPdfCache[path];
+  if(!buf){ var r=await window.supabase.storage.from('ecom-etiquetas').download(path); if(!r||r.error||!r.data) throw new Error((r&&r.error&&r.error.message)||'n\u00e3o consegui baixar o PDF'); buf=await r.data.arrayBuffer(); _ecomFullPdfCache[path]=buf; }
+  var src=await PDFLib.PDFDocument.load(buf), out=await PDFLib.PDFDocument.create();
+  var cps=await out.copyPages(src,paginas.map(function(p){return p-1;})); cps.forEach(function(p){out.addPage(p);});
+  return URL.createObjectURL(new Blob([await out.save()],{type:'application/pdf'}));
+}
+async function ecomFullVer(pid,tipo,chave){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), path=tipo==='master'?meta.master_pdf:meta.unidades_pdf, pgs=[], tit='';
+  if(tipo==='master'){ var cx=(meta.caixas||[]).filter(function(c){ return chave==null||c.n===chave; }); pgs=cx.map(function(c){return c.pagina;}).filter(Boolean); tit='Etiquetas de caixa \u00b7 '+(chave==null?'todas ('+pgs.length+')':'caixa '+chave+' de '+(meta.caixas_total||'?')); }
+  else { var pg=meta.unidades_paginas||{}; if(chave) pgs=pg[chave]||[]; else Object.keys(pg).forEach(function(k){ pgs=pgs.concat(pg[k]); }); pgs.sort(function(a,b){return a-b;}); tit='Etiquetas de unidade \u00b7 '+(chave||'todas')+' ('+pgs.length+')'; }
+  if(!path||!pgs.length){ ecomAvisoCentro('Etiquetas n\u00e3o encontradas',['Este pedido ainda n\u00e3o tem essas etiquetas importadas.'],'amber'); return; }
+  try{ var url=await ecomFullPdfSub(path,pgs); capaPdfViewer(url,tit+' \u00b7 Full '+(p.numero_pedido||''),'60 \u00d7 40 mm','full-'+tipo+'-'+(chave||'todas')+'.pdf'); }
+  catch(e){ ecomAvisoCentro('Erro ao abrir as etiquetas',[ecomEsc(e.message||e)],'red'); }
+}
+function ecomFullDetEtiq(p){
+  var meta=ecomFullMeta(p), pg=meta.unidades_paginas||{}, its=ecomItensDo(p.id);
+  var btn='font-size:11.5px;padding:3px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer';
+  var totUn=0; Object.keys(pg).forEach(function(k){ totUn+=pg[k].length; });
+  var h='<div style="display:flex;gap:18px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">'
+    +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">ASN</div><div style="font-family:monospace;font-size:13px;font-weight:700">'+ecomEsc(p.numero_pedido||'\u2014')+'</div></div>'
+    +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Armaz\u00e9m</div><div style="font-size:13px;font-weight:600">'+ecomEsc(meta.armazem||'\u2014')+'</div></div>'
+    +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Coleta</div><div style="font-size:13px">'+ecomEsc(meta.data_coleta||'\u2014')+'</div></div>'
+    +'<div><div style="font-size:10px;color:var(--text3);text-transform:uppercase">NF</div><div style="font-size:13px">'+(ecomTemNf(p.id)?'\u2714 ligada':'<span style="color:var(--red-text)">falta</span>')+'</div></div></div>';
+  // unidades
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><b style="font-size:13px">Etiquetas de unidade</b>'
+    +(meta.unidades_pdf?'<span><button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'unidade\')">Ver todas ('+totUn+')</button> <button style="'+btn+'" onclick="ecomFullEtiqUnidades(\''+p.id+'\')">\ud83d\udda8 Imprimir</button></span>':'<span style="font-size:12px;color:var(--red-text)">n\u00e3o importadas</span>')+'</div>';
+  if(meta.unidades_pdf){
+    h+='<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'+its.map(function(it){
+      var sk=String(it.sku||'').toUpperCase(), n=(pg[sk]||[]).length, ok=n===ecomN(it.qtd);
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12.5px"><b style="min-width:70px">'+ecomEsc(it.sku)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(it.descricao||'')+'</span>'
+        +'<span style="'+(ok?'color:var(--green-text)':'color:var(--red-text)')+'">'+n+'/'+ecomN(it.qtd)+'</span>'+(n?'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'unidade\',\''+sk+'\')">Ver</button>':'')+'</div>';
+    }).join('')+'</div>';
+  }
+  // caixas
+  var cxs=meta.caixas||[];
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><b style="font-size:13px">Etiquetas de caixa (volumes)</b>'
+    +(meta.master_pdf?'<span><button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'master\')">Ver todas ('+cxs.length+')</button></span>':'<span style="font-size:12px;color:var(--red-text)">n\u00e3o importadas</span>')+'</div>';
+  if(meta.master_pdf){
+    h+='<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">'+cxs.map(function(c){
+      var cont=Object.keys(c.itens||{}).map(function(k){return k+' \u00d7 '+c.itens[k];}).join(', ');
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12.5px"><b style="min-width:70px">Caixa '+c.n+'</b><span style="font-family:monospace">'+ecomEsc(c.spx||'')+'</span>'
+        +'<span style="flex:1;color:var(--text2)">'+(c.fechada_em?(c.qtd+' un \u00b7 '+ecomEsc(cont)):'aguardando checkout')+'</span>'
+        +'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'master\','+c.n+')">Ver</button> <button style="'+btn+'" onclick="ecomFullImprimirPaginas(\''+meta.master_pdf+'\',['+c.pagina+'])">\ud83d\udda8</button></div>';
+    }).join('')+'</div>';
+  }
+  return h;
 }
 
 function canDo(tela, acao){
@@ -50010,6 +50061,7 @@ function ecomDetNf(){
 
 function ecomDetEtiq(){
   var D=ecomDet, e=D.etiq, p=D.ped;
+  if(ecomEhFull(p)) return ecomFullDetEtiq(p);   // v1.0.1052: Full mostra as etiquetas de unidade e de caixa
   if(!e) return '<div style="color:var(--text3);font-size:13px;padding:20px;text-align:center">Nenhuma etiqueta vinculada.<br><span style="font-size:12px">O pedido só é liberado para separação depois que a etiqueta casar.</span></div>';
   var img=e.img?('<div style="text-align:center;margin-top:12px"><img src="'+ecomEsc(e.img)+'" style="max-width:100%;max-height:420px;border:1px solid var(--border);border-radius:8px"></div>'):'';
   if(!e.img&&e.arquivo_path){   // v1.0.1033: etiqueta guardada como arquivo
@@ -53181,7 +53233,9 @@ async function ecomEtiqImportFile(input){
   if(!ecomPedidosDoLojista().length){ showToast('Importe os pedidos antes das etiquetas','amber'); return; }
   // v1.0.1045: recarrega as notas antes de casar — XML importado na mesma sessão (sem recarregar a página) não era visto
   try{ ecomNfes=await dbSelectAll('ecom_nfe','company_id=eq.'+cid+'&select=id,chave,numero,order_id,pedido_id')||ecomNfes; }catch(_rn){}
-  try{ var _fd=await ecomFullEtiqDetectar(f); if(_fd){ await ecomFullEtiqImportar(f,_fd); return; } }catch(_fe){ console.warn('etiquetas full',_fe); }   // v1.0.1049: Embarque Full
+  // v1.0.1052: etiqueta do Full reconhecida NUNCA cai na importação normal — erro aparece no meio da tela
+  var _fd=null; try{ _fd=await ecomFullEtiqDetectar(f); }catch(_de){ console.warn('deteccao full',_de); }
+  if(_fd){ try{ await ecomFullEtiqImportar(f,_fd); }catch(_fe){ console.error('etiquetas full',_fe); ecomProgResultado('Erro ao ligar as etiquetas do Full',null,[ecomEsc((_fe&&_fe.message)||_fe),'Nada foi gravado pela metade: corrija e envie o PDF de novo.'],'red'); } return; }   // v1.0.1049: Embarque Full
   // etiqueta por PDF permanece liberada (backup da integração)
   var _trkFix=0, _trkVazio=0;
   try{
