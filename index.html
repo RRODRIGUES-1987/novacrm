@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1052 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1053 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1052';
+const APP_VERSION='v1.0.1053';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2863,8 +2863,10 @@ function ecomParseFullAsn(text){
 function ecomFullRowsDaAsn(a){
   var dest='Shopee Full \u00b7 '+(a.armazem||'armaz\u00e9m Shopee');
   ecomImportRows={pedidos:[{numero_pedido:a.asn||('FULL-'+Date.now()),tracking:'',destinatario_nome:dest,transportadora:'Shopee (coleta)',canal:'Shopee Full',
-    itens:a.itens.map(function(i){ return {sku:i.sku,ean:'',descricao:i.descricao,qtd:i.qtd}; }),
-    _full:{asn:a.asn,armazem:a.armazem,loja_id:a.loja_id,total:a.total,skuids:a.skuids,caixas:[],cx_atual:1}}],totalItens:a.itens.length};
+    itens:ecomExplodeKits(a.itens,ecomLojistaId),   // v1.0.1053: mesmas regras de kit do pedido normal
+    _full:{asn:a.asn,armazem:a.armazem,loja_id:a.loja_id,total:a.total,skuids:a.skuids,caixas:[],cx_atual:1,
+           unidades:a.itens.reduce(function(o,i){ o[i.sku]=(o[i.sku]||0)+i.qtd; return o; },{}),
+           unid_desc:a.itens.reduce(function(o,i){ o[i.sku]=i.descricao; return o; },{})}}],totalItens:a.itens.length};
   ecomAvisoCentro('ASN '+(a.asn||'')+' lida',[a.itens.length+' SKU(s) \u00b7 <b>'+a.total+' unidade(s)</b> \u00b7 armaz\u00e9m '+ecomEsc(a.armazem||'?'),'Confira a lista e grave. Depois: a NF (XML) e as etiquetas de unidade e de caixa, um PDF de cada vez.'],'green');
 }
 // ── 2) etiquetas do Full (unidade 60×40 e caixa master) no passo das etiquetas ──
@@ -2906,12 +2908,12 @@ async function ecomFullEtiqImportar(file,det){
       if(!sk) return; (porSku[sk]=porSku[sk]||[]).push(i+1); if(id) skuids[sk]=id;
     });
     // pedido Full cujas quantidades por SKU batem com as etiquetas
-    ped=cands.find(function(p){ var its=ecomItensDo(p.id); return its.length&&its.every(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length===ecomN(it.qtd); }); })
+    ped=cands.find(function(p){ var u=ecomFullUnid(p), ks=Object.keys(u); return ks.length&&ks.every(function(k){ return (porSku[k]||[]).length===ecomN(u[k]); }); })
       ||(cands.length===1?cands[0]:null);
     if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Nenhum pedido Full aguardando etiqueta tem as mesmas quantidades por SKU destas etiquetas.','Confira se a lista de separa\u00e7\u00e3o foi gravada e se a NF n\u00e3o mudou as quantidades.'],'red'); return; }
     meta=ecomFullMeta(ped);
     meta.unidades_paginas=porSku; meta.skuids=Object.assign(meta.skuids||{},skuids);
-    var its=ecomItensDo(ped.id), div=its.filter(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length!==ecomN(it.qtd); });
+    var _uu=ecomFullUnid(ped), div=Object.keys(_uu).filter(function(k){ return (porSku[k]||[]).length!==ecomN(_uu[k]); }).map(function(k){ return {sku:k,qtd:_uu[k]}; });
     var _divTxt=div.length?('<span style="color:var(--amber-text,#b45309)">\u25cf</span> '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(d){return ecomEsc(d.sku)+' ('+(porSku[String(d.sku||'').toUpperCase()]||[]).length+'/'+ecomN(d.qtd)+')';}).join(', ')):'';
   }
   var path=cid+'/full/'+String(ped.numero_pedido||ped.id).replace(/[^A-Za-z0-9_-]/g,'_')+'/'+det.tipo+'.pdf';
@@ -2952,10 +2954,10 @@ async function ecomFullImprimirPaginas(path,paginas){
 function ecomFullEtiqUnidades(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
   var meta=ecomFullMeta(p), pg=meta.unidades_paginas||{};
-  var its=ecomItensDo(pid);
+  var _un=ecomFullUnid(p);
   var old=ge('ecom-full-etq'); if(old) old.remove();
-  var linhas=its.map(function(it){ var sk=String(it.sku||'').toUpperCase(), n=(pg[sk]||[]).length;
-    return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:13px"><b style="min-width:80px">'+ecomEsc(it.sku)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(it.descricao||'')+'</span><span>'+n+' etiqueta(s)</span>'
+  var linhas=Object.keys(_un).map(function(sk){ var n=(pg[sk]||[]).length;
+    return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:13px"><b style="min-width:80px">'+ecomEsc(sk)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(ecomFullDesc(p,sk))+'</span><span>'+n+' etiqueta(s)</span>'
       +(n?'<button class="btn btn-sm" onclick="ecomFullImprimirPaginas(\''+meta.unidades_pdf+'\','+JSON.stringify(pg[sk]).replace(/"/g,'')+')">\ud83d\udda8 Imprimir</button>':'')+'</div>'; }).join('');
   var todas=[]; Object.keys(pg).forEach(function(k){ todas=todas.concat(pg[k]); }); todas.sort(function(a,b){return a-b;});
   document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-full-etq" style="z-index:300;display:flex"><div class="modal" style="width:620px;max-width:95vw;padding:16px">'
@@ -2966,14 +2968,14 @@ function ecomFullEtiqUnidades(pid){
 // ── 4) checkout: cada bipe = uma etiqueta de unidade; caixa cheia imprime a master ──
 function ecomFullUpc(p,meta){
   if(meta.upc) return meta.upc;
-  var tot=ecomItensDo(p.id).reduce(function(s,i){return s+ecomN(i.qtd);},0), cx=meta.caixas_total||(meta.caixas||[]).length||1;
+  var _u=ecomFullUnid(p), tot=Object.keys(_u).reduce(function(s,k){return s+ecomN(_u[k]);},0), cx=meta.caixas_total||(meta.caixas||[]).length||1;
   return Math.max(1,Math.ceil(tot/cx));
 }
 function ecomFullSetUpc(pid,v){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
   var meta=ecomFullMeta(p), n=parseInt(v,10); if(!(n>0)) return;
   meta.upc=n; p.full_meta=meta; dbUpdate('ecom_pedidos',pid,{full_meta:meta}).catch(function(){});
-  var tot=ecomItensDo(pid).reduce(function(s,i){return s+ecomN(i.qtd);},0), cx=meta.caixas_total||0;
+  var _u=ecomFullUnid(p), tot=Object.keys(_u).reduce(function(s,k){return s+ecomN(_u[k]);},0), cx=meta.caixas_total||0;
   if(cx&&Math.ceil(tot/n)!==cx) showToast('Com '+n+' por caixa ficam '+Math.ceil(tot/n)+' caixa(s), mas a Shopee mandou '+cx+' etiquetas de caixa.','amber');
   ecomCxRender();
 }
@@ -2981,19 +2983,25 @@ async function ecomFullBip(p,its,code){
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
   Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
   if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
-  if(!sk){ ecomBeep(); ecomCxFlash('Etiqueta n\u00e3o \u00e9 deste Full: '+code,'red'); ecomCxRender(); return; }
-  var it=its.find(function(i){ return String(i.sku||'').toUpperCase()===sk; });
-  if(!it){ ecomBeep(); ecomCxFlash('SKU '+sk+' n\u00e3o est\u00e1 neste Full','red'); ecomCxRender(); return; }
-  if(ecomN(it.qtd_conferida)>=ecomN(it.qtd)){ ecomBeep(); ecomCxFlash('SKU '+sk+' j\u00e1 completo ('+ecomN(it.qtd)+') \u2014 etiqueta a mais ou bipada duas vezes','red'); ecomCxRender(); return; }
-  var nova=ecomN(it.qtd_conferida)+1;
-  await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+  var un=ecomFullUnid(p);
+  if(!sk||!(sk in un)){ ecomBeep(); ecomCxFlash(sk?('SKU '+sk+' n\u00e3o est\u00e1 neste Full'):('Etiqueta n\u00e3o \u00e9 deste Full: '+code),'red'); ecomCxRender(); return; }
+  if(ecomFullConf(p,sk)>=ecomN(un[sk])){ ecomBeep(); ecomCxFlash('SKU '+sk+' j\u00e1 completo ('+ecomN(un[sk])+') \u2014 etiqueta a mais ou bipada duas vezes','red'); ecomCxRender(); return; }
+  // v1.0.1053: kit = 1 etiqueta; confere de uma vez os componentes de UM kit (conversão do cadastro ecom_kit_itens)
+  var alvo=its.filter(function(i){return String(i.kit_sku||'').toUpperCase()===sk;}), porKit={};
+  if(alvo.length){ (ecomKitComp(sk)||[]).forEach(function(c){ porKit[String(c.sku||'').toUpperCase()]=ecomN(c.qtd)||1; }); }
+  else { var it1=its.find(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===sk&&ecomN(i.qtd_conferida)<ecomN(i.qtd); }); if(it1){ alvo=[it1]; porKit[sk]=1; } }
+  if(!alvo.length){ ecomBeep(); ecomCxFlash('SKU '+sk+' sem item a conferir neste Full','red'); ecomCxRender(); return; }
+  for(var a=0;a<alvo.length;a++){
+    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, nova=ecomN(it.qtd_conferida)+inc;
+    await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+    await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
+  }
   if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
-  await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
   meta.caixas=meta.caixas||[]; var n=meta.cx_atual||1;
   var cx=meta.caixas.find(function(c){return c.n===n;}); if(!cx){ cx={n:n,spx:'',pagina:null,itens:{},qtd:0,fechada_em:null}; meta.caixas.push(cx); }
   cx.itens[sk]=(cx.itens[sk]||0)+1; cx.qtd=(cx.qtd||0)+1;
-  var completo=its.every(function(i){ return ecomN(i.qtd_conferida)>=ecomN(i.qtd); });
-  var msg='Unidade OK \u00b7 caixa '+n+': '+cx.qtd+'/'+ecomFullUpc(p,meta);
+  var completo=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+  var msg='Unidade OK \u00b7 caixa '+n+': '+cx.qtd+'/'+ecomFullUpc(p,meta)+(alvo[0].kit_sku?' \u00b7 kit '+sk+' conferido':'');
   if(cx.qtd>=ecomFullUpc(p,meta)||completo){ msg=await ecomFullFecharCaixa(p,meta,cx,completo); }
   p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta});
   if(completo){
@@ -3024,8 +3032,8 @@ function ecomFullReimprimirMaster(pid,n){
   ecomFullImprimirPaginas(meta.master_pdf,cx?[cx.pagina]:[]);
 }
 function ecomFullPainelCheckout(p){
-  var meta=ecomFullMeta(p), its=ecomItensDo(p.id), upc=ecomFullUpc(p,meta);
-  var tot=its.reduce(function(s,i){return s+ecomN(i.qtd);},0), feito=its.reduce(function(s,i){return s+ecomN(i.qtd_conferida);},0);
+  var meta=ecomFullMeta(p), upc=ecomFullUpc(p,meta), _un=ecomFullUnid(p), _ks=Object.keys(_un);
+  var tot=_ks.reduce(function(s,k){return s+ecomN(_un[k]);},0), feito=_ks.reduce(function(s,k){return s+Math.min(ecomN(_un[k]),ecomFullConf(p,k));},0);
   var n=meta.cx_atual||1, cx=(meta.caixas||[]).find(function(c){return c.n===n;})||{qtd:0}, fech=(meta.caixas||[]).filter(function(c){return c.fechada_em;});
   var pc=Math.min(100,Math.round((cx.qtd||0)/upc*100));
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0">'
@@ -3036,7 +3044,7 @@ function ecomFullPainelCheckout(p){
     +'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomFullFecharAgora(\''+p.id+'\')">Fechar caixa agora</button>'
     +(fech.length?'<button class="btn btn-sm" onclick="ecomFullReimprimirMaster(\''+p.id+'\','+fech[fech.length-1].n+')">Reimprimir master '+fech[fech.length-1].n+'</button>':'')+'</div></div>'
     +'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">TOTAL \u00b7 '+feito+' de '+tot+'</div>'
-    +its.map(function(i){ var ok=ecomN(i.qtd_conferida)>=ecomN(i.qtd); return '<div style="display:flex;justify-content:space-between;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(i.sku)+'</span><span>'+ecomN(i.qtd_conferida)+'/'+ecomN(i.qtd)+(ok?' \u2713':'')+'</span></div>'; }).join('')
+    +_ks.map(function(k){ var c=ecomFullConf(p,k), ok=c>=ecomN(_un[k]); return '<div style="display:flex;justify-content:space-between;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+(ecomKitComp(k)?' <small>(kit)</small>':'')+'</span><span>'+c+'/'+ecomN(_un[k])+(ok?' \u2713':'')+'</span></div>'; }).join('')
     +'</div></div>';
 }
 // ── 5) embarque: o Full embarca quando todas as caixas (QR SPXBR) forem bipadas ──
@@ -3100,7 +3108,7 @@ async function ecomFullVer(pid,tipo,chave){
   catch(e){ ecomAvisoCentro('Erro ao abrir as etiquetas',[ecomEsc(e.message||e)],'red'); }
 }
 function ecomFullDetEtiq(p){
-  var meta=ecomFullMeta(p), pg=meta.unidades_paginas||{}, its=ecomItensDo(p.id);
+  var meta=ecomFullMeta(p), pg=meta.unidades_paginas||{}, _un=ecomFullUnid(p);
   var btn='font-size:11.5px;padding:3px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer';
   var totUn=0; Object.keys(pg).forEach(function(k){ totUn+=pg[k].length; });
   var h='<div style="display:flex;gap:18px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">'
@@ -3112,10 +3120,10 @@ function ecomFullDetEtiq(p){
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><b style="font-size:13px">Etiquetas de unidade</b>'
     +(meta.unidades_pdf?'<span><button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'unidade\')">Ver todas ('+totUn+')</button> <button style="'+btn+'" onclick="ecomFullEtiqUnidades(\''+p.id+'\')">\ud83d\udda8 Imprimir</button></span>':'<span style="font-size:12px;color:var(--red-text)">n\u00e3o importadas</span>')+'</div>';
   if(meta.unidades_pdf){
-    h+='<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'+its.map(function(it){
-      var sk=String(it.sku||'').toUpperCase(), n=(pg[sk]||[]).length, ok=n===ecomN(it.qtd);
-      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12.5px"><b style="min-width:70px">'+ecomEsc(it.sku)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(it.descricao||'')+'</span>'
-        +'<span style="'+(ok?'color:var(--green-text)':'color:var(--red-text)')+'">'+n+'/'+ecomN(it.qtd)+'</span>'+(n?'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'unidade\',\''+sk+'\')">Ver</button>':'')+'</div>';
+    h+='<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'+Object.keys(_un).map(function(sk){
+      var n=(pg[sk]||[]).length, ok=n===ecomN(_un[sk]);
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12.5px"><b style="min-width:70px">'+ecomEsc(sk)+'</b><span style="flex:1;color:var(--text2)">'+ecomEsc(ecomFullDesc(p,sk))+'</span>'
+        +'<span style="'+(ok?'color:var(--green-text)':'color:var(--red-text)')+'">'+n+'/'+ecomN(_un[sk])+'</span>'+(n?'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'unidade\',\''+sk+'\')">Ver</button>':'')+'</div>';
     }).join('')+'</div>';
   }
   // caixas
@@ -3131,6 +3139,58 @@ function ecomFullDetEtiq(p){
     }).join('')+'</div>';
   }
   return h;
+}
+// v1.0.1053: mesmas regras de cadastro para todo pedido — produto certo do cadastro (SKU duplicado: prefere o do
+// mesmo cliente, depois o com endereço, depois o com EAN) e conversão de kits (ecom_kit_itens) também na NF.
+function ecomProdDoSku(sku,lojistaId){
+  var s=String(sku||'').trim().toUpperCase(); if(!s) return null;
+  var cs=(ecomProdutos||[]).filter(function(p){ return String(p.sku||'').trim().toUpperCase()===s; });
+  if(!cs.length) return null;
+  cs.sort(function(a,b){ return ((b.lojista_id===lojistaId)-(a.lojista_id===lojistaId))||((b.endereco?1:0)-(a.endereco?1:0))||((b.ean?1:0)-(a.ean?1:0)); });
+  return cs[0];
+}
+function ecomExplodeKits(itens,lojistaId){
+  var out=[];
+  (itens||[]).forEach(function(it){
+    var ks=String(it.sku||'').toUpperCase(), comps=ecomKitComp(ks);
+    if(comps&&comps.length){
+      comps.forEach(function(cp){ var cs=String(cp.sku||'').toUpperCase(), pr=ecomProdDoSku(cs,lojistaId);
+        out.push({sku:cs,ean:(pr&&pr.ean)||'',descricao:(pr&&pr.descricao)||cs,qtd:ecomN(it.qtd)*(ecomN(cp.qtd)||1),kit_sku:ks,produto_id:pr?pr.id:null}); });
+    } else {
+      var pr=ecomProdDoSku(it.sku,lojistaId);
+      out.push({sku:it.sku,ean:it.ean||(pr&&pr.ean)||'',descricao:it.descricao||(pr&&pr.descricao)||it.sku,qtd:ecomN(it.qtd),kit_sku:null,produto_id:pr?pr.id:null});
+    }
+  });
+  return out;
+}
+async function ecomInserirItem(obj){
+  if(!obj.kit_sku) delete obj.kit_sku;
+  try{ return await dbInsert('ecom_pedido_itens',obj); }
+  catch(e){ if(obj.kit_sku!==undefined){ delete obj.kit_sku; return await dbInsert('ecom_pedido_itens',obj); } throw e; }
+}
+// Full: a "unidade" é a da Shopee (etiqueta) — o kit conta como 1, mesmo com os componentes abertos nos itens
+function ecomFullUnid(p){
+  var meta=ecomFullMeta(p); if(meta.unidades&&Object.keys(meta.unidades).length) return meta.unidades;
+  var u={}, its=ecomItensDo(p.id);
+  its.forEach(function(i){
+    if(i.kit_sku){ var cp=(ecomKitComp(i.kit_sku)||[]).find(function(c){return String(c.sku||'').toUpperCase()===String(i.sku||'').toUpperCase();});
+      var n=Math.floor(ecomN(i.qtd)/(ecomN(cp&&cp.qtd)||1)); if(!(i.kit_sku in u)||n<u[i.kit_sku]) u[i.kit_sku]=n; }
+    else { var k=String(i.sku||'').toUpperCase(); u[k]=(u[k]||0)+ecomN(i.qtd); }
+  });
+  return u;
+}
+function ecomFullConf(p,sku){
+  var its=ecomItensDo(p.id), k=String(sku||'').toUpperCase();
+  var comps=its.filter(function(i){return String(i.kit_sku||'').toUpperCase()===k;});
+  if(comps.length){ var mn=Infinity; comps.forEach(function(i){ var cp=(ecomKitComp(k)||[]).find(function(c){return String(c.sku||'').toUpperCase()===String(i.sku||'').toUpperCase();});
+    mn=Math.min(mn,Math.floor(ecomN(i.qtd_conferida)/(ecomN(cp&&cp.qtd)||1))); }); return mn===Infinity?0:mn; }
+  return its.filter(function(i){return !i.kit_sku&&String(i.sku||'').toUpperCase()===k;}).reduce(function(s,i){return s+ecomN(i.qtd_conferida);},0);
+}
+function ecomFullDesc(p,sku){
+  var meta=ecomFullMeta(p); if(meta.unid_desc&&meta.unid_desc[sku]) return meta.unid_desc[sku];
+  var it=ecomItensDo(p.id).find(function(i){return String(i.sku||'').toUpperCase()===sku;});
+  if(it) return it.descricao||sku;
+  return ecomKitComp(sku)?('Kit '+sku+' (componentes: '+(ecomKitComp(sku)||[]).map(function(c){return c.sku+' \u00d7 '+(c.qtd||1);}).join(', ')+')'):sku;
 }
 
 function canDo(tela, acao){
@@ -49649,7 +49709,7 @@ async function ecomImportConfirm(){
           // completa o cadastro em vez de criar um irmão duplicado
           try{ await dbUpdate('ecom_produtos',prod.id,{ean:it.ean}); prod.ean=it.ean; prodIdx[String(it.ean).toLowerCase()]=prod; }catch(_pe){}
         }
-        await dbInsert('ecom_pedido_itens',{company_id:cid,pedido_id:ped.id,produto_id:prod?prod.id:null,sku:it.sku||null,ean:it.ean||null,descricao:it.descricao||null,qtd:it.qtd});
+        await ecomInserirItem({company_id:cid,pedido_id:ped.id,produto_id:(it.produto_id||(prod?prod.id:null)),sku:it.sku||null,ean:it.ean||null,descricao:it.descricao||null,qtd:it.qtd,kit_sku:it.kit_sku||null});   // v1.0.1053
       }
       if(_npk)_existentes[_npk]=true;
       if(ped&&ped.id)_novosIds.push(ped.id);
@@ -50370,7 +50430,10 @@ function ecomOrdRota(ea,sa,eb,sb){
 function ecomProdEndereco(it){
   var p=null;
   if(it.produto_id) p=ecomProdutos.find(function(x){return x.id===it.produto_id;});
-  if(!p && it.sku)  p=ecomProdutos.find(function(x){return (x.sku||'')===it.sku;});
+  if((!p||!p.endereco) && it.sku){   // v1.0.1053: SKU duplicado no cadastro — prefere o do cliente e com endereço
+    var _pd=(ecomPedidos||[]).find(function(x){return x.id===it.pedido_id;});
+    var alt=ecomProdDoSku(it.sku,_pd&&_pd.lojista_id); if(alt&&(alt.endereco||!p)) p=alt;
+  }
   return (p&&p.endereco)?p.endereco:'';
 }
 function ecomPedDistinctSkus(pid){
@@ -53069,10 +53132,12 @@ async function ecomNfeImportFiles(input){
         if(_podeSubst){
           try{ var ai=await dbSelect('ecom_pedido_itens','company_id=eq.'+cid+'&pedido_id=eq.'+ped.id+'&select=id');
                for(var q=0;q<ai.length;q++) await dbDelete('ecom_pedido_itens',ai[q].id); }catch(e){}
-          for(var j=0;j<nf.itens.length;j++){
-            var y=nf.itens[j];
-            await dbInsert('ecom_pedido_itens',{company_id:cid,pedido_id:ped.id,sku:y.sku,ean:y.ean||null,
-                                                descricao:y.descricao,qtd:y.qtd,qtd_conferida:0});
+          // v1.0.1053: mesmas regras da planilha/PDF/integração — kit aberto nos componentes e item ligado ao produto do cadastro
+          var _nfIts=ecomExplodeKits(nf.itens.map(function(y){return {sku:y.sku,ean:y.ean||'',descricao:y.descricao,qtd:y.qtd};}),ped.lojista_id);
+          for(var j=0;j<_nfIts.length;j++){
+            var y=_nfIts[j];
+            await ecomInserirItem({company_id:cid,pedido_id:ped.id,produto_id:y.produto_id||null,sku:y.sku,ean:y.ean||null,
+                                   descricao:y.descricao,qtd:y.qtd,qtd_conferida:0,kit_sku:y.kit_sku||null});
           }
         } else {
           // pedido ja em separacao/conferencia: NAO mexe nos itens — compara e avisa se divergir
