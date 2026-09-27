@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1050 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1051 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1050';
+const APP_VERSION='v1.0.1051';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3046,6 +3046,40 @@ function ecomFullEmbCaixa(code,romId){
   if(!ped) return null;
   var cx=(ecomFullMeta(ped).caixas||[]).find(function(x){return ecomFullNormQr(x.spx)===c;});
   return {ped:ped,cx:cx};
+}
+// v1.0.1051: PROVISÓRIO — nota em PDF (DANFE) no lugar do XML. Lê a chave (número e série saem dela), emissão,
+// valor, itens (código, descrição, quantidade) e o xPed (no Full, a ASN). Mesmo formato do ecomNfeParse.
+async function ecomNfeDoDanfe(file){
+  await ecomLoadPdfjs();
+  var pdf=await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise, t='';
+  for(var pg=1;pg<=pdf.numPages;pg++){ var tc=await (await pdf.getPage(pg)).getTextContent(); t+=' '+tc.items.map(function(i){return i.str;}).join(' '); }
+  t=t.replace(/\s+/g,' ');
+  if(!/DANFE/i.test(t)) return null;
+  var chave='', cm=t.match(/(?:^|\D)(\d(?:[ .]?\d){43})(?:\D|$)/g)||[];
+  for(var k=0;k<cm.length;k++){ var d=cm[k].replace(/\D/g,''); if(d.length===44){ chave=d; break; } }
+  if(!chave) return null;
+  var dt=t.match(/(\d{2})[-\/](\d{2})[-\/](\d{4})\s+(\d{2}:\d{2}:\d{2})/);
+  var emissao=dt?(dt[3]+'-'+dt[2]+'-'+dt[1]+'T'+dt[4]):null;
+  var oid=(t.match(/xPed:\s*([A-Za-z0-9]+)/)||[])[1]||null;
+  var dest=((t.match(/DESTINAT[ÁA]RIO:\s*(.+?)\s+-\s/i)||[])[1]||'').trim()||null;
+  var itens=[], vistos={}, m;
+  // código começando por letra (evita pegar o resto do preço unitário, que o PDF quebra em pedaços); sem nenhum, aceita código numérico
+  var _res=[/(?:^|\s)([A-Z][A-Z0-9._-]*\d[A-Z0-9._-]*)\s+(.+?)\s+(\d{8})\s+(\d{2,4})\s+(\d{4})\s+([A-Z]{1,6})\s+(\d+(?:[.,]\d+)?)\s/g,
+            /(?:^|\s)(\d{3,}[A-Z0-9._-]*)\s+([A-Za-z].+?)\s+(\d{8})\s+(\d{2,4})\s+(\d{4})\s+([A-Z]{1,6})\s+(\d+(?:[.,]\d+)?)\s/g];
+  for(var _r=0;_r<_res.length&&!itens.length;_r++){ var re=_res[_r];
+  while((m=re.exec(t))){
+    var desc=m[2].replace(/,?\s*xPed:.*$/i,'').replace(/\s*Valor aproximado.*$/i,'').trim();
+    var qtd=Math.round(parseFloat(String(m[7]).replace(',','.'))||0);
+    var key=m[1]+'|'+desc+'|'+qtd; if(vistos[key]||!qtd) continue; vistos[key]=1;
+    itens.push({sku:m[1],ean:'',descricao:desc,qtd:qtd,cfop:m[5],valor:0});
+  } }
+  var t2=t.replace(/(\d[.,]\d)\s(\d)(?!\d)/g,'$1$2');   // o PDF quebra 38354.50 em "38354.5 0"
+  var vt=0, vm=t2.match(/V\.\s*TOTAL\s*NOTA([\s\S]{0,120})/i);
+  if(vm){ (vm[1].match(/\d+[.,]\d{2}(?!\d)/g)||[]).forEach(function(x){ var n=parseFloat(x.replace(',','.')); if(n>vt) vt=n; }); }
+  return {chave:chave, numero:parseInt(chave.slice(25,34),10)||null, serie:parseInt(chave.slice(22,25),10)||null,
+          order_id:oid, destinatario:dest, cep:null, cidade:null, uf:null, endereco:null, bairro:null,
+          emit_nome:null, emit_cnpj:chave.slice(6,20), emit_uf:null, protocolo:null,
+          emissao:emissao, valor:vt, itens:itens, _danfe:true};
 }
 
 function canDo(tela, acao){
@@ -49190,7 +49224,7 @@ function ecomWizStep2(){
   var box='<div style="border:2px dashed var(--border);border-radius:12px;padding:24px;text-align:center;background:var(--bg2);cursor:pointer" onclick="ge(\'ecom-nfe-file\').click()">'
     +'<div style="font-size:14px;font-weight:600">Etapa 2 &middot; Anexe os XMLs das notas</div>'
     +'<div style="font-size:12px;color:var(--text3);margin-top:3px">a NF define os itens do pedido (kits já vêm explodidos) e casa pelo Order ID</div>'
-    +'<input type="file" id="ecom-nfe-file" accept=".xml" multiple style="display:none" onchange="ecomNfeImportFiles(this)"></div>';
+    +'<input type="file" id="ecom-nfe-file" accept=".xml,.pdf" multiple style="display:none" onchange="ecomNfeImportFiles(this)"></div>';
   if(r){
     box+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
       +'<span style="font-size:12px;padding:4px 10px;border-radius:99px;background:var(--green-bg,#dcfce7);color:var(--green-text,#059669)">'+r.nfs+' nota(s) lidas</span>'
@@ -52790,7 +52824,7 @@ function ecomEtiqPanel(){
     +'<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15h6M9 11h3"/></svg>'
     +'<div style="font-weight:600;font-size:13px;margin-top:6px">Selecionar XMLs das notas</div>'
     +'<div style="font-size:12px;color:var(--text3);margin-top:2px">a NF define os itens do pedido (kits ja vem explodidos) e casa pelo Order ID</div>'
-    +'<input type="file" id="ecom-nfe-file" accept=".xml" multiple style="display:none" onchange="ecomNfeImportFiles(this)"></div>'
+    +'<input type="file" id="ecom-nfe-file" accept=".xml,.pdf" multiple style="display:none" onchange="ecomNfeImportFiles(this)"></div>'
     +ecomNfeResumo();
   if(r){
     box+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'
@@ -52917,9 +52951,14 @@ async function ecomNfeImportFiles(input){
     for(var i=0;i<fs.length;i++){
       ecomProgSet(i,'XML '+(i+1)+' de '+fs.length,{lidas:okNf,atualizados:atualiz,falhas:erros.length});
       if(i%3===0) await ecomTick();
-      var txt=await fs[i].text();
-      if(txt.indexOf('<infNFe')<0){ erros.push(fs[i].name+': nao e NF-e'); continue; }
-      var nf=ecomNfeParse(txt);
+      var nf=null;
+      if(/\.pdf$/i.test(fs[i].name||'')){   // v1.0.1051: provisório — DANFE em PDF
+        nf=await ecomNfeDoDanfe(fs[i]); if(!nf){ erros.push(fs[i].name+': PDF n\u00e3o reconhecido como DANFE (sem a chave de acesso)'); continue; }
+      } else {
+        var txt=await fs[i].text();
+        if(txt.indexOf('<infNFe')<0){ erros.push(fs[i].name+': nao e NF-e'); continue; }
+        nf=ecomNfeParse(txt);
+      }
       console.log('[NFe] '+fs[i].name+' -> chave='+(nf.chave?nf.chave.slice(25,34):'NAO ACHOU')+' oid='+(nf.order_id||'-')+' itens='+nf.itens.length);
       if(!nf.chave){ erros.push(fs[i].name+': sem chave'); continue; }
 
