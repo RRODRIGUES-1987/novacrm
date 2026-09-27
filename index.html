@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1049 | Gerado: 2026-09-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1050 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1049';
+const APP_VERSION='v1.0.1050';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2865,7 +2865,7 @@ function ecomFullRowsDaAsn(a){
   ecomImportRows={pedidos:[{numero_pedido:a.asn||('FULL-'+Date.now()),tracking:'',destinatario_nome:dest,transportadora:'Shopee (coleta)',canal:'Shopee Full',
     itens:a.itens.map(function(i){ return {sku:i.sku,ean:'',descricao:i.descricao,qtd:i.qtd}; }),
     _full:{asn:a.asn,armazem:a.armazem,loja_id:a.loja_id,total:a.total,skuids:a.skuids,caixas:[],cx_atual:1}}],totalItens:a.itens.length};
-  showToast('ASN '+(a.asn||'')+' lida: '+a.itens.length+' SKU(s), '+a.total+' unidade(s). Importe a NF e as etiquetas (unidade e caixa) nos pr\u00f3ximos passos.','green');
+  ecomAvisoCentro('ASN '+(a.asn||'')+' lida',[a.itens.length+' SKU(s) \u00b7 <b>'+a.total+' unidade(s)</b> \u00b7 armaz\u00e9m '+ecomEsc(a.armazem||'?'),'Confira a lista e grave. Depois: a NF (XML) e as etiquetas de unidade e de caixa, um PDF de cada vez.'],'green');
 }
 // ── 2) etiquetas do Full (unidade 60×40 e caixa master) no passo das etiquetas ──
 async function ecomFullPdfTexto(pdf,pg){ var tc=await (await pdf.getPage(pg)).getTextContent(); return tc.items.map(function(i){return i.str;}).join(' ').replace(/\s+/g,' '); }
@@ -2879,13 +2879,14 @@ async function ecomFullEtiqDetectar(file){
 }
 async function ecomFullEtiqImportar(file,det){
   var cid=ecomCid(), pdf=det.pdf, pags=[];
-  for(var pg=1;pg<=pdf.numPages;pg++){ pags.push(await ecomFullPdfTexto(pdf,pg)); if(pg%50===0) showToast('Lendo etiquetas\u2026 '+pg+'/'+pdf.numPages,'blue'); }
+  ecomProgAbrir(det.tipo==='master'?'Lendo etiquetas de caixa':'Lendo etiquetas de unidade',pdf.numPages,false);
+  for(var pg=1;pg<=pdf.numPages;pg++){ pags.push(await ecomFullPdfTexto(pdf,pg)); if(pg%10===0||pg===pdf.numPages){ ecomProgSet(pg,'p\u00e1gina '+pg+' de '+pdf.numPages); await ecomTick(); } }
   var cands=ecomPedidosDoLojista().filter(function(p){ return ecomEhFull(p)&&['aguardando_etiqueta','importado'].indexOf(p.status)>=0; });
   var ped=null, meta=null;
   if(det.tipo==='master'){
     var asn=(pags[0].replace(/\s+/g,'').match(/INBR[A-Z]{2,4}\d{8,14}/)||[])[0]||'';
     ped=cands.find(function(p){ return String(p.numero_pedido||'').toUpperCase()===asn; });
-    if(!ped){ showToast('Etiquetas de caixa da ASN '+asn+': pedido Full n\u00e3o encontrado. Importe a lista de separa\u00e7\u00e3o antes.','red'); return; }
+    if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Etiquetas de caixa da ASN <b>'+ecomEsc(asn)+'</b>, mas n\u00e3o h\u00e1 pedido Full com essa ASN aguardando etiqueta.','Importe e grave a lista de separa\u00e7\u00e3o antes.'],'red'); return; }
     meta=ecomFullMeta(ped);
     meta.caixas=pags.map(function(t,i){
       var n=(t.match(/Total de\s+Caixas\s+[\s\S]*?\s(\d{1,3})\s+(\d{1,3})\s+Pickup/i)||[]);
@@ -2907,15 +2908,15 @@ async function ecomFullEtiqImportar(file,det){
     // pedido Full cujas quantidades por SKU batem com as etiquetas
     ped=cands.find(function(p){ var its=ecomItensDo(p.id); return its.length&&its.every(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length===ecomN(it.qtd); }); })
       ||(cands.length===1?cands[0]:null);
-    if(!ped){ showToast('Etiquetas de unidade: nenhum pedido Full com as mesmas quantidades por SKU. Confira a lista de separa\u00e7\u00e3o importada.','red'); return; }
+    if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Nenhum pedido Full aguardando etiqueta tem as mesmas quantidades por SKU destas etiquetas.','Confira se a lista de separa\u00e7\u00e3o foi gravada e se a NF n\u00e3o mudou as quantidades.'],'red'); return; }
     meta=ecomFullMeta(ped);
     meta.unidades_paginas=porSku; meta.skuids=Object.assign(meta.skuids||{},skuids);
     var its=ecomItensDo(ped.id), div=its.filter(function(it){ return (porSku[String(it.sku||'').toUpperCase()]||[]).length!==ecomN(it.qtd); });
-    if(div.length) showToast('Aten\u00e7\u00e3o: '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(d){return d.sku;}).join(', '),'amber');
+    var _divTxt=div.length?('<span style="color:var(--amber-text,#b45309)">\u25cf</span> '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(d){return ecomEsc(d.sku)+' ('+(porSku[String(d.sku||'').toUpperCase()]||[]).length+'/'+ecomN(d.qtd)+')';}).join(', ')):'';
   }
   var path=cid+'/full/'+String(ped.numero_pedido||ped.id).replace(/[^A-Za-z0-9_-]/g,'_')+'/'+det.tipo+'.pdf';
   var up=await window.supabase.storage.from('ecom-etiquetas').upload(path,new Blob([det.buf],{type:'application/pdf'}),{contentType:'application/pdf',upsert:true});
-  if(up&&up.error){ showToast('Erro ao guardar o PDF: '+up.error.message,'red'); return; }
+  if(up&&up.error){ ecomProgResultado('Erro ao guardar o PDF',null,[ecomEsc(up.error.message),'Confira as permiss\u00f5es da pasta ecom-etiquetas (SQL parte 1 da v1.0.1033).'],'red'); return; }
   if(det.tipo==='master') meta.master_pdf=path; else meta.unidades_pdf=path;
   var upd={full_meta:meta};
   if(meta.master_pdf&&meta.unidades_pdf){
@@ -2927,7 +2928,10 @@ async function ecomFullEtiqImportar(file,det){
     if(ped.status==='aguardando_etiqueta') upd.status='importado';
   }
   await dbUpdate('ecom_pedidos',ped.id,upd); Object.assign(ped,upd);
-  showToast((det.tipo==='master'?meta.caixas_total+' etiqueta(s) de caixa':pags.length+' etiqueta(s) de unidade')+' ligada(s) ao Full '+(ped.numero_pedido||'')+(upd.status==='importado'?' \u00b7 liberado para a separa\u00e7\u00e3o':''),'green');
+  var _lin=[(det.tipo==='master'?'<b>'+meta.caixas_total+'</b> etiqueta(s) de caixa \u00b7 coleta '+ecomEsc(meta.data_coleta||'?'):'<b>'+pags.length+'</b> etiqueta(s) de unidade')+' ligada(s) ao Full <b>'+ecomEsc(ped.numero_pedido||'')+'</b>'];
+  if(typeof _divTxt!=='undefined'&&_divTxt) _lin.push(_divTxt);
+  _lin.push(upd.status==='importado'?'<span style="color:var(--green-text,#059669)">\u2714</span> Liberado para a separa\u00e7\u00e3o.':('Falta: '+[!meta.unidades_pdf?'etiquetas de unidade':'',!meta.master_pdf?'etiquetas de caixa':''].filter(Boolean).join(' e ')+(ecomTemNf(ped.id)?'':' \u00b7 NF (XML)')));
+  ecomProgResultado(det.tipo==='master'?'Etiquetas de caixa ligadas':'Etiquetas de unidade ligadas',null,_lin,(typeof _divTxt!=='undefined'&&_divTxt)?'amber':'green');
   ecomRenderBody();
 }
 // ── 3) impressão (páginas do PDF guardado, sem abrir outra tela) ──
@@ -49032,6 +49036,23 @@ function ecomProgSet(i,sub,cnts){
   }
 }
 function ecomProgFechar(){ var m=ge('ecom-prog'); if(m)m.remove(); }
+// v1.0.1050: o resultado aparece na própria janela de progresso, no meio da tela (sem toast)
+function ecomProgResultado(titulo,cnts,linhas,cor){
+  if(!ge('ecom-prog')) ecomProgAbrir(titulo,1,false);
+  var t=ge('ecom-prog-tit'); if(t){ t.textContent=titulo; t.style.color=cor==='red'?'var(--red-text)':(cor==='amber'?'var(--amber-text,#b45309)':'var(--green-text,#059669)'); }
+  var bar=ge('ecom-prog-bar'); if(bar){ bar.style.width='100%'; bar.style.background=cor==='red'?'#dc2626':(cor==='amber'?'#f59e0b':'#16a34a'); }
+  var s=ge('ecom-prog-sub'); if(s) s.textContent='';
+  if(cnts) ecomProgSet(window._ecomProgTotal||1,'',cnts);
+  var st=ge('ecom-prog-stop'); if(st) st.remove();
+  var box=ge('ecom-prog'); if(!box) return;
+  var md=box.querySelector('.modal'); if(!md) return;
+  var old=ge('ecom-prog-det'); if(old) old.remove();
+  md.insertAdjacentHTML('beforeend','<div id="ecom-prog-det" style="margin-top:14px;text-align:left">'
+    +((linhas||[]).length?'<div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5">'+linhas.map(function(l){return '<div>'+l+'</div>';}).join('')+'</div>':'')
+    +'<div style="text-align:center;margin-top:14px"><button class="btn btn-p" onclick="ecomProgFechar()">OK</button></div></div>');
+}
+function ecomAvisoCentro(titulo,linhas,cor){ ecomProgAbrir(titulo,1,false); ecomProgResultado(titulo,null,linhas,cor); }
+
 // devolve o controle ao browser pra barra realmente pintar
 function ecomTick(){ return new Promise(function(r){ setTimeout(r,0); }); }
 
@@ -49557,7 +49578,7 @@ async function ecomImportConfirm(){
       transportadora:_bt||null,qtd_pedidos:btnOk,qtd_unidades:_logUn,duplicados:btnDup,falhas:btnErr,detalhe:_logDet});
   }catch(_el){ /* log nunca bloqueia a importação */ }
   ecomProgSet(_totalPrev,'concluído',{gravados:btnOk,ignorados:btnDup,falhas:btnErr});
-  await ecomTick(); ecomProgFechar();
+  await ecomTick();   // v1.0.1050: a janela continua aberta e vira o resultado
   ecomImportRows=null; _ecomLoaded=false; await ecomLoadAll();
   if(ecomWiz){
     ecomWiz.pedIds=(ecomWiz.pedIds||[]).concat(_novosIds);
@@ -49571,7 +49592,12 @@ async function ecomImportConfirm(){
     +'Isso acontece quando a planilha é aberta e salva no Excel. Importe o arquivo original baixado do TikTok, sem abrir no Excel.\n\nExemplos: '+_cortados.slice(0,5).join(', ')); },300);
   if(btnDup) _msg+=' · '+btnDup+' pedido(s) não importado(s) (já estavam na base)';
   if(btnErr) _msg+=' · falhas: '+btnErr;
-  showToast(_msg, (btnErr?'red':(btnDup?'amber':'green')));
+  var _falhas=_logDet.filter(function(d){return d.erro;}).map(function(d){
+    var e=String(d.erro||''); var dica=/tipo_envio|full_meta/i.test(e)?' <b>\u2192 rode o SQL da v1.0.1049 (colunas do Embarque Full)</b>':'';
+    return '<span style="color:var(--red-text)">\u2716</span> <b>'+ecomEsc(d.pedido||'?')+'</b>: '+ecomEsc(e)+dica; });
+  ecomProgResultado(btnErr?(btnOk?'Importa\u00e7\u00e3o com falhas':'Importa\u00e7\u00e3o n\u00e3o gravada'):'Importa\u00e7\u00e3o conclu\u00edda',
+    {gravados:btnOk,ignorados:btnDup,falhas:btnErr}, (btnDup?['<span style="color:var(--amber-text,#b45309)">\u25cf</span> '+btnDup+' pedido(s) j\u00e1 estavam na base (n\u00e3o duplicados)']:[]).concat(_falhas),
+    btnErr?'red':(btnDup?'amber':'green'));
 }
 
 // ───── ABA PEDIDOS (lista) ─────
