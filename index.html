@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1055 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1056 | Gerado: 2026-09-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1055';
+const APP_VERSION='v1.0.1056';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3192,6 +3192,141 @@ function ecomFullDesc(p,sku){
   if(it) return it.descricao||sku;
   return ecomKitComp(sku)?('Kit '+sku+' (componentes: '+(ecomKitComp(sku)||[]).map(function(c){return c.sku+' \u00d7 '+(c.qtd||1);}).join(', ')+')'):sku;
 }
+// ══════════════ WORKFLOW DA EMPRESA (v1.0.1056) ══════════════
+// Parametrização por empresa: gestores por área + diretoria (nível final), níveis de cada aprovação (G → D)
+// e quem vê cada aviso da tela inicial. Chave geral "Ligar workflow": desligada, tudo funciona como antes.
+var WF_AREAS=[['faturamento','Faturamento'],['cp','Contas a Pagar'],['cr','Contas a Receber'],['compras','Compras'],['comercial','Comercial'],['rh','RH'],['wms','WMS'],['ecom','E-commerce'],['qualidade','Qualidade'],['portaria','Portaria'],['manutencao','Manuten\u00e7\u00e3o']];
+var WF_ROT2={   // rotina: [área, rótulo, G padrão, D padrão, lembrete d.u.]
+  fatura:['faturamento','\ud83d\udcb0 Aprovar fatura',true,true,1],
+  cp_titulo:['cp','\ud83e\uddfe Aprovar t\u00edtulo',true,true,1],
+  cp_excluir:['cp','\ud83d\uddd1 Excluir t\u00edtulo aprovado/pago',false,true,0],
+  compra_liberar:['compras','\ud83d\udce4 Liberar solicita\u00e7\u00e3o para cotar',true,false,0],
+  compra_aprovar:['compras','\ud83d\uded2 Aprovar compra',true,true,2],
+  proposta:['comercial','\ud83d\udccb Aprovar proposta',true,true,1],
+  cliente_efetivar:['comercial','\ud83c\udfe2 Efetivar cliente',true,false,0],
+  tabela_efetivar:['comercial','\ud83d\udcca Efetivar tabela tarif\u00e1ria',true,false,0],
+  demissao:['rh','\ud83d\udcdd Homologar demiss\u00e3o',true,true,0],
+  ferias:['rh','\ud83c\udfd6 Aprovar f\u00e9rias',true,false,0],
+  wms_auditoria:['wms','\ud83d\udd0e Auditoria de confer\u00eancia',true,false,0],
+  ecom_autorizar:['ecom','\ud83d\udd13 Autorizar checkout / embarque parcial',true,false,0],
+  qual_revisao:['qualidade','\ud83d\udcc4 Aprovar revis\u00e3o de documento',false,true,0],
+  portaria:['portaria','\ud83d\udeaa Autoriza\u00e7\u00f5es e libera\u00e7\u00f5es',true,false,0]
+};
+var WF_AVISOS={   // aviso: [área, rótulo, padrão]  padrão: nivel | gestores | todos | solicitante
+  fat_aprovar:['faturamento','A aprovar','nivel'], fat_outros:['faturamento','Vencidas \u00b7 paradas \u00b7 sem NF \u00b7 a enviar','gestores'],
+  cp_aprovar:['cp','A aprovar','nivel'], cp_outros:['cp','Em atraso \u00b7 duplicidades','todos'],
+  cr_vencidos:['cr','A receber vencidos','todos'],
+  compras_aprovar:['compras','A liberar \u00b7 a aprovar','nivel'], compras_cotar:['compras','Liberadas para cotar','gestores'], compras_info:['compras','Pedido de mais informa\u00e7\u00e3o','solicitante'],
+  com_aprovar:['comercial','A aprovar \u00b7 a efetivar','nivel'], com_vencendo:['comercial','Propostas vencendo em 30 dias','gestores'],
+  rh_aprovar:['rh','A homologar \u00b7 f\u00e9rias a aprovar','nivel'], rh_outros:['rh','F\u00e9rias vencendo \u00b7 avalia\u00e7\u00f5es \u00b7 experi\u00eancia \u00b7 promo\u00e7\u00f5es','gestores'],
+  wms_auditoria:['wms','Auditorias pendentes','nivel'], wms_outros:['wms','P\u00e1tio > 2 h \u00b7 NF de cobertura','gestores'],
+  qual_revisao:['qualidade','Revis\u00f5es a aprovar','nivel'], manut_outros:['manutencao','Preventivas vencidas \u00b7 chamados urgentes','gestores']
+};
+var WF_VE={nivel:'quem aprova o n\u00edvel',gestores:'gestores da \u00e1rea',todos:'todos com acesso (como hoje)',solicitante:'quem solicitou'};
+var wfEmp={ativo:false,config:{}}, wfLogs=[], _wfLoaded=false;
+async function wfCarregar(cid){
+  cid=cid||(company&&company.id); if(!cid) return;
+  try{ var r=await dbSelect('workflow_empresa','company_id=eq.'+cid); wfEmp=(r&&r[0])||{ativo:false,config:{}}; if(typeof wfEmp.config==='string'){ try{ wfEmp.config=JSON.parse(wfEmp.config); }catch(e){ wfEmp.config={}; } } wfEmp.config=wfEmp.config||{}; }catch(e){ wfEmp={ativo:false,config:{}}; }
+  try{ wfLogs=await dbSelect('workflow_aprovacoes','company_id=eq.'+cid+'&order=em.asc')||[]; }catch(e){ wfLogs=[]; }
+  _wfLoaded=true;
+}
+function wfAtivo(){ return !!(wfEmp&&wfEmp.ativo); }
+function wfCfg(){ return (wfEmp&&wfEmp.config)||{}; }
+function wfMembros(area){ var c=wfCfg(); return area==='diretoria'?(c.diretoria||[]):((c.membros||{})[area]||[]); }
+function wfSouGestor(area){ return !!(cu&&wfMembros(area).indexOf(cu.id)>=0); }
+function wfSouDiretoria(){ return !!(cu&&wfMembros('diretoria').indexOf(cu.id)>=0); }
+function wfRotina(k){ var d=WF_ROT2[k]; if(!d) return null; var c=(wfCfg().rotinas||{})[k]||{}; return {area:d[0],g:c.g!==undefined?!!c.g:d[2],d:c.d!==undefined?!!c.d:d[3],prazo:c.prazo!==undefined?c.prazo:d[4]}; }
+function wfRotinaAtiva(k){ var r=wfRotina(k); return wfAtivo()&&r&&(r.g||r.d); }
+function wfLogsDe(rot,ref){ return (wfLogs||[]).filter(function(l){ return l.rotina===rot&&l.ref_id===ref&&!l.anulado; }); }
+// próximo nível que falta: 'G', 'D' ou null (aprovado em todos os níveis)
+function wfNivelPendente(rot,ref){
+  var r=wfRotina(rot); if(!r) return null; var ls=wfLogsDe(rot,ref);
+  var ok=function(n){ return ls.some(function(l){ return l.nivel===n&&l.decisao==='aprovado'; }); };
+  if(r.g&&!ok('G')) return 'G';
+  if(r.d&&!ok('D')) return 'D';
+  return null;
+}
+function wfPodeAprovar(rot,ref){
+  var n=wfNivelPendente(rot,ref); if(!n) return false;
+  if(n==='G') return wfSouGestor(wfRotina(rot).area);
+  return wfSouDiretoria();
+}
+function wfNivelTxt(n,rot){ return n==='G'?('aguardando gestor ('+((WF_AREAS.find(function(a){return a[0]===wfRotina(rot).area;})||[])[1]||'')+')'):(n==='D'?'aguardando diretoria':'aprovado'); }
+async function wfRegistrar(rot,ref,nivel,decisao,obs){
+  var o={company_id:company.id,rotina:rot,ref_id:ref,nivel:nivel,decisao:decisao||'aprovado',por:cu&&cu.id,por_nome:(profile&&profile.full_name)||(cu&&cu.email)||'',em:new Date().toISOString(),obs:obs||null};
+  var r=await dbInsert('workflow_aprovacoes',o); wfLogs.push(r&&r.id?r:o); return r;
+}
+async function wfAnularAprovacoes(rot,ref){   // documento voltou para rascunho/foi alterado: recomeça o ciclo
+  var ls=wfLogsDe(rot,ref); if(!ls.length) return;
+  try{ await sbFetch('PATCH','/rest/v1/workflow_aprovacoes?company_id=eq.'+company.id+'&rotina=eq.'+rot+'&ref_id=eq.'+ref,{anulado:true},tok); }catch(e){}
+  ls.forEach(function(l){ l.anulado=true; });
+}
+// quem vê um aviso (true = mostra). Diretoria vê tudo, como hoje.
+function wfVeAviso(key,rot,ref){
+  if(!wfAtivo()) return true;
+  if(wfSouDiretoria()) return true;
+  var d=WF_AVISOS[key]; if(!d) return true;
+  var modo=((wfCfg().avisos||{})[key])||d[2];
+  if(modo==='todos') return true;
+  if(modo==='gestores') return wfSouGestor(d[0]);
+  if(modo==='nivel') return rot&&ref?wfPodeAprovar(rot,ref):wfSouGestor(d[0]);
+  return true;
+}
+// ── tela Admin → Workflow (uma linha por área) ──
+var _wfEd=null;
+function rWorkflow(){
+  if(!_wfLoaded){ setTimeout(async function(){ await wfCarregar(); var el=ge('wf-admin-box'); if(el) el.innerHTML=rWorkflowCorpo(); },0); return '<div id="wf-admin-box" style="padding:20px;color:var(--text3)">Carregando workflow\u2026</div>'; }
+  return '<div id="wf-admin-box">'+rWorkflowCorpo()+'</div>';
+}
+function rWorkflowCorpo(){
+  _wfEd=JSON.parse(JSON.stringify(wfCfg())); _wfEd.membros=_wfEd.membros||{}; _wfEd.diretoria=_wfEd.diretoria||[]; _wfEd.rotinas=_wfEd.rotinas||{}; _wfEd.avisos=_wfEd.avisos||{};
+  return wfTelaHtml(wfAtivo());
+}
+function wfTelaHtml(ativo){
+  var E=_wfEd, cid=company&&company.id;
+  var us=(profiles||[]).filter(function(p){ return !p.company_id||p.company_id===cid; }).sort(function(a,b){ return String(a.full_name||a.email).localeCompare(String(b.full_name||b.email)); });
+  var nome=function(id){ var p=us.find(function(x){return x.id===id;})||(profiles||[]).find(function(x){return x.id===id;}); return p?(p.full_name||p.email):'(usu\u00e1rio)'; };
+  var chips=function(area){ var ids=area==='diretoria'?E.diretoria:(E.membros[area]||[]);
+    return ids.map(function(id){ return '<span style="padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--border);display:inline-block;margin:1px 2px 1px 0;white-space:nowrap">'+ecomEsc(nome(id))+' <span style="cursor:pointer;color:var(--text3)" onclick="wfEdMembro(\''+area+'\',\''+id+'\',false)">\u2715</span></span>'; }).join('')
+      +'<select style="font-size:11px;max-width:120px" onchange="if(this.value){wfEdMembro(\''+area+'\',this.value,true);}"><option value="">+ adicionar</option>'+us.filter(function(u){return ids.indexOf(u.id)<0;}).map(function(u){return '<option value="'+u.id+'">'+ecomEsc(u.full_name||u.email)+'</option>';}).join('')+'</select>'; };
+  var td='padding:7px 8px;vertical-align:top;border-top:1px solid var(--border)';
+  var linhas='<tr style="background:var(--blue-bg)"><td style="'+td+'"><b>Diretoria</b><div style="font-size:10.5px;color:var(--text3)">n\u00edvel final</div></td><td style="'+td+'">'+chips('diretoria')+'</td><td style="'+td+';color:var(--text3)">Recebe tudo o que as \u00e1reas marcaram com <b>D</b>, depois do gestor</td><td style="'+td+';color:var(--text3)">Tela inicial como est\u00e1 hoje (v\u00ea tudo)</td></tr>';
+  WF_AREAS.forEach(function(a){
+    var rots=Object.keys(WF_ROT2).filter(function(k){return WF_ROT2[k][0]===a[0];});
+    var avs=Object.keys(WF_AVISOS).filter(function(k){return WF_AVISOS[k][0]===a[0];});
+    var semGestor=!(E.membros[a[0]]||[]).length && rots.some(function(k){ var c=E.rotinas[k]||{}; return c.g!==undefined?c.g:WF_ROT2[k][2]; });
+    var colA=rots.map(function(k){ var d=WF_ROT2[k], c=E.rotinas[k]||{}, g=c.g!==undefined?c.g:d[2], dd=c.d!==undefined?c.d:d[3], pz=c.prazo!==undefined?c.prazo:d[4];
+      return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;line-height:1.9"><span>'+d[1]+'</span><span style="white-space:nowrap;font-size:11.5px">'
+        +'<label><input type="checkbox" '+(g?'checked':'')+' onchange="wfEdRot(\''+k+'\',\'g\',this.checked)"> G</label> \u2192 <label><input type="checkbox" '+(dd?'checked':'')+' onchange="wfEdRot(\''+k+'\',\'d\',this.checked)"> D</label>'
+        +' \u00b7 <input type="number" min="0" value="'+pz+'" onchange="wfEdRot(\''+k+'\',\'prazo\',parseInt(this.value,10)||0)" style="width:40px;font-size:11px" title="lembrete ap\u00f3s (dias \u00fateis)"> d.u.</span></div>'; }).join('')||'<span style="color:var(--text3)">\u2014</span>';
+    var colV=avs.map(function(k){ var d=WF_AVISOS[k], v=E.avisos[k]||d[2];
+      return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;line-height:1.9"><span>'+d[1]+'</span><select style="font-size:11px" onchange="wfEdAviso(\''+k+'\',this.value)">'+Object.keys(WF_VE).filter(function(m){return m!=='solicitante'||d[2]==='solicitante';}).map(function(m){return '<option value="'+m+'"'+(m===v?' selected':'')+'>'+WF_VE[m]+'</option>';}).join('')+'</select></div>'; }).join('')||'<span style="color:var(--text3)">\u2014</span>';
+    linhas+='<tr'+(semGestor?' style="background:var(--amber-bg,#fef3c7)"':'')+'><td style="'+td+'"><b>'+a[1]+'</b>'+(semGestor?'<div style="font-size:10.5px;color:var(--amber-text,#b45309)">\u26a0 G marcado sem gestor</div>':'')+'</td><td style="'+td+'">'+chips(a[0])+'</td><td style="'+td+'">'+colA+'</td><td style="'+td+'">'+colV+'</td></tr>';
+  });
+  return '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">'
+    +'<div><div style="font-size:15px;font-weight:700">Workflow da empresa</div><div style="font-size:12px;color:var(--text3)">Uma linha por \u00e1rea: quem s\u00e3o os gestores, o que aprovam e quais avisos veem</div></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:8px 12px;border:1px solid #f0d9a8;border-radius:10px;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)"><input type="checkbox" id="wf-ligar" '+(ativo?'checked':'')+'> <b>Ligar workflow</b> \u00b7 desligado = o VERUS funciona como hoje</label></div>'
+    +'<div style="overflow-x:auto;border:1px solid var(--border);border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">'
+    +'<tr style="text-align:left;background:var(--bg2);color:var(--text2);font-size:11px"><th style="padding:8px;width:12%">\u00c1rea</th><th style="padding:8px;width:20%">Gestores</th><th style="padding:8px;width:38%">Aprova\u00e7\u00f5es \u00b7 <span style="font-weight:400">G = gestor da \u00e1rea \u2192 D = diretoria</span></th><th style="padding:8px;width:30%">Avisos da tela inicial \u2192 quem v\u00ea</th></tr>'
+    +linhas+'</table></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;flex-wrap:wrap"><span style="font-size:11.5px;color:var(--text3)">Nesta vers\u00e3o o workflow j\u00e1 vale para a <b>fatura</b> e os avisos do Faturamento; as demais rotinas entram na fase 2.</span>'
+    +'<button class="btn btn-p" onclick="wfSalvar()">Salvar workflow</button></div>'
+    +'<details style="margin-top:16px"><summary style="cursor:pointer;font-size:12.5px;color:var(--text2)">Lembretes por perfil (configura\u00e7\u00e3o antiga)</summary><div style="margin-top:10px">'+rWorkflowLegado()+'</div></details>';
+}
+function wfRedesenhar(){ var el=ge('wf-admin-box'); var lig=ge('wf-ligar'); if(el) el.innerHTML=wfTelaHtml(lig?lig.checked:wfAtivo()); }
+function wfEdMembro(area,id,add){ var arr=area==='diretoria'?_wfEd.diretoria:(_wfEd.membros[area]=_wfEd.membros[area]||[]); var i=arr.indexOf(id); if(add&&i<0) arr.push(id); if(!add&&i>=0) arr.splice(i,1); wfRedesenhar(); }
+function wfEdRot(k,campo,v){ (_wfEd.rotinas[k]=_wfEd.rotinas[k]||{})[campo]=v; if(campo!=='prazo') wfRedesenhar(); }
+function wfEdAviso(k,v){ _wfEd.avisos[k]=v; }
+async function wfSalvar(){
+  var cid=company&&company.id, lig=!!(ge('wf-ligar')&&ge('wf-ligar').checked);
+  if(lig&&!_wfEd.diretoria.length&&!confirm('Nenhuma pessoa na Diretoria. As aprova\u00e7\u00f5es marcadas com D ficariam sem ningu\u00e9m. Ligar mesmo assim?')) return;
+  try{
+    var r=await sbFetch('POST','/rest/v1/workflow_empresa?on_conflict=company_id',{company_id:cid,ativo:lig,config:_wfEd,atualizado_por:cu&&cu.id,atualizado_em:new Date().toISOString()},tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+    if(!r.ok) throw new Error((r.data&&r.data.message)||('HTTP '+r.status));
+    wfEmp={ativo:lig,config:JSON.parse(JSON.stringify(_wfEd))};
+    showToast('Workflow salvo'+(lig?' e LIGADO.':' (desligado \u2014 o VERUS segue como hoje).'),'green');
+  }catch(e){ showToast('Erro ao salvar o workflow: '+(e.message||e),'red'); }
+}
 
 function canDo(tela, acao){
   const role=profile?.role||'vendedor';
@@ -3261,7 +3396,7 @@ async function loadData(){
         dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
         dbSelect('user_companies',`select=*`).catch(()=>[]),
       ]);
-      workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]);
+      workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]); try{ await wfCarregar(cid); }catch(_wf){}
       await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
       await loadRHFerias().catch(console.warn);
       rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
@@ -3313,7 +3448,7 @@ async function loadData(){
         dbSelect('tarifario_padrao','select=*&order=created_at.desc'),
         dbSelect('user_companies','select=*'),
       ]);
-      workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*');
+      workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*'); try{ await wfCarregar(cid); }catch(_wf){}
       contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc');
       contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc').catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
     }
@@ -3334,7 +3469,7 @@ async function loadData(){
       dbSelect('propostas',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
       dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
     ]);
-    workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]);
+    workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]); try{ await wfCarregar(cid); }catch(_wf){}
     await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
     contasReceber=await dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`).catch(()=>[]);
     contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
@@ -3404,7 +3539,7 @@ async function loadData(){
       dbSelect('atas',gFilter),
       dbSelect('plano_acao',gFilter),
     ]);
-    workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*');
+    workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*'); try{ await wfCarregar(cid); }catch(_wf){}
     contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`);
     contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
   }
@@ -8334,7 +8469,7 @@ function fatEtapa(f){
   var S=fatSLA();
   var def=null;
   if(f.status==='rascunho')      def={k:'criar',   quem:'nos',    txt:'rascunho',            desde:f.periodo_fim||f.created_at, lim:S.criar};
-  else if(f.status==='aguardando')def={k:'aprovar',quem:'nos',    txt:'aguardando gestor',   desde:f.created_at,                lim:S.aprovar};
+  else if(f.status==='aguardando')def={k:'aprovar',quem:'nos',    txt:(wfRotinaAtiva('fatura')?wfNivelTxt(wfNivelPendente('fatura',f.id),'fatura'):'aguardando gestor'),   desde:f.created_at,                lim:S.aprovar};
   else if(f.status==='aprovado') def={k:'enviar',  quem:'nos',    txt:'a enviar ao cliente', desde:f.aprovado_em||f.created_at, lim:S.enviar};
   else if(f.status==='enviado')  def={k:'cliente', quem:'cliente',txt:'aguardando cliente',  desde:f.enviado_em||f.aprovado_em, lim:S.cliente};
   else if(f.status==='autorizado')def={k:'emitir', quem:'nos',    txt:'a emitir documentos', desde:f.autorizado_em||f.created_at,lim:S.emitir};
@@ -8403,7 +8538,7 @@ function fatRowHTML(f,i){
       <div class="lright">
         <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:${st.bg};color:${st.color};white-space:nowrap">${st.label}</span>
         <div style="display:flex;gap:4px;margin-top:4px" onclick="event.stopPropagation()">
-          ${isGestor&&f.status==='aguardando'?`<button class="bicon btn-sm" title="Aprovar" style="color:var(--green)" onclick="aprovarFatura('${f.id}')">
+          ${(wfRotinaAtiva('fatura')?wfPodeAprovar('fatura',f.id):isGestor)&&f.status==='aguardando'?`<button class="bicon btn-sm" title="Aprovar" style="color:var(--green)" onclick="aprovarFatura('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </button>`:''}
           ${['aprovado','enviado','autorizado','faturado','nfse_emitida','pago_parcial','pago'].includes(f.status)?`<button class="bicon btn-sm" title="${f.status==='enviado'?'Reenviar fatura por e-mail':'Enviar fatura por e-mail ao cliente'}" style="color:var(--accent)" onclick="event.stopPropagation();enviarFaturaEmail('${f.id}')">
@@ -8706,7 +8841,7 @@ async function openFaturaEditor(id=null){
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="closeFaturaEditor()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">✕ Fechar</button>
         <button onclick="salvarFaturaRascunho()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>
-        ${role==='admin'||role==='adm'||role==='gestor'?`<button onclick="salvarFaturaAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Aprovar</button>`:`<button onclick="enviarFaturaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`}
+        ${(wfRotinaAtiva('fatura')?(faturaEditando&&faturaEditando.id?wfPodeAprovar('fatura',faturaEditando.id):wfSouGestor('faturamento')):(role==='admin'||role==='adm'||role==='gestor'))?`<button onclick="salvarFaturaAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Aprovar</button>`:`<button onclick="enviarFaturaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`}
       </div>
     </div>
 
@@ -9806,6 +9941,7 @@ async function uploadNfsePdf(input){
 
 async function salvarFatura(status){
   const cid=company?.id||profile?.company_id||null;
+  if(faturaEditando&&faturaEditando.id&&wfRotinaAtiva('fatura')){ try{ await wfAnularAprovacoes('fatura',faturaEditando.id); }catch(_an){} }   // v1.0.1056: fatura alterada recomeça as aprovações
   const clienteId=getFatV('fat-cliente');
   const cli=clientes.find(c=>c.id===clienteId);
   const responsavelId=getFatV('fat-responsavel');
@@ -9900,6 +10036,13 @@ async function enviarFaturaAprovacao(){
   catch(e){alert('Erro: '+e.message);}
 }
 async function salvarFaturaAprovar(){
+  if(wfRotinaAtiva('fatura')){   // v1.0.1056: com workflow, salvar e aprovar = enviar e aprovar o nível de quem clicou
+    if(faturaEditando&&faturaEditando.id&&faturaEditando.status==='aguardando'){ var _fid0=faturaEditando.id; closeFaturaEditor(); await aprovarFatura(_fid0); return; }   // já na fila: só aprova o nível (sem salvar, para não zerar a aprovação do gestor)
+    try{ await salvarFatura('aguardando'); var _fid=faturaEditando&&faturaEditando.id; closeFaturaEditor();
+         if(_fid&&wfPodeAprovar('fatura',_fid)) await aprovarFatura(_fid); else { alert('Enviado para aprova\u00e7\u00e3o.'); render(); } }
+    catch(e){ alert('Erro: '+e.message); }
+    return;
+  }
   try{
     await salvarFatura('aprovado');
     if(faturaEditando){await dbUpdate('faturamento',faturaEditando.id,{aprovado_por:cu.id,aprovado_em:new Date().toISOString()});}
@@ -9907,8 +10050,20 @@ async function salvarFaturaAprovar(){
   }catch(e){alert('Erro: '+e.message);}
 }
 
-async function aprovarFatura(id){
-  if(!confirm('Aprovar esta fatura?'))return;
+async function aprovarFatura(id,_wfFinal){
+  // v1.0.1056: workflow ligado — aprova o nível pendente (gestor do Faturamento → diretoria); só o último nível aprova de fato
+  if(!_wfFinal&&wfRotinaAtiva('fatura')){
+    var _n=wfNivelPendente('fatura',id);
+    if(_n){
+      if(!wfPodeAprovar('fatura',id)){ alert('Esta fatura est\u00e1 '+wfNivelTxt(_n,'fatura')+'. Voc\u00ea n\u00e3o aprova este n\u00edvel.'); return; }
+      if(!confirm('Aprovar esta fatura no n\u00edvel '+(_n==='G'?'do gestor do Faturamento':'da diretoria')+'?')) return;
+      try{ await wfRegistrar('fatura',id,_n,'aprovado'); }catch(e){ alert('Erro ao registrar a aprova\u00e7\u00e3o: '+(e.message||e)); return; }
+      var _prox=wfNivelPendente('fatura',id);
+      if(_prox){ showToast('Aprovada pelo gestor \u00b7 segue para a diretoria','green'); render(); return; }
+    }
+    return aprovarFatura(id,true);
+  }
+  if(!_wfFinal&&!confirm('Aprovar esta fatura?'))return;
   const f=faturamento.find(x=>x.id===id);
   const upd={status:'aprovado',aprovado_por:cu.id,aprovado_em:new Date().toISOString()};
   // Gera número da Nota de Débito se houver linhas ND e ainda não tiver número
@@ -11118,12 +11273,12 @@ function avisosCalcular(){
   } }catch(e){console.warn('aviso wms',e);}
 
   try{ if(pode('faturamento')){
-    var fatAg=(faturamento||[]).filter(function(f){return f.status==='aguardando';}).length;
+    var fatAg=(faturamento||[]).filter(function(f){return f.status==='aguardando'&&wfVeAviso('fat_aprovar','fatura',f.id);}).length;   // v1.0.1056
     add('Financeiro',fatAg,'1 fatura aguardando aprova\u00e7\u00e3o','{n} faturas aguardando aprova\u00e7\u00e3o','faturamento');
     // régua do fluxo: só o que passou do prazo (dias úteis) entra aqui
     if(typeof fatEtapa==='function'){
       var _fx={cliente:0,enviar:0,emitir:0,criar:0,vencida:0};
-      (faturamento||[]).forEach(function(f){
+      if(wfVeAviso('fat_outros')) (faturamento||[]).forEach(function(f){   // v1.0.1056: quem vê segue o workflow
         var e=null; try{ e=fatEtapa(f); }catch(_x){}
         if(e&&e.estourou&&_fx[e.k]!=null)_fx[e.k]++;
       });
@@ -23464,7 +23619,7 @@ const WF_ROTINAS={
 
 const WF_PERFIS=['admin','adm','gestor','vendedor','financeiro'];
 
-function rWorkflow(){
+function rWorkflowLegado(){
   const rows=Object.entries(WF_ROTINAS).map(([key,def])=>{
     const cfg=workflowConfig.find(w=>w.rotina===key)||{prazo_dias_uteis:1,perfis_aprovadores:[],perfis_lembrete:[],ativo:true};
     return`<div style="background:var(--bg);border-radius:12px;padding:18px;border:1px solid var(--border);margin-bottom:12px">
