@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1057 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1058 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1057';
+const APP_VERSION='v1.0.1058';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -8221,7 +8221,7 @@ function renderTTQuadros(){
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Recebimento">Cap.Rec</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Aparece na capa de Expedição">Cap.Exp</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Esta linha vai para a Nota de Débito (valor fixo, sem imposto)">ND</th>
-            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:6%" title="Linha de ND que conta para o faturamento mínimo (ex.: locação que é o mínimo do contrato)">Mín.</th>
+            <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:6%" title="Esta ND é o faturamento mínimo: a NF cobra só o que os serviços passarem dela (ex.: locação Viscofan)">É o mín.</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Conta só para o cálculo do faturamento mínimo e não é cobrada (ex.: litros expedidos de outro cliente)">Só mín.</th>
             <th style="width:5%"></th>
           </tr>
@@ -8717,11 +8717,14 @@ function fatEntraNoMinimo(l){
   if((l.manual===true)||(l.quadro==='Extras')) return l.entra_minimo!==false;
   return true;
 }
+// v1.0.1058: ND marcada "é o mínimo" (ex.: locação Viscofan) — é o faturamento mínimo cobrado em ND;
+// a NF cobra só o que os serviços passarem dela (nunca abaixo de zero).
+function fatNdMinimo(linhas){ return (linhas||[]).filter(function(l){ return l&&l.nota_debito&&l.entra_minimo===true&&!l.is_complemento&&!l.so_minimo; }).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
 function fatFaturavelNF(l){ return !!l&&!l.nota_debito&&!l.so_minimo&&!l.is_complemento; }
 function fatBaseMinimo(linhas){ return (linhas||[]).filter(fatEntraNoMinimo).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
 function fatLinhaMinTag(l,gi){
   if(l.so_minimo) return '<div style="font-size:10.5px;color:var(--text3);margin-top:2px">n\u00e3o faturado \u00b7 conta s\u00f3 para o faturamento m\u00ednimo</div>';
-  if(l.nota_debito) return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> ND \u00b7 conta para o faturamento m\u00ednimo</label>';   // v1.0.1055
+  if(l.nota_debito) return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> ND \u00b7 \u00e9 o faturamento m\u00ednimo (a NF cobra s\u00f3 o excedente)</label>';   // v1.0.1055
   if(l.manual===true||l.quadro==='Extras') return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> entra no faturamento m\u00ednimo</label>';
   return '';
 }
@@ -9075,7 +9078,8 @@ function _imprimirFatura(f,contatoResp){
   const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
-  const _imp=fatImpostosCalc(subtotalNF,_tabF,issIncluso);
+  const _pdfNdMin=Math.min(fatNdMinimo(linhas),subtotalNF);   // v1.0.1058
+  const _imp=fatImpostosCalc(subtotalNF-_pdfNdMin,_tabF,issIncluso);
   const _baseServ=linhas.filter(l=>!l.nota_debito&&!l.is_complemento).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _minInfo=fatMinInfo(_tabF,_baseServ);
   const subtotal=subtotalNF;
@@ -9189,6 +9193,7 @@ function _imprimirFatura(f,contatoResp){
     </table>
     <div class="totals">
       <div class="total-row"><span style="color:#666">Subtotal serviços:</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(subtotal)}</span></div>
+      ${_pdfNdMin>0?`<div class="total-row"><span style="color:#666">(−) Faturamento mínimo em ND:</span><span style="font-weight:600;min-width:110px;text-align:right">− ${fmtBRL(_pdfNdMin)}</span></div><div class="total-row"><span style="color:#666">Base da NF:</span><span style="font-weight:600;min-width:110px;text-align:right">${fmtBRL(subtotal-_pdfNdMin)}</span></div>`:''}
       ${_minInfo?('<div class="total-row"><span style="color:#999">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+':</span><span style="font-weight:600;min-width:110px;text-align:right;color:#999">'+fmtBRL(_minInfo.valor)+'</span></div>'):''}
       ${fatImpostoLinhas(_imp).map(function(x){return '<div class="total-row"><span style="color:#666">'+x.label+':</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?('<div class="total-row"><span style="color:#666">Nota de Débito (s/ imposto):</span><span style="font-weight:600;min-width:110px;text-align:right">'+fmtBRL(subtotalND)+'</span></div>'):''}
@@ -9384,7 +9389,8 @@ async function confirmarEnvioEmail(id){
   const subtotalNF=linhas.filter(l=>!l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalND=linhas.filter(l=>l.nota_debito).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _tabF=tabelasTarifarias.find(t=>t.id===f.tabela_id);
-  const _imp=fatImpostosCalc(subtotalNF,_tabF,f.iss_incluso);
+  const _emNdMin=Math.min(fatNdMinimo(linhas),subtotalNF);   // v1.0.1058
+  const _imp=fatImpostosCalc(subtotalNF-_emNdMin,_tabF,f.iss_incluso);
   const _baseServ=linhas.filter(l=>!l.nota_debito&&!l.is_complemento).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const _minInfo=fatMinInfo(_tabF,_baseServ);
   const subtotal=subtotalNF;
@@ -9428,6 +9434,7 @@ async function confirmarEnvioEmail(id){
       </table>
       <div style="text-align:right;font-size:13px">
         <div>Subtotal serviços: <strong>${fmtBRL(subtotal)}</strong></div>
+        ${_emNdMin>0?'<div>(−) Faturamento mínimo em ND: <strong>− '+fmtBRL(_emNdMin)+'</strong></div><div>Base da NF: <strong>'+fmtBRL(subtotal-_emNdMin)+'</strong></div>':''}
         ${_minInfo?('<div style="color:#888">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':' (complementado)')+': <strong>'+fmtBRL(_minInfo.valor)+'</strong></div>'):''}
         ${fatImpostoLinhas(_imp).map(function(x){return '<div>'+x.label+': <strong>'+fmtBRL(x.value)+'</strong></div>';}).join('')}
         ${subtotalND>0?('<div>Nota de Débito (s/ imposto): <strong>'+fmtBRL(subtotalND)+'</strong></div>'):''}
@@ -9840,7 +9847,9 @@ function recalcFatura(){
     }
   }
 
-  const subtotal=subtotalLinhas+complemento;       // base NF
+  const _ndMin=fatNdMinimo(fatLinhas);            // v1.0.1058: mínimo cobrado em ND sai da NF
+  const _descMin=Math.min(_ndMin,subtotalLinhas+complemento);
+  const subtotal=Math.max(0,subtotalLinhas+complemento-_ndMin);       // base NF
   const _imp=fatImpostosCalc(subtotal,tabela,issIncluso);
   const totalNF=_imp.bruto;                         // NF c/ impostos por dentro
   const total=totalNF+subtotalND;                   // total geral = NF + ND (ND sem imposto)
@@ -9888,6 +9897,8 @@ function recalcFatura(){
         <span style="color:var(--text2)">Subtotal (c/ mínimo):</span>
         <span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span>
       </div>`:''}
+      ${_descMin>0?`<div style="display:flex;gap:40px;font-size:13px"><span style="color:var(--text2)">(−) Faturamento mínimo em ND:</span><span style="font-weight:600;min-width:120px;text-align:right;color:var(--red-text)">− ${fmtV(_descMin)}</span></div>
+      <div style="display:flex;gap:40px;font-size:13px;border-top:1px dashed var(--border);padding-top:6px"><span style="color:var(--text2)">Base da NF:</span><span style="font-weight:600;min-width:120px;text-align:right">${fmtV(subtotal)}</span></div>`:''}
       ${_minInfo?('<div style="display:flex;gap:40px;font-size:12px"><span style="color:var(--text3)">Faturamento mínimo'+(_minInfo.atingido?' (atingido)':(fatSubtotalOk?' (complementado)':' (pendente de subtotal)'))+':</span><span style="min-width:120px;text-align:right;color:var(--text3)">'+fmtV(_minInfo.valor)+'</span></div>'):''}
       ${fatImpostoLinhas(_imp).map(function(x){return '<div style="display:flex;gap:40px;font-size:13px"><span style="color:var(--text2)">'+x.label+':</span><span style="font-weight:600;min-width:120px;text-align:right">'+fmtV(x.value)+'</span></div>';}).join('')}
       ${subtotalND>0?`<div style="display:flex;gap:40px;font-size:13px">
@@ -9951,7 +9962,7 @@ async function salvarFatura(status){
   const subtotalNF=fatLinhas.filter(fatFaturavelNF).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const subtotalND=fatLinhas.filter(l=>l.nota_debito&&!l.so_minimo).reduce((s,l)=>s+Number(l.subtotal||0),0);
   const complemento=window._fatComplemento||0;
-  const subtotal=subtotalNF+complemento;            // base NF
+  const subtotal=Math.max(0,subtotalNF+complemento-fatNdMinimo(fatLinhas));            // base NF (v1.0.1058: sem o mínimo cobrado em ND)
   const issIncluso=ge('fat-iss-incluso')?.value==='sim';
   const _tabFat=tabelasTarifarias.find(t=>t.id===(getFatV('fat-tabela')||null));
   const _imp=fatImpostosCalc(subtotal,_tabFat,issIncluso);
@@ -10140,11 +10151,12 @@ function feCalc(f,lin){
   var base=lin.filter(fatFaturavelNF).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
   var baseMin=fatBaseMinimo(lin);
   var compl=0; if(temCompl){ var mn=feMinimo(tab); compl=(mn>baseMin)?(mn-baseMin):0; }
-  var baseNF=base+compl;
+  var ndMin=fatNdMinimo(lin);   // v1.0.1058
+  var baseNF=Math.max(0,base+compl-ndMin);
   var imp=fatImpostosCalc(baseNF,tab,f.iss_incluso===true);
   var nd=lin.filter(function(l){return l.nota_debito&&!l.is_complemento&&!l.so_minimo;}).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
   var totalNF=baseNF>0?imp.bruto:0;
-  return {tab:tab,base:base,compl:compl,baseNF:baseNF,imp:imp,totalNF:totalNF,nd:nd,total:totalNF+nd};
+  return {tab:tab,base:base,compl:compl,ndMin:Math.min(ndMin,base+compl),baseNF:baseNF,imp:imp,totalNF:totalNF,nd:nd,total:totalNF+nd};
 }
 function feVencimento(f,dataRef){
   var v=null;
@@ -10194,10 +10206,10 @@ async function feUploadNfseK(input,k){
 }
 // cálculo por NF: impostos sobre a base de cada nota; complemento na NF escolhida
 function feCalcMulti(f,lin){
-  var c=feCalc(f,lin), n=_feQtdNF, tab=c.tab, nfs=[];
+  var c=feCalc(f,lin), n=_feQtdNF, tab=c.tab, nfs=[], _resta=fatNdMinimo(lin);   // v1.0.1058: o mínimo em ND sai das NFs em ordem
   for(var k=1;k<=n;k++){
     var base=lin.filter(function(l){ return fatFaturavelNF(l)&&Math.min(n,l.nf_seq||1)===k; }).reduce(function(s,l){return s+Number(l.subtotal||0);},0);
-    var compl=(k===_feComplNF)?c.compl:0, baseNF=base+compl;
+    var compl=(k===_feComplNF)?c.compl:0, _d=Math.min(_resta,base+compl); _resta-=_d; var baseNF=base+compl-_d;
     var imp=fatImpostosCalc(baseNF,tab,f.iss_incluso===true);
     nfs.push({seq:k, base:base, compl:compl, baseNF:baseNF, imp:imp, total:baseNF>0?imp.bruto:0});
   }
