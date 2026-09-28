@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1058 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1059 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1058';
+const APP_VERSION='v1.0.1059';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51483,7 +51483,14 @@ async function ecomSepConcluir(osId){
   }
   try{
     await dbUpdate('ecom_ordens_sep',osId,{status:'separada',data_conclusao:new Date().toISOString()});
-    for(var i=0;i<pids.length;i++){ await dbUpdate('ecom_pedidos',pids[i],{status:'separado',data_separacao:new Date().toISOString()}); }
+    // v1.0.1059: só passa para "separado" quem ainda está antes disso — nunca volta pedido já conferido, romaneado ou carregado
+    var _antes=['importado','aguardando_etiqueta','separando'];
+    for(var i=0;i<pids.length;i++){
+      var _pp=(ecomPedidos||[]).find(function(x){return x.id===pids[i];});
+      if(_pp&&_antes.indexOf(_pp.status)<0) continue;
+      await dbUpdate('ecom_pedidos',pids[i],{status:'separado',data_separacao:(_pp&&_pp.data_separacao)||new Date().toISOString()});
+      if(_pp){ _pp.status='separado'; }
+    }
     // registra a conclusão sem bipagem: não preenche quantidade, apenas deixa o rastro
     if(forcado){
       for(var k=0;k<pids.length;k++){
