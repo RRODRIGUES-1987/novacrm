@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1059 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1060 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1059';
+const APP_VERSION='v1.0.1060';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49835,6 +49835,21 @@ async function ecomImportConfirm(){
     if(/^\d{16,}$/.test(n)) _prefix15[n.slice(0,15)]=p;       // completo ja na base
     if(/^\d{15}$/.test(n))  _curtos[n]=p;                      // copia cortada ja na base
   });
+  // v1.0.1060: número arredondado pelo Excel (18 dígitos terminando em 000). Número real terminar em 000 é 1 em 1.000;
+  // em série, é planilha/PDF que passou pelo Excel: recusa o arquivo inteiro, antes de gravar qualquer coisa.
+  var _n18=ecomImportRows.pedidos.map(function(p){return String(p.numero_pedido||'').trim();}).filter(function(n){return /^\d{18}$/.test(n);});
+  var _arr=_n18.filter(function(n){return /000$/.test(n);});
+  if(_n18.length>=5 && _arr.length/_n18.length>=0.3){
+    ecomAvisoCentro('Arquivo recusado: números arredondados pelo Excel',[
+      '<b>'+_arr.length+' de '+_n18.length+'</b> números de pedido terminam em "000" (ex.: '+ecomEsc(_arr.slice(0,3).join(', '))+').',
+      'O Excel guarda só 15 dígitos e arredonda o número do TikTok (18 dígitos). Com o número errado, a nota, a etiqueta e o romaneio não casam.',
+      '<b>Importe o arquivo original baixado do TikTok, sem abrir e salvar no Excel.</b> Para conferir antes, use o Google Planilhas.',
+      'Nada foi gravado.'],'red');
+    return;
+  }
+  // gêmeo por proximidade: o arredondado fica a menos de 1.000 do número verdadeiro
+  var _n18Base=[]; ecomPedidosDoLojista().forEach(function(p){ var n=String(p.numero_pedido||'').trim(); if(/^\d{18}$/.test(n)&&p.status!=='cancelado') _n18Base.push(p); });
+  function _gemeoProximo(n){ try{ var b=BigInt(n); for(var k=0;k<_n18Base.length;k++){ var bn=String(_n18Base[k].numero_pedido).trim(); if(bn===n) continue; var d=BigInt(bn)-b; if(d<0n)d=-d; if(d<1000n) return _n18Base[k]; } }catch(e){} return null; }
   var _novosIds=[];
   var _totalPrev=ecomImportRows.pedidos.length;
   ecomProgAbrir('Gravando pedidos', _totalPrev, true);
@@ -49860,6 +49875,18 @@ async function ecomImportConfirm(){
     if(/^\d{15}$/.test(_nraw)){
       // cortado, e o completo ja esta na base -> e o mesmo pedido
       if(_prefix15[_nraw]){ btnDup++; continue; }
+      if(/^\d{18}$/.test(_nraw)){   // v1.0.1060: mesmo pedido com número arredondado (ou o verdadeiro chegando depois do arredondado)
+        var _gm=_gemeoProximo(_nraw), _gmn=_gm?String(_gm.numero_pedido).trim():'';
+        if(_gm && /000$/.test(_gmn) && !/000$/.test(_nraw)){
+          // o da base é o arredondado e este é o verdadeiro: corrige o número do pedido existente (mantém itens, nota, etiqueta e OS)
+          try{ await dbUpdate('ecom_pedidos',_gm.id,{numero_pedido:_nraw}); _gm.numero_pedido=_nraw; _existentes[_nraw.toLowerCase()]=true;
+               btnDup++; _logDet.push({pedido:_nraw,erro:null,obs:'número corrigido: '+_gmn+' → '+_nraw}); }
+          catch(_ce){ btnErr++; _logDet.push({pedido:_nraw,erro:'não consegui corrigir o número de '+_gmn+': '+(_ce.message||_ce)}); }
+          continue;
+        }
+        if(_gm){ btnDup++; _logDet.push({pedido:_nraw,erro:'já existe como '+_gmn+' (número muito próximo: um dos dois foi arredondado pelo Excel)'}); continue; }
+        if(/000$/.test(_nraw)){ btnErr++; _logDet.push({pedido:_nraw,erro:'número terminado em 000: provável arredondamento do Excel. Confira o número no TikTok antes de importar'}); continue; }
+      }
       // TikTok tem 18 digitos: com 15, veio cortado — nao cria pedido que nunca vai casar
       if(/^5\d{14}$/.test(_nraw)){ btnErr++; _cortados.push(_nraw); _logDet.push({pedido:_nraw,erro:'numero do TikTok cortado pelo Excel (15 de 18 digitos)'}); continue; }
     }
@@ -49919,9 +49946,11 @@ async function ecomImportConfirm(){
     +'Isso acontece quando a planilha é aberta e salva no Excel. Importe o arquivo original baixado do TikTok, sem abrir no Excel.\n\nExemplos: '+_cortados.slice(0,5).join(', ')); },300);
   if(btnDup) _msg+=' · '+btnDup+' pedido(s) não importado(s) (já estavam na base)';
   if(btnErr) _msg+=' · falhas: '+btnErr;
-  var _falhas=_logDet.filter(function(d){return d.erro;}).map(function(d){
+  var _falhas=_logDet.filter(function(d){return d.erro||d.obs;}).map(function(d){
+    if(d.obs) return '<span style="color:var(--green-text,#059669)">\u2714</span> <b>'+ecomEsc(d.pedido||'?')+'</b>: '+ecomEsc(d.obs);
     var e=String(d.erro||''); var dica=/tipo_envio|full_meta/i.test(e)?' <b>\u2192 rode o SQL da v1.0.1049 (colunas do Embarque Full)</b>':'';
-    return '<span style="color:var(--red-text)">\u2716</span> <b>'+ecomEsc(d.pedido||'?')+'</b>: '+ecomEsc(e)+dica; });
+    var ign=/^j\u00e1 existe como|^já existe como/.test(e);
+    return '<span style="color:'+(ign?'var(--amber-text,#b45309)">\u25cf':'var(--red-text)">\u2716')+'</span> <b>'+ecomEsc(d.pedido||'?')+'</b>: '+ecomEsc(e)+dica; });
   ecomProgResultado(btnErr?(btnOk?'Importa\u00e7\u00e3o com falhas':'Importa\u00e7\u00e3o n\u00e3o gravada'):'Importa\u00e7\u00e3o conclu\u00edda',
     {gravados:btnOk,ignorados:btnDup,falhas:btnErr}, (btnDup?['<span style="color:var(--amber-text,#b45309)">\u25cf</span> '+btnDup+' pedido(s) j\u00e1 estavam na base (n\u00e3o duplicados)']:[]).concat(_falhas),
     btnErr?'red':(btnDup?'amber':'green'));
