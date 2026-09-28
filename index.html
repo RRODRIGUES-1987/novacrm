@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1061 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1062 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1061';
+const APP_VERSION='v1.0.1062';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -49693,15 +49693,20 @@ function ecomKitComp(sku){
 }
 function ecomParseSepText(text){
   text=String(text||'').replace(/\s+/g,' ').trim();
-  var idxs=[], re=/58\d{16}/g, mm;      // TikTok: prefixo 585, 586... (18 digitos)
-  while((mm=re.exec(text))){ idxs.push(mm.index); }
+  // v1.0.1062: PDF montado no Excel traz "Order ID" cortado em 15 dígitos seguido do "Package ID" de 18 arredondado.
+  // O de 15 é corte exato (dígitos certos); o de 18 arredondado pode ter o 15º dígito trocado: usa o de 15.
+  var idxs=[], oids=[], re=/(?:(?:^|\s)(58\d{13})\s+)?(58\d{16})/g, mm;      // TikTok: prefixo 585, 586... (18 digitos)
+  while((mm=re.exec(text))){
+    var _i=mm.index; if(mm[1]){ _i=text.indexOf(mm[1],mm.index); }
+    idxs.push(_i); oids.push(mm[1]||mm[2]);
+  }
   if(!idxs.length){ showToast('Não encontrei pedidos (Order ID 585…) no PDF','red'); ecomImportRows=null; return; }
   var byPed={}, order=[], total=0, kitsFalt={};
   for(var i=0;i<idxs.length;i++){
     var chunk=text.slice(idxs[i], i+1<idxs.length?idxs[i+1]:text.length).trim();
     var toks=chunk.split(' ').filter(Boolean);
     if(toks.length<4) continue;
-    var oid=toks[0];
+    var oid=oids[i]||toks[0];
     // Seller SKU = token logo apos o ULTIMO numero longo (OrderID > PackageID > SKU ID)
     var lastLong=0;
     for(var k=0;k<toks.length && k<10;k++){ if(/^\d{12,}$/.test(toks[k])) lastLong=k; }
@@ -49891,7 +49896,9 @@ async function ecomImportConfirm(){
         if(/000$/.test(_nraw)){ btnErr++; _logDet.push({pedido:_nraw,erro:'número terminado em 000: provável arredondamento do Excel. Confira o número no TikTok antes de importar'}); continue; }
       }
       // TikTok tem 18 digitos: com 15, veio cortado — nao cria pedido que nunca vai casar
-      if(/^5\d{14}$/.test(_nraw)){ btnErr++; _cortados.push(_nraw); _logDet.push({pedido:_nraw,erro:'numero do TikTok cortado pelo Excel (15 de 18 digitos)'}); continue; }
+      // v1.0.1062: 15 dígitos = corte exato do número (ex.: xPed da nota). Entra como PROVISÓRIO: casa pelo prefixo com a
+      // nota e com a etiqueta, e a etiqueta (que traz os 18) completa o número. Se o completo já existe, é ignorado acima.
+      if(/^5\d{14}$/.test(_nraw)){ _logDet.push({pedido:_nraw,erro:null,obs:'número de 15 dígitos (provisório): a etiqueta completa os 18'}); }
     }
     // chegou o completo e existe a copia cortada que ainda nao andou: corrige a copia
     if(/^\d{16,}$/.test(_nraw) && _curtos[_nraw.slice(0,15)]){
@@ -53671,6 +53678,10 @@ async function ecomEtiqImportFile(input){
           return np&&(np===oidN||np.indexOf(oidN)===0||oidN.indexOf(np)===0);
         });
         if(ped)viaTxt='order id';
+        // v1.0.1062: pedido com número provisório (15 dígitos) e etiqueta com os 18: completa o número do pedido
+        if(ped && /^\d{15}$/.test(String(ped.numero_pedido||'')) && /^\d{18}$/.test(oidN) && oidN.indexOf(String(ped.numero_pedido))===0){
+          try{ await dbUpdate('ecom_pedidos',ped.id,{numero_pedido:oidN}); ped.numero_pedido=oidN; }catch(_cn){}
+        }
       }
 
       // (b) chave da NF-e -> ecom_nfe -> pedido  (exato: resolve cliente com 2 pedidos)
