@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1066 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1067 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1368,7 +1368,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1066';
+const APP_VERSION='v1.0.1067';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2701,6 +2701,7 @@ function rFatCapasDigitar(){
   noPer.forEach(function(c){
     var k=c.cliente_id||c.cliente_nome||'?';
     var g=porCli[k]||(porCli[k]={nome:c.cliente_nome||'\u2014',pend:[],dig:0,fat:0});
+    if(c.status==='inutilizada') return;   // v1.0.1067
     if(c.status==='aberta'||c.status==='devolvida') g.pend.push(c); else if(c.status==='digitada'||c.status==='pendente_conferencia') g.dig++; else if(c.status==='conferida'||c.status==='faturada') g.fat++;   // v1.0.1066
   });
   var grupos=Object.keys(porCli).map(function(k){ return Object.assign({k:k},porCli[k]); })
@@ -3724,9 +3725,14 @@ function capaVerTela(c){
     +'<button class="btn" onclick="capaDevolver(\''+c.id+'\')">↩ Devolver à operação…</button>'
     +'<button class="btn" onclick="capaDigIniciar(\''+c.id+'\',\'corrigir\')">✏ Corrigir digitação</button>';
   else if(pendConf) acoes='<span style="font-size:12.5px;color:var(--text3)">Aguardando a conferência do financeiro.</span>';
+  // v1.0.1067: estornos e inutilização
+  if(c.status==='conferida'&&!c.fatura_id&&capaPodeConferir()) acoes+='<button class="btn" onclick="capaEstornarConferencia(\''+c.id+'\')">↩ Estornar conferência</button>';
+  if((pendConf||c.status==='devolvida')&&capaPodeEditar()) acoes+='<button class="btn" onclick="capaEstornarDigitacao(\''+c.id+'\')">⟲ Estornar digitação</button>';
+  if(c.status!=='faturada'&&c.status!=='inutilizada'&&!c.fatura_id&&capaPodeEditar()) acoes+='<button class="btn" style="color:var(--red-text)" onclick="capaInutilizar(\''+c.id+'\')">⊘ Inutilizar capa</button>';
   return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>'
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+'</div>'
     +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span><button class="btn btn-sm" style="margin-left:auto" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></div>'
+    +(c.status==='inutilizada'?'<div style="border:1px solid var(--border);background:var(--bg2);color:var(--text2);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">⊘ Capa inutilizada: <b>'+ecomEsc(c.motivo_inutilizacao||'')+'</b></div>':'')
     +(c.status==='devolvida'&&c.motivo_devolucao?'<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">↩ Devolvida à operação: <b>'+ecomEsc(c.motivo_devolucao)+'</b></div>':'')
     +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px;max-width:720px">'
     +(cache?capaResumoHtml(c,resp,cache):'<div style="color:var(--text3)">Carregando…</div>')
@@ -3749,6 +3755,51 @@ async function capaReenviar(id){
   if(!confirm('A capa '+c.numero+' foi corrigida e volta para a digitação do financeiro?')) return;
   var up={status:'aberta',observacoes:((c.observacoes?c.observacoes+'\n':'')+'Devolvida em '+new Date(c.devolvida_em||Date.now()).toLocaleDateString('pt-BR')+': '+(c.motivo_devolucao||'')+' · corrigida pela operação').slice(0,2000),motivo_devolucao:null};
   try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' reenviada para digitação.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+// ══════════════ CAPAS · ESTORNO E INUTILIZAÇÃO (v1.0.1067) ══════════════
+function capaRegObs(c,txt){ return ((c.observacoes?c.observacoes+'\n':'')+new Date().toLocaleString('pt-BR')+' · '+txt+' · '+((profile&&profile.full_name)||(cu&&cu.email)||'')).slice(0,4000); }
+async function capaEstornarConferencia(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeConferir()){ alert('Só quem confere capas pode estornar a conferência.'); return; }
+  if(c.status!=='conferida'||c.fatura_id){ alert('Só dá para estornar a conferência de capa conferida que ainda não entrou em fatura.'); return; }
+  var m=prompt('Motivo do estorno da conferência:',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  var up={status:'pendente_conferencia',conferida_em:null,conferida_por:null,observacoes:capaRegObs(c,'Conferência estornada: '+m)};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Conferência da capa '+c.numero+' estornada.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+async function capaEstornarDigitacao(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(['pendente_conferencia','digitada','devolvida'].indexOf(c.status)<0){ alert('Só dá para estornar a digitação de capa pendente de conferência ou devolvida.'); return; }
+  var m=prompt('Motivo do estorno da digitação (as quantidades serão zeradas e a capa volta para "a digitar"):',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  try{
+    var servs=await dbSelect('processo_capa_servicos','capa_id=eq.'+id).catch(function(){return [];})||[];
+    for(var i=0;i<servs.length;i++) await dbUpdate('processo_capa_servicos',servs[i].id,{quantidade:null,realizado:false});
+    var up={status:'aberta',pallets_movimentados:null,pallets_pbr:null,qtd_pbr:null,qtd_chep:null,qtd_outros:null,tipo_carga:null,tipo_carga_pallet:null,local_descarga:null,operador_resp:null,
+      digitada_em:null,digitada_por:null,motivo_devolucao:null,observacoes:capaRegObs(c,'Digitação estornada: '+m)};
+    await dbUpdate('processo_capas',id,up); Object.assign(c,up); delete _capaVerCache[id];
+    showToast('Digitação da capa '+c.numero+' estornada · volta para a digitar.','green'); capaViewId=null; render();
+  }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+async function capaInutilizar(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(c.status==='faturada'||c.fatura_id){ alert('Capa já faturada não pode ser inutilizada.'); return; }
+  if(c.status==='inutilizada') return;
+  var m=prompt('Motivo para inutilizar a capa '+c.numero+' (ela mantém o número, sai das pendências e não entra em fatura):',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  var up={status:'inutilizada',inutilizada_em:new Date().toISOString(),inutilizada_por:cu&&cu.id,motivo_inutilizacao:m,observacoes:capaRegObs(c,'Capa inutilizada: '+m)};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' inutilizada.','green'); capaViewId=null; render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+function capaPodeExcluir(c){ return !!c && c.status==='aberta' && !c.digitada_em && (profile&&profile.role==='admin'); }
+// ══════════════ FULL · REIMPRESSÃO DA MASTER (v1.0.1067) ══════════════
+function ecomFullReimpEscolher(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  var meta=ecomFullMeta(p), cx=(meta.caixas||[]).filter(function(c){return c.pagina;}).sort(function(a,b){return a.n-b.n;});
+  if(!meta.master_pdf||!cx.length){ showToast('Este Full não tem etiquetas de caixa importadas.','red'); return; }
+  var old=ge('ecom-full-reimp'); if(old) old.remove();
+  var b='font-size:14px;padding:10px 0;min-width:54px';
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-full-reimp" style="z-index:5300;display:flex;align-items:center;justify-content:center"><div class="modal" style="width:520px;max-width:96vw;padding:18px">'
+    +'<div style="display:flex;align-items:center;margin-bottom:6px"><h3 style="margin:0;font-size:17px">Reimprimir etiqueta de caixa · Full '+ecomEsc(p.numero_pedido||'')+'</h3><button class="btn btn-sm" style="margin-left:auto" onclick="ge(\'ecom-full-reimp\').remove()">Fechar</button></div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">Bobina 100 × 150 · etiqueta deitada. Escolha a caixa:</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+cx.map(function(c){ return '<button class="btn" style="'+b+'" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')" title="'+ecomEsc(c.spx||'')+'">'+c.n+'</button>'; }).join('')+'</div>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-p" onclick="ecomFullImprimirPaginas(\''+meta.master_pdf+'\',['+cx.map(function(c){return c.pagina;}).join(',')+'],\'master\')">🖨 Todas ('+cx.length+')</button></div></div></div>');
 }
 
 function canDo(tela, acao){
@@ -32075,6 +32126,7 @@ const CAPA_STATUS={   // v1.0.1066: pendente de conferência, conferida e devolv
   conferida:{l:'Conferida', bg:'var(--green-bg)', c:'var(--green-text)'},
   devolvida:{l:'Devolvida \u00e0 opera\u00e7\u00e3o', bg:'var(--red-bg,#fee2e2)', c:'var(--red-text)'},
   faturada:{l:'Faturada', bg:'var(--bg2)', c:'var(--text2)'},
+  inutilizada:{l:'Inutilizada', bg:'var(--bg2)', c:'var(--text3)'},   // v1.0.1067
 };
 const CAPA_VEICULOS=['Carreta','Truck/Toco','Van/Utilitário','Container 20','Container 40','Moto'];
 const CAPA_CARGA=['Paletizada','Batida','Paletizada/Batida'];
@@ -48163,7 +48215,8 @@ function rCapasProcesso_i(){
         ${pode&&curPage==='fat-capas-digitar'?`<button class="bicon btn-sm" title="Digitar" onclick="event.stopPropagation();capaViewId='${c.id}';render()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>`:''}
-        ${pode&&c.status!=='faturada'?`<button class="bicon btn-sm" title="Excluir" onclick="event.stopPropagation();capaExcluir('${c.id}')">
+        ${pode&&c.status!=='faturada'&&c.status!=='inutilizada'&&!capaPodeExcluir(c)?`<button class="btn btn-sm" style="color:var(--red-text)" onclick="event.stopPropagation();capaInutilizar('${c.id}')">⊘ Inutilizar</button>`:''}
+        ${capaPodeExcluir(c)?`<button class="bicon btn-sm" title="Excluir (capa criada por engano)" onclick="event.stopPropagation();capaExcluir('${c.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>`:''}
       </div></div>`;
@@ -52618,6 +52671,8 @@ async function ecomEtiqPrint(pedidoId){
 }
 async function ecomEtiqPrintAuto(pedidoId){
   try{
+    var _pf=(ecomPedidos||[]).find(function(x){return x.id===pedidoId;});
+    if(ecomEhFull(_pf)){ ecomFullReimpEscolher(pedidoId); return true; }   // v1.0.1067: Full reimprime a master no formato novo
     var img=await ecomEtiqFetchImg(pedidoId);
     // sem etiqueta vinculada: avisa e devolve false — quem chamou decide o fluxo
     if(!img){ showToast('Conferido (sem etiqueta para imprimir)','amber'); return false; }
