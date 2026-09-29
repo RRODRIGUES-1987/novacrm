@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1062 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1063 | Gerado: 2026-09-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1062';
+const APP_VERSION='v1.0.1063';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3326,6 +3326,258 @@ async function wfSalvar(){
     wfEmp={ativo:lig,config:JSON.parse(JSON.stringify(_wfEd))};
     showToast('Workflow salvo'+(lig?' e LIGADO.':' (desligado \u2014 o VERUS segue como hoje).'),'green');
   }catch(e){ showToast('Erro ao salvar o workflow: '+(e.message||e),'red'); }
+}
+// ══════════════ HERMES · COMERCIAL (v1.0.1063) ══════════════
+// Consultas (resumo de ações, cliente, desempenho, propostas) e cadastros com confirmação
+// (contato, oportunidade, tarefa e proposta padrão). Funciona nos dois motores: IA (ferramentas
+// com confirmação obrigatória) e local (assistente de passos que pergunta campo a campo).
+function hmDia(d){ return d?String(d).slice(0,10):''; }
+function hmHojeIso(){ var h=new Date(); return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0'); }
+function hmDiasDesde(d){ if(!d) return 9999; return Math.floor((Date.now()-new Date(d).getTime())/86400000); }
+function hmNomeUser(id){ var p=(profiles||[]).find(function(x){return x.id===id;}); return p?(p.full_name||p.email||'—'):'—'; }
+function hmNormTxt(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function hmCasaNome(a,b){ a=hmNormTxt(a); b=hmNormTxt(b); return !!a&&!!b&&(a.indexOf(b)>=0||b.indexOf(a)>=0); }
+function hmUltimaAtividade(d){
+  var datas=[d.updated_at,d.created_at];
+  (tasks||[]).forEach(function(t){ if(t.deal_id===d.id) datas.push(t.updated_at||t.created_at); });
+  (propostas||[]).forEach(function(p){ if(p.deal_id===d.id) datas.push(p.updated_at||p.created_at); });
+  return datas.filter(Boolean).sort().pop()||null;
+}
+var HM_ABERTAS=['Prospecção','Negociação'];
+function hmComResumo(){
+  var abertas=(deals||[]).filter(function(d){return HM_ABERTAS.indexOf(d.stage)>=0;});
+  var tot=abertas.reduce(function(s,d){return s+Number(d.value||0);},0);
+  var r='Funil: '+abertas.length+' oportunidade(s) aberta(s) · '+fmtV(tot)+'/mês em jogo\n';
+  HM_ABERTAS.forEach(function(st){ var l=abertas.filter(function(d){return d.stage===st;}); r+='• '+st+': '+l.length+' ('+fmtV(l.reduce(function(s,d){return s+Number(d.value||0);},0))+')\n'; });
+  var paradas=abertas.map(function(d){return {d:d,dias:hmDiasDesde(hmUltimaAtividade(d))};}).filter(function(x){return x.dias>15;}).sort(function(a,b){return b.dias-a.dias;});
+  if(paradas.length) r+='⚠ '+paradas.length+' parada(s) há mais de 15 dias: '+paradas.slice(0,5).map(function(x){return (x.d.empresa||x.d.name)+' ('+x.dias+' d)';}).join(', ')+'\n';
+  var P=propostas||[];
+  var ag=P.filter(function(p){return p.status==='aguardando_aprovacao';}), rasc=P.filter(function(p){return p.status==='rascunho';}), env=P.filter(function(p){return p.status==='enviada';});
+  r+='Propostas: '+ag.length+' aguardando sua aprovação'+(ag.length?' ('+ag.slice(0,4).map(function(p){return p.cliente_nome||p.numero_po;}).join(', ')+')':'')+' · '+env.length+' enviada(s) sem resposta · '+rasc.length+' em rascunho\n';
+  var novas=(deals||[]).filter(function(d){return hmDiasDesde(d.created_at)<=7;}).length;
+  var ganhas=(deals||[]).filter(function(d){return d.stage==='Fechado'&&hmDiasDesde(d.updated_at)<=7;});
+  var perdidas=(deals||[]).filter(function(d){return d.stage==='Perdido'&&hmDiasDesde(d.updated_at)<=7;});
+  r+='Esta semana: '+novas+' nova(s) · '+ganhas.length+' ganha(s)'+(ganhas.length?' ('+ganhas.map(function(d){return d.empresa||d.name;}).join(', ')+')':'')+' · '+perdidas.length+' perdida(s)\n';
+  var hoje=hmHojeIso(), T=(tasks||[]).filter(function(t){return !t.done;});
+  var atras=T.filter(function(t){return t.due_date&&hmDia(t.due_date)<hoje;}), deHoje=T.filter(function(t){return hmDia(t.due_date)===hoje;});
+  r+='Tarefas: '+atras.length+' atrasada(s) · '+deHoje.length+' para hoje';
+  return r;
+}
+function hmComCliente(nome){
+  if(!nome) return 'De qual cliente? Ex.: "como está a negociação com a Acme".';
+  var D=(deals||[]).filter(function(d){return hmCasaNome(d.empresa,nome)||hmCasaNome(d.name,nome)||hmCasaNome(d.contact_name,nome);});
+  var cli=(clientes||[]).find(function(c){return hmCasaNome(c.nome,nome);});
+  var P=(propostas||[]).filter(function(p){return D.some(function(d){return d.id===p.deal_id;})||hmCasaNome(p.cliente_nome,nome);});
+  var C=(contacts||[]).filter(function(c){return hmCasaNome(c.company,nome)||hmCasaNome(c.name,nome);});
+  if(!D.length&&!cli&&!P.length&&!C.length) return 'Não achei nada de "'+nome+'" no comercial nem nos clientes.';
+  var r='';
+  D.slice(0,3).forEach(function(d){
+    r+=(d.empresa||d.name)+' · '+d.stage+' · '+fmtV(Number(d.value||0))+'/mês · responsável: '+hmNomeUser(d.owner_id)+' · última atividade há '+hmDiasDesde(hmUltimaAtividade(d))+' d\n';
+    var tk=(tasks||[]).filter(function(t){return t.deal_id===d.id&&!t.done;}).sort(function(a,b){return String(a.due_date||'').localeCompare(String(b.due_date||''));})[0];
+    if(tk) r+='  Próxima tarefa: "'+tk.title+'"'+(tk.due_date?' em '+new Date(hmDia(tk.due_date)+'T00:00').toLocaleDateString('pt-BR'):'')+(tk.due_date&&hmDia(tk.due_date)<hmHojeIso()?' (ATRASADA)':'')+'\n';
+  });
+  P.slice(0,3).forEach(function(p){ r+='Proposta '+(p.numero_po||'')+(p.versao?' v'+p.versao:'')+' · '+String(p.status||'').replace(/_/g,' ')+' · '+(p.mes_ano||'')+'\n'; });
+  if(C.length) r+='Contato: '+C.slice(0,2).map(function(c){return c.name+(c.phone?' · '+c.phone:'')+(c.email?' · '+c.email:'');}).join(' | ')+'\n';
+  if(cli){
+    var tb=(tabelasTarifarias||[]).filter(function(t){return t.cliente_id===cli.id;}).sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0];
+    if(tb) r+='Tabela tarifária: '+(tb.nome||tb.descricao||'vigente')+(tb.faturamento_minimo?' · mínimo '+fmtV(Number(tb.faturamento_minimo)):'')+'\n';
+    var fats=(faturamento||[]).filter(function(f){return f.cliente_id===cli.id&&f.status!=='rascunho'&&f.status!=='cancelada';});
+    var porMes={}; fats.forEach(function(f){ var m=String(f.periodo_fim||f.data_emissao||'').slice(0,7); if(m) porMes[m]=(porMes[m]||0)+Number(f.valor_total||0); });
+    var ms=Object.keys(porMes).sort().slice(-6);
+    if(ms.length) r+='Faturamento: '+ms.map(function(m){return m.slice(5)+'/'+m.slice(2,4)+' '+fmtV(porMes[m]);}).join(' · ');
+  }
+  return r.trim();
+}
+function hmComDesempenho(dias){
+  dias=Number(dias)||90; var por={};
+  (deals||[]).forEach(function(d){
+    var k=d.owner_id||'-'; var o=por[k]=por[k]||{ab:0,vab:0,g:0,vg:0,p:0};
+    if(HM_ABERTAS.indexOf(d.stage)>=0){ o.ab++; o.vab+=Number(d.value||0); }
+    else if(hmDiasDesde(d.updated_at)<=dias){ if(d.stage==='Fechado'){ o.g++; o.vg+=Number(d.value||0); } else if(d.stage==='Perdido') o.p++; }
+  });
+  var ks=Object.keys(por); if(!ks.length) return 'Não há oportunidades no CRM.';
+  ks.sort(function(a,b){return por[b].vg-por[a].vg;});
+  return 'Desempenho nos últimos '+dias+' dias:\n'+ks.map(function(k){ var o=por[k], conv=(o.g+o.p)?Math.round(o.g/(o.g+o.p)*100):0;
+    return '• '+hmNomeUser(k)+': '+o.ab+' aberta(s) ('+fmtV(o.vab)+') · '+o.g+' ganha(s) ('+fmtV(o.vg)+') · '+o.p+' perdida(s) · conversão '+conv+'%'; }).join('\n');
+}
+function hmComPropostas(){
+  var P=(propostas||[]).filter(function(p){return ['rascunho','aguardando_aprovacao','aprovada','enviada'].indexOf(p.status)>=0;});
+  if(!P.length) return 'Nenhuma proposta em andamento.';
+  var g={}; P.forEach(function(p){ (g[p.status]=g[p.status]||[]).push(p); });
+  var nomes={aguardando_aprovacao:'Aguardando sua aprovação',enviada:'Enviadas sem resposta',aprovada:'Aprovadas (a enviar)',rascunho:'Em rascunho'};
+  return ['aguardando_aprovacao','enviada','aprovada','rascunho'].filter(function(s){return g[s];}).map(function(s){
+    return nomes[s]+' ('+g[s].length+'): '+g[s].slice(0,6).map(function(p){return (p.cliente_nome||'?')+' '+(p.numero_po||'')+' · há '+hmDiasDesde(p.updated_at||p.created_at)+' d';}).join(', ');
+  }).join('\n');
+}
+// ── datas faladas: hoje, amanhã, sexta, 15/10 ──
+function hmData(txt){
+  var t=hmNormTxt(txt), d=new Date(); d.setHours(0,0,0,0);
+  var iso=function(x){ return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); };
+  if(/depois de amanha/.test(t)){ d.setDate(d.getDate()+2); return iso(d); }
+  if(/amanha/.test(t)){ d.setDate(d.getDate()+1); return iso(d); }
+  if(/\bhoje\b/.test(t)) return iso(d);
+  var dias=['domingo','segunda','terca','quarta','quinta','sexta','sabado'];
+  for(var k=0;k<7;k++){ if(t.indexOf(dias[k])>=0){ var add=(k-d.getDay()+7)%7||7; d.setDate(d.getDate()+add); return iso(d); } }
+  var m=t.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+  if(m){ var a=m[3]?(m[3].length===2?'20'+m[3]:m[3]):String(d.getFullYear()); var x=new Date(Number(a),Number(m[2])-1,Number(m[1])); if(!m[3]&&x<d) x.setFullYear(x.getFullYear()+1); return iso(x); }
+  var m2=t.match(/(?:dia|em)\s+(\d{1,2})\b/); if(m2){ var y=new Date(d.getFullYear(),d.getMonth(),Number(m2[1])); if(y<d) y.setMonth(y.getMonth()+1); return iso(y); }
+  return null;
+}
+function hmValor(txt){
+  var t=hmNormTxt(txt).replace(/r\$/g,' ');
+  var m=t.match(/(\d+(?:[.,]\d+)*)\s*(mil|k)?/); if(!m) return null;
+  var n=m[1]; if(/,\d{1,2}$/.test(n)) n=n.replace(/\./g,'').replace(',','.'); else n=n.replace(/[.,]/g,'');
+  var v=parseFloat(n)||0; if(m[2]) v*=1000; return v||null;
+}
+function hmBrData(iso){ return iso?new Date(iso+'T00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'}):'sem data'; }
+function hmAchaDeal(nome){ if(!nome) return null; var l=(deals||[]).filter(function(d){return hmCasaNome(d.empresa,nome)||hmCasaNome(d.name,nome);}); l.sort(function(a,b){return (HM_ABERTAS.indexOf(b.stage)>=0)-(HM_ABERTAS.indexOf(a.stage)>=0)||String(b.created_at||'').localeCompare(String(a.created_at||''));}); return l[0]||null; }
+// ── gravações ──
+async function hmGravarContato(a){
+  var cid=company&&company.id, ex=(contacts||[]).find(function(c){return hmNormTxt(c.name)===hmNormTxt(a.nome)&&hmCasaNome(c.company,a.empresa);});
+  if(ex) return {ok:true,ja:true,c:ex};
+  var obj={owner_id:cu.id,company_id:cid,name:a.nome,company:a.empresa||null,email:a.email||null,phone:a.telefone||null};
+  var c=await dbInsert('contacts',obj); if(c&&contacts) contacts.unshift(c); return {ok:!!c,c:c};
+}
+async function hmGravarOportunidade(a){
+  var cid=company&&company.id;
+  if(a.contato_nome){ await hmGravarContato({nome:a.contato_nome,empresa:a.empresa,email:a.contato_email,telefone:a.contato_telefone}); }
+  var obj={owner_id:cu.id,company_id:cid,name:a.titulo||((a.empresa||'')+(a.operacao?' · '+a.operacao:'')),contact_name:a.contato_nome||'',empresa:a.empresa||null,value:Number(a.valor_mensal)||0,stage:a.etapa||'Prospecção'};
+  var d=await dbInsert('deals',obj); if(d&&deals) deals.unshift(d); return d;
+}
+async function hmGravarTarefa(a){
+  var cid=company&&company.id, dl=hmAchaDeal(a.oportunidade);
+  var obj={owner_id:cu.id,company_id:cid,title:a.titulo,due_date:a.data||null,done:false,deal_id:dl?dl.id:null,priority:a.prioridade||'normal',note:a.obs||null,tipo:'Comercial'};
+  var t=await dbInsert('tasks',obj); if(t&&tasks) tasks.unshift(t); return t;
+}
+// parâmetros padrão da MK (os do cliente saem da conversa ou ficam "a definir")
+function hmPropPadraoMK(){ return {sla:'D + 1 com corte as 17:00 do dia anterior',fat_coletas:'Por conta do cliente',carregamento:'Por conta da MKLOG',docas:'Compartilhadas',operacao_dedicada:'Não',estrutura_armazenagem:'Porta-Pallets',horario_operacional:'Início: Segunda-feira 06:00 - Término: Sexta-feira as 22:00',cond_faturamento:'Quinzenal',cond_reajustes:'IPCA a cada 12 meses',cond_multa:'Não aplicado',cond_notice:'30 dias',cond_prazo_aprovacao:'2 dias úteis após apresentação',cond_prazo_pagamento_dias:'7',venc_regra_tipo:'prazo',venc_regra_dias:'',venc_regra_obs:''}; }
+async function hmGravarProposta(a){
+  var dl=hmAchaDeal(a.empresa);
+  var cid=company&&company.id, AD='a definir';
+  var nextPO=await proximoNumeroPO();
+  var dados=Object.assign({owner_id:cu.id,company_id:cid,status:'rascunho',numero_po:nextPO,mes_ano:new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),versao:1,
+    deal_id:dl?dl.id:null,cliente_nome:(dl&&dl.empresa)||a.empresa||'',cliente_contato:(dl&&dl.contact_name)||a.contato||'',
+    local_operacao:a.local?('MKLOG '+String(a.local).toUpperCase()):AD, volume:a.volume||AD, dimensao_peso:a.dimensao_peso||AD, tipo_produto:a.tipo_produto||AD,
+    total_codigos:a.skus||AD, recebimento:a.recebimento||AD, expedicao:a.expedicao||AD, valor_estoque:a.valor_estoque||AD, cond_fat_minimo:a.fat_minimo||AD,
+    tarifas:JSON.stringify(propTarifasPadrao())}, hmPropPadraoMK());
+  var p=await dbInsert('propostas',dados); if(p&&propostas) propostas.unshift(p); return p;
+}
+function hmResumoAcao(nome,a){
+  if(nome==='criar_contato') return 'Vou cadastrar o contato: '+a.nome+(a.empresa?' · '+a.empresa:'')+(a.telefone?' · '+a.telefone:'')+(a.email?' · '+a.email:'')+'.';
+  if(nome==='criar_oportunidade') return 'Vou cadastrar a oportunidade "'+(a.titulo||((a.empresa||'')+(a.operacao?' · '+a.operacao:'')))+'" · '+(a.valor_mensal?fmtV(Number(a.valor_mensal))+'/mês':'valor a definir')+' · etapa '+(a.etapa||'Prospecção')+' · responsável: você'+(a.contato_nome?'. Contato: '+a.contato_nome+(a.contato_email?' · '+a.contato_email:'')+(a.contato_telefone?' · '+a.contato_telefone:''):'')+'.';
+  if(nome==='criar_tarefa'){ var dl=hmAchaDeal(a.oportunidade); return 'Vou criar a tarefa "'+a.titulo+'" · '+hmBrData(a.data)+' · prioridade '+(a.prioridade||'normal')+(dl?' · ligada a '+(dl.empresa||dl.name):'')+'.'; }
+  if(nome==='gerar_proposta'){ var AD='a definir';
+    return 'Vou gerar a proposta padrão para '+a.empresa+' (tarifário padrão ativo): unidade '+(a.local||AD)+' · volume '+(a.volume||AD)+' · SKUs '+(a.skus||AD)+' · valor em estoque '+(a.valor_estoque||AD)
+      +' · recebimento '+(a.recebimento||AD)+' · expedição '+(a.expedicao||AD)+' · faturamento mínimo '+(a.fat_minimo||AD)+'. O resto segue o padrão da MK.'; }
+  return '';
+}
+async function hmExecutarAcao(nome,a){
+  if(nome==='criar_contato'){ var r=await hmGravarContato(a); return r.ja?('Esse contato já existia: '+a.nome+'.'):(r.ok?'✔ Contato cadastrado: '+a.nome+'.':'Não consegui gravar o contato.'); }
+  if(nome==='criar_oportunidade'){ var d=await hmGravarOportunidade(a); return d?'✔ Oportunidade cadastrada no CRM'+(a.contato_nome?', com o contato':'')+'. Quer que eu crie uma tarefa de follow-up?':'Não consegui gravar a oportunidade.'; }
+  if(nome==='criar_tarefa'){ var t=await hmGravarTarefa(a); return t?'✔ Tarefa criada para '+hmBrData(a.data)+'.':'Não consegui gravar a tarefa.'; }
+  if(nome==='gerar_proposta'){ var p=await hmGravarProposta(a); return p?('Pronto, proposta '+(p.numero_po||'')+' criada a partir do tarifário padrão.\n⟦PROPOSTA:'+p.id+'⟧'):'Não consegui gerar a proposta.'; }
+  return 'Ação desconhecida.';
+}
+// ── cartão da proposta no diálogo ──
+function hmCartaoProposta(id){
+  var p=(propostas||[]).find(function(x){return x.id===id;}); if(!p) return '';
+  var st=String(p.status||'').replace(/_/g,' '), b='font-size:12.5px;padding:7px 11px;border-radius:9px;border:1px solid #d6dae0;background:#fff;cursor:pointer;margin:3px 4px 0 0';
+  return '<div style="margin-top:8px;border:1px solid #d6dae0;border-radius:12px;padding:10px 12px;background:#fff;color:#111;white-space:normal">'
+    +'<div style="display:flex;justify-content:space-between;gap:8px"><b>'+tgEsc((p.numero_po||'Proposta')+' · '+(p.cliente_nome||''))+'</b><span style="font-size:11px;padding:1px 8px;border-radius:99px;background:'+(p.status==='aprovada'?'#dcfce7;color:#166534':'#fef3c7;color:#92400e')+'">'+tgEsc(st)+'</span></div>'
+    +'<div style="font-size:12px;color:#5b6573;margin:3px 0 6px">'+tgEsc((p.cliente_contato?'contato '+p.cliente_contato+' · ':'')+(p.mes_ano||''))+'</div>'
+    +'<button style="'+b+'" onclick="hmPropEditar(\''+p.id+'\')">✏ Editar</button>'
+    +'<button style="'+b+'" onclick="gerarPDF(\''+p.id+'\')">⬇ Baixar PDF'+(p.status==='aprovada'?'':' (rascunho)')+'</button>'
+    +(p.status==='aprovada'?'':'<button style="'+b+';font-weight:700;background:#0A2540;color:#fff;border-color:#0A2540" onclick="hmPropAprovarBaixar(\''+p.id+'\')">✔ Aprovar e baixar</button>')
+    +'</div>';
+}
+function hmComCartoes(htmlEscapado){ return String(htmlEscapado).replace(/⟦PROPOSTA:([0-9a-f-]{36})⟧/g,function(_,id){ return hmCartaoProposta(id); }); }
+async function hmPropEditar(id){ await openPropostaEditor(id); var ov=ge('prop-editor-overlay'); if(ov) ov.style.zIndex='10050'; }
+async function hmPropAprovarBaixar(id){
+  var p=(propostas||[]).find(function(x){return x.id===id;}); if(!p) return;
+  try{ var up={status:'aprovada',aprovado_por:cu.id,aprovado_em:new Date().toISOString()}; await dbUpdate('propostas',id,up); Object.assign(p,up); }
+  catch(e){ showToast('Não consegui aprovar: '+(e.message||e),'red'); return; }
+  gerarPDF(id); if(typeof asmPintar==='function') asmPintar(); if(typeof asPintar==='function') asPintar();
+}
+// ── motor de IA: toda escrita passa por "resumo -> sim -> grava" ──
+var hmPendAcao=null;
+function hmNUser(){ return (asMsgs||[]).filter(function(m){return m.role==='user'&&typeof m.content==='string';}).length; }
+function hmUltUser(){ var l=(asMsgs||[]).filter(function(m){return m.role==='user'&&typeof m.content==='string';}); return l.length?l[l.length-1].content:''; }
+function hmAcaoTool(nome){
+  return async function(a){
+    a=a||{};
+    if(a.confirmado===true && hmPendAcao && hmPendAcao.nome===nome && hmNUser()>hmPendAcao.nUser && /^\s*(sim|s|ok|pode|confirmo|confirma|isso|manda|pode gravar|pode sim|bora|fechado)\b/i.test(hmUltUser())){
+      var args=Object.assign({},hmPendAcao.args); hmPendAcao=null;
+      return {texto_pronto:await hmExecutarAcao(nome,args)};
+    }
+    var aa=Object.assign({},a); delete aa.confirmado;
+    hmPendAcao={nome:nome,args:aa,nUser:hmNUser()};
+    return {precisa_confirmar:true,resumo:hmResumoAcao(nome,aa)+' Confirma?'};
+  };
+}
+AS_TOOLS.push(
+  {name:'comercial_resumo',description:'Resumo de ações do comercial: funil por etapa e valor, oportunidades paradas ha mais de 15 dias, propostas aguardando aprovacao/enviadas/rascunho, novas/ganhas/perdidas na semana e tarefas atrasadas. Use para "como esta o comercial", "funil", "pipeline".',input_schema:{type:'object',properties:{}},run:async function(){return {texto_pronto:hmComResumo()};}},
+  {name:'comercial_cliente',description:'Situacao comercial de um cliente/prospect: oportunidade (etapa, valor, responsavel, ultima atividade, proxima tarefa), propostas, contato, tabela tarifaria e faturamento recente. Use para "como esta a negociacao com X", "e a X?", "resumo da X".',input_schema:{type:'object',properties:{nome:{type:'string',description:'Nome do cliente ou prospect'}},required:['nome']},run:async function(a){return {texto_pronto:hmComCliente(a&&a.nome)};}},
+  {name:'comercial_desempenho',description:'Desempenho do time comercial por vendedor: abertas, ganhas, perdidas, valor e conversao no periodo.',input_schema:{type:'object',properties:{dias:{type:'number',description:'Periodo em dias (padrao 90)'}}},run:async function(a){return {texto_pronto:hmComDesempenho(a&&a.dias)};}},
+  {name:'comercial_propostas',description:'Propostas em andamento por situacao (aguardando aprovacao, enviadas sem resposta, aprovadas, rascunho).',input_schema:{type:'object',properties:{}},run:async function(){return {texto_pronto:hmComPropostas()};}},
+  {name:'criar_contato',description:'Cadastra um contato no CRM. Chame primeiro SEM confirmado: devolve o resumo; mostre ao usuario e pergunte "Confirma?". So depois do "sim" chame de novo com confirmado=true.',input_schema:{type:'object',properties:{nome:{type:'string'},empresa:{type:'string'},telefone:{type:'string'},email:{type:'string'},confirmado:{type:'boolean'}},required:['nome','empresa']},run:hmAcaoTool('criar_contato')},
+  {name:'criar_oportunidade',description:'Cadastra uma oportunidade no CRM (e o contato, se for novo). valor_mensal = receita mensal estimada em reais. Mesma regra: primeiro sem confirmado, depois do "sim" com confirmado=true.',input_schema:{type:'object',properties:{empresa:{type:'string'},operacao:{type:'string',description:'Ex.: armazenagem 800 pallets'},titulo:{type:'string'},valor_mensal:{type:'number'},etapa:{type:'string',enum:['Prospecção','Negociação']},contato_nome:{type:'string'},contato_email:{type:'string'},contato_telefone:{type:'string'},confirmado:{type:'boolean'}},required:['empresa']},run:hmAcaoTool('criar_oportunidade')},
+  {name:'criar_tarefa',description:'Cria uma tarefa do comercial. data em AAAA-MM-DD (converta "sexta", "amanha" para a data). oportunidade = nome da empresa, se a tarefa for de um cliente. Mesma regra de confirmacao.',input_schema:{type:'object',properties:{titulo:{type:'string'},data:{type:'string'},prioridade:{type:'string',enum:['baixa','normal','alta']},oportunidade:{type:'string'},confirmado:{type:'boolean'}},required:['titulo','data']},run:hmAcaoTool('criar_tarefa')},
+  {name:'gerar_proposta',description:'Gera a proposta comercial padrao (tarifario padrao ativo) para um cliente/oportunidade. ANTES, pergunte ao usuario os dados do cliente que faltarem: unidade (Salto ou Itu), volume (pallets), SKUs, valor em estoque, recebimento e expedicao (paletizado ou batido), faturamento minimo. O que ele nao souber vai como "a definir". Mesma regra de confirmacao.',input_schema:{type:'object',properties:{empresa:{type:'string'},local:{type:'string',enum:['Salto','Itu']},volume:{type:'string'},skus:{type:'string'},valor_estoque:{type:'string'},recebimento:{type:'string'},expedicao:{type:'string'},dimensao_peso:{type:'string'},tipo_produto:{type:'string'},fat_minimo:{type:'string'},confirmado:{type:'boolean'}},required:['empresa']},run:hmAcaoTool('gerar_proposta')}
+);
+// ── motor local: assistente de passos ──
+var hmWiz=null;
+var HM_WIZ={
+  criar_contato:[['nome','Qual o nome do contato?'],['empresa','De qual empresa?'],['telefone','Telefone? (ou "pular")'],['email','E-mail? (ou "pular")']],
+  criar_oportunidade:[['empresa','Qual a empresa?'],['operacao','Qual a operação? Ex.: armazenagem 800 pallets (ou "pular")'],['valor_mensal','Valor mensal estimado? (ou "pular")'],['contato_nome','Nome do contato? (ou "pular")'],['contato_email','E-mail do contato? (ou "pular")'],['contato_telefone','Telefone do contato? (ou "pular")']],
+  criar_tarefa:[['titulo','Qual a tarefa?'],['data','Para quando? (hoje, amanhã, sexta, 15/10)'],['oportunidade','É de algum cliente? Diga o nome (ou "pular")']],
+  gerar_proposta:[['empresa','Para qual cliente?'],['local','Qual unidade, Salto ou Itu? (ou "pular")'],['volume','Quantos pallets? (ou "pular")'],['skus','Quantos SKUs? (ou "pular")'],['valor_estoque','Valor em estoque? (ou "pular")'],['recebimento','Recebimento paletizado ou batido? (ou "pular")'],['expedicao','Expedição paletizada ou batida? (ou "pular")'],['fat_minimo','Faturamento mínimo? (ou "pular")']]
+};
+var HM_OBRIG={criar_contato:['nome','empresa'],criar_oportunidade:['empresa'],criar_tarefa:['titulo','data'],gerar_proposta:['empresa']};
+function hmWizPergunta(){ var c=HM_WIZ[hmWiz.tipo][hmWiz.passo]; return c?c[1]:null; }
+function hmWizInicio(txt){
+  var t=hmNormTxt(txt), tipo=null;
+  if(/\b(ger|cri|mont|fa[zc]|prepar)\w*\b.*\bproposta/.test(t)) tipo='gerar_proposta';
+  else if(/\b(cri|cadastr|nov|agend|marc)\w*\b.*\b(tarefa|lembrete|follow)/.test(t)) tipo='criar_tarefa';
+  else if(/\b(cri|cadastr|nov|abr)\w*\b.*\b(oportunidade|negocio|lead)/.test(t)) tipo='criar_oportunidade';
+  else if(/\b(cri|cadastr|nov|adicion)\w*\b.*\bcontato/.test(t)) tipo='criar_contato';
+  if(!tipo) return null;
+  hmWiz={tipo:tipo,passo:0,dados:{},confirmar:false};
+  // aproveita o nome dito na própria frase ("proposta para a Gama", "oportunidade da Gama")
+  var m=String(txt).match(/\b(?:para|pra|da|do|de|com)\s+(?:a\s+|o\s+)?([A-ZÀ-Ú][\wÀ-ú&.\- ]{1,40})$/);
+  if(m && (tipo==='gerar_proposta'||tipo==='criar_oportunidade')){ hmWiz.dados.empresa=m[1].trim(); hmWiz.passo=1; }
+  return {texto:(tipo==='gerar_proposta'?'Vamos montar a proposta padrão. ':'')+hmWizPergunta(),tools:[tipo]};
+}
+async function hmWizResponder(txt){
+  var t=hmNormTxt(txt).trim();
+  if(/^(cancel|esquece|deixa|para)\b/.test(t)){ hmWiz=null; return {texto:'Cancelado, nada foi gravado.',tools:[]}; }
+  if(hmWiz.confirmar){
+    if(/^(sim|s|ok|pode|confirm|isso|manda|bora|fechado)/.test(t)){ var w=hmWiz; hmWiz=null; return {texto:await hmExecutarAcao(w.tipo,w.dados),tools:[w.tipo]}; }
+    hmWiz=null; return {texto:'Ok, não gravei. Se quiser, comece de novo.',tools:[]};
+  }
+  var campo=HM_WIZ[hmWiz.tipo][hmWiz.passo][0], pular=/^(pular|pula|nao sei|sem|nenhum|nao)\b/.test(t);
+  if(pular && HM_OBRIG[hmWiz.tipo].indexOf(campo)>=0) return {texto:'Esse eu preciso. '+hmWizPergunta(),tools:[]};
+  if(!pular){
+    var v=String(txt).trim();
+    if(campo==='data'){ v=hmData(txt); if(!v) return {texto:'Não entendi a data. Diga "amanhã", "sexta" ou "15/10".',tools:[]}; }
+    else if(campo==='valor_mensal'){ v=hmValor(txt); if(!v) return {texto:'Não entendi o valor. Ex.: "25 mil".',tools:[]}; }
+    else if(campo==='local'){ v=/salto/.test(t)?'Salto':(/itu/.test(t)?'Itu':null); if(!v) return {texto:'Salto ou Itu?',tools:[]}; }
+    hmWiz.dados[campo]=v;
+  }
+  hmWiz.passo++;
+  if(hmWiz.tipo==='criar_oportunidade' && hmWiz.passo>=4 && !hmWiz.dados.contato_nome) hmWiz.passo=HM_WIZ.criar_oportunidade.length;   // sem contato: não pergunta e-mail/telefone
+  while(hmWiz.passo<HM_WIZ[hmWiz.tipo].length && hmWiz.dados[HM_WIZ[hmWiz.tipo][hmWiz.passo][0]]!=null) hmWiz.passo++;
+  if(hmWiz.passo<HM_WIZ[hmWiz.tipo].length) return {texto:hmWizPergunta(),tools:[]};
+  hmWiz.confirmar=true;
+  return {texto:hmResumoAcao(hmWiz.tipo,hmWiz.dados)+'\nConfirma? (sim / não)',tools:[hmWiz.tipo]};
+}
+function hmComIntentLeitura(txt){
+  var t=hmNormTxt(txt);
+  if(/desempenho|performance|ranking|como esta o time|vendedor/.test(t)) return {tool:'comercial_desempenho',args:{}};
+  if(/propostas?\b/.test(t) && /pendent|andamento|aberto|aprova|quais|lista/.test(t)) return {tool:'comercial_propostas',args:{}};
+  if(/comercial|funil|pipeline|oportunidades\b/.test(t) && !/\b(cri|cadastr|nov)\w*/.test(t)) return {tool:'comercial_resumo',args:{}};
+  var m=String(txt).match(/(?:negocia[cç][aã]o|oportunidade|proposta|situa[cç][aã]o|resumo)\s+(?:com|da|do|de)\s+(?:a\s+|o\s+)?(.{2,40})$/i)||String(txt).match(/^e\s+(?:a|o)\s+(.{2,40})\??$/i);
+  if(m) return {tool:'comercial_cliente',args:{nome:m[1].replace(/[?.!]+$/,'').trim()}};
+  return null;
 }
 
 function canDo(tela, acao){
@@ -6492,7 +6744,10 @@ REGRAS:
 - Responda em portugues do Brasil, curto e direto, como quem manda uma mensagem — o destinatario e um diretor no celular, entre reunioes.
 - Numeros primeiro, contexto depois. Sem preambulo, sem "claro!", sem repetir a pergunta.
 - Se algo estiver ruim (atraso, doca cheia, fatura vencida), diga sem suavizar.
-- Voce e SOMENTE LEITURA. Nao cria, nao altera e nao apaga nada. Se pedirem, explique que ainda nao faz isso.
+- Voce so GRAVA no comercial: contato (criar_contato), oportunidade (criar_oportunidade), tarefa (criar_tarefa) e proposta padrao (gerar_proposta). Fora disso, e somente leitura: se pedirem outra gravacao, explique que ainda nao faz.
+- TODA gravacao em duas etapas: chame a ferramenta SEM confirmado, mostre o resumo que ela devolver e pergunte "Confirma?". So depois que o usuario disser sim, chame de novo com confirmado=true. Nunca pule a confirmacao.
+- Para a proposta: pergunte antes os dados do cliente que faltarem (unidade Salto ou Itu, pallets, SKUs, valor em estoque, recebimento e expedicao paletizado ou batido, faturamento minimo), numa pergunta so. O que ele nao souber vai como "a definir". Depois de gerada, a resposta traz um cartao com os botoes; apenas diga que esta pronta.
+- Datas faladas ("sexta", "amanha") viram AAAA-MM-DD a partir de hoje: ${new Date().toISOString().slice(0,10)}.
 
 FILTROS QUE FALTAM:
 - Se uma ferramenta devolver "precisa_de", NAO chute e NAO responda com dado parcial.
@@ -7111,6 +7366,13 @@ async function hermesRegistrarNaoEntendida(txt){
 }
 
 async function asResponderLocal(txt){
+  // v1.0.1063: comercial — assistente de passos (cadastros/proposta) e consultas
+  if(hmWiz) return await hmWizResponder(txt);
+  if(!asPend){
+    var _hw=hmWizInicio(txt); if(_hw) return _hw;
+    var _hl=hmComIntentLeitura(txt);
+    if(_hl){ var _dd=await asRodarTool(_hl.tool,_hl.args); asUltimo={tool:_hl.tool,args:_hl.args}; return {texto:asRespostaLocal(_hl.tool,_dd),tools:[_hl.tool]}; }
+  }
   // 0) Mapa de perguntas (tabela) — tem prioridade sobre as regras do código
   if(!asPend){
     var hi=await hermesIntent(txt);
@@ -7274,7 +7536,7 @@ async function asPerguntar(txtDireto){
     return;
   }
 
-  const usadas=[];
+  const usadas=[]; let _cartao=null;
   try{
     let resp=await asChamarAPI(asMsgs);
     let voltas=0;
@@ -7287,13 +7549,15 @@ async function asPerguntar(txtDireto){
         usadas.push(bloco.name);
         asPintar(bloco.name);
         const out=await asRodarTool(bloco.name,bloco.input);
+        if(out&&typeof out.texto_pronto==='string'){ const _cm=out.texto_pronto.match(/⟦PROPOSTA:[0-9a-f-]{36}⟧/); if(_cm) _cartao=_cm[0]; }   // v1.0.1063
         results.push({type:'tool_result',tool_use_id:bloco.id,content:JSON.stringify(out)});
       }
       asMsgs.push({role:'user',content:results});
       resp=await asChamarAPI(asMsgs);
     }
-    const texto=(resp.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim()
+    let texto=(resp.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim()
       || 'Nao consegui formular a resposta.';
+    if(_cartao && texto.indexOf(_cartao)<0){ resp.content=(resp.content||[]).concat([{type:'text',text:'\n'+_cartao}]); texto+='\n'+_cartao; }
     asMsgs.push({role:'assistant',content:resp.content});
     asLog.push({em:new Date().toISOString(),motor:'claude',usuario:(cu&&cu.email)||'?',
       pergunta:txt,ferramentas:usadas,resposta:texto});
@@ -7383,6 +7647,7 @@ function hermesBolsoIniciar(){
 function asmToggleFala(){ _asmFalar=!_asmFalar; var b=ge('asm-fala-btn'); if(b)b.textContent=_asmFalar?'🔊 voz':'🔇 mudo'; if(!_asmFalar)asmPararFala(); }
 function asmPararFala(){ try{ if(window.speechSynthesis)window.speechSynthesis.cancel(); }catch(e){} }
 function asmFalar(texto){
+  texto=String(texto||'').replace(/⟦[^⟧]*⟧/g,'');   // v1.0.1063: o cartão da proposta não é lido
   if(!_asmFalar||!window.speechSynthesis)return;
   asmPararFala();
   var limpo=String(texto||'').replace(/[•⚠➤🔊🎤]/g,'').replace(/R\$\s?/g,'').replace(/\s+/g,' ').trim();
@@ -7420,7 +7685,7 @@ function asmPintar(ferramentaEmUso){
     var t=asTexto(m); if(!t)return;
     var eu=(m.role==='user');
     h+='<div style="display:flex;justify-content:'+(eu?'flex-end':'flex-start')+';margin-bottom:10px">'
-      +'<div style="max-width:84%;padding:11px 14px;border-radius:18px;'+(eu?'border-bottom-right-radius:6px;background:'+(HERMES_BOLSO?'#111':'#0A2540')+';color:#fff':'border-bottom-left-radius:6px;background:#fff;color:#111;border:1px solid #e2e5e9')+';font-size:15px;line-height:1.45;white-space:pre-wrap">'+wEsc(t)+'</div></div>';
+      +'<div style="max-width:84%;padding:11px 14px;border-radius:18px;'+(eu?'border-bottom-right-radius:6px;background:'+(HERMES_BOLSO?'#111':'#0A2540')+';color:#fff':'border-bottom-left-radius:6px;background:#fff;color:#111;border:1px solid #e2e5e9')+';font-size:15px;line-height:1.45;white-space:pre-wrap">'+hmComCartoes(wEsc(t))+'</div></div>';
   });
   if(asBusy)h+='<div style="display:flex;justify-content:flex-start;margin-bottom:10px"><div style="padding:11px 16px;border-radius:18px;background:#fff;border:1px solid #e2e5e9;color:#888;font-size:14px">'+(ferramentaEmUso?('consultando '+ferramentaEmUso+'…'):'…')+'</div></div>';
   box.innerHTML=h; box.scrollTop=box.scrollHeight;
@@ -7556,7 +7821,7 @@ function asPintar(ferramentaEmUso){
     if(m.role==='user'){
       h+=`<div class="wa-row" style="justify-content:flex-end"><div class="wa-b wa-out">${tgEsc(t)}<span class="wa-h">${asHora()} ✓✓</span></div></div>`;
     }else{
-      h+=`<div class="wa-row"><div class="wa-b wa-in">${tools?('<span class="wa-tool">'+tgEsc(tools.join(' · '))+'</span><br>'):''}${tgEsc(t)}<span class="wa-h">${asHora()}</span></div></div>`;
+      h+=`<div class="wa-row"><div class="wa-b wa-in">${tools?('<span class="wa-tool">'+tgEsc(tools.join(' · '))+'</span><br>'):''}${hmComCartoes(tgEsc(t))}<span class="wa-h">${asHora()}</span></div></div>`;
     }
   });
   if(asBusy){
@@ -13639,6 +13904,32 @@ function autoFillEmpresaDeal(contactName){
   if(empEl&&contato?.company&&!empEl.value) empEl.value=contato.company;
 }
 
+// v1.0.1063: tarifas da proposta padrão (tarifário padrão ativo; sem ele, a lista fixa de sempre)
+function propTarifasPadrao(){
+  const tarAtivo=getTarifarioAtivo();
+  let tarifasPadrao;
+  if(tarAtivo){
+    try{tarifasPadrao=JSON.parse(tarAtivo.tarifas||'[]');}catch(e){tarifasPadrao=[];}
+  }
+  if(!tarifasPadrao||!tarifasPadrao.length) tarifasPadrao=[
+    {quadro:'Tarifas Básicas',itens:[
+      {servico:'Armazenagem Mensal*',unidade:'Pallet',valor:'50,55'},
+      {servico:'Movimentação Entrada',unidade:'Pallet',valor:'16,00'},
+      {servico:'Movimentação Saída',unidade:'Pallet',valor:'16,00'},
+      {servico:'Picking',unidade:'Volume separado',valor:'1,80'},
+      {servico:'Aplicação de etiquetas (sem abertura caixa)',unidade:'Por etiqueta',valor:'0,80'},
+      {servico:'Gris+Advalorem Mensal*',unidade:'Valor em estoque',valor:'0,20%'},
+    ]},
+    {quadro:'Extraordinários',itens:[
+      {servico:'Impressão de documentos do cliente (ex. NF venda/CTE)',unidade:'Folha',valor:'0,26'},
+      {servico:'Descarga/Carga Manual',unidade:'Carretas',valor:'1.000,00'},
+      {servico:'Fornecimento de pallet',unidade:'Pallet',valor:'60,64'},
+      {servico:'Fornecimento de filme stretch',unidade:'Pallet',valor:'17,47'},
+      {servico:'Movimentação interna',unidade:'Pallet',valor:'16,00'},
+    ]},
+  ];
+  return tarifasPadrao;
+}
 async function gerarPropostaDoDeal(dealId){
   const d=deals.find(x=>x.id===dealId);
   if(!d)return;
@@ -13665,28 +13956,7 @@ async function gerarPropostaDoDeal(dealId){
   const role=profile?.role||'vendedor';
 
   // Tarifas: usa tarifário ativo se existir, senão usa padrão hard-coded
-  const tarAtivo=getTarifarioAtivo();
-  let tarifasPadrao;
-  if(tarAtivo){
-    try{tarifasPadrao=JSON.parse(tarAtivo.tarifas||'[]');}catch(e){tarifasPadrao=[];}
-  }
-  if(!tarifasPadrao||!tarifasPadrao.length) tarifasPadrao=[
-    {quadro:'Tarifas Básicas',itens:[
-      {servico:'Armazenagem Mensal*',unidade:'Pallet',valor:'50,55'},
-      {servico:'Movimentação Entrada',unidade:'Pallet',valor:'16,00'},
-      {servico:'Movimentação Saída',unidade:'Pallet',valor:'16,00'},
-      {servico:'Picking',unidade:'Volume separado',valor:'1,80'},
-      {servico:'Aplicação de etiquetas (sem abertura caixa)',unidade:'Por etiqueta',valor:'0,80'},
-      {servico:'Gris+Advalorem Mensal*',unidade:'Valor em estoque',valor:'0,20%'},
-    ]},
-    {quadro:'Extraordinários',itens:[
-      {servico:'Impressão de documentos do cliente (ex. NF venda/CTE)',unidade:'Folha',valor:'0,26'},
-      {servico:'Descarga/Carga Manual',unidade:'Carretas',valor:'1.000,00'},
-      {servico:'Fornecimento de pallet',unidade:'Pallet',valor:'60,64'},
-      {servico:'Fornecimento de filme stretch',unidade:'Pallet',valor:'17,47'},
-      {servico:'Movimentação interna',unidade:'Pallet',valor:'16,00'},
-    ]},
-  ];
+  let tarifasPadrao=propTarifasPadrao();   // v1.0.1063: mesma regra usada pelo Hermes
 
   // Salva rascunho automaticamente
   const dados={
