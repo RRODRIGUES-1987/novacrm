@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1065 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1066 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1245,9 +1245,10 @@ const TELAS=[
   // Financeiro
   {id:'financeiro-dashboard',  label:'Financeiro · Dashboard',                  modulo:'Financeiro'},
   {id:'faturamento',           label:'Financeiro · Faturamento',                modulo:'Financeiro'},
-  {id:'fat-capas',             label:'Financeiro · Capas de Processo',          modulo:'Financeiro'},
+  {id:'fat-capas',             label:'WMS · Capas de processo (criar e imprimir)', modulo:'WMS'},
   {id:'fat-programacao',       label:'Financeiro · Programação de Faturamento', modulo:'Financeiro'},
   {id:'fat-capas-digitar',     label:'Financeiro · Capas de processo (digitação)', modulo:'Financeiro'},
+  {id:'fat-capas-conferir',    label:'Financeiro · Capas de processo (conferência)', modulo:'Financeiro'},   // v1.0.1066
   {id:'fat-relatorios',        label:'Controladoria · Receita e faturamento',   modulo:'Controladoria'},
   {id:'tabelas-tarifarias',    label:'Financeiro · Tabelas Tarifárias',         modulo:'Financeiro'},
   {id:'contas-receber',        label:'Financeiro · Contas a Receber',           modulo:'Financeiro'},
@@ -1367,7 +1368,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1065';
+const APP_VERSION='v1.0.1066';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2700,7 +2701,7 @@ function rFatCapasDigitar(){
   noPer.forEach(function(c){
     var k=c.cliente_id||c.cliente_nome||'?';
     var g=porCli[k]||(porCli[k]={nome:c.cliente_nome||'\u2014',pend:[],dig:0,fat:0});
-    if(c.status==='aberta') g.pend.push(c); else if(c.status==='digitada') g.dig++; else if(c.status==='faturada') g.fat++;
+    if(c.status==='aberta'||c.status==='devolvida') g.pend.push(c); else if(c.status==='digitada'||c.status==='pendente_conferencia') g.dig++; else if(c.status==='conferida'||c.status==='faturada') g.fat++;   // v1.0.1066
   });
   var grupos=Object.keys(porCli).map(function(k){ return Object.assign({k:k},porCli[k]); })
     .sort(function(a,b){ return b.pend.length-a.pend.length||String(a.nome).localeCompare(String(b.nome)); });
@@ -2734,8 +2735,8 @@ function rFatCapasDigitar(){
     +'<button class="btn btn-sm" onclick="fcdCarregar(true).then(render)">\u21bb Atualizar</button></div>'
     +'<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px"><b style="color:var(--text)">'+noPer.length+'</b> capa(s) no per\u00edodo \u00b7 <b style="color:'+(totPend?'var(--amber-text)':'var(--green-text)')+'">'+totPend+'</b> impressa(s) aguardando digita\u00e7\u00e3o</div>'
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-    +'<thead><tr style="text-align:left;background:var(--bg2);color:var(--text2);font-size:11.5px"><th style="padding:8px">Cliente</th><th style="padding:8px">Impressas, sem digitar</th><th style="padding:8px">Digitadas</th><th style="padding:8px">Faturadas</th><th style="padding:8px">Mais antiga pendente</th></tr></thead><tbody>'+linhas+'</tbody></table></div>'
-    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Clique no cliente para ver as capas. As capas digitadas do per\u00edodo entram sozinhas nas quantidades ao gerar as faturas.</div>';
+    +'<thead><tr style="text-align:left;background:var(--bg2);color:var(--text2);font-size:11.5px"><th style="padding:8px">Cliente</th><th style="padding:8px">A digitar / devolvidas</th><th style="padding:8px">A conferir</th><th style="padding:8px">Conferidas / faturadas</th><th style="padding:8px">Mais antiga pendente</th></tr></thead><tbody>'+linhas+'</tbody></table></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Clique no cliente para ver as capas. S\u00f3 as capas <b>conferidas</b> entram nas quantidades da fatura; cliente com capa do per\u00edodo n\u00e3o conferida n\u00e3o gera fatura.</div>';
 }
 async function fcdAbrirPorCodigo(v){
   var cod=capaCodigoLeitura(v); if(!cod) return;
@@ -2753,8 +2754,8 @@ async function fcdCapasParaFaturas(novas){
   var ini=novas.reduce(function(m,x){return (!m||x.per.ini<m)?x.per.ini:m;},''), fim=novas.reduce(function(m,x){return (!m||x.per.fim>m)?x.per.fim:m;},'');
   if(!clis.length) return out;
   var capas=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&cliente_id=in.('+clis.join(',')+')&data_operacao=gte.'+ini+'&data_operacao=lte.'+fim).catch(function(){return [];})||[];
-  out.pend=capas.filter(function(c){return c.status==='aberta';});
-  var dig=capas.filter(function(c){return c.status==='digitada'&&!c.fatura_id;});
+  out.pend=capas.filter(function(c){return ['aberta','digitada','pendente_conferencia','devolvida'].indexOf(c.status)>=0;});   // v1.0.1066: só conferida libera
+  var dig=capas.filter(function(c){return c.status==='conferida'&&!c.fatura_id;});
   var servs=[];
   for(var i=0;i<dig.length;i+=100){ var ids=dig.slice(i,i+100).map(function(c){return c.id;}); var r=await dbSelectAll('processo_capa_servicos','capa_id=in.('+ids.join(',')+')').catch(function(){return [];}); servs=servs.concat(r||[]); }
   novas.forEach(function(x,ix){
@@ -2785,8 +2786,8 @@ async function capasMarcarFaturadas(fatId){
 }
 async function capasDesligarFatura(fatId){
   if(!fatId) return;
-  await sbFetch('PATCH','/rest/v1/processo_capas?fatura_id=eq.'+fatId,{status:'digitada',fatura_id:null},tok);
-  (capasProcesso||[]).forEach(function(c){ if(c.fatura_id===fatId){ c.status='digitada'; c.fatura_id=null; } });
+  await sbFetch('PATCH','/rest/v1/processo_capas?fatura_id=eq.'+fatId,{status:'conferida',fatura_id:null},tok);
+  (capasProcesso||[]).forEach(function(c){ if(c.fatura_id===fatId){ c.status='conferida'; c.fatura_id=null; } });
 }
 // v1.0.1048: modelo da capa de processo no cadastro do cliente (só visualizar — sem criar capa, sem movimentação)
 function capaModeloBlocoHtml(clienteId){
@@ -3615,6 +3616,139 @@ function hmComIntentLeitura(txt){
   var m=String(txt).match(/(?:negocia[cç][aã]o|oportunidade|proposta|situa[cç][aã]o|resumo)\s+(?:com|da|do|de)\s+(?:a\s+|o\s+)?(.{2,40})$/i)||String(txt).match(/^e\s+(?:a|o)\s+(.{2,40})\??$/i);
   if(m) return {tool:'comercial_cliente',args:{nome:m[1].replace(/[?.!]+$/,'').trim()}};
   return null;
+}
+// ══════════════ CAPAS · DIGITAÇÃO POR PERGUNTAS, CONFERÊNCIA E DEVOLUÇÃO (v1.0.1066) ══════════════
+// aberta → (digitação) → pendente_conferencia → (conferência) → conferida → faturada
+//                     ↘ devolvida (motivo) → a operação corrige no WMS e reenvia → aberta
+function capaPodeConferir(){ return (profile&&profile.role==='admin')||canDo('fat-capas-conferir','pode_editar')||canDo('fat-capas-conferir','pode_criar'); }
+function capaNumBR(v){ var s=String(v==null?'':v).trim(); if(s==='') return null; s=s.replace(/\s/g,''); if(/,\d+$/.test(s)) s=s.replace(/\./g,'').replace(',','.'); var n=Number(s); return isNaN(n)||n<0?null:n; }
+var capaDig=null;   // {id, i, perg:[], resp:{}, servs:[], modo:'digitar'|'corrigir'}
+async function capaDigIniciar(id,modo){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  var servs=await dbSelect('processo_capa_servicos','capa_id=eq.'+id+'&order=ordem.asc').catch(function(){return [];})||[];
+  var exp=c.tipo==='expedicao';
+  var perg=[
+    {k:'pallets_movimentados',t:'Pallets '+(exp?'expedidos':'descarregados'),tipo:'num',obrig:true},
+    {k:'pallets_pbr',t:'Pallets armazenados',tipo:'num',obrig:true},
+    {k:'qtd_pbr',t:'Pallets PBR',tipo:'num',obrig:true},
+    {k:'qtd_chep',t:'Pallets CHEP',tipo:'num',obrig:true},
+    {k:'qtd_outros',t:'Pallets de outros tipos',tipo:'num',obrig:true},
+    {k:'tipo_carga',t:'Tipo de carga',tipo:'opc',opc:CAPA_CARGA,obrig:true},
+    {k:'local_descarga',t:'Local de '+(exp?'carregamento':'descarga'),tipo:'txt'},
+    {k:'operador_resp',t:'Operador responsável',tipo:'txt'}
+  ];
+  servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
+  perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
+  var resp={}; ['pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ if(c[k]!=null&&c[k]!=='') resp[k]=String(c[k]); });
+  if(modo==='corrigir'||c.status!=='aberta') servs.forEach(function(s,ix){ if(s.quantidade!=null) resp['serv_'+ix]=String(s.quantidade); });
+  capaDig={id:id,i:0,perg:perg,resp:resp,servs:servs,modo:modo||'digitar'};
+  render();
+}
+function capaDigFoco(){ setTimeout(function(){ var el=ge('capa-q'); if(el){ el.focus(); try{ el.select(); }catch(e){} } },40); }
+function capaDigAvancar(){
+  var d=capaDig; if(!d) return; var q=d.perg[d.i]; var el=ge('capa-q'); var v=el?el.value:'';
+  var err=ge('capa-q-err'); var falha=function(m){ if(err){ err.textContent=m; } if(el) el.focus(); };
+  if(q.tipo==='num'){ var n=capaNumBR(v); if(n==null) return falha(q.serv!=null?'Responda com um número. Se não houve esse serviço, digite 0.':'Responda com um número (0 se não houve).'); d.resp[q.k]=String(n); }
+  else if(q.tipo==='opc'){ var t=String(v).trim(), idx=parseInt(t,10); var op=(idx>=1&&idx<=q.opc.length)?q.opc[idx-1]:q.opc.find(function(o){return fcdNorm(o)===fcdNorm(t);}); if(!op) return falha('Digite 1, 2 ou 3.'); d.resp[q.k]=op; }
+  else d.resp[q.k]=String(v).trim();
+  d.i++; render();
+}
+function capaDigVoltar(){ if(capaDig&&capaDig.i>0){ capaDig.i--; render(); } }
+function capaDigTecla(ev){ if(ev.key==='Enter'){ ev.preventDefault(); capaDigAvancar(); } else if(ev.key==='ArrowUp'){ ev.preventDefault(); capaDigVoltar(); } }
+function capaResumoHtml(c,resp,servs){
+  var linha=function(l,v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--text2)">'+l+'</span><b>'+(v==null||v===''?'—':ecomEsc(String(v)))+'</b></div>'; };
+  var exp=c.tipo==='expedicao', h='';
+  h+=linha('Pallets '+(exp?'expedidos':'descarregados'),resp.pallets_movimentados)+linha('Pallets armazenados',resp.pallets_pbr)
+    +linha('PBR · CHEP · Outros',[resp.qtd_pbr||0,resp.qtd_chep||0,resp.qtd_outros||0].join(' · '))+linha('Tipo de carga',resp.tipo_carga)
+    +linha('Local de '+(exp?'carregamento':'descarga'),resp.local_descarga)+linha('Operador responsável',resp.operador_resp);
+  h+='<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin:12px 0 4px">SERVIÇOS</div>';
+  (servs||[]).forEach(function(s,ix){ h+=linha(s.servico+(s.unidade_cobranca?' <small style="color:var(--text3)">('+ecomEsc(s.unidade_cobranca)+')</small>':''),resp['serv_'+ix]); });
+  if(resp.observacoes) h+=linha('Observações',resp.observacoes);
+  var soma=(Number(resp.qtd_pbr)||0)+(Number(resp.qtd_chep)||0)+(Number(resp.qtd_outros)||0), pm=Number(resp.pallets_movimentados)||0;
+  if(soma!==pm) h='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ PBR + CHEP + Outros = '+soma+', mas os pallets '+(exp?'expedidos':'descarregados')+' são '+pm+'.</div>'+h;
+  return h;
+}
+function capaDigTela(c){
+  var d=capaDig, tot=d.perg.length;
+  var topo='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaDig=null;capaViewId=null;render()">← Voltar</button>'
+    +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+(c.data_operacao?' · '+new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+'</div>'
+    +'<button class="btn btn-sm" style="margin-left:auto" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></div>';
+  if(d.i>=tot){
+    return topo+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px;max-width:720px">'
+      +'<div style="font-size:15px;font-weight:700;margin-bottom:10px">Revisão da digitação</div>'+capaResumoHtml(c,d.resp,d.servs)
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">'
+      +'<button class="btn btn-p" style="background:var(--green-text,#059669);border-color:var(--green-text,#059669)" onclick="capaDigFinalizar(\'ok\')">✔ Tudo certo → pendente de conferência</button>'
+      +'<button class="btn" onclick="capaDigFinalizar(\'devolver\')">↩ Devolver à operação…</button>'
+      +'<button class="btn" onclick="capaDig.i=0;render()">← Voltar e corrigir</button></div></div>';
+  }
+  var q=d.perg[d.i], pc=Math.round(d.i/tot*100), val=d.resp[q.k]!=null?d.resp[q.k]:'';
+  capaDigFoco();
+  return topo+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:720px">'
+    +'<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3)"><span>'+(q.serv!=null?'SERVIÇO':'DADOS DA CARGA')+'</span><span>pergunta '+(d.i+1)+' de '+tot+'</span></div>'
+    +'<div style="height:6px;background:var(--bg3);border-radius:99px;margin:8px 0 16px;overflow:hidden"><div style="width:'+pc+'%;height:6px;background:var(--blue-text)"></div></div>'
+    +'<div style="font-size:21px;font-weight:700;margin-bottom:10px">'+ecomEsc(q.t)+(q.u?' <span style="font-size:14px;color:var(--text3);font-weight:400">('+ecomEsc(q.u)+')</span>':'')+'</div>'
+    +(q.tipo==='opc'?'<div style="font-size:13px;color:var(--text2);margin-bottom:8px">'+q.opc.map(function(o,ix){return '<b>'+(ix+1)+'</b> · '+ecomEsc(o);}).join(' &nbsp; ')+'</div>':'')
+    +'<input id="capa-q" class="fi" autocomplete="off" '+(q.tipo==='num'?'inputmode="decimal"':'')+' value="'+ecomEsc(val)+'" onkeydown="capaDigTecla(event)" style="font-size:24px;height:56px;padding:0 14px">'
+    +'<div id="capa-q-err" style="color:var(--red-text);font-size:12.5px;min-height:18px;margin-top:6px"></div>'
+    +'<div style="font-size:12px;color:var(--text3)">Enter para a próxima · ↑ volta na anterior'+(q.serv!=null?' · sem ocorrência = 0 (em branco não passa)':(q.tipo==='txt'?' · pode deixar em branco':''))+'</div></div>';
+}
+async function capaDigFinalizar(acao){
+  var d=capaDig; if(!d) return; var c=(capasProcesso||[]).find(function(x){return x.id===d.id;}); if(!c) return;
+  var motivo=null;
+  if(acao==='devolver'){ motivo=prompt('Motivo da devolução à operação (aparece para eles no WMS):',''); if(motivo==null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo da devolução.'); return; } }
+  var r=d.resp, n=function(k){ var v=capaNumBR(r[k]); return v==null?0:v; };
+  var tipos=[['PBR',n('qtd_pbr')],['CHEP',n('qtd_chep')],['Outros',n('qtd_outros')]].filter(function(x){return x[1]>0;}).map(function(x){return x[0];}).join(',');
+  var agora=new Date().toISOString();
+  var dados={local_descarga:r.local_descarga||null,operador_resp:r.operador_resp||null,pallets_movimentados:n('pallets_movimentados'),pallets_pbr:n('pallets_pbr'),
+    qtd_pbr:n('qtd_pbr'),qtd_chep:n('qtd_chep'),qtd_outros:n('qtd_outros'),tipo_carga:r.tipo_carga||null,tipo_carga_pallet:tipos||null,observacoes:r.observacoes||null,
+    digitada_em:agora,digitada_por:cu&&cu.id};
+  if(acao==='devolver'){ dados.status='devolvida'; dados.motivo_devolucao=motivo; dados.devolvida_em=agora; dados.devolvida_por=cu&&cu.id; }
+  else { dados.status='pendente_conferencia'; dados.motivo_devolucao=null; }
+  try{
+    await dbUpdate('processo_capas',c.id,dados); Object.assign(c,dados);
+    for(var ix=0;ix<d.servs.length;ix++){ var q=n('serv_'+ix); await dbUpdate('processo_capa_servicos',d.servs[ix].id,{quantidade:q,realizado:q>0}); }
+    showToast(acao==='devolver'?'Capa '+c.numero+' devolvida à operação.':'Capa '+c.numero+' digitada · pendente de conferência.','green');
+    capaDig=null; capaViewId=null; render();
+  }catch(e){ alert('Erro ao salvar: '+(e.message||e)); }
+}
+// conferência (e consulta das capas já digitadas)
+var _capaVerCache={};
+function capaVerTela(c){
+  var st=CAPA_STATUS[c.status]||CAPA_STATUS.aberta, pendConf=(c.status==='pendente_conferencia'||c.status==='digitada');
+  var cache=_capaVerCache[c.id];
+  if(!cache){ setTimeout(async function(){ var s=await dbSelect('processo_capa_servicos','capa_id=eq.'+c.id+'&order=ordem.asc').catch(function(){return [];})||[]; _capaVerCache[c.id]=s; render(); },0); }
+  var resp={}; ['pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ resp[k]=c[k]; });
+  (cache||[]).forEach(function(s,ix){ resp['serv_'+ix]=s.quantidade==null?'':s.quantidade; });
+  var acoes='';
+  if(pendConf&&capaPodeConferir()) acoes='<button class="btn btn-p" style="background:var(--green-text,#059669);border-color:var(--green-text,#059669)" onclick="capaConferir(\''+c.id+'\')">✔ Conferir</button>'
+    +'<button class="btn" onclick="capaDevolver(\''+c.id+'\')">↩ Devolver à operação…</button>'
+    +'<button class="btn" onclick="capaDigIniciar(\''+c.id+'\',\'corrigir\')">✏ Corrigir digitação</button>';
+  else if(pendConf) acoes='<span style="font-size:12.5px;color:var(--text3)">Aguardando a conferência do financeiro.</span>';
+  return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>'
+    +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+'</div>'
+    +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span><button class="btn btn-sm" style="margin-left:auto" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></div>'
+    +(c.status==='devolvida'&&c.motivo_devolucao?'<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">↩ Devolvida à operação: <b>'+ecomEsc(c.motivo_devolucao)+'</b></div>':'')
+    +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px;max-width:720px">'
+    +(cache?capaResumoHtml(c,resp,cache):'<div style="color:var(--text3)">Carregando…</div>')
+    +(acoes?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">'+acoes+'</div>':'')+'</div>';
+}
+async function capaConferir(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeConferir()){ alert('Sem permissão para conferir capas.'); return; }
+  var up={status:'conferida',conferida_em:new Date().toISOString(),conferida_por:cu&&cu.id};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' conferida.','green'); capaViewId=null; render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+async function capaDevolver(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  var m=prompt('Motivo da devolução à operação (aparece para eles no WMS):',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  var up={status:'devolvida',motivo_devolucao:m,devolvida_em:new Date().toISOString(),devolvida_por:cu&&cu.id};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' devolvida à operação.','green'); capaViewId=null; render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+async function capaReenviar(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!confirm('A capa '+c.numero+' foi corrigida e volta para a digitação do financeiro?')) return;
+  var up={status:'aberta',observacoes:((c.observacoes?c.observacoes+'\n':'')+'Devolvida em '+new Date(c.devolvida_em||Date.now()).toLocaleDateString('pt-BR')+': '+(c.motivo_devolucao||'')+' · corrigida pela operação').slice(0,2000),motivo_devolucao:null};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' reenviada para digitação.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 
 function canDo(tela, acao){
@@ -12355,16 +12489,24 @@ async function fatGerarExecutar(){
   // v1.0.1047: capas de processo — avisa as impressas sem digitar e soma as digitadas nas linhas
   var _capInfo={pend:[],porFat:{}};
   try{ _capInfo=await fcdCapasParaFaturas(novas); }catch(_ce){ console.warn('capas',_ce); }
+  // v1.0.1066: cliente com capa do período NÃO conferida não gera fatura (aberta, pendente de conferência ou devolvida)
+  var _bloqCli={};
   if(_capInfo.pend.length){
-    var _pc={}; _capInfo.pend.forEach(function(c){ _pc[c.cliente_nome||'?']=(_pc[c.cliente_nome||'?']||0)+1; });
-    if(!confirm('H\u00e1 '+_capInfo.pend.length+' capa(s) impressa(s) ainda sem digitar no per\u00edodo:\n\n'+Object.keys(_pc).map(function(k){return '\u2022 '+k+': '+_pc[k];}).join('\n')+'\n\nGerar as faturas mesmo assim? (as quantidades dessas capas ficam de fora)')) return;
+    var _pc={}; _capInfo.pend.forEach(function(c){ _bloqCli[c.cliente_id]=1; var k=c.cliente_nome||'?'; (_pc[k]=_pc[k]||[]).push(c.numero+' ('+((CAPA_STATUS[c.status]||{}).l||c.status)+')'); });
+    var _todos=novas.every(function(x){ return _bloqCli[x.prog.cliente_id]; });
+    alert('Estes clientes N\u00c3O ter\u00e3o fatura gerada: h\u00e1 capa do per\u00edodo que ainda n\u00e3o foi conferida.\n\n'
+      +Object.keys(_pc).map(function(k){return '\u2022 '+k+': '+_pc[k].slice(0,6).join(', ')+(_pc[k].length>6?' \u2026':'');}).join('\n')
+      +'\n\nConfira (ou resolva as devolvidas) em Financeiro \u2192 Capas de processo e gere de novo.'+(_todos?'':'\nOs demais clientes ser\u00e3o gerados agora.'));
+    if(_todos) return;
   }
+
   var btn=ge('fg-btn-criar'); if(btn){ btn.disabled=true; btn.textContent='Criando\u2026'; }
   var cid=company?company.id:null;
   var ok=0, erros=0, falhas=[];
   // numeração sequencial local (getFatNumero lê o maior já existente)
   for(var i=0;i<novas.length;i++){
     var x=novas[i];
+    if(_bloqCli[x.prog.cliente_id]) continue;   // v1.0.1066: capa não conferida
     try{
       var obj={
         owner_id:(cu&&cu.id)||null, company_id:cid, ...unitPayload(),   // regra do VERUS: nunca grava sem unidade
@@ -31926,10 +32068,13 @@ async function loadCapasData(cid){
 
 let capaFiltroTipo='todos';
 let capaViewId=null; // null=lista | id=tela de digitação
-const CAPA_STATUS={
+const CAPA_STATUS={   // v1.0.1066: pendente de conferência, conferida e devolvida
   aberta:  {l:'Impressa \u00b7 aguardando retorno', bg:'var(--amber-bg)', c:'var(--amber-text)'},
-  digitada:{l:'Digitada', bg:'var(--blue-bg)',  c:'var(--blue-text)'},
-  faturada:{l:'Faturada', bg:'var(--green-bg)', c:'var(--green-text)'},
+  digitada:{l:'Digitada \u00b7 pendente de confer\u00eancia', bg:'var(--blue-bg)',  c:'var(--blue-text)'},
+  pendente_conferencia:{l:'Pendente de confer\u00eancia', bg:'var(--blue-bg)', c:'var(--blue-text)'},
+  conferida:{l:'Conferida', bg:'var(--green-bg)', c:'var(--green-text)'},
+  devolvida:{l:'Devolvida \u00e0 opera\u00e7\u00e3o', bg:'var(--red-bg,#fee2e2)', c:'var(--red-text)'},
+  faturada:{l:'Faturada', bg:'var(--bg2)', c:'var(--text2)'},
 };
 const CAPA_VEICULOS=['Carreta','Truck/Toco','Van/Utilitário','Container 20','Container 40','Moto'];
 const CAPA_CARGA=['Paletizada','Batida','Paletizada/Batida'];
@@ -47983,7 +48128,7 @@ function rWmsEmConstrucao(titulo, descricao){
   </div>`;
 }
 
-function rCapasProcesso(){return wmsAbaBar()+rCapasProcesso_i();}
+function rCapasProcesso(){ if(!window._capasWmsLidas){ window._capasWmsLidas=true; setTimeout(function(){ fcdCarregar(true).then(function(){ if(curPage==='fat-capas') render(); }); },0); } return wmsAbaBar()+rCapasProcesso_i(); }   // v1.0.1066
 function rCapasProcesso_i(){
   // Se está digitando uma capa, mostra a tela de digitação
   if(capaViewId){return rCapaDigitacaoTela(capaViewId);}
@@ -47994,7 +48139,8 @@ function rCapasProcesso_i(){
   // Cards de gestão
   const total=capasProcesso.length;
   const abertas=capasProcesso.filter(c=>c.status==='aberta').length;
-  const digitadas=capasProcesso.filter(c=>c.status==='digitada').length;
+  const digitadas=capasProcesso.filter(c=>c.status==='digitada'||c.status==='pendente_conferencia'||c.status==='conferida').length;
+  const devolvidas=capasProcesso.filter(c=>c.status==='devolvida').length;   // v1.0.1066
   const faturadas=capasProcesso.filter(c=>c.status==='faturada').length;
   const card=(label,valor,cor)=>`<div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
     <div style="font-size:22px;font-weight:800;color:${cor}">${valor}</div>
@@ -48007,9 +48153,10 @@ function rCapasProcesso_i(){
     return`<div class="li">
       <div class="av" style="width:38px;height:38px;border-radius:8px;background:var(--bg2);color:${tipoCor};font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${c.tipo==='expedicao'?'EXP':'REC'}</div>
       <div class="linfo"><div class="lname">${c.numero} · ${c.cliente_nome||'—'}</div>
-      <div class="lsub">${tipoLabel} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'sem data'} ${c.doc?'· DOC '+c.doc:''}</div></div>
+      <div class="lsub">${tipoLabel} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'sem data'} ${c.doc?'· DOC '+c.doc:''}</div>${c.status==='devolvida'&&c.motivo_devolucao?`<div class="lsub" style="color:var(--red-text);font-weight:600">↩ Devolvida: ${ecomEsc(c.motivo_devolucao)}</div>`:''}</div>
       <div class="lright" style="display:flex;flex-direction:row;align-items:center;gap:6px">
         <span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span>
+        ${pode&&c.status==='devolvida'&&curPage==='fat-capas'?`<button class="btn btn-sm" onclick="event.stopPropagation();capaReenviar('${c.id}')">↻ Corrigida · reenviar</button>`:''}
         <button class="bicon btn-sm" title="Gerar PDF" onclick="event.stopPropagation();capaGerarPdf('${c.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </button>
@@ -48025,6 +48172,7 @@ function rCapasProcesso_i(){
   return`<div style="display:flex;gap:10px;margin-bottom:16px">
     ${card('Total de capas',total,'var(--text)')}
     ${card('Abertas',abertas,'var(--amber-text)')}
+    ${card('Devolvidas',devolvidas,'var(--red-text)')}
     ${card('Digitadas',digitadas,'var(--blue-text)')}
     ${card('Faturadas',faturadas,'var(--green-text)')}
   </div>
@@ -48040,66 +48188,12 @@ function rCapasProcesso_i(){
 }
 
 // ── TELA DE DIGITAÇÃO (separada, com cards) ──
-function rCapaDigitacaoTela(id){
+function rCapaDigitacaoTela(id){   // v1.0.1066
   const c=capasProcesso.find(x=>x.id===id);
-  if(!c){capaViewId=null;return rCapasProcesso();}
-  const st=CAPA_STATUS[c.status]||CAPA_STATUS.aberta;
-  // dispara carregamento dos serviços
-  setTimeout(()=>capaCarregarServicosDigitacao(id),50);
-  return`<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>
-      <div style="font-size:16px;font-weight:700">${c.numero} — ${c.cliente_nome||''}</div>
-      <span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span>
-    </div>
-    <div style="display:flex;gap:10px;margin-bottom:16px">
-      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
-        <div style="font-size:11px;color:var(--text3)">Tipo</div>
-        <div style="font-size:15px;font-weight:700;color:${c.tipo==='expedicao'?'var(--red-text)':'var(--green-text)'}">${c.tipo==='expedicao'?'Expedição':'Recebimento'}</div>
-      </div>
-      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
-        <div style="font-size:11px;color:var(--text3)">Data</div>
-        <div style="font-size:15px;font-weight:700">${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'—'}</div>
-      </div>
-      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
-        <div style="font-size:11px;color:var(--text3)">Operação</div>
-        <div style="font-size:15px;font-weight:700">${c.tipo_operacao||'—'}</div>
-      </div>
-      <div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
-        <div style="font-size:11px;color:var(--text3)">DOC</div>
-        <div style="font-size:15px;font-weight:700">${c.doc||'—'}</div>
-      </div>
-    </div>
-    <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px">
-      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Dados da Carga</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
-        <div><label class="fl">Local de descarga</label><input class="fi" id="capa-d-local" value="${c.local_descarga||''}"></div>
-        <div><label class="fl">Operador responsável</label><input class="fi" id="capa-d-oper" value="${c.operador_resp||''}"></div>
-        <div><label class="fl">Início da operação</label><input class="fi" id="capa-d-inicio" type="datetime-local" value="${c.inicio_operacao||''}"></div>
-        <div><label class="fl">Fim da operação</label><input class="fi" id="capa-d-fim" type="datetime-local" value="${c.fim_operacao||''}"></div>
-        <div><label class="fl">Pallets ${c.tipo==='expedicao'?'expedidos':'descarregados'} *</label><input class="fi" id="capa-d-pallets" type="number" value="${c.pallets_movimentados||''}"></div>
-        <div><label class="fl">Pallets armazenados</label><input class="fi" id="capa-d-armaz" type="number" value="${c.pallets_pbr||''}"></div>
-      </div>
-      <div style="margin-bottom:8px"><label class="fl">Tipo de carga</label>
-        <div style="display:flex;gap:18px;padding:6px 0">
-          ${CAPA_CARGA.map(t=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-            <input type="radio" name="capa-d-carga" value="${t}" ${c.tipo_carga===t?'checked':''} style="width:16px;height:16px;cursor:pointer"> ${t}</label>`).join('')}
-        </div></div>
-      <div style="margin-bottom:18px"><label class="fl">Quantidade por tipo de pallet</label>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding:6px 0">
-          <div><label class="fl" style="font-size:11px">PBR</label><input class="fi" id="capa-d-qtd-PBR" type="number" min="0" value="${c.qtd_pbr||''}" placeholder="0"></div>
-          <div><label class="fl" style="font-size:11px">CHEP</label><input class="fi" id="capa-d-qtd-CHEP" type="number" min="0" value="${c.qtd_chep||''}" placeholder="0"></div>
-          <div><label class="fl" style="font-size:11px">Outros</label><input class="fi" id="capa-d-qtd-Outros" type="number" min="0" value="${c.qtd_outros||''}" placeholder="0"></div>
-        </div>
-        <div class="lsub" style="color:var(--text3);font-size:11px">A soma por tipo deve corresponder aos pallets ${c.tipo==='expedicao'?'expedidos':'descarregados'}.</div>
-      </div>
-      <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">Serviços Realizados</div>
-      <div id="capa-servicos-dig"><div class="lsub" style="color:var(--text3)">Carregando serviços...</div></div>
-      <div style="margin-top:14px"><label class="fl">Observações</label><textarea class="fi" id="capa-d-obs" rows="2">${c.observacoes||''}</textarea></div>
-      <div style="display:flex;gap:8px;margin-top:18px">
-        <button class="btn btn-p" onclick="capaSalvarDigitacao('${id}')">Salvar digitação</button>
-        <button class="btn" onclick="capaGerarPdf('${id}')">📄 Gerar PDF</button>
-      </div>
-    </div>`;
+  if(!c){capaViewId=null;capaDig=null;return rCapasProcesso();}
+  if(capaDig&&capaDig.id===id) return capaDigTela(c);
+  if(c.status==='aberta'&&curPage==='fat-capas-digitar'&&capaPodeEditar()){ setTimeout(function(){ if(!capaDig||capaDig.id!==id) capaDigIniciar(id,'digitar'); },0); return '<div style="padding:30px;color:var(--text3)">Preparando a digitação\u2026</div>'; }
+  return capaVerTela(c);
 }
 
 async function capaCarregarServicosDigitacao(id){
@@ -48434,8 +48528,7 @@ function capaBuildPdfDef(c, servicos, P){
   })),columnGap:24,margin:[0,Math.min(P.espaco_acima_assinatura,40),0,0]});
   const assBox={
     table:{widths:['*'],body:[[{stack:[
-      assRow(['Motorista','Líder']),
-      assRow(['Conferente Recebimento','Controle Operacional','Gerente da Operação']),
+      assRow(['Motorista','Líder','Conferente']),   // v1.0.1066
     ],margin:[10,8,10,8]}]]},
     layout:{hLineWidth:()=>1.2,vLineWidth:()=>1.2,hLineColor:()=>BORDA,vLineColor:()=>BORDA},
     margin:[0,mm(P.esp_assinatura),0,0]
@@ -48460,7 +48553,6 @@ function capaBuildPdfDef(c, servicos, P){
       grid2([
         ['Local de Descarga:',''],[palletLabel+':',''],
         ['Operador Respons.:',''],['Pallets Armazenados:',''],
-        ['Início da Operação:',''],['Fim da Operação:',''],
       ]),
       {columns:[
         {text:'Tipo de Carga:',bold:true,width:'auto',fontSize:P.fonte_corpo,margin:[0,1,0,0]},
@@ -48579,8 +48671,6 @@ function capaBuildHtml(c, servicos, P){
     <div class="campo"><span class="lbl">${palletLabel}:</span><span class="val"></span></div>
     <div class="campo"><span class="lbl">Operador Respons.:</span><span class="val"></span></div>
     <div class="campo"><span class="lbl">Pallets Armazenados:</span><span class="val"></span></div>
-    <div class="campo"><span class="lbl">Início da Operação:</span><span class="val"></span></div>
-    <div class="campo"><span class="lbl">Fim da Operação:</span><span class="val"></span></div>
   </div>
   <div class="carga-tipo">
     <span style="font-weight:600">Tipo de Carga:</span>
@@ -48612,14 +48702,10 @@ function capaBuildHtml(c, servicos, P){
   </div>
 
   <div class="ass-box">
-    <div class="linha-ass">
+    <div class="linha-ass tres">
       <div class="campo-ass">Motorista</div>
       <div class="campo-ass">Líder</div>
-    </div>
-    <div class="linha-ass tres">
-      <div class="campo-ass">Conferente Recebimento</div>
-      <div class="campo-ass">Controle Operacional</div>
-      <div class="campo-ass">Gerente da Operação</div>
+      <div class="campo-ass">Conferente</div>
     </div>
   </div>
   </div>
