@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1069 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1070 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1368,7 +1368,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1069';
+const APP_VERSION='v1.0.1070';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53263,6 +53263,9 @@ async function ecomEmbCarregar(romId){
     var _fcx={};
     (rows||[]).forEach(function(x){ var fp=(ecomPedidos||[]).find(function(p){return p.id===x.pedido_id;}); if(!ecomEhFull(fp)) return;
       var cx=(ecomFullMeta(fp).caixas||[]).find(function(c){ return ecomFullNormQr(c.spx)===ecomFullNormQr(x.codigo_lido); }); if(cx){ (_fcx[fp.id]=_fcx[fp.id]||{})[cx.n]=1; } });
+    // v1.0.1070: caixas bipadas registradas no próprio pedido Full
+    (ecomPedidos||[]).forEach(function(fp){ if(!ecomEhFull(fp)||fp.romaneio_id!==romId) return; var em=ecomFullMeta(fp).embarque||{};
+      Object.keys(em).forEach(function(n){ if(!em[n].romaneio_id||em[n].romaneio_id===romId){ (_fcx[fp.id]=_fcx[fp.id]||{})[n]=1; o[fp.id]=o[fp.id]||1; } }); });
     Object.keys(o).forEach(function(pid){ var fp=(ecomPedidos||[]).find(function(p){return p.id===pid;}); if(!ecomEhFull(fp)) return;
       var tot=ecomFullMeta(fp).caixas_total||0; if(Object.keys(_fcx[pid]||{}).length<tot) delete o[pid]; });
     if(ecomEmb && ecomEmb.romId===romId) ecomEmb.fullCx=Object.assign(_fcx, ecomEmb.fullCx||{});
@@ -53373,8 +53376,14 @@ async function ecomEmbBip(code){
     if(_fp.romaneio_id!==ecomEmb.romId){ ecomBeep(); ecomEmb.cor='erro'; ecomEmb.msg='RETIRAR \u2014 nao e deste romaneio'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
     ecomEmb.fullCx=ecomEmb.fullCx||{}; var _set=ecomEmb.fullCx[_fp.id]=ecomEmb.fullCx[_fp.id]||{};
     if(_set[_fx.cx.n]){ ecomEmb.cor='dup'; ecomEmb.msg='CAIXA JA BIPADA'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
-    try{ await dbInsert('ecom_embarque_conf',{company_id:ecomCid(),romaneio_id:ecomEmb.romId,pedido_id:_fp.id,codigo_lido:code,operador:ecomOper()}); }
-    catch(e){ ecomBeep(); ecomEmb.cor='erro'; ecomEmb.msg='NAO SALVO \u2014 bipe de novo'; ecomEmb.det=_lb; ecomEmbRender(); ecomEmbFocus(); return; }
+    // v1.0.1070: cada caixa fica registrada no próprio pedido (full_meta.embarque); a tabela de embarque aceita
+    // um registro por pedido no romaneio, então só a PRIMEIRA caixa grava lá (as demais eram recusadas: "não salvo")
+    try{
+      _fm.embarque=_fm.embarque||{};
+      _fm.embarque[_fx.cx.n]={em:new Date().toISOString(),codigo:code,operador:ecomOper(),romaneio_id:ecomEmb.romId};
+      await dbUpdate('ecom_pedidos',_fp.id,{full_meta:_fm}); _fp.full_meta=_fm;
+      if(!Object.keys(_set).length){ try{ await dbInsert('ecom_embarque_conf',{company_id:ecomCid(),romaneio_id:ecomEmb.romId,pedido_id:_fp.id,codigo_lido:code,operador:ecomOper()}); }catch(_e1){ /* já existe o registro do pedido */ } }
+    }catch(e){ ecomBeep(); ecomEmb.cor='erro'; ecomEmb.msg='NAO SALVO \u2014 bipe de novo'; ecomEmb.det=_lb+' · '+ecomEsc(String(e.message||e).slice(0,80)); ecomEmbRender(); ecomEmbFocus(); return; }
     _set[_fx.cx.n]=1; var _feitas=Object.keys(_set).length;
     var _falt=(_fm.caixas||[]).filter(function(c){return !_set[c.n];}).map(function(c){return c.n;});
     if(_feitas>=_tot){ ecomEmb.ok[_fp.id]=1; ecomEmb.msg='EMBARCAR \u2713 Full completo ('+_tot+' caixas)'; }
