@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1064 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1065 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1367,7 +1367,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1064';
+const APP_VERSION='v1.0.1065';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2939,17 +2939,40 @@ async function ecomFullEtiqImportar(file,det){
 // ── 3) impressão (páginas do PDF guardado, sem abrir outra tela) ──
 var _ecomFullPdfCache={};
 async function ecomFullPdfLib(){ if(window.PDFLib) return window.PDFLib; await new Promise(function(ok,err){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; s.onload=ok; s.onerror=err; document.head.appendChild(s); }); return window.PDFLib; }
-async function ecomFullImprimirPaginas(path,paginas){
+async function ecomFullImprimirPaginas(path,paginas,formato){
+  // v1.0.1065: desenha cada página como imagem e imprime com @page no tamanho EXATO da etiqueta.
+  //   unidade (padrão): 60x40 mm, paisagem, como vem no PDF da Shopee.
+  //   'master': bobina de 100x150 mm (a mesma das etiquetas de envio) — gira 90° e amplia para preencher a etiqueta.
+  // Antes mandava o PDF e o leitor do navegador escolhia a orientação (saía em pé, com a etiqueta no topo).
   if(!path||!paginas||!paginas.length){ showToast('Etiquetas n\u00e3o encontradas para imprimir.','red'); return false; }
-  var PDFLib=await ecomFullPdfLib();
   var buf=_ecomFullPdfCache[path];
   if(!buf){ var r=await window.supabase.storage.from('ecom-etiquetas').download(path); if(!r||r.error||!r.data){ showToast('N\u00e3o consegui baixar as etiquetas.','red'); return false; } buf=await r.data.arrayBuffer(); _ecomFullPdfCache[path]=buf; }
-  var src=await PDFLib.PDFDocument.load(buf), out=await PDFLib.PDFDocument.create();
-  var cps=await out.copyPages(src,paginas.map(function(p){return p-1;})); cps.forEach(function(p){out.addPage(p);});
-  var url=URL.createObjectURL(new Blob([await out.save()],{type:'application/pdf'}));
-  var fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'; fr.src=url;
-  fr.onload=function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} setTimeout(function(){ fr.remove(); URL.revokeObjectURL(url); },60000); };
-  document.body.appendChild(fr); return true;
+  await ecomLoadPdfjs();
+  var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, imgs=[], wmm=60, hmm=40;
+  for(var k=0;k<paginas.length;k++){
+    var pg=await pdf.getPage(paginas[k]), v1=pg.getViewport({scale:1});
+    wmm=Math.round(v1.width*25.4/72*10)/10; hmm=Math.round(v1.height*25.4/72*10)/10;
+    var vp=pg.getViewport({scale:(formato==='master'?600:300)/72}), cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+    var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);
+    await pg.render({canvasContext:cx,viewport:vp}).promise;
+    if(formato==='master'){
+      // 100 x 150 mm a 300 dpi; etiqueta deitada: gira 90° (sentido horário) e ocupa a área toda, mantendo a proporção
+      var W=1181, H=1772, rc=document.createElement('canvas'); rc.width=W; rc.height=H;
+      var rx=rc.getContext('2d'); rx.fillStyle='#fff'; rx.fillRect(0,0,W,H);
+      var esc=Math.min(H/cv.width, W/cv.height), dw=cv.width*esc, dh=cv.height*esc;
+      rx.translate(W,0); rx.rotate(Math.PI/2); rx.drawImage(cv,(H-dw)/2,(W-dh)/2,dw,dh);
+      imgs.push(rc.toDataURL('image/png')); wmm=100; hmm=150;
+    } else imgs.push(cv.toDataURL('image/png'));
+  }
+  var html='<!doctype html><html><head><meta charset="utf-8"><style>@page{size:'+wmm+'mm '+hmm+'mm;margin:0}html,body{margin:0;padding:0}'
+    +'img{display:block;width:'+wmm+'mm;height:'+hmm+'mm;page-break-after:always;break-after:page}img:last-child{page-break-after:auto;break-after:auto}</style></head><body>'
+    +imgs.map(function(s){return '<img src="'+s+'">';}).join('')+'</body></html>';
+  var old=ge('ecom-full-print'); if(old) old.remove();
+  var fr=document.createElement('iframe'); fr.id='ecom-full-print'; fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(fr);
+  var d=fr.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} },350);
+  return true;
 }
 function ecomFullEtiqUnidades(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
@@ -3014,9 +3037,9 @@ async function ecomFullBip(p,its,code){
 async function ecomFullFecharCaixa(p,meta,cx,ultima){
   cx.fechada_em=new Date().toISOString();
   var pg=cx.pagina||((meta.caixas||[]).find(function(c){return c.n===cx.n&&c.pagina;})||{}).pagina;
-  var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,pg?[pg]:[]); }catch(e){}
+  cx.impressa_em=null;   // v1.0.1065: a master sai quando o operador mandar (botão no quadro)
   if(!ultima) meta.cx_atual=cx.n+1;
-  return 'Caixa '+cx.n+' fechada ('+cx.qtd+' un)'+(ok?' \u00b7 etiqueta master '+cx.n+'/'+(meta.caixas_total||'?')+' impressa':' \u00b7 SEM etiqueta master para imprimir')+(cx.spx?' \u00b7 '+cx.spx:'');
+  return 'Caixa '+cx.n+' fechada ('+cx.qtd+' un)'+(pg?' \u00b7 clique em \u201cImprimir etiqueta da caixa '+cx.n+'\u201d':' \u00b7 SEM etiqueta master para imprimir')+(cx.spx?' \u00b7 '+cx.spx:'');
 }
 async function ecomFullFecharAgora(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
@@ -3026,10 +3049,15 @@ async function ecomFullFecharAgora(pid){
   var msg=await ecomFullFecharCaixa(p,meta,cx,false); p.full_meta=meta; await dbUpdate('ecom_pedidos',pid,{full_meta:meta});
   ecomCxFlash(msg,'green'); ecomCxRender();
 }
-function ecomFullReimprimirMaster(pid,n){
+async function ecomFullReimprimirMaster(pid,n){ return ecomFullImprimirCaixa(pid,n); }
+// v1.0.1065: imprime a etiqueta master de UMA caixa, no comando do operador, e registra que saiu
+async function ecomFullImprimirCaixa(pid,n){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
-  var meta=ecomFullMeta(p), cx=(meta.caixas||[]).find(function(c){return c.n===n&&c.pagina;});
-  ecomFullImprimirPaginas(meta.master_pdf,cx?[cx.pagina]:[]);
+  var meta=ecomFullMeta(p), cx=(meta.caixas||[]).find(function(c){return c.n===n;});
+  var pg=cx&&(cx.pagina||((meta.caixas||[]).find(function(c){return c.n===n&&c.pagina;})||{}).pagina);
+  if(!pg){ showToast('Caixa '+n+' sem etiqueta master no PDF da Shopee.','red'); return; }
+  var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,[pg],'master'); }catch(e){ showToast('Erro ao imprimir: '+(e.message||e),'red'); }
+  if(ok){ cx.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(e){} ecomCxRender(); }
 }
 function ecomFullPainelCheckout(p){
   var meta=ecomFullMeta(p), upc=ecomFullUpc(p,meta), _un=ecomFullUnid(p), _ks=Object.keys(_un);
@@ -3045,7 +3073,13 @@ function ecomFullPainelCheckout(p){
     +(fech.length?'<button class="btn btn-sm" onclick="ecomFullReimprimirMaster(\''+p.id+'\','+fech[fech.length-1].n+')">Reimprimir master '+fech[fech.length-1].n+'</button>':'')+'</div></div>'
     +'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">TOTAL \u00b7 '+feito+' de '+tot+'</div>'
     +_ks.map(function(k){ var c=ecomFullConf(p,k), ok=c>=ecomN(_un[k]); return '<div style="display:flex;justify-content:space-between;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+(ecomKitComp(k)?' <small>(kit)</small>':'')+'</span><span>'+c+'/'+ecomN(_un[k])+(ok?' \u2713':'')+'</span></div>'; }).join('')
-    +'</div></div>';
+    +'</div></div>'
+    + (function(){ var pend=(meta.caixas||[]).filter(function(c){return c.fechada_em&&!c.impressa_em;});   // v1.0.1065
+        if(!pend.length) return '';
+        return '<div style="border:2px solid #f59e0b;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:10px 12px;margin-bottom:10px">'
+          +'<div style="font-size:12px;font-weight:700;color:var(--amber-text,#92400e);margin-bottom:6px">\ud83d\udda8 '+pend.length+' caixa(s) fechada(s) esperando a etiqueta master</div>'
+          +pend.map(function(c){ return '<button class="btn btn-p" style="margin:3px 6px 3px 0;font-size:14px;padding:9px 14px" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')">\ud83d\udda8 Imprimir etiqueta da caixa '+c.n+(c.spx?' \u00b7 '+ecomEsc(c.spx):'')+'</button>'; }).join('')
+          +'</div>'; })();
 }
 // ── 5) embarque: o Full embarca quando todas as caixas (QR SPXBR) forem bipadas ──
 function ecomFullEmbCaixa(code,romId){
@@ -3135,7 +3169,7 @@ function ecomFullDetEtiq(p){
       var cont=Object.keys(c.itens||{}).map(function(k){return k+' \u00d7 '+c.itens[k];}).join(', ');
       return '<div style="display:flex;gap:10px;align-items:center;padding:6px 10px;border-top:1px solid var(--border);font-size:12.5px"><b style="min-width:70px">Caixa '+c.n+'</b><span style="font-family:monospace">'+ecomEsc(c.spx||'')+'</span>'
         +'<span style="flex:1;color:var(--text2)">'+(c.fechada_em?(c.qtd+' un \u00b7 '+ecomEsc(cont)):'aguardando checkout')+'</span>'
-        +'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'master\','+c.n+')">Ver</button> <button style="'+btn+'" onclick="ecomFullImprimirPaginas(\''+meta.master_pdf+'\',['+c.pagina+'])">\ud83d\udda8</button></div>';
+        +'<button style="'+btn+'" onclick="ecomFullVer(\''+p.id+'\',\'master\','+c.n+')">Ver</button> <button style="'+btn+'" onclick="ecomFullImprimirPaginas(\''+meta.master_pdf+'\',['+c.pagina+'],\'master\')">\ud83d\udda8</button></div>';
     }).join('')+'</div>';
   }
   return h;
