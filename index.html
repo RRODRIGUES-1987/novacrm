@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1068 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1069 | Gerado: 2026-09-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1368,7 +1368,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1068';
+const APP_VERSION='v1.0.1069';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2797,7 +2797,8 @@ function capaModeloBlocoHtml(clienteId){
     +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
     +'<button type="button" class="btn btn-sm" onclick="capaModeloVer(\''+clienteId+'\',\'recebimento\')">\ud83d\udcc4 Ver modelo \u00b7 Recebimento</button>'
     +'<button type="button" class="btn btn-sm" onclick="capaModeloVer(\''+clienteId+'\',\'expedicao\')">\ud83d\udcc4 Ver modelo \u00b7 Expedi\u00e7\u00e3o</button></div>'
-    +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Os servi\u00e7os s\u00e3o as linhas da tabela tarif\u00e1ria marcadas como "Cap. Rec." ou "Cap. Exp.".</div></div>';
+    +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Os servi\u00e7os s\u00e3o as linhas da tabela tarif\u00e1ria marcadas como "Cap. Rec." ou "Cap. Exp.".</div>'
+    +'<div style="margin-top:10px"><button type="button" class="btn btn-sm" onclick="crRegrasAbrir(\''+clienteId+'\')">\u2699 Regras da capa (consist\u00eancia)</button> <span style="font-size:11px;color:var(--text3)">par\u00e2metro financeiro \u00b7 rodam na conclus\u00e3o da digita\u00e7\u00e3o</span></div></div>';   // v1.0.1069
 }
 async function capaModeloVer(clienteId,tipo){
   if(typeof pdfMake==='undefined'){ showToast('Biblioteca de PDF ainda carregando, tente de novo em instantes.','amber'); return; }
@@ -3685,12 +3686,28 @@ function capaDigTela(c){
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+(c.data_operacao?' · '+new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+'</div>'
     +'<button class="btn btn-sm" style="margin-left:auto" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></div>';
   if(d.i>=tot){
-    return topo+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px;max-width:720px">'
+    // v1.0.1069: regras de consistência do cliente (se o disjuntor estiver ligado)
+    var _res=capaAvaliarRegras(c,d.resp,d.servs); d.regras=_res;
+    var _dev=(_res||[]).filter(function(x){return !x.ok&&x.acao==='devolver';});
+    var _bts;
+    if(_dev.length&&c.confirmado_operacao){
+      _bts='<div style="border:1px solid var(--blue-text);background:var(--blue-bg);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:10px">A operação confirmou esta capa: <b>'+ecomEsc(c.confirmacao_texto||'')+'</b></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-p" onclick="capaDigFinalizar(\'forcar\')">⚡ Forçar digitação → pendente de conferência</button>'
+        +'<button class="btn" onclick="capaDigFinalizar(\'devolver_regras\')">↩ Devolver de novo à operação</button><button class="btn" onclick="capaDig.i=0;render()">← Corrigir a digitação</button></div>';
+    } else if(_dev.length){
+      _bts='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn btn-p" style="background:var(--red-text);border-color:var(--red-text)" onclick="capaDigFinalizar(\'devolver_regras\')">↩ Devolver à operação (com as inconsistências)</button>'
+        +'<button class="btn" onclick="capaDig.i=0;render()">← Corrigir a digitação</button></div>'
+        +'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">Se a operação confirmar que está correto, a capa volta com a opção de forçar a digitação.</div>';
+    } else {
+      _bts='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">'
+        +'<button class="btn btn-p" style="background:var(--green-text,#059669);border-color:var(--green-text,#059669)" onclick="capaDigFinalizar(\'ok\')">✔ Tudo certo → pendente de conferência</button>'
+        +'<button class="btn" onclick="capaDigFinalizar(\'devolver\')">↩ Devolver à operação…</button>'
+        +'<button class="btn" onclick="capaDig.i=0;render()">← Voltar e corrigir</button></div>';
+    }
+    return topo+capaCabecalhoHtml(c)+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px">'
       +'<div style="font-size:15px;font-weight:700;margin-bottom:10px">Revisão da digitação</div>'+capaResumoHtml(c,d.resp,d.servs)
-      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">'
-      +'<button class="btn btn-p" style="background:var(--green-text,#059669);border-color:var(--green-text,#059669)" onclick="capaDigFinalizar(\'ok\')">✔ Tudo certo → pendente de conferência</button>'
-      +'<button class="btn" onclick="capaDigFinalizar(\'devolver\')">↩ Devolver à operação…</button>'
-      +'<button class="btn" onclick="capaDig.i=0;render()">← Voltar e corrigir</button></div></div>';
+      +(_res?'<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-top:14px">CONSISTÊNCIAS DO CLIENTE</div>'+capaRegrasTabelaHtml(_res):'')
+      +_bts+'</div>';
   }
   var q=d.perg[d.i], pc=Math.round(d.i/tot*100), val=d.resp[q.k]!=null?d.resp[q.k]:'';
   capaDigFoco();
@@ -3705,16 +3722,19 @@ function capaDigTela(c){
 }
 async function capaDigFinalizar(acao){
   var d=capaDig; if(!d) return; var c=(capasProcesso||[]).find(function(x){return x.id===d.id;}); if(!c) return;
-  var motivo=null;
+  var motivo=null, forcarMot=null;
   if(acao==='devolver'){ motivo=prompt('Motivo da devolução à operação (aparece para eles no WMS):',''); if(motivo==null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo da devolução.'); return; } }
+  if(acao==='devolver_regras'){ motivo='Inconsistências: '+capaRegrasMotivo(d.regras); acao='devolver'; }   // v1.0.1069
+  if(acao==='forcar'){ forcarMot=prompt('Motivo para forçar a digitação com as inconsistências (fica registrado):',''); if(forcarMot==null) return; forcarMot=forcarMot.trim(); if(!forcarMot){ alert('Informe o motivo.'); return; } }
   var r=d.resp, n=function(k){ var v=capaNumBR(r[k]); return v==null?0:v; };
   var tipos=[['PBR',n('qtd_pbr')],['CHEP',n('qtd_chep')],['Outros',n('qtd_outros')]].filter(function(x){return x[1]>0;}).map(function(x){return x[0];}).join(',');
   var agora=new Date().toISOString();
   var dados={local_descarga:r.local_descarga||null,operador_resp:r.operador_resp||null,pallets_movimentados:n('pallets_movimentados'),pallets_pbr:n('pallets_pbr'),
     qtd_pbr:n('qtd_pbr'),qtd_chep:n('qtd_chep'),qtd_outros:n('qtd_outros'),tipo_carga:r.tipo_carga||null,tipo_carga_pallet:tipos||null,observacoes:r.observacoes||null,
-    digitada_em:agora,digitada_por:cu&&cu.id};
+    digitada_em:agora,digitada_por:cu&&cu.id,consistencia:d.regras||null};
+  if(forcarMot){ dados.forcada_em=agora; dados.forcada_por=cu&&cu.id; dados.forcada_motivo=forcarMot; dados.observacoes=capaRegObs(Object.assign({},c,{observacoes:dados.observacoes}),'Digitação forçada com inconsistências: '+forcarMot); }
   if(acao==='devolver'){ dados.status='devolvida'; dados.motivo_devolucao=motivo; dados.devolvida_em=agora; dados.devolvida_por=cu&&cu.id; }
-  else { dados.status='pendente_conferencia'; dados.motivo_devolucao=null; }
+  else { dados.status='pendente_conferencia'; dados.motivo_devolucao=null; if(!forcarMot) dados.confirmado_operacao=false; }
   try{
     await dbUpdate('processo_capas',c.id,dados); Object.assign(c,dados);
     for(var ix=0;ix<d.servs.length;ix++){ var q=n('serv_'+ix); await dbUpdate('processo_capa_servicos',d.servs[ix].id,{quantidade:q,realizado:q>0}); }
@@ -3746,8 +3766,9 @@ function capaVerTela(c){
     +capaCabecalhoHtml(c)
     +(c.status==='inutilizada'?'<div style="border:1px solid var(--border);background:var(--bg2);color:var(--text2);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">⊘ Capa inutilizada: <b>'+ecomEsc(c.motivo_inutilizacao||'')+'</b></div>':'')
     +(c.status==='devolvida'&&c.motivo_devolucao?'<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">↩ Devolvida à operação: <b>'+ecomEsc(c.motivo_devolucao)+'</b></div>':'')
+    +(c.forcada_em?'<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">⚡ Digitação forçada com inconsistências em '+new Date(c.forcada_em).toLocaleString('pt-BR')+': <b>'+ecomEsc(c.forcada_motivo||'')+'</b>'+(c.confirmacao_texto?'<br>Operação confirmou: '+ecomEsc(c.confirmacao_texto):'')+'</div>':'')
     +'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px">'
-    +(cache?capaResumoHtml(c,resp,cache):'<div style="color:var(--text3)">Carregando…</div>')
+    +(cache?capaResumoHtml(c,resp,cache)+(c.consistencia&&c.consistencia.length?capaRegrasTabelaHtml(typeof c.consistencia==='string'?JSON.parse(c.consistencia):c.consistencia):''):'<div style="color:var(--text3)">Carregando…</div>')
     +(acoes?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">'+acoes+'</div>':'')+'</div>';
 }
 async function capaConferir(id){
@@ -3870,6 +3891,167 @@ async function crLoteConfirmar(){
   var m=ge('modal-cr-lote'); if(m) m.remove();
   if(falhas.length) alert(ok+' título(s) baixado(s). Falharam:\n'+falhas.join('\n')); else showToast(ok+' título(s) baixado(s).','green');
   try{ renderCRMatrix(); }catch(e){} try{ crLisRender(); }catch(e){}
+}
+// ══════════════ CAPAS · REGRAS DE CONSISTÊNCIA (v1.0.1069) ══════════════
+// Parâmetro financeiro do cliente (clientes.capa_regras + disjuntor clientes.capa_regras_ativo).
+// Cada regra: QUANDO (sempre / tipo de carga / tipo de veículo) + RESULTADO ESPERADO (campo op referência × mult) + tolerância + ação.
+var CR_CAMPOS=[['pallets_movimentados','Pallets descarregados/expedidos'],['pallets_pbr','Pallets armazenados'],['qtd_pbr','Pallets PBR'],['qtd_chep','Pallets CHEP'],['qtd_outros','Pallets outros'],['soma_tipos','PBR + CHEP + Outros']];
+var CR_OPS=[['igual','igual a'],['max','no máximo'],['min','no mínimo'],['entre','entre'],['maior_zero','maior que zero'],['zero','igual a zero']];
+function crServicosCliente(cliId){
+  var nomes={};
+  (tabelasTarifarias||[]).filter(function(t){return t.cliente_id===cliId;}).forEach(function(t){
+    var q=[]; try{ q=typeof t.tarifas==='string'?JSON.parse(t.tarifas||'[]'):(t.tarifas||[]); }catch(e){}
+    (q||[]).forEach(function(qd){ (qd.itens||[]).forEach(function(it){ if(it&&it.servico&&(it.cap_recebimento||it.cap_expedicao)) nomes[it.servico]=1; }); });
+  });
+  return Object.keys(nomes).sort();
+}
+function crRotuloCampo(k){ if(!k) return '—'; if(k.indexOf('serv:')===0) return k.slice(5); if(k==='cap_veiculo') return 'Capacidade do veículo'; var f=CR_CAMPOS.find(function(x){return x[0]===k;}); return f?f[1]:k; }
+function crValorCampo(k,ctx){
+  if(k==='soma_tipos') return (Number(ctx.qtd_pbr)||0)+(Number(ctx.qtd_chep)||0)+(Number(ctx.qtd_outros)||0);
+  if(k==='cap_veiculo'){ var cap=ctx._cli&&ctx._cli.wms_capacidade_veiculo; if(typeof cap==='string'){ try{cap=JSON.parse(cap);}catch(e){cap={};} } var v=cap&&ctx.tipo_veiculo?cap[ctx.tipo_veiculo]:null; return (v==null||v==='')?null:Number(v); }
+  if(k.indexOf('serv:')===0){ var nm=fcdNorm(k.slice(5)); var v2=ctx._servs[nm]; return v2==null?0:Number(v2); }
+  var v3=ctx[k]; return (v3==null||v3==='')?0:Number(v3);
+}
+function crFmt(n){ return (n==null)?'—':Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2}); }
+// avalia as regras do cliente sobre a capa digitada: [{regra, lancado, esperado, ok, acao, na}]
+function capaAvaliarRegras(c,resp,servs){
+  var cli=(clientes||[]).find(function(x){return x.id===c.cliente_id;}); if(!cli||cli.capa_regras_ativo!==true) return null;
+  var regras=cli.capa_regras; if(typeof regras==='string'){ try{regras=JSON.parse(regras);}catch(e){regras=[];} }
+  var ctx=Object.assign({},resp,{tipo_veiculo:c.tipo_veiculo,_cli:cli,_servs:{}});
+  (servs||[]).forEach(function(s,ix){ var v=resp['serv_'+ix]; ctx._servs[fcdNorm(s.servico)]=(v==null||v==='')?0:Number(String(v).replace(',','.')); });
+  ['pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros'].forEach(function(k){ if(ctx[k]!=null&&ctx[k]!=='') ctx[k]=Number(String(ctx[k]).replace(',','.')); });
+  var out=[];
+  (regras||[]).forEach(function(r){
+    if(!r||r.ativa===false) return;
+    if(r.tipo_capa&&r.tipo_capa!=='ambas'&&r.tipo_capa!==c.tipo) return;
+    if(r.quando&&r.quando.campo){ var qv=r.quando.campo==='tipo_carga'?resp.tipo_carga:c.tipo_veiculo; if((r.quando.valores||[]).indexOf(qv)<0) return; }
+    var lanc=crValorCampo(r.campo,ctx), op=r.op, ok=true, esp='', na=false;
+    if(op==='maior_zero'){ ok=lanc>0; esp='> 0'; }
+    else if(op==='zero'){ ok=lanc===0; esp='0'; }
+    else {
+      var ref=r.ref&&r.ref.tipo==='numero'?Number(r.ref.valor):crValorCampo(r.ref&&r.ref.campo,ctx);
+      if(ref==null||isNaN(ref)){ na=true; }
+      else {
+        ref=ref*(Number(r.mult)||1);
+        var tolA=r.tol_unid==='%'?ref*(Number(r.tol)||0)/100:(Number(r.tol)||0);
+        var refTxt=r.ref&&r.ref.tipo==='numero'?'':' (= '+crRotuloCampo(r.ref.campo)+((Number(r.mult)||1)!==1?' × '+r.mult:'')+')';
+        if(op==='igual'){ ok=Math.abs(lanc-ref)<=tolA+1e-9; esp=crFmt(ref)+(tolA?' ± '+crFmt(tolA):'')+refTxt; }
+        else if(op==='max'){ ok=lanc<=ref+tolA+1e-9; esp='até '+crFmt(ref+tolA)+refTxt; }
+        else if(op==='min'){ ok=lanc>=ref-tolA-1e-9; esp='no mínimo '+crFmt(ref-tolA)+refTxt; }
+        else if(op==='entre'){ var ref2=r.ref2&&r.ref2.tipo==='numero'?Number(r.ref2.valor):crValorCampo(r.ref2&&r.ref2.campo,ctx); ref2=(ref2||0)*(Number(r.mult)||1); ok=lanc>=ref-tolA-1e-9&&lanc<=ref2+tolA+1e-9; esp=crFmt(ref-tolA)+' a '+crFmt(ref2+tolA); }
+      }
+    }
+    out.push({nome:r.nome||crRotuloCampo(r.campo),mensagem:r.mensagem||'',lancado:lanc,esperado:na?'sem referência (ex.: capacidade do veículo não cadastrada)':esp,ok:na?true:ok,na:na,acao:r.acao||'devolver'});
+  });
+  return out;
+}
+function capaRegrasTabelaHtml(res){
+  if(!res||!res.length) return '';
+  return '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:12px;font-size:12.5px">'
+    +'<div style="display:grid;grid-template-columns:1.7fr 80px 1.4fr 100px;gap:8px;padding:7px 10px;background:var(--bg2);font-size:10.5px;color:var(--text3)"><span>CONSISTÊNCIA</span><span>LANÇADO</span><span>ESPERADO</span><span>RESULTADO</span></div>'
+    +res.map(function(x){ var cor=x.ok?'var(--green-text)':(x.acao==='avisar'?'var(--amber-text,#b45309)':'var(--red-text)'); var t=x.na?'— n/a':(x.ok?'✔ ok':(x.acao==='avisar'?'⚠ aviso':'✖ devolve'));
+      return '<div style="display:grid;grid-template-columns:1.7fr 80px 1.4fr 100px;gap:8px;padding:7px 10px;border-top:1px solid var(--border)"><span>'+ecomEsc(x.nome)+(x.mensagem&&!x.ok?'<br><small style="color:var(--text3)">'+ecomEsc(x.mensagem)+'</small>':'')+'</span><b>'+crFmt(x.lancado)+'</b><span>'+ecomEsc(x.esperado)+'</span><span style="color:'+cor+';font-weight:600">'+t+'</span></div>'; }).join('')+'</div>';
+}
+function capaRegrasMotivo(res){ return (res||[]).filter(function(x){return !x.ok&&x.acao==='devolver';}).map(function(x){ return x.nome+': lançado '+crFmt(x.lancado)+', esperado '+x.esperado; }).join(' · '); }
+// ── editor (cadastro do cliente) ──
+var _crEd=null;
+function crRegrasPadraoMK(){
+  return [
+    {id:'p1',nome:'Stretch igual à repaletização',tipo_capa:'recebimento',campo:'serv:Aplicação de Filme Stretch',op:'igual',ref:{tipo:'campo',campo:'serv:Paletização / Repaletização'},mult:1,tol:0,tol_unid:'un',acao:'avisar',ativa:true,mensagem:'Todo pallet repaletizado leva stretch'},
+    {id:'p2',nome:'Stretch no máximo o armazenado',tipo_capa:'recebimento',campo:'serv:Aplicação de Filme Stretch',op:'max',ref:{tipo:'campo',campo:'pallets_pbr'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,mensagem:''},
+    {id:'p3',nome:'Repaletização no máximo o armazenado',tipo_capa:'recebimento',campo:'serv:Paletização / Repaletização',op:'max',ref:{tipo:'campo',campo:'pallets_pbr'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,mensagem:''},
+    {id:'p4',nome:'Pallets × capacidade do veículo',tipo_capa:'ambas',campo:'soma_tipos',op:'max',ref:{tipo:'campo',campo:'cap_veiculo'},mult:1,tol:10,tol_unid:'%',acao:'devolver',ativa:true,mensagem:'Mais pallets do que cabe no veículo'},
+    {id:'p5',nome:'Descarregado no máximo o armazenado',tipo_capa:'recebimento',campo:'pallets_movimentados',op:'max',ref:{tipo:'campo',campo:'pallets_pbr'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,mensagem:'Descarregou mais do que foi armazenado'},
+    {id:'p6',nome:'Carga batida/mista: paletização',tipo_capa:'recebimento',quando:{campo:'tipo_carga',valores:['Batida','Paletizada/Batida']},campo:'serv:Paletização / Repaletização',op:'igual',ref:{tipo:'campo',campo:'pallets_pbr'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,mensagem:'Carga batida: todo pallet armazenado é paletizado'},
+    {id:'p7',nome:'Carga batida/mista: stretch',tipo_capa:'recebimento',quando:{campo:'tipo_carga',valores:['Batida','Paletizada/Batida']},campo:'serv:Aplicação de Filme Stretch',op:'igual',ref:{tipo:'campo',campo:'pallets_pbr'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,mensagem:'Carga batida: todo pallet armazenado leva stretch'}
+  ];
+}
+function crRegrasAbrir(cliId){
+  var cli=(clientes||[]).find(function(x){return x.id===cliId;}); if(!cli) return;
+  var rg=cli.capa_regras; if(typeof rg==='string'){ try{rg=JSON.parse(rg);}catch(e){rg=[];} }
+  _crEd={cli:cliId,ativo:cli.capa_regras_ativo===true,regras:JSON.parse(JSON.stringify(rg||[])),edit:null};
+  crRegrasRender();
+}
+function crRegrasRender(){
+  var E=_crEd; if(!E) return; var cli=(clientes||[]).find(function(x){return x.id===E.cli;});
+  var old=ge('modal-cr-regras'); if(old) old.remove();
+  var servs=crServicosCliente(E.cli);
+  var opcCampo=function(sel,incluiParam){ var o=CR_CAMPOS.map(function(x){return '<option value="'+x[0]+'"'+(sel===x[0]?' selected':'')+'>'+x[1]+'</option>';}).join('');
+    o+=servs.map(function(s){ var v='serv:'+s; return '<option value="'+ecomEsc(v)+'"'+(sel===v?' selected':'')+'>'+ecomEsc(s)+'</option>'; }).join('');
+    if(sel&&sel.indexOf('serv:')===0&&servs.indexOf(sel.slice(5))<0) o+='<option value="'+ecomEsc(sel)+'" selected>'+ecomEsc(sel.slice(5))+' (fora da tabela)</option>';
+    if(incluiParam) o+='<option value="cap_veiculo"'+(sel==='cap_veiculo'?' selected':'')+'>Capacidade do veículo (WMS)</option>';
+    return o; };
+  var lista=E.regras.map(function(r,ix){
+    var q=r.quando&&r.quando.campo?((r.quando.campo==='tipo_carga'?'carga ':'veículo ')+(r.quando.valores||[]).join(' ou ')):'sempre';
+    var opl=(CR_OPS.find(function(o){return o[0]===r.op;})||['',''])[1];
+    var ref=(r.op==='maior_zero'||r.op==='zero')?'':(r.ref&&r.ref.tipo==='numero'?r.ref.valor:crRotuloCampo(r.ref&&r.ref.campo))+((Number(r.mult)||1)!==1?' × '+r.mult:'');
+    return '<div style="display:grid;grid-template-columns:28px 1fr 1.6fr 70px 110px 70px;gap:8px;padding:8px 10px;border-top:1px solid var(--border);align-items:center;font-size:12.5px'+(r.ativa===false?';opacity:.55':'')+'">'
+      +'<input type="checkbox" '+(r.ativa!==false?'checked':'')+' title="Regra ativa" onchange="_crEd.regras['+ix+'].ativa=this.checked">'
+      +'<span>'+ecomEsc(q)+'</span><span><b>'+ecomEsc(crRotuloCampo(r.campo))+'</b> '+opl+' <b>'+ecomEsc(String(ref))+'</b><br><small style="color:var(--text3)">'+ecomEsc(r.nome||'')+'</small></span>'
+      +'<span>'+(r.tol?r.tol+(r.tol_unid==='%'?'%':''):'0')+'</span><span>'+(r.acao==='avisar'?'só avisa':'devolve à operação')+'</span>'
+      +'<span style="display:flex;gap:4px"><button class="bicon btn-sm" title="Editar" onclick="_crEd.edit='+ix+';crRegrasRender()">✏</button><button class="bicon btn-sm" title="Excluir" onclick="_crEd.regras.splice('+ix+',1);crRegrasRender()">🗑</button></span></div>';
+  }).join('')||'<div style="padding:16px;text-align:center;color:var(--text3);font-size:12.5px">Nenhuma regra. Use "+ Nova regra" ou "+ Regras padrão MK".</div>';
+  var ed='';
+  if(E.edit!=null){
+    var r=E.edit==='novo'?{op:'max',ref:{tipo:'campo'},mult:1,tol:0,tol_unid:'un',acao:'devolver',ativa:true,tipo_capa:'ambas'}:E.regras[E.edit];
+    var qc=r.quando&&r.quando.campo||'', qvals=(r.quando&&r.quando.valores)||[];
+    var chkVals=function(lista){ return lista.map(function(v){ return '<label style="margin-right:10px"><input type="checkbox" class="cr-q-val" value="'+ecomEsc(v)+'" '+(qvals.indexOf(v)>=0?'checked':'')+'> '+ecomEsc(v)+'</label>'; }).join(''); };
+    ed='<div style="border:1px solid var(--blue-text);border-radius:10px;padding:12px;margin-top:10px;background:var(--bg2);display:grid;grid-template-columns:130px 1fr;gap:8px 10px;align-items:center;font-size:12.5px">'
+      +'<span>Nome</span><input class="fi" id="cr-e-nome" value="'+ecomEsc(r.nome||'')+'">'
+      +'<span>Vale para</span><select class="fi" id="cr-e-tipo"><option value="ambas"'+(r.tipo_capa==='ambas'?' selected':'')+'>Recebimento e expedição</option><option value="recebimento"'+(r.tipo_capa==='recebimento'?' selected':'')+'>Recebimento</option><option value="expedicao"'+(r.tipo_capa==='expedicao'?' selected':'')+'>Expedição</option></select>'
+      +'<span>Quando</span><span><select class="fi" id="cr-e-qc" style="width:auto" onchange="_crEdQuando(this.value)"><option value="">sempre</option><option value="tipo_carga"'+(qc==='tipo_carga'?' selected':'')+'>tipo de carga é…</option><option value="tipo_veiculo"'+(qc==='tipo_veiculo'?' selected':'')+'>tipo de veículo é…</option></select>'
+        +'<div id="cr-e-qv" style="margin-top:6px">'+(qc==='tipo_carga'?chkVals(CAPA_CARGA):(qc==='tipo_veiculo'?chkVals(CAPA_VEICULOS):''))+'</div></span>'
+      +'<span>Resultado esperado</span><span style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select class="fi" id="cr-e-campo" style="width:auto">'+opcCampo(r.campo,false)+'</select>'
+        +'<select class="fi" id="cr-e-op" style="width:auto">'+CR_OPS.map(function(o){return '<option value="'+o[0]+'"'+(r.op===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+        +'<select class="fi" id="cr-e-ref" style="width:auto"><option value="#num"'+(r.ref&&r.ref.tipo==='numero'?' selected':'')+'>número fixo…</option>'+opcCampo(r.ref&&r.ref.tipo!=='numero'?r.ref.campo:'',true)+'</select>'
+        +'<input class="fi" id="cr-e-num" placeholder="número" value="'+ecomEsc(r.ref&&r.ref.tipo==='numero'?r.ref.valor:'')+'" style="width:80px">'
+        +'× <input class="fi" id="cr-e-mult" value="'+(r.mult||1)+'" style="width:56px"></span>'
+      +'<span>Tolerância</span><span><input class="fi" id="cr-e-tol" value="'+(r.tol||0)+'" style="width:70px;display:inline-block"> <select class="fi" id="cr-e-tolu" style="width:auto;display:inline-block"><option value="un">unidades</option><option value="%"'+(r.tol_unid==='%'?' selected':'')+'>%</option></select></span>'
+      +'<span>Se não bater</span><select class="fi" id="cr-e-acao"><option value="devolver">devolve à operação</option><option value="avisar"'+(r.acao==='avisar'?' selected':'')+'>só avisa</option></select>'
+      +'<span>Mensagem</span><input class="fi" id="cr-e-msg" value="'+ecomEsc(r.mensagem||'')+'" placeholder="Explica a regra para a operação">'
+      +'<span></span><span style="display:flex;gap:6px"><button class="btn btn-p btn-sm" onclick="crRegraSalvarEdicao()">Aplicar regra</button><button class="btn btn-sm" onclick="_crEd.edit=null;crRegrasRender()">Cancelar</button></span></div>';
+  }
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-cr-regras" style="z-index:600;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 0"><div class="modal" style="width:880px;max-width:96vw;padding:18px">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div><div style="font-size:15px;font-weight:700">Regras da capa · '+ecomEsc((cli&&cli.nome)||'')+'</div><div style="font-size:12px;color:var(--text3)">Rodam na conclusão da digitação. Parâmetro financeiro do cliente.</div></div>'
+    +'<label style="margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;border:1px solid '+(E.ativo?'var(--green-text)':'#f0d9a8')+';background:'+(E.ativo?'var(--green-bg)':'var(--amber-bg,#fef3c7)')+';font-size:13px;cursor:pointer"><input type="checkbox" '+(E.ativo?'checked':'')+' onchange="_crEd.ativo=this.checked;crRegrasRender()"> <b>Regras ligadas</b> '+(E.ativo?'(valendo)':'(desligado: a digitação segue sem regras)')+'</label></div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden"><div style="display:grid;grid-template-columns:28px 1fr 1.6fr 70px 110px 70px;gap:8px;padding:7px 10px;background:var(--bg2);font-size:10.5px;color:var(--text3)"><span>ATIVA</span><span>QUANDO</span><span>RESULTADO ESPERADO</span><span>TOLER.</span><span>SE NÃO BATER</span><span></span></div>'+lista+'</div>'
+    +ed
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-sm" onclick="_crEd.edit=\'novo\';crRegrasRender()">+ Nova regra</button><button class="btn btn-sm" onclick="crRegrasAddPadrao()">+ Regras padrão MK</button>'
+    +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn" onclick="ge(\'modal-cr-regras\').remove();_crEd=null">Fechar</button><button class="btn btn-p" onclick="crRegrasSalvar()">Salvar regras</button></span></div>'
+    +(servs.length?'':'<div style="font-size:11.5px;color:var(--amber-text,#b45309);margin-top:8px">⚠ Nenhum serviço marcado como Cap.Rec/Cap.Exp na tabela deste cliente: as regras de serviço não terão o que comparar.</div>')
+    +'</div></div>');
+}
+function _crEdQuando(v){ var box=ge('cr-e-qv'); if(!box) return; var l=v==='tipo_carga'?CAPA_CARGA:(v==='tipo_veiculo'?CAPA_VEICULOS:[]); box.innerHTML=l.map(function(x){ return '<label style="margin-right:10px"><input type="checkbox" class="cr-q-val" value="'+ecomEsc(x)+'"> '+ecomEsc(x)+'</label>'; }).join(''); }
+function crRegraSalvarEdicao(){
+  var E=_crEd; var qc=ge('cr-e-qc').value, vals=Array.from(document.querySelectorAll('.cr-q-val')).filter(function(x){return x.checked;}).map(function(x){return x.value;});
+  if(qc&&!vals.length){ alert('Escolha pelo menos um valor para o "quando".'); return; }
+  var refSel=ge('cr-e-ref').value, op=ge('cr-e-op').value;
+  var r={id:(E.edit!=='novo'&&E.regras[E.edit]&&E.regras[E.edit].id)||('r'+Date.now()),nome:ge('cr-e-nome').value.trim(),tipo_capa:ge('cr-e-tipo').value,
+    quando:qc?{campo:qc,valores:vals}:null,campo:ge('cr-e-campo').value,op:op,
+    ref:refSel==='#num'?{tipo:'numero',valor:Number(String(ge('cr-e-num').value).replace(',','.'))||0}:{tipo:'campo',campo:refSel},
+    mult:Number(String(ge('cr-e-mult').value).replace(',','.'))||1,tol:Number(String(ge('cr-e-tol').value).replace(',','.'))||0,tol_unid:ge('cr-e-tolu').value,
+    acao:ge('cr-e-acao').value,mensagem:ge('cr-e-msg').value.trim(),ativa:E.edit==='novo'?true:(E.regras[E.edit].ativa!==false)};
+  if(op==='entre'){ alert('Para "entre", use duas regras: "no mínimo" e "no máximo".'); return; }
+  if(!r.nome) r.nome=crRotuloCampo(r.campo)+' '+((CR_OPS.find(function(o){return o[0]===op;})||['',''])[1]);
+  if(E.edit==='novo') E.regras.push(r); else E.regras[E.edit]=r;
+  E.edit=null; crRegrasRender();
+}
+function crRegrasAddPadrao(){ var E=_crEd; var ja={}; E.regras.forEach(function(r){ ja[r.nome]=1; }); crRegrasPadraoMK().forEach(function(r){ if(!ja[r.nome]){ r.id='r'+Date.now()+Math.random().toString(36).slice(2,6); E.regras.push(r); } }); crRegrasRender(); }
+async function crRegrasSalvar(){
+  var E=_crEd; if(!E) return;
+  try{
+    await dbUpdate('clientes',E.cli,{capa_regras:E.regras,capa_regras_ativo:E.ativo});
+    var cli=(clientes||[]).find(function(x){return x.id===E.cli;}); if(cli){ cli.capa_regras=E.regras; cli.capa_regras_ativo=E.ativo; }
+    showToast('Regras salvas'+(E.ativo?' e LIGADAS.':' (desligadas: a digitação segue sem regras).'),'green');
+    ge('modal-cr-regras').remove(); _crEd=null;
+  }catch(e){ alert('Erro ao salvar: '+(e.message||e)); }
+}
+// operação: reenviar dizendo que está correto
+async function capaReenviarConfirmado(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  var t=prompt('A operação confirma que a capa '+c.numero+' está correta. Explique para o financeiro:',''); if(t==null) return; t=t.trim(); if(!t){ alert('Escreva a explicação.'); return; }
+  var up={status:'aberta',confirmado_operacao:true,confirmacao_texto:t,observacoes:capaRegObs(c,'Operação confirmou a capa: '+t)};
+  try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' reenviada como confirmada pela operação.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 
 function canDo(tela, acao){
@@ -41033,7 +41215,13 @@ function wmsCliTabBody(clienteId){
         <label style="font-size:12px;color:var(--text2)">dígitos</label>
       </div>
       <div style="font-size:11px;color:var(--amber-text);margin-top:10px">⚠ Vale para novas importações. Para reprocessar os pedidos já importados, rode o SQL de correção.</div>
-    </div>`;
+    </div>
+    <div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-top:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Capacidade média por veículo (pallets)</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Usada nas regras da capa de processo (pallets da capa × capacidade do veículo). Em branco = sem referência.</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">${(function(){ var cap=c.wms_capacidade_veiculo; if(typeof cap==='string'){ try{cap=JSON.parse(cap);}catch(e){cap={};} } cap=cap||{};
+        return CAPA_VEICULOS.map(function(v,ix){ return '<label style="font-size:12px;color:var(--text2);display:flex;flex-direction:column;gap:4px">'+v+'<input type="number" min="0" class="wms-cap-veic" data-veic="'+v+'" value="'+(cap[v]!=null?cap[v]:'')+'" style="width:96px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;text-align:center;font-size:14px"></label>'; }).join(''); })()}</div>
+    </div>`;   // v1.0.1069
   }
   return `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
     <div style="font-size:13px;font-weight:600;margin-bottom:6px">${titulos[wmsCliTab]||wmsCliTab}</div>
@@ -41301,6 +41489,8 @@ function wmsToggleUsaEtiq(clienteId,el){
 async function wmsSalvarParamCliente(clienteId){
   const dados={};
   // aba Geral: dígitos do número do pedido
+  const _capEls=document.querySelectorAll('.wms-cap-veic');
+  if(_capEls.length){ const _cap={}; _capEls.forEach(function(el){ if(el.value!=='') _cap[el.dataset.veic]=Number(el.value); }); dados.wms_capacidade_veiculo=_cap; }   // v1.0.1069
   const digInput=ge('wms-digitos-pedido');
   if(digInput){const n=Math.max(1,Math.min(20,parseInt(digInput.value)||5));dados.wms_digitos_pedido=n;}
   // aba Saída: modo de separação
@@ -48285,7 +48475,7 @@ function rCapasProcesso_i(){
       <div class="lsub">${tipoLabel} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'sem data'} ${c.doc?'· DOC '+c.doc:''}</div>${c.status==='devolvida'&&c.motivo_devolucao?`<div class="lsub" style="color:var(--red-text);font-weight:600">↩ Devolvida: ${ecomEsc(c.motivo_devolucao)}</div>`:''}</div>
       <div class="lright" style="display:flex;flex-direction:row;align-items:center;gap:6px">
         <span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span>
-        ${pode&&c.status==='devolvida'&&curPage==='fat-capas'?`<button class="btn btn-sm" onclick="event.stopPropagation();capaReenviar('${c.id}')">↻ Corrigida · reenviar</button>`:''}
+        ${pode&&c.status==='devolvida'&&curPage==='fat-capas'?`<button class="btn btn-sm" onclick="event.stopPropagation();capaReenviar('${c.id}')">↻ Corrigida · reenviar</button><button class="btn btn-sm" onclick="event.stopPropagation();capaReenviarConfirmado('${c.id}')">✔ Está correto · reenviar</button>`:''}
         <button class="bicon btn-sm" title="Gerar PDF" onclick="event.stopPropagation();capaGerarPdf('${c.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </button>
