@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1071 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1072 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1071';
+const APP_VERSION='v1.0.1072';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4166,6 +4166,49 @@ async function armzPdf(){
   ]};
   var url=await capaPdfBlobUrl(def);
   capaPdfViewer(url,'Extrato de armazenagem · '+(cli.nome||'')+' · '+armzNomeMes(armzMes),'Demonstração para autorização do faturamento','extrato-armazenagem-'+armzMes+'.pdf');
+}
+// ══════════════ CP · LOMBADA DE MEDIÇÃO (v1.0.1072) ══════════════
+function cpMedPendente(cp){ return !!(cp&&cp.depende_medicao&&cp.medicao_status!=='aprovada'); }
+function cpMedHtmlForm(ed){
+  var on=!!(ed&&ed.depende_medicao);
+  var us=(profiles||[]).filter(function(p){return !p.company_id||!company||p.company_id===company.id;}).sort(function(a,b){return String(a.full_name||a.email).localeCompare(String(b.full_name||b.email));});
+  return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:10px 0">'
+    +'<label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;cursor:pointer"><input type="checkbox" id="cp-med" style="width:auto"'+(on?' checked':'')+' onchange="ge(\'cp-med-box\').style.display=this.checked?\'grid\':\'none\'"> 📐 Depende de medição</label>'
+    +'<div id="cp-med-box" style="display:'+(on?'grid':'none')+';grid-template-columns:150px 1fr;gap:8px 10px;margin-top:10px;align-items:start;font-size:12.5px">'
+    +'<span style="color:var(--text2);padding-top:6px">Qual medição *</span><textarea class="fi" id="cp-med-desc" rows="2" placeholder="Ex.: medição de setembro da obra do galpão 3, boletim 04">'+ecomEsc((ed&&ed.medicao_descricao)||'')+'</textarea>'
+    +'<span style="color:var(--text2);padding-top:6px">Quem aprova a medição *</span><select class="fi" id="cp-med-aprov"><option value="">Selecione…</option>'+us.map(function(u){return '<option value="'+u.id+'"'+(ed&&ed.medicao_aprovador_id===u.id?' selected':'')+'>'+ecomEsc(u.full_name||u.email)+'</option>';}).join('')+'</select>'
+    +(ed&&ed.depende_medicao&&ed.medicao_status?'<span></span><span style="font-size:11.5px;color:var(--text3)">Situação da medição: <b>'+(ed.medicao_status==='aprovada'?'aprovada':(ed.medicao_status==='recusada'?'recusada':'aguardando aprovação'))+'</b></span>':'')
+    +'</div></div>';
+}
+function cpMedBadge(cp){
+  if(!cp||!cp.depende_medicao) return '';
+  var quem=hmNomeUser(cp.medicao_status==='aprovada'||cp.medicao_status==='recusada'?(cp.medicao_aprovada_por||cp.medicao_aprovador_id):cp.medicao_aprovador_id);
+  var d=String(cp.medicao_descricao||'').slice(0,90);
+  if(cp.medicao_status==='aprovada') return '<div style="font-size:11.5px;margin-top:4px;padding:3px 8px;border-radius:6px;background:var(--green-bg);color:var(--green-text);display:inline-block">📐 Medição aprovada por <b>'+ecomEsc(quem)+'</b>'+(cp.medicao_aprovada_em?' em '+new Date(cp.medicao_aprovada_em).toLocaleDateString('pt-BR'):'')+' · "'+ecomEsc(d)+'"</div>';
+  if(cp.medicao_status==='recusada') return '<div style="font-size:11.5px;margin-top:4px;padding:3px 8px;border-radius:6px;background:var(--red-bg,#fee2e2);color:var(--red-text);display:inline-block">📐 Medição RECUSADA por <b>'+ecomEsc(quem)+'</b>: '+ecomEsc(cp.medicao_motivo||'')+' · "'+ecomEsc(d)+'"</div>';
+  return '<div style="font-size:11.5px;margin-top:4px;padding:3px 8px;border-radius:6px;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);display:inline-block">📐 Depende de medição · aguardando <b>'+ecomEsc(quem)+'</b> · "'+ecomEsc(d)+'"</div>';
+}
+function cpMedMinhas(){ return (contasPagar||[]).filter(function(cp){ return cp.depende_medicao&&cp.medicao_aprovador_id===(cu&&cu.id)&&(cp.medicao_status||'pendente')==='pendente'&&['pago','pago_atraso','cancelado','baixado'].indexOf(cp.status)<0; }); }
+function rCPMedicoes(){
+  var l=cpMedMinhas().sort(function(a,b){return String(a.vencimento||'').localeCompare(String(b.vencimento||''));});
+  var h='<div style="margin-bottom:12px"><div style="font-size:15px;font-weight:600">Medições para aprovar</div><div style="font-size:11px;color:var(--text3)">Títulos que só podem ser aprovados para pagamento depois da sua aprovação da medição</div></div>';
+  if(!l.length) return h+'<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;border:1px solid var(--border);border-radius:12px">Nenhuma medição aguardando você ✓</div>';
+  return h+'<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden">'+l.map(function(cp,i){
+    return '<div style="padding:12px 14px;border-top:'+(i?'1px solid var(--border)':'0')+';display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:260px"><div style="font-size:13px;font-weight:600">'+ecomEsc(cp.fornecedor_nome||'—')+' · '+fmtV(cp.valor)+' · vence '+(cp.vencimento?new Date(cp.vencimento+'T00:00').toLocaleDateString('pt-BR'):'—')+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-top:2px">📐 '+ecomEsc(cp.medicao_descricao||'')+'</div></div>'
+      +'<button onclick="cpAnexosModal(\''+cp.id+'\')" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:12px;cursor:pointer">📎</button>'
+      +'<button onclick="cpMedDecidir(\''+cp.id+'\',true)" style="padding:6px 12px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">✔ Aprovar medição</button>'
+      +'<button onclick="cpMedDecidir(\''+cp.id+'\',false)" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:#991b1b;font-size:12px;cursor:pointer">✖ Recusar…</button></div>';
+  }).join('')+'</div>';
+}
+async function cpMedDecidir(id,aprovar){
+  var cp=(contasPagar||[]).find(function(x){return x.id===id;}); if(!cp) return;
+  var motivo=null;
+  if(!aprovar){ motivo=prompt('Motivo da recusa da medição:',''); if(motivo==null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
+  else if(!confirm('Aprovar a medição de '+(cp.fornecedor_nome||'')+' ('+fmtV(cp.valor)+')?')) return;
+  var up={medicao_status:aprovar?'aprovada':'recusada',medicao_aprovada_por:cu&&cu.id,medicao_aprovada_em:new Date().toISOString(),medicao_motivo:motivo};
+  try{ await dbUpdate('contas_pagar',id,up); Object.assign(cp,up); showToast(aprovar?'Medição aprovada.':'Medição recusada.','green'); cpSetTab('medicoes'); }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 
 function canDo(tela, acao){
@@ -12085,6 +12128,7 @@ function avisosCalcular(){
 
   try{ if(pode('contas-pagar')){
     var cpAprov=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status==='pendente'&&(x.aprovacao_status||'')==='pendente';}).length;
+    try{ var _nMedA=cpMedMinhas().length; if(_nMedA) add('Financeiro',_nMedA,'1 medição aguardando sua aprovação','{n} medições aguardando sua aprovação','contas-pagar',"cpTab='medicoes';pg('contas-pagar')"); }catch(_ma){}   // v1.0.1072
     add('Financeiro',cpAprov,'1 título a pagar aguardando sua aprovação','{n} títulos a pagar aguardando sua aprovação','contas-pagar');
     // contas a PAGAR em atraso — mesma regua da lista (aprovado, nao pago, vencimento efetivo)
     var cpVenc=(contasPagar||[]).filter(function(x){ return x.company_id===cid && typeof cpLisStatusDe==='function' && cpLisStatusDe(x)==='vencido'; });
@@ -20887,9 +20931,11 @@ function cpDuplicidadesModal(){
 function rContasPagar(){
   var nPend=cpFilaAprov().length;
   var lblAp='Aprova\u00e7\u00f5es'+(nPend?' <span style="background:#854d0e;color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px">'+nPend+'</span>':'');
-  var bar='<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px">'+cpTabBtn('dashboard','Dashboard')+cpTabBtn('lista','Lançamentos')+cpTabBtn('aprovacoes',lblAp)+'</div>';
+  var _nMed=cpMedMinhas().length;   // v1.0.1072
+  var bar='<div style="display:flex;gap:2px;border-bottom:2px solid var(--border);margin-bottom:16px">'+cpTabBtn('dashboard','Dashboard')+cpTabBtn('lista','Lançamentos')+cpTabBtn('aprovacoes',lblAp)
+    +((_nMed||cpTab==='medicoes')?cpTabBtn('medicoes','Medições'+(_nMed?' <span style="background:#854d0e;color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px">'+_nMed+'</span>':'')):'')+'</div>';
   if(cpTab==='relatorios')cpTab='lista';
-  return bar+(cpTab==='aprovacoes'?rCPAprovacoes():cpTab==='lista'?rCPLista():rCPLancamentos());
+  return bar+(cpTab==='medicoes'?rCPMedicoes():cpTab==='aprovacoes'?rCPAprovacoes():cpTab==='lista'?rCPLista():rCPLancamentos());
 }
 function rCPLancamentos(){
   var hoje=new Date();hoje.setHours(0,0,0,0);
@@ -20963,7 +21009,7 @@ function rCPLancamentos(){
   return h;
 }
 
-function initContasPagar(){if(cpTab==='relatorios'){renderCPRelatorio();}else if(cpTab==='aprovacoes'){/* estático */}else if(cpTab==='lista'){cpLisRender();}else{renderCPMatrix();renderCPChart();}}
+function initContasPagar(){if(cpTab==='relatorios'){renderCPRelatorio();}else if(cpTab==='aprovacoes'||cpTab==='medicoes'){/* estático */}else if(cpTab==='lista'){cpLisRender();}else{renderCPMatrix();renderCPChart();}}
 
 function cpNavMes(d){
   cpPeriodo.mes+=d;
@@ -22690,6 +22736,7 @@ async function novoTituloCP(editId){
      +'<button type="button" id="cp-parc-gerar" onclick="cpGerarParcelas()" disabled style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Gerar</button></div>'
      +'<div id="cp-parc-box" style="display:none;margin-top:10px"></div></div>')
    +'<div class="fg"><label class="fl">Descri\u00e7\u00e3o</label><input class="fi" id="cp-desc" placeholder="Hist\u00f3rico do t\u00edtulo" value="'+(ed?(ed.descricao||'').replace(/"/g,'&quot;'):'')+'"></div>'
+   +cpMedHtmlForm(ed)   // v1.0.1072: lombada de medição
    +'<div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:10px 0">'
    +'<input type="checkbox" id="cp-semmov" style="width:auto;margin-top:2px"'+((ed&&ed.sem_movimento)?' checked':'')+'>'
    +'<div><label for="cp-semmov" style="font-size:13px;font-weight:600;cursor:pointer">N\u00e3o gerar movimento</label>'
@@ -22884,6 +22931,15 @@ async function salvarTituloCP(novo){
     dfc_conta_id:contaId,forma_pagamento:ge('cp-forma')?ge('cp-forma').value:'',nf_numero:ge('cp-nf')?ge('cp-nf').value:'',
     descricao:ge('cp-desc')?ge('cp-desc').value:'',
     sem_movimento:!!(ge('cp-semmov')&&ge('cp-semmov').checked)};
+  // v1.0.1072: lombada de medição
+  var _med=!!(ge('cp-med')&&ge('cp-med').checked);
+  if(_med){
+    var _mdesc=(ge('cp-med-desc')||{}).value||'', _maprov=(ge('cp-med-aprov')||{}).value||'';
+    if(!_mdesc.trim()||!_maprov){ alert('Título que depende de medição: informe qual medição e quem aprova.'); return; }
+    comum.depende_medicao=true; comum.medicao_descricao=_mdesc.trim(); comum.medicao_aprovador_id=_maprov;
+    var _atu=cpEditId?((contasPagar||[]).find(function(x){return x.id===cpEditId;})||{}):{};
+    if(!_atu.depende_medicao||_atu.medicao_aprovador_id!==_maprov){ comum.medicao_status='pendente'; comum.medicao_aprovada_por=null; comum.medicao_aprovada_em=null; comum.medicao_motivo=null; }
+  } else { comum.depende_medicao=false; }
 
   // EDIÇÃO
   if(cpEditId){
@@ -22961,6 +23017,7 @@ async function salvarTituloCP(novo){
 function cpFilaAprov(){
   return (contasPagar||[]).filter(function(cp){
     if(!cpPendenteAprov(cp))return false;
+    if(['pago','pago_atraso','cancelado','baixado'].indexOf(cp.status)>=0)return false;   // v1.0.1072: título já pago não entra na fila
     if(activeUnit&&cp.unit_id&&cp.unit_id!==activeUnit)return false;
     return true;
   }).sort(function(a,b){return (a.vencimento||'').localeCompare(b.vencimento||'');});
@@ -22981,14 +23038,15 @@ function rCPAprovacoes(){
     var un=(userUnits||[]).find(function(u){return u.id===cp.unit_id;});
     var parc=(cp.parcela_total>1)?(' \u00b7 '+cp.parcela_num+'/'+cp.parcela_total):'';
     h+='<div style="padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;background:'+(i%2?'var(--bg2)':'var(--bg)')+'">'
-      +'<input type="checkbox" class="cp-aprov-chk" value="'+cp.id+'" onchange="cpAprovTick()" style="width:auto">'
+      +(cpMedPendente(cp)?'<span style="width:13px"></span>':'<input type="checkbox" class="cp-aprov-chk" value="'+cp.id+'" onchange="cpAprovTick()" style="width:auto">')
       +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">'+(cp.fornecedor_nome||'\u2014')+'</div>'
-      +'<div style="font-size:11px;color:var(--text2)">'+[(cp.agrupamento||'')+(cp.categoria?' \u203a '+cp.categoria:''),(cp.nf_numero||''),'vence '+venc,(un?un.name:'')].filter(Boolean).join(' \u00b7 ')+parc+'</div></div>'
+      +'<div style="font-size:11px;color:var(--text2)">'+[(cp.agrupamento||'')+(cp.categoria?' \u203a '+cp.categoria:''),(cp.nf_numero||''),'vence '+venc,(un?un.name:'')].filter(Boolean).join(' \u00b7 ')+parc+'</div>'+cpMedBadge(cp)+'</div>'
       +'<div style="text-align:right;white-space:nowrap;margin-right:8px"><div style="font-size:13px;font-weight:700">'+fmtV(cp.valor)+'</div></div>'
       +'<div style="display:flex;gap:6px">'
       +'<button onclick="cpAnexosModal(\''+cp.id+'\')" title="Anexos" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:12px;cursor:pointer">\ud83d\udcce</button>'
       +'<button onclick="novoTituloCP(\''+cp.id+'\')" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:12px;cursor:pointer">Editar</button>'
-      +'<button onclick="cpAprovar(\''+cp.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Aprovar</button>'
+      +(cpMedPendente(cp)?'<button disabled title="Aguardando a aprovação da medição" style="padding:5px 10px;border:none;border-radius:6px;background:#d1d5db;color:#6b7280;font-size:12px;font-weight:600;cursor:not-allowed">Aprovar</button>'
+        :'<button onclick="cpAprovar(\''+cp.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Aprovar</button>')
       +'<button onclick="cpReprovar(\''+cp.id+'\')" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:#991b1b;font-size:12px;cursor:pointer">Recusar</button>'
       +'</div></div>';
   });
@@ -23008,6 +23066,8 @@ function cpAprovTick(){
 }
 
 async function cpAprovar(id,semRender){
+  var _cpm=(contasPagar||[]).find(function(x){return x.id===id;});
+  if(cpMedPendente(_cpm)){ alert('Este título depende de medição e ela ainda não foi aprovada por '+hmNomeUser(_cpm.medicao_aprovador_id)+'.'); return; }   // v1.0.1072
   var uid=(profile&&profile.id)||null;
   try{
     await dbUpdate('contas_pagar',id,{aprovacao_status:'aprovado',aprovado_por:uid,aprovado_em:new Date().toISOString()});
