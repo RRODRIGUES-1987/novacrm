@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1073 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1074 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1073';
+const APP_VERSION='v1.0.1074';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52444,6 +52444,8 @@ async function ecomSepConcluir(osId){
   }catch(e){ showToast('Erro ao concluir: '+(e.message||e),'red'); }
 }
 function ecomCloseModal(){ try{if(typeof coletorCamStop==='function')coletorCamStop();}catch(e){} _colScanHandler=null; var m=ge('ecom-modal'); if(m)m.remove(); }
+// v1.0.1074: nome usado na integracao (lote, Cancelar, aviso de bloqueio) — antes nao existia e travava o fim do lote
+function ecomModalClose(){ ecomCloseModal(); }
 
 // ─────────────────────────── TELA: CHECK-OUT · Caixa (POS, guiado pela folha) ───────────────────────────
 let ecomCx=null; // {modo:'sku'|'pedido', sku, fila:[pid], msg, msgcolor}
@@ -55716,23 +55718,31 @@ function intgImportarLotePrev(){
   document.body.insertAdjacentHTML('beforeend',html);
 }
 async function intgImportarLoteExec(){
+  if(window._intgLote)return;   // v1.0.1074: sem duplo disparo
   var ids=Object.keys(_intgSel); if(!ids.length)return;
   var btn=ge('intg-lote-ok'), prog=ge('intg-lote-prog');
   if(btn){btn.disabled=true;btn.textContent='Importando\u2026';}
   if(prog)prog.style.display='block';
   window._intgLote=true;
-  var ok=0, pul=0, err=0;
-  for(var i=0;i<ids.length;i++){
-    var p=intgPedidos.find(function(x){return x.id===ids[i];}); if(!p){continue;}
-    if(prog)prog.innerHTML='Importando '+(i+1)+' de '+ids.length+' \u2014 <b>'+ecomEsc(p.numero||'')+'</b>';
-    var existia=!!intgJaNaBase(p);
-    try{ await intgImportar(ids[i]); if(existia)pul++; else ok++; }
-    catch(e){ err++; }
+  var ok=0, pul=0, err=0, erros=[];
+  try{
+    for(var i=0;i<ids.length;i++){
+      var p=intgPedidos.find(function(x){return x.id===ids[i];}); if(!p){continue;}
+      if(prog)prog.innerHTML='Importando '+(i+1)+' de '+ids.length+' \u2014 <b>'+ecomEsc(p.numero||'')+'</b>';
+      var existia=!!intgJaNaBase(p);
+      try{ await intgImportar(ids[i]); if(existia)pul++; else ok++; }
+      catch(e){ err++; erros.push((p.numero||p.pedido_externo_id||ids[i])+': '+String((e&&e.message)||e)); }
+    }
+  } finally {
+    window._intgLote=false; _intgSel={};
   }
-  window._intgLote=false; _intgSel={};
-  _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll();
-  ecomModalClose(); intgRenderBody();
-  showToast(ok+' importado(s)'+(pul?' \u00b7 '+pul+' j\u00e1 existiam':'')+(err?' \u00b7 '+err+' com erro':''), err?'amber':'green');
+  // v1.0.1074: fecha e mostra o resultado ANTES de recarregar — a recarga nao prende mais a tela
+  if(erros.length) console.warn('[importa\u00e7\u00e3o em lote] pedidos com erro:',erros);
+  try{ ecomModalClose(); }catch(e){ var _m=ge('ecom-modal'); if(_m)_m.remove(); }
+  showToast(ok+' importado(s)'+(pul?' \u00b7 '+pul+' j\u00e1 existiam':'')+(err?' \u00b7 '+err+' com erro \u2014 '+erros[0].slice(0,90):''), err?'amber':'green');
+  try{ _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll(); }
+  catch(e){ console.warn('[importa\u00e7\u00e3o em lote] recarga',e); }
+  try{ intgRenderBody(); }catch(e){ console.warn('[importa\u00e7\u00e3o em lote] tela',e); }
 }
 // ───── PEDIDO JÁ NA BASE (entrou pela planilha): a integração reconhece e vincula ─────
 function intgNormId(v){ return String(v||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase(); }
