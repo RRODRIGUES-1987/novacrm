@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1072 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1073 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1072';
+const APP_VERSION='v1.0.1073';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -55358,11 +55358,47 @@ async function intgBuscaRemota(){
     else if(!r||!r.length){ showToast('Nenhum pedido encontrado com "'+q+'"','amber'); }
   }catch(e){ console.warn('busca remota',e); }
 }
+// v1.0.1073: plataforma do pedido e busca de vários pedidos separados por ";"
+function intgPlataforma(p){
+  var pl=p&&p.payload; if(typeof pl==='string'){ try{pl=JSON.parse(pl);}catch(e){pl={};} } pl=pl||{};
+  var nome=(pl.ecommerce&&(pl.ecommerce.nome||pl.ecommerce.canalVenda||pl.ecommerce.canal))||(pl.intermediador&&pl.intermediador.nome)||pl.canalVenda||pl.origem||'';
+  var t=String(nome||'').toLowerCase(), n=String((p&&(p.numero||p.pedido_externo_id))||'').trim();
+  var mapa=[['tiktok','TikTok','#111','#fff'],['shopee','Shopee','#ee4d2d','#fff'],['mercado','Mercado Livre','#ffe600','#333'],['amazon','Amazon','#232f3e','#fff'],['magalu','Magalu','#0086ff','#fff'],['magazine','Magalu','#0086ff','#fff'],['shein','Shein','#000','#fff'],['americanas','Americanas','#e60014','#fff'],['kwai','Kwai','#ff7a00','#fff']];
+  for(var i=0;i<mapa.length;i++){ if(t.indexOf(mapa[i][0])>=0) return {nome:mapa[i][1],bg:mapa[i][2],cor:mapa[i][3]}; }
+  if(/^5[678]\d{16}$/.test(n)) return {nome:'TikTok',bg:'#111',cor:'#fff'};
+  if(/^2000\d{12}$/.test(n)) return {nome:'Mercado Livre',bg:'#ffe600',cor:'#333'};
+  if(/^\d{3}-\d{7}-\d{7}$/.test(n)) return {nome:'Amazon',bg:'#232f3e',cor:'#fff'};
+  if(/^\d{6}[A-Z0-9]{8}$/.test(n)) return {nome:'Shopee',bg:'#ee4d2d',cor:'#fff'};
+  if(nome) return {nome:String(nome).slice(0,18),bg:'var(--bg3)',cor:'var(--text2)'};
+  return null;
+}
+function intgBadgePlataforma(p){ var x=intgPlataforma(p); return x?'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:'+x.bg+';color:'+x.cor+';white-space:nowrap">'+ecomEsc(x.nome)+'</span>':'<span style="color:var(--text3)">—</span>'; }
+function intgTermos(){ var q=String(intgBusca||''); if(q.indexOf(';')<0&&q.indexOf('\n')<0) return null; return q.split(/[;\n\t]+/).map(function(t){return t.trim().toLowerCase().replace(/[^a-z0-9]/g,'');}).filter(function(t){return t.length>=3;}); }
+function intgAlvo(p){ return [p.numero,p.pedido_externo_id,p.cliente_nome,p.destinatario_nome,p.numero_nota,p.nfe_numero,p.nf_numero].map(function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');}).join('|'); }
+async function intgBuscaLista(termos){
+  var falta=termos.filter(function(t){ return !intgPedidos.some(function(p){ return intgAlvo(p).split('|').indexOf(t)>=0; }); });
+  if(falta.length){
+    try{
+      var cid=ecomCid(), lst=falta.map(function(t){return encodeURIComponent(t);}).join(',');
+      var r=await dbSelect('intg_pedidos','company_id=eq.'+cid+'&or=(numero.in.('+lst+'),pedido_externo_id.in.('+lst+'),nf_numero.in.('+lst+'))&limit=500')||[];
+      r.forEach(function(x){ if(!intgPedidos.some(function(y){return y.id===x.id;})) intgPedidos.push(x); });
+    }catch(e){ console.warn('busca lista',e); }
+  }
+  var nao=termos.filter(function(t){ return !intgPedidos.some(function(p){ return intgAlvo(p).split('|').indexOf(t)>=0; }); });
+  showToast((termos.length-nao.length)+' de '+termos.length+' pedido(s) encontrado(s)'+(nao.length?' · não encontrados: '+nao.slice(0,8).join(', ')+(nao.length>8?'…':''):''),nao.length?'amber':'green');
+  intgRenderBody();
+}
+function intgMarcarEncontrados(){
+  var termos=intgTermos()||[], imp={}; intgImportaveis().forEach(function(p){imp[p.id]=1;});
+  var n=0; intgPedidos.forEach(function(p){ if(imp[p.id]&&termos.some(function(t){ return intgAlvo(p).split('|').indexOf(t)>=0; })){ _intgSel[p.id]=1; n++; } });
+  showToast(n+' pedido(s) marcado(s) para importar.','green'); intgRenderBody();
+}
 function intgBuscaSet(v){
   intgBusca=v;
   clearTimeout(window._intgBuscaT);
   window._intgBuscaT=setTimeout(function(){
     var q=String(intgBusca||'').trim();
+    var _tl=intgTermos(); if(_tl&&_tl.length){ intgBuscaLista(_tl); return; }   // v1.0.1073
     if(q.length>=4){
       var achou=intgPedidos.some(function(p){
         var alvo=[p.numero,p.pedido_externo_id,p.destinatario_nome,p.nf_numero]
@@ -55417,7 +55453,9 @@ function intgPanelPed(){
     if(!(intgPedFiltro==='todos'||st===intgPedFiltro))return false;
     if(intgCtl&&intgCtlCat(p)!==intgCtl)return false;
     if(intgSitFiltro&&intgSitDe(p)!==intgSitFiltro)return false;
-    if(_bq){
+    var _tl=intgTermos();
+    if(_tl&&_tl.length){ var _al=intgAlvo(p).split('|'); if(!_tl.some(function(t){return _al.indexOf(t)>=0;})) return false; }   // v1.0.1073: vários pedidos
+    else if(_bq){
       var alvo=[p.numero,p.pedido_externo_id,p.cliente_nome,p.numero_nota,p.nfe_numero]
         .map(function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');}).join('|');
       if(alvo.indexOf(_bq)<0)return false;
@@ -55439,18 +55477,20 @@ function intgPanelPed(){
       +'<td style="padding:6px 8px;text-align:center">'+chk+'</td>'
       +'<td style="padding:6px 8px">'+ecomEsc(p.numero||p.pedido_externo_id||'—')
         +(_nb?'<div style="font-size:10px;font-weight:700;color:#1d4ed8">na base \u00b7 E-'+String(_nb.numero_interno||0).padStart(6,'0')+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px">'+intgBadgePlataforma(p)+'</td>'
       +'<td style="padding:6px 8px">'+ecomFmtD(p.data_pedido)+'</td>'
       +'<td style="padding:6px 8px"><span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:'+sc.bg+';color:'+sc.cor+';border:1px solid '+sc.bd+'">'+ecomEsc(sc.lbl)+'</span></td>'
       +'<td style="padding:6px 8px">'+(its.length?mp+'/'+its.length:'—')+'</td>'
       +'<td style="padding:6px 8px">'+intgBadgePedido(p)+'</td>'
       +'<td style="padding:6px 8px;text-align:center">'+et+'</td>'
       +'<td style="padding:6px 8px;white-space:nowrap">'+act+'</td></tr>'
-      +(_intgAberto===p.id?('<tr><td colspan="8" style="padding:0">'+intgFichaHTML(p)+'</td></tr>'):'');
-  }).join('')||'<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido sincronizado.</td></tr>';
+      +(_intgAberto===p.id?('<tr><td colspan="9" style="padding:0">'+intgFichaHTML(p)+'</td></tr>'):'');
+  }).join('')||'<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido sincronizado.</td></tr>';
   var nImp=intgImportaveis().length;
   var busca='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">'
-    +'<input id="intg-busca" class="fi" value="'+ecomEsc(intgBusca||'')+'" placeholder="\ud83d\udd0d Buscar por n\u00famero do pedido, ID do marketplace, cliente ou NF\u2026" '
+    +'<input id="intg-busca" class="fi" value="'+ecomEsc(intgBusca||'')+'" placeholder="\ud83d\udd0d Pedido, ID do marketplace, cliente ou NF \u00b7 v\u00e1rios pedidos: separe com ; (ponto e v\u00edrgula)" '
     +'oninput="intgBuscaSet(this.value)" style="flex:1;font-size:13px">'
+    +(intgTermos()?('<button class="btn btn-sm btn-p" onclick="intgMarcarEncontrados()">\u2611 Marcar todos os encontrados</button>'):'')
     +(intgBusca?('<button class="btn btn-sm" onclick="intgBuscaSet(\'\')">Limpar</button>'):'')
     +'<span style="font-size:12px;color:var(--text3);white-space:nowrap">'+lista.length+' de '+intgPedidos.length+'</span>'
     +'</div>';
@@ -55464,7 +55504,7 @@ function intgPanelPed(){
     +'<span style="margin-left:auto"><button class="btn" style="font-size:12px" onclick="intgSync(null)">&#128260; Sincronizar tudo</button></span></div>'
     +lote
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<thead><tr style="text-align:left;color:var(--text2);background:var(--bg2)"><th style="padding:6px 8px;width:34px"></th><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Plataforma</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Situação Tiny</th><th style="padding:6px 8px">De-Para</th><th style="padding:6px 8px">Status VERUS</th><th style="padding:6px 8px">Etq.</th><th style="padding:6px 8px">Ações</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +(lista.length>_intgLimite?'<div style="text-align:center;padding:10px;border-top:1px solid var(--border)"><button class="btn btn-sm" onclick="_intgLimite+=150;intgRenderBody()">Mostrar mais '+Math.min(150,lista.length-_intgLimite)+' (mostrando '+_intgLimite+' de '+lista.length+')</button></div>':'')
     +'</div>';
 }
