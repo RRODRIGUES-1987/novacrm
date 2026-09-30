@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1074 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1075 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1074';
+const APP_VERSION='v1.0.1075';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51596,6 +51596,7 @@ function rEcomRelatorios(){
   if(ecomRelView==='expedicao') return ecomRelExpedicaoView();
   if(ecomRelView==='produtividade') return ecomRelProdutividadeView();
   if(ecomRelView==='laudo') return ecomLaudoView();
+  if(ecomRelView==='intgstatus') return ecomRelIntgStatusView();
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -51618,7 +51619,186 @@ function rEcomRelatorios(){
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Hora, operador e c&oacute;digo capturado em cada bip do volume. Laudo imprim&iacute;vel para contesta&ccedil;&atilde;o de coleta.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
+      +'<div onclick="ecomRelAbrir(\'intgstatus\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M7 7h13l-3-3"/><path d="M17 17H4l3 3"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Status pedidos integra&ccedil;&atilde;o</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Pedido a pedido: onde cada um est&aacute; no vai e vem com o Olist, a hora de cada passo e de quem &eacute; a vez.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
     +'</div></div>';
+}
+// ───── RELATÓRIO · STATUS PEDIDOS INTEGRAÇÃO (v1.0.1075) ─────
+// Sempre analítico: uma linha por pedido, com a hora de cada passo do vai e vem VERUS <-> Olist.
+var isiRows=[], isiFiltro='pend', isiBusca='', isiIntg='', _isiCarregando=false;
+var ISI_COLS='id,company_id,integracao_id,pedido_externo_id,numero,data_pedido,situacao_tiny,destinatario_nome,destinatario_doc,cep,endereco,cidade,uf,transportadora,tracking,itens,nf_numero,nf_id,nf_chave,nf_situacao,etiqueta_url,etiqueta_urls,etiqueta_arquivo,etiqueta_formato,etiqueta_em,status_importacao,erro_msg,pedido_verus_id,situacao_enviada,pronto_envio_em,agrupamento_id,alerta,created_at,updated_at';
+var ISI_GRUPOS={alerta:{lbl:'Alertas',bg:'var(--red-bg,#fdf1f1)',cor:'var(--red-text,#991b1b)'},
+  verus:{lbl:'Vez do VERUS',bg:'var(--amber-bg,#fef3c7)',cor:'var(--amber-text,#8a6d1a)'},
+  cliente:{lbl:'Vez do cliente',bg:'var(--bg2)',cor:'var(--text2)'},
+  oper:{lbl:'Em opera\u00e7\u00e3o',bg:'#eef4ff',cor:'#1d4ed8'},
+  fim:{lbl:'Conclu\u00eddos',bg:'#eef7f1',cor:'#166534'}};
+function isiDataIso(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function isiHora(d){ if(!d)return ''; var x=new Date(d); if(isNaN(x))return ''; return String(x.getDate()).padStart(2,'0')+'/'+String(x.getMonth()+1).padStart(2,'0')+' '+String(x.getHours()).padStart(2,'0')+':'+String(x.getMinutes()).padStart(2,'0'); }
+function isiParadoH(desde){ if(!desde)return null; var t=new Date(desde).getTime(); if(isNaN(t))return null; return Math.max(0,(Date.now()-t)/36e5); }
+function isiParadoTxt(h){ if(h==null)return '\u2014'; if(h<48) return h.toFixed(1).replace('.',',')+' h'; return Math.floor(h/24)+' d'; }
+function isiPed(p){ return p.pedido_verus_id?(ecomPedidos||[]).find(function(x){return x.id===p.pedido_verus_id;}):null; }
+function isiNumVerus(ped){ return ped?('E-'+String(ped.numero_interno||0).padStart(6,'0')):''; }
+// etapa atual: mesmas regras da consulta SQL de acompanhamento
+function isiEtapa(p){
+  var ped=isiPed(p), sit=intgSitDe(p), pst=ped?String(ped.status||''):'';
+  var st=p.status_importacao||'pendente', calc='';
+  try{ calc=intgStatusCalc(p); }catch(e){ calc=st; }
+  var temEtq=!!(p.etiqueta_url||p.etiqueta_arquivo);
+  var nfOk=!!p.nf_numero&&(!p.nf_situacao||['6','7'].indexOf(String(p.nf_situacao))>=0);
+  function R(k,g,lbl,desde){ return {k:k,g:g,lbl:lbl,desde:desde||null}; }
+  if(sit==='cancelado'){
+    if(ped&&['cancelado','expedido','carregado'].indexOf(pst)<0) return R('a_canc','alerta','Cancelado no Olist \u00b7 ativo no VERUS',p.updated_at);
+    return R('canc','fim','Cancelado');
+  }
+  if(st==='erro') return R('a_erro','alerta','Erro na importa\u00e7\u00e3o',p.updated_at);
+  if(calc==='manual') return R('planilha','fim','Entrou pela planilha');
+  if(calc==='historico') return R('hist','fim','Hist\u00f3rico');
+  if(sit==='enviado'||sit==='entregue'||pst==='expedido'||pst==='carregado') return R('concl','fim','Conclu\u00eddo');
+  if(!p.pedido_verus_id){
+    if(calc==='depara_pendente') return R('depara','verus','Resolver De-Para',p.created_at);
+    if(INTG_SIT[sit]&&INTG_SIT[sit].acao==='importar') return R('importar','verus','Aguardando importar',p.created_at);
+    return R('cli_olist','cliente','Aguardando o cliente ('+intgSitCfg(p).lbl+')',p.created_at);
+  }
+  if(!p.situacao_enviada&&sit==='aprovado') return R('podefat','verus','"Pode faturar" n\u00e3o enviado',(ped&&ped.created_at)||p.created_at);
+  if(!p.nf_numero) return R('nf','cliente','Aguardando NF',p.situacao_enviada_em||(ped&&ped.created_at)||p.updated_at);
+  if(!nfOk) return R('nfaut','cliente','NF em autoriza\u00e7\u00e3o',p.updated_at);
+  if(!temEtq){
+    if(!p.agrupamento_id) return R('agrup','verus','Aguardando agrupamento',p.updated_at);
+    return R('etq','verus','Aguardando etiqueta do Olist',p.updated_at);
+  }
+  return R('oper','oper','Em opera\u00e7\u00e3o \u00b7 '+(pst?pst.replace(/_/g,' '):'\u2014'));
+}
+function ecomRelIntgStatusView(){
+  var hoje=new Date(), ini=new Date(hoje.getTime()-30*864e5);
+  setTimeout(isiCarregar,30);
+  return '<div style="max-width:1280px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><button class="btn btn-sm" onclick="ecomRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Status pedidos integra&ccedil;&atilde;o</b>'
+      +'<button class="btn btn-sm" style="margin-left:auto" onclick="isiExcel()">Exportar Excel</button></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:12px">'
+      +'<div style="flex:1;min-width:240px"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Buscar pedido (v&aacute;rios: separe com ;)</div><input id="isi-busca" value="'+ecomEsc(isiBusca)+'" placeholder="n&ordm; Olist, E-006629, NF ou destinat&aacute;rio" style="width:100%" onkeydown="if(event.key===\'Enter\')isiCarregar()" oninput="isiBusca=this.value;isiRender()"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Sincronizados de</div><input type="date" id="isi-ini" value="'+isiDataIso(ini)+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">at&eacute;</div><input type="date" id="isi-fim" value="'+isiDataIso(hoje)+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Etapa</div><select id="isi-etapa" onchange="isiFiltro=this.value;isiRender()">'
+        +'<option value="pend">Pendentes</option><option value="todas">Todas</option><option value="alerta">Alertas</option><option value="verus">Vez do VERUS</option><option value="cliente">Vez do cliente</option><option value="oper">Em opera&ccedil;&atilde;o</option><option value="fim">Conclu&iacute;dos</option></select></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Integra&ccedil;&atilde;o</div><select id="isi-intg" onchange="isiIntg=this.value;isiRender()"><option value="">Todas</option></select></div>'
+      +'<button class="btn btn-p btn-sm" onclick="isiCarregar()">Atualizar</button>'
+    +'</div>'
+    +'<div id="isi-res"><div style="padding:24px;text-align:center;color:var(--text3)">Carregando...</div></div>'
+    +'</div>';
+}
+async function isiCarregar(){
+  var el=ge('isi-res'); if(!el||_isiCarregando)return;
+  _isiCarregando=true; el.innerHTML='<div style="padding:24px;text-align:center;color:var(--text3)">Carregando...</div>';
+  try{
+    var cid=ecomCid(); if(!cid){ el.innerHTML=''; return; }
+    if(!_ecomLoaded){ try{ await ecomLoadAll(); }catch(e){} }
+    if(!(intgList||[]).length) intgList=await dbSelect('integracoes','company_id=eq.'+cid+'&order=created_at.desc');
+    if(!(intgDepara||[]).length){ try{ intgDepara=await dbSelect('intg_depara_produtos','company_id=eq.'+cid); }catch(e){} }
+    var ini=(ge('isi-ini')||{}).value||'', fim=(ge('isi-fim')||{}).value||'';
+    var f='company_id=eq.'+cid, per=[];
+    if(ini) per.push('created_at.gte.'+ini+'T00:00:00-03:00');
+    if(fim){ var d=new Date(fim+'T12:00:00'); d.setDate(d.getDate()+1); per.push('created_at.lt.'+isiDataIso(d)+'T00:00:00-03:00'); }
+    if(per.length) f+='&and=('+per.join(',')+')';
+    // situacao_enviada_em/situacao_reenvios vêm da edge v7.31 (SQL); sem as colunas, carrega sem elas
+    var rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+',situacao_enviada_em,situacao_reenvios&order=created_at.desc');
+    if(!rows.length) rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+'&order=created_at.desc');
+    // busca fora do período: o pedido procurado aparece mesmo que tenha sincronizado antes
+    var termos=isiTermos();
+    if(termos.length){
+      var extra=[], vistos=new Set(rows.map(function(r){return r.id;}));
+      var idsVerus=(ecomPedidos||[]).filter(function(x){ var n=String(x.numero_interno||''); return termos.some(function(t){ var d=t.replace(/^e0*/,''); return d&&n===d; }); }).map(function(x){return x.id;});
+      for(var i=0;i<Math.min(termos.length,30);i++){
+        var t=encodeURIComponent('*'+termos[i]+'*');
+        try{ extra=extra.concat(await dbSelect('intg_pedidos','company_id=eq.'+cid+'&select='+ISI_COLS+'&or=(numero.ilike.'+t+',pedido_externo_id.ilike.'+t+',nf_numero.ilike.'+t+',destinatario_nome.ilike.'+t+')&limit=50')); }catch(e){}
+      }
+      if(idsVerus.length){ try{ extra=extra.concat(await dbSelect('intg_pedidos','company_id=eq.'+cid+'&select='+ISI_COLS+'&pedido_verus_id=in.('+idsVerus.slice(0,100).join(',')+')')); }catch(e){} }
+      extra.forEach(function(r){ if(!vistos.has(r.id)){ vistos.add(r.id); rows.push(r); } });
+    }
+    isiRows=rows;
+    var sel=ge('isi-intg');
+    if(sel) sel.innerHTML='<option value="">Todas</option>'+(intgList||[]).map(function(g){ return '<option value="'+g.id+'"'+(isiIntg===g.id?' selected':'')+'>'+ecomEsc(g.nome||'Integra\u00e7\u00e3o')+'</option>'; }).join('');
+    var se=ge('isi-etapa'); if(se) se.value=isiFiltro;
+    isiRender();
+  }catch(e){
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--red-text,#b91c1c)">Erro ao carregar: '+ecomEsc(e.message||String(e))+'</div>';
+  }finally{ _isiCarregando=false; }
+}
+function isiTermos(){ return String(isiBusca||'').split(/[;\n\t]+/).map(function(t){return t.trim().toLowerCase().replace(/[^a-z0-9]/g,'');}).filter(function(t){return t.length>=3;}); }
+function isiLinhas(){
+  var termos=isiTermos();
+  var L=(isiRows||[]).map(function(p){ var e=isiEtapa(p); return {p:p,ped:isiPed(p),e:e,h:e.desde?isiParadoH(e.desde):null}; });
+  if(isiIntg) L=L.filter(function(x){return x.p.integracao_id===isiIntg;});
+  if(termos.length) L=L.filter(function(x){
+    var ped=x.ped, alvo=[x.p.numero,x.p.pedido_externo_id,x.p.nf_numero,x.p.destinatario_nome,isiNumVerus(ped),ped&&ped.numero_interno].map(function(v){return String(v||'').toLowerCase().replace(/[^a-z0-9]/g,'');}).join('|');
+    return termos.some(function(t){ return alvo.indexOf(t)>=0 || (/^e?0*\d+$/.test(t)&&ped&&String(ped.numero_interno)===t.replace(/^e0*/,'')); });
+  });
+  return L;
+}
+function isiRender(){
+  var el=ge('isi-res'); if(!el)return;
+  var L=isiLinhas(), cont={alerta:0,verus:0,cliente:0,oper:0,fim:0};
+  L.forEach(function(x){ cont[x.e.g]=(cont[x.e.g]||0)+1; });
+  var V=L.filter(function(x){ if(isiFiltro==='todas')return true; if(isiFiltro==='pend')return ['alerta','verus','cliente'].indexOf(x.e.g)>=0; return x.e.g===isiFiltro; });
+  var _ord={alerta:0,verus:1,cliente:2,oper:3,fim:4};
+  V.sort(function(a,b){ var d=_ord[a.e.g]-_ord[b.e.g]; if(d&&(a.e.g==='alerta'||b.e.g==='alerta'))return d; if(a.h!=null||b.h!=null) return (b.h==null?-1:b.h)-(a.h==null?-1:a.h); return String(b.p.created_at||'').localeCompare(String(a.p.created_at||'')); });
+  var chips=Object.keys(ISI_GRUPOS).map(function(k){ var g=ISI_GRUPOS[k], on=isiFiltro===k;
+    return '<span onclick="isiFiltro=\''+(on?'pend':k)+'\';var s=ge(\'isi-etapa\');if(s)s.value=isiFiltro;isiRender()" style="cursor:pointer;font-size:12.5px;padding:5px 12px;border-radius:9px;background:'+g.bg+';color:'+g.cor+';border:1.5px solid '+(on?'currentColor':'transparent')+'">'+g.lbl+' <b>'+(cont[k]||0)+'</b></span>'; }).join('');
+  var MAX=500, cinza='color:var(--text3)';
+  var th=function(t,w,al){ return '<th style="padding:6px 8px;font-weight:600;font-size:11px;color:var(--text3);text-align:'+(al||'left')+(w?';width:'+w:'')+'">'+t+'</th>'; };
+  var rows=V.slice(0,MAX).map(function(x){
+    var p=x.p, ped=x.ped, e=x.e, g=ISI_GRUPOS[e.g];
+    var pf='<span style="'+cinza+'">\u2014</span>';
+    if(p.situacao_enviada) pf='<span style="color:#166534">\u2713 '+isiHora(p.situacao_enviada_em||(ped&&ped.created_at))+'</span>'+(Number(p.situacao_reenvios||0)>0?' <span title="reenvios autom\u00e1ticos" style="font-size:10px;color:var(--amber-text,#8a6d1a)">\u21bb'+p.situacao_reenvios+'</span>':'');
+    else if(ped) pf='<span style="color:var(--amber-text,#8a6d1a)">pendente</span>';
+    var temEtq=!!(p.etiqueta_url||p.etiqueta_arquivo);
+    var plat=intgPlataforma(p);
+    var alertaRow=e.g==='alerta';
+    return '<tr onclick="isiAbrir(\''+p.id+'\')" style="cursor:pointer;border-top:1px solid var(--border)'+(alertaRow?';background:var(--red-bg,#fdf1f1)':'')+'" onmouseover="this.style.outline=\'1px solid var(--accent)\'" onmouseout="this.style.outline=\'\'">'
+      +'<td style="padding:6px 8px"><div style="font-family:monospace;font-size:12px">'+ecomEsc(p.numero||p.pedido_externo_id||'\u2014')+'</div><div style="font-size:11px;color:var(--text3)">'+(isiNumVerus(ped)||'n\u00e3o importado')+(plat?' \u00b7 '+ecomEsc(plat.nome):'')+'</div></td>'
+      +'<td style="padding:6px 8px;white-space:nowrap">'+isiHora(p.created_at)+'</td>'
+      +'<td style="padding:6px 8px;white-space:nowrap">'+(ped?isiHora(ped.created_at):'<span style="'+cinza+'">\u2014</span>')+'</td>'
+      +'<td style="padding:6px 8px;white-space:nowrap">'+pf+'</td>'
+      +'<td style="padding:6px 8px">'+(p.nf_numero?ecomEsc(String(p.nf_numero)):'<span style="'+cinza+'">\u2014</span>')+'</td>'
+      +'<td style="padding:6px 8px">'+(p.agrupamento_id?ecomEsc(String(p.agrupamento_id)):'<span style="'+cinza+'">\u2014</span>')+'</td>'
+      +'<td style="padding:6px 8px;white-space:nowrap">'+(temEtq?'<span style="color:#166534">\u2713 '+isiHora(p.etiqueta_em)+'</span>':'<span style="'+cinza+'">\u2014</span>')+'</td>'
+      +'<td style="padding:6px 8px"><span style="font-size:11px;padding:2px 8px;border-radius:7px;background:'+g.bg+';color:'+g.cor+'">'+ecomEsc(e.lbl)+'</span>'+(p.alerta?'<div style="font-size:10.5px;color:var(--amber-text,#8a6d1a);margin-top:2px">'+ecomEsc(String(p.alerta).replace(/_/g,' '))+'</div>':'')+(e.k==='a_erro'&&p.erro_msg?'<div style="font-size:10.5px;color:var(--red-text,#991b1b);margin-top:2px">'+ecomEsc(String(p.erro_msg).slice(0,90))+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px;text-align:right;white-space:nowrap">'+isiParadoTxt(x.h)+'</td></tr>';
+  }).join('');
+  el.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center">'+chips+'<span style="font-size:12px;color:var(--text3);margin-left:auto">'+V.length+' pedido(s)'+(V.length>MAX?' \u00b7 mostrando '+MAX+' (o Excel leva todos)':'')+'</span></div>'
+    +'<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:980px">'
+    +'<thead><tr style="background:var(--bg2)">'+th('Pedido Olist \u00b7 VERUS','190px')+th('Sincronizado')+th('Importado')+th('Pode faturar')+th('NF')+th('Agrupamento')+th('Etiqueta')+th('Etapa atual','230px')+th('Parado','70px','right')+'</tr></thead>'
+    +'<tbody>'+(rows||'<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--text3)">Nenhum pedido nesse filtro.</td></tr>')+'</tbody></table></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Clique na linha para ver a linha do tempo do pedido. Pendentes ordenados do mais parado para o mais recente.</div>';
+}
+function isiAbrir(id){
+  var p=(isiRows||[]).find(function(x){return x.id===id;}); if(!p)return;
+  var ficha=''; try{ ficha=intgFichaHTML(p); }catch(e){ ficha='<div style="padding:16px;color:var(--text3)">N\u00e3o foi poss\u00edvel montar a ficha: '+ecomEsc(e.message||String(e))+'</div>'; }
+  var html='<div class="modal-overlay" id="ecom-modal" onclick="if(event.target===this)ecomModalClose()"><div class="modal" style="width:860px;max-width:96vw;max-height:92vh;overflow:auto;padding:0">'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:15px">Pedido '+ecomEsc(p.numero||p.pedido_externo_id||'')+'</b><button class="btn btn-sm" style="margin-left:auto" onclick="ecomModalClose()">Fechar</button></div>'
+    +ficha+'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+async function isiExcel(){
+  var L=isiLinhas().filter(function(x){ if(isiFiltro==='todas')return true; if(isiFiltro==='pend')return ['alerta','verus','cliente'].indexOf(x.e.g)>=0; return x.e.g===isiFiltro; });
+  if(!L.length){ showToast('Nada para exportar nesse filtro','amber'); return; }
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var dados=L.map(function(x){ var p=x.p, ped=x.ped, plat=intgPlataforma(p);
+      return {Pedido_Olist:p.numero||'', ID_Olist:p.pedido_externo_id||'', Pedido_VERUS:isiNumVerus(ped), Plataforma:plat?plat.nome:'', Destinatario:p.destinatario_nome||'',
+        Situacao_Olist:intgSitCfg(p).lbl, Status_VERUS:ped?String(ped.status||'').replace(/_/g,' '):'',
+        Sincronizado:isiHora(p.created_at), Importado:ped?isiHora(ped.created_at):'',
+        Pode_faturar:p.situacao_enviada?isiHora(p.situacao_enviada_em||(ped&&ped.created_at)):'', Reenvios:Number(p.situacao_reenvios||0)||'',
+        NF:p.nf_numero||'', Situacao_NF:p.nf_situacao||'', Agrupamento:p.agrupamento_id||'', Etiqueta:(p.etiqueta_url||p.etiqueta_arquivo)?isiHora(p.etiqueta_em)||'sim':'',
+        Separado_avisado:isiHora(p.pronto_envio_em), Etapa:x.e.lbl, Vez_de:ISI_GRUPOS[x.e.g].lbl,
+        Parado_h:x.h!=null?Number(x.h.toFixed(1)):'', Observacao:(x.e.k==='a_erro'?p.erro_msg:p.alerta)||''}; });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(dados),'Pedidos');
+    XLSX.writeFile(wb,'Status_pedidos_integracao_'+isiDataIso(new Date())+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
 }
 // ───── RELATÓRIO · RASTREABILIDADE DE LEITURAS (laudo de bips) ─────
 // Prova documental de que o volume foi lido: hora, operador e código capturado.
