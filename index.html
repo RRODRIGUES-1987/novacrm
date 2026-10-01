@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1076 | Gerado: 2026-09-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1077 | Gerado: 2026-10-01 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1076';
+const APP_VERSION='v1.0.1077';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -55862,7 +55862,8 @@ async function intgImportar(id){
     }
     await dbUpdate('intg_pedidos',id,{status_importacao:'importado',pedido_verus_id:ped.id});
     // "pode faturar": o VERUS devolve ao Tiny assim que o pedido entra
-    intgNotificarPodeFaturar(p);
+    if(window._intgLote){ (window._intgLoteNotif=window._intgLoteNotif||[]).push(p); }   // v1.0.1077: lote envia um por vez, depois
+    else intgNotificarPodeFaturar(p);
     if(!window._intgLote){ _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll(); intgRenderBody();
       showToast('Pedido importado para o E-commerce','green'); }
   }catch(e){
@@ -55873,15 +55874,19 @@ async function intgImportar(id){
 }
 // devolve ao Tiny a situação que libera o cliente a faturar
 async function intgNotificarPodeFaturar(p){
+  // v1.0.1077: devolve o resultado ({ok, skip, confirmado} ou {ok:false, error}) — a fila do lote usa
   try{
-    if(!p||!intgList.length)return;
+    if(!p||!intgList.length)return {ok:true,skip:'sem integra\u00e7\u00e3o'};
     // so faz sentido para pedido ainda APROVADO; se a automacao do cliente ja
     // avancou (preparando / faturado / pronto), mandar o 4 seria voltar um passo
-    if(intgSitDe(p)!=='aprovado')return;
-    await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
+    if(intgSitDe(p)!=='aprovado')return {ok:true,skip:'n\u00e3o est\u00e1 aprovado'};
+    var r=await fetch(SB_URL+'/functions/v1/sync-olist',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
       body:JSON.stringify({action:'situacao',integracao_id:p.integracao_id,intg_pedido_id:p.id,situacao:'preparando_envio'})});
-  }catch(e){ /* não bloqueia a importação */ }
+    var j=await r.json().catch(function(){return {};});
+    if(!r.ok&&!j.error) j.error='HTTP '+r.status;
+    return j;
+  }catch(e){ return {ok:false,error:String((e&&e.message)||e)}; }
 }
 // ───── IMPORTAÇÃO EM LOTE (prévia + execução) ─────
 function intgImportarLotePrev(){
@@ -55931,6 +55936,26 @@ async function intgImportarLoteExec(){
   try{ _ecomLoaded=false; _intgLoaded=false; await ecomLoadAll(); await intgLoadAll(); }
   catch(e){ console.warn('[importa\u00e7\u00e3o em lote] recarga',e); }
   try{ intgRenderBody(); }catch(e){ console.warn('[importa\u00e7\u00e3o em lote] tela',e); }
+  var fila=window._intgLoteNotif||[]; window._intgLoteNotif=[];
+  if(fila.length) intgNotificarFila(fila);   // v1.0.1077: "pode faturar" um por vez, em segundo plano
+}
+// v1.0.1077: avisa o Olist ("pode faturar") um pedido por vez. Em 01/10, 83 avisos simultâneos: só 34 passaram.
+// O que falhar aqui a sincronização cobre em até 10 min (edge v7.34). Mostra o andamento no cabeçalho da integração.
+async function intgNotificarFila(lista){
+  var conf=0, semConf=0, falha=0, pul=0, erros=[];
+  var st=function(txt){ var el=ge('intg-fila-status'); if(el) el.textContent=txt; };
+  var box=ge('intg-fila-status'); if(!box){ var hd=ge('intg-body'); if(hd){ box=document.createElement('div'); box.id='intg-fila-status'; box.style.cssText='font-size:12px;color:var(--text3);padding:4px 0'; hd.insertAdjacentElement('beforebegin',box); } }
+  for(var i=0;i<lista.length;i++){
+    st('Avisando o Olist ("pode faturar"): '+(i+1)+' de '+lista.length+' \u2014 '+(lista[i].numero||''));
+    var r=await intgNotificarPodeFaturar(lista[i]);
+    if(r&&r.ok&&!r.skip){ if(r.confirmado===false) semConf++; else conf++; }
+    else if(r&&r.ok&&r.skip){ pul++; }
+    else { falha++; erros.push((lista[i].numero||lista[i].id)+': '+((r&&r.error)||'?')); }
+  }
+  if(erros.length) console.warn('["pode faturar" em lote] falhas:',erros);
+  st('');
+  showToast('"Pode faturar": '+conf+' confirmado(s)'+(semConf?' \u00b7 '+semConf+' sem confirma\u00e7\u00e3o (a sincroniza\u00e7\u00e3o reenvia)':'')+(falha?' \u00b7 '+falha+' falha(s) \u2014 a sincroniza\u00e7\u00e3o cobre em at\u00e9 10 min':'')+(pul?' \u00b7 '+pul+' pulado(s)':''), falha?'amber':'green');
+  try{ _intgLoaded=false; await intgLoadAll(); intgRenderBody(); }catch(e){}
 }
 // ───── PEDIDO JÁ NA BASE (entrou pela planilha): a integração reconhece e vincula ─────
 function intgNormId(v){ return String(v||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase(); }
