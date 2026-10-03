@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1080 | Gerado: 2026-10-02 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1081 | Gerado: 2026-10-02 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1080';
+const APP_VERSION='v1.0.1081';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5396,25 +5396,237 @@ function buildCadastroForm(tipo, record, id=null){
     <div class="tabs" style="margin-bottom:14px">
       <button class="tab active" id="cli-tab-dados" onclick="switchClienteTab('dados')">Dados</button>
       <button class="tab" id="cli-tab-contatos" onclick="switchClienteTab('contatos')">Contatos</button>
+      <button class="tab" id="cli-tab-params" onclick="switchClienteTab('params')">Parâmetros</button>
     </div>
     <div id="cli-tab-dados-content">${dadosForm}</div>
     <div id="cli-tab-contatos-content" style="display:none">
       <div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div>
-    </div>`;
+    </div>
+    <div id="cli-tab-params-content" data-cli="${id}" style="display:none"></div>`;
   }
   return dadosForm;
 }
 
 function switchClienteTab(tab){
-  ['dados','contatos'].forEach(t=>{
+  ['dados','contatos','params'].forEach(t=>{
     const btn=ge('cli-tab-'+t);
     const content=ge('cli-tab-'+t+'-content');
     if(btn)btn.classList.toggle('active',t===tab);
     if(content)content.style.display=t===tab?'':'none';
   });
   const saveBtn=ge('msave');
-  if(saveBtn)saveBtn.style.display=tab==='contatos'?'none':'';
+  if(saveBtn)saveBtn.style.display=(tab==='contatos'||tab==='params')?'none':'';
+  // v1.0.1081: parâmetros do cliente (carrega ao abrir a aba)
+  if(tab==='params'){ const el=ge('cli-tab-params-content'); if(el&&el.dataset.cli) cparLoad(el.dataset.cli); }
 }
+// ───── PARÂMETROS DO CLIENTE (v1.0.1081): Operação · Etiquetas · Códigos de produto · Automações ─────
+var cparCli=null, cparSub='op', cparProds=[], cparCodigos=[], cparAutos=[], cparExecs=[], cparBusca='';
+var CPAR_PLATS=['TikTok','Shopee','Mercado Livre','Amazon','Magalu','Outros'];
+var CPAR_TIPOS_COD={fornecedor:'Código do fornecedor',mfg:'Código do fabricante (MFG P/N)',cliente_final:'Código do item no cliente final',barras:'Código de barras do fornecedor',outro:'Outro'};
+var CPAR_DIAS=[[1,'Seg'],[2,'Ter'],[3,'Qua'],[4,'Qui'],[5,'Sex'],[6,'Sáb'],[7,'Dom']];
+function cparEsc(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function cparP(){ return (cparCli&&cparCli.parametros)||{}; }
+async function cparLoad(clienteId){
+  var el=ge('cli-tab-params-content'); if(!el) return;
+  el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2)"><span class="spin"></span> Carregando...</div>';
+  try{
+    var r=await dbSelect('clientes','id=eq.'+clienteId+'&select=id,nome,parametros');
+    cparCli=(r&&r[0])||{id:clienteId,parametros:{}};
+    cparCli.parametros=cparCli.parametros||{};
+    var cid=company?.id;
+    cparProds=(wmsProdutos&&wmsProdutos.length)?wmsProdutos.filter(function(p){return p.cliente_id===clienteId;})
+      :(await dbSelectAll('wms_produtos','company_id=eq.'+cid+'&cliente_id=eq.'+clienteId+'&select=id,sku,descricao&order=sku.asc').catch(function(){return [];}));
+    cparCodigos=await dbSelectAll('wms_produto_depara','company_id=eq.'+cid+'&depositante_id=eq.'+clienteId+'&order=cod_fornecedor.asc').catch(function(){return [];});
+    cparAutos=await dbSelect('automacoes','company_id=eq.'+cid+'&cliente_id=eq.'+clienteId+'&order=ordem.asc,created_at.asc').catch(function(){return null;});
+    if(cparAutos&&cparAutos.length){
+      cparExecs=await dbSelect('automacoes_execucoes','automacao_id=in.('+cparAutos.map(function(a){return a.id;}).join(',')+')&order=em.desc&limit=40').catch(function(){return [];});
+    } else cparExecs=[];
+  }catch(e){ el.innerHTML='<div style="padding:16px;color:var(--red-text,#b91c1c)">Erro ao carregar: '+cparEsc(e.message||e)+'</div>'; return; }
+  cparRender();
+}
+function cparRender(){
+  var el=ge('cli-tab-params-content'); if(!el) return;
+  var tab=function(k,t){ var on=cparSub===k; return '<button class="tab'+(on?' active':'')+'" onclick="cparSub=\''+k+'\';cparRender()">'+t+'</button>'; };
+  var corpo=cparSub==='op'?cparOpHtml():cparSub==='etq'?cparEtqHtml():cparSub==='cod'?cparCodHtml():cparAutoHtml();
+  el.innerHTML='<div class="tabs" style="margin-bottom:12px">'+tab('op','Operação')+tab('etq','Etiquetas')+tab('cod','Códigos de produto')+tab('auto','Automações')+'</div>'+corpo;
+}
+function cparSel(id,val,opts){ return '<select class="fi" id="'+id+'">'+opts.map(function(o){return '<option value="'+o[0]+'"'+(String(val)===String(o[0])?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
+function cparOpHtml(){
+  var p=cparP().operacao||{};
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div class="fg"><label class="fl">Regra de saída padrão</label>'+cparSel('cpar-regra',p.regra_saida||'fifo',[['fifo','FIFO · entrada mais antiga'],['fefo','FEFO · vencimento mais próximo'],['lifo','LIFO · entrada mais recente'],['livre','LIVRE · menos visitas']])+'</div>'
+    +'<div class="fg"><label class="fl">Tipo de onda padrão</label>'+cparSel('cpar-onda',p.onda||'pedido',[['pedido','Pedido a pedido'],['onda','Onda (vários pedidos)']])+'</div>'
+    +'<div class="fg"><label class="fl">Pedido fora do múltiplo do produto</label>'+cparSel('cpar-multiplo',p.fora_multiplo||'avisar',[['bloquear','Bloquear a linha · atendimento trata com o cliente'],['avisar','Aceitar com aviso']])+'</div>'
+    +'<div class="fg"><label class="fl">Observações da operação</label><input class="fi" id="cpar-obs" value="'+cparEsc(p.obs||'')+'"></div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin:4px 0 10px">Horário de corte: definido em cada automação (aba Automações).</div>'
+    +'<button class="btn btn-p btn-sm" onclick="cparSalvarParams(\'operacao\')">Salvar operação</button>';
+}
+function cparEtqHtml(){
+  var p=cparP().etiquetas||{};
+  var chk=function(id,v,t,sub){ return '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border);cursor:pointer"><input type="checkbox" id="'+id+'"'+(v?' checked':'')+' style="margin-top:2px"><span><b style="font-weight:600">'+t+'</b><br><span style="font-size:11px;color:var(--text3)">'+sub+'</span></span></label>'; };
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div><div style="font-weight:600;margin-bottom:6px">Etiqueta de embarque (volume)</div>'
+      +'<div class="fg"><label class="fl">Modelo</label>'+cparSel('cpar-etq-modelo',p.modelo_embarque||'padrao_mk',[['padrao_mk','Padrão MK'],['casco_10x10','10×10 · CASCO (dados da NF de venda)']])+'</div>'
+      +'<div class="fg"><label class="fl">Dados da etiqueta vêm de</label>'+cparSel('cpar-etq-origem',p.origem||'pedido',[['pedido','Pedido importado'],['xml_nf_venda','XML da NF de venda do cliente (após a conferência)']])+'</div></div>'
+    +'<div><div style="font-weight:600;margin-bottom:6px">Etiquetas MK de identificação</div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-bottom:4px">O identificador da caixa e do pallet é sempre criado (controla saldo, endereço e rastreio). Aqui só se decide se a etiqueta MK é impressa.</div>'
+      +chk('cpar-etq-cx',p.imprimir_caixa!==false,'Imprimir etiqueta MK da caixa','Desligado: usa a etiqueta do fornecedor (ex.: QR da Amphenol na CASCO)')
+      +chk('cpar-etq-pl',p.imprimir_pallet!==false,'Imprimir etiqueta MK do pallet','Desligado: o pallet existe no sistema, sem etiqueta física')
+    +'</div></div>'
+    +'<button class="btn btn-p btn-sm" style="margin-top:10px" onclick="cparSalvarParams(\'etiquetas\')">Salvar etiquetas</button>';
+}
+async function cparSalvarParams(sec){
+  var p=Object.assign({},cparP());
+  if(sec==='operacao') p.operacao={regra_saida:ge('cpar-regra').value,onda:ge('cpar-onda').value,fora_multiplo:ge('cpar-multiplo').value,obs:ge('cpar-obs').value.trim()};
+  if(sec==='etiquetas') p.etiquetas={modelo_embarque:ge('cpar-etq-modelo').value,origem:ge('cpar-etq-origem').value,imprimir_caixa:!!ge('cpar-etq-cx').checked,imprimir_pallet:!!ge('cpar-etq-pl').checked};
+  try{ await dbUpdate('clientes',cparCli.id,{parametros:p}); cparCli.parametros=p;
+    var c=(clientes||[]).find(function(x){return x.id===cparCli.id;}); if(c) c.parametros=p;
+    showToast('Parâmetros salvos','green'); }
+  catch(e){ showToast('Erro ao salvar: '+(e.message||e),'red'); }
+}
+// ── códigos de produto ──
+function cparCodHtml(){
+  var prodById={}; cparProds.forEach(function(p){prodById[p.id]=p;});
+  var q=String(cparBusca||'').toLowerCase().trim();
+  var L=cparCodigos.filter(function(c){ if(!q) return true; var p=prodById[c.produto_id]||{}; return [c.cod_fornecedor,c.destinatario,p.sku,p.descricao].join('|').toLowerCase().indexOf(q)>=0; });
+  var cont={}; cparCodigos.forEach(function(c){ var t=c.tipo||'fornecedor'; cont[t]=(cont[t]||0)+1; });
+  var resumo=Object.keys(CPAR_TIPOS_COD).filter(function(t){return cont[t];}).map(function(t){return '<span style="font-size:11px;padding:2px 8px;border-radius:7px;background:var(--bg2);margin-right:4px">'+CPAR_TIPOS_COD[t]+': <b>'+cont[t]+'</b></span>';}).join('');
+  var rows=L.slice(0,300).map(function(c){ var p=prodById[c.produto_id]||{};
+    return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px;font-family:monospace;font-size:12px">'+cparEsc(c.cod_fornecedor)+'</td><td style="padding:6px 8px">'+cparEsc(CPAR_TIPOS_COD[c.tipo||'fornecedor']||c.tipo)+'</td><td style="padding:6px 8px">'+cparEsc(c.destinatario||'—')+'</td><td style="padding:6px 8px"><span style="font-family:monospace;font-size:12px">'+cparEsc(p.sku||'?')+'</span> <span style="color:var(--text3);font-size:11px">'+cparEsc(String(p.descricao||'').slice(0,40))+'</span></td><td style="padding:6px 8px;text-align:right"><button class="btn btn-sm" onclick="cparCodExcluir(\''+c.id+'\')">Excluir</button></td></tr>'; }).join('');
+  var dl='<datalist id="cpar-skus">'+cparProds.slice(0,3000).map(function(p){return '<option value="'+cparEsc(p.sku)+'">'+cparEsc(String(p.descricao||'').slice(0,50))+'</option>';}).join('')+'</datalist>';
+  return '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Códigos extras do produto. Todos são aceitos na bipagem e na conferência do XML de entrada; o código do item no cliente final vai na etiqueta de embarque daquele destinatário.</div>'
+    +'<div style="margin-bottom:8px">'+(resumo||'<span style="font-size:12px;color:var(--text3)">Nenhum código cadastrado.</span>')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1.2fr 1.4fr 1.1fr 1fr auto;gap:6px;align-items:end;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);margin-bottom:8px">'
+      +'<div><div class="fl">SKU do produto</div><input class="fi" id="cpar-cod-sku" list="cpar-skus" placeholder="ex.: 4070200237-00">'+dl+'</div>'
+      +'<div><div class="fl">Tipo</div>'+cparSel('cpar-cod-tipo','mfg',Object.keys(CPAR_TIPOS_COD).map(function(k){return [k,CPAR_TIPOS_COD[k]];}))+'</div>'
+      +'<div><div class="fl">Código</div><input class="fi" id="cpar-cod-cod" placeholder="ex.: AT04-2P-BM02"></div>'
+      +'<div><div class="fl">Destinatário (opcional)</div><input class="fi" id="cpar-cod-dest" placeholder="ex.: CISA"></div>'
+      +'<button class="btn btn-p btn-sm" onclick="cparCodAdd()">Adicionar</button></div>'
+    +'<input class="fi" placeholder="Buscar código, SKU, descrição ou destinatário" value="'+cparEsc(cparBusca)+'" oninput="cparBusca=this.value;cparRender();var i=document.querySelector(\'#cli-tab-params-content input[placeholder^=Buscar]\');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}" style="margin-bottom:6px">'
+    +'<div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:var(--bg2);text-align:left;font-size:11px;color:var(--text3)"><th style="padding:6px 8px">Código</th><th style="padding:6px 8px">Tipo</th><th style="padding:6px 8px">Destinatário</th><th style="padding:6px 8px">Produto</th><th></th></tr></thead><tbody>'
+    +(rows||'<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text3)">Nada encontrado.</td></tr>')+'</tbody></table></div>'
+    +(L.length>300?'<div style="font-size:11px;color:var(--text3);margin-top:4px">Mostrando 300 de '+L.length+'. Use a busca.</div>':'');
+}
+async function cparCodAdd(){
+  var sku=ge('cpar-cod-sku').value.trim(), tipo=ge('cpar-cod-tipo').value, cod=ge('cpar-cod-cod').value.trim(), dest=ge('cpar-cod-dest').value.trim();
+  var p=cparProds.find(function(x){return String(x.sku).trim().toUpperCase()===sku.toUpperCase();});
+  if(!p){ showToast('SKU não encontrado nos produtos deste cliente','amber'); return; }
+  if(!cod){ showToast('Informe o código','amber'); return; }
+  if(cparCodigos.some(function(c){return c.produto_id===p.id&&(c.tipo||'fornecedor')===tipo&&String(c.cod_fornecedor)===cod&&String(c.destinatario||'')===dest;})){ showToast('Esse código já está cadastrado','amber'); return; }
+  try{
+    var row=await dbInsert('wms_produto_depara',{company_id:company?.id,depositante_id:cparCli.id,cod_fornecedor:cod,descricao_fornecedor:p.descricao||null,produto_id:p.id,origem:'manual',tipo:tipo,destinatario:dest||null,owner_id:cu?.id||null});
+    row=Array.isArray(row)?row[0]:row; if(row){ cparCodigos.push(row); if(typeof wmsProdutoDepara!=='undefined') wmsProdutoDepara=[...(wmsProdutoDepara||[]),row]; }
+    showToast('Código adicionado','green'); cparRender();
+  }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function cparCodExcluir(id){
+  if(!confirm('Excluir este código do produto?')) return;
+  try{ await dbDelete('wms_produto_depara',id); cparCodigos=cparCodigos.filter(function(c){return c.id!==id;});
+    if(typeof wmsProdutoDepara!=='undefined') wmsProdutoDepara=(wmsProdutoDepara||[]).filter(function(c){return c.id!==id;});
+    cparRender(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+// ── automações ──
+function cparHora(d){ if(!d) return '—'; var x=new Date(d); return x.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+x.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+function cparAutoResumoFiltro(a){ var f=a.filtro||{}, t=[];
+  if((f.plataformas||[]).length) t.push(f.plataformas.join(', '));
+  if((f.transportadoras||[]).length) t.push(f.transportadoras.join(', '));
+  if((f.ufs||[]).length) t.push(f.ufs.join(' '));
+  return t.length?t.join(' · '):'todos os pedidos'; }
+function cparAutoResumoGatilho(a){ var t=[]; if(a.gatilho_volume) t.push('≥ '+a.gatilho_volume+' pedidos'); if((a.horarios||[]).length) t.push(a.horarios.join(' · ')); return t.join(' ou ')||'só manual'; }
+function cparAutoHtml(){
+  if(cparAutos===null) return '<div style="padding:16px;color:var(--text3)">As tabelas de automação ainda não existem no banco. Rode o SQL da v1.0.1081.</div>';
+  var ult={}; cparExecs.forEach(function(e){ if(!ult[e.automacao_id]) ult[e.automacao_id]=e; });
+  var linhas=cparAutos.map(function(a,i){ var e=ult[a.id];
+    var ue=e?(cparHora(e.em)+' · '+(e.resultado==='gerou'?(e.qtd_pedidos+' ped. em '+((e.os_ids||[]).length)+' OS'):(e.resultado==='erro'?'erro':'não gerou ('+cparEsc(e.motivo||'')+')'))):'—';
+    return '<tr style="border-top:1px solid var(--border)'+(a.ativo?'':';opacity:.55')+'">'
+      +'<td style="padding:7px 8px;white-space:nowrap"><button class="btn btn-sm" title="Subir" onclick="cparAutoMover(\''+a.id+'\',-1)"'+(i===0?' disabled':'')+'>↑</button> <button class="btn btn-sm" title="Descer" onclick="cparAutoMover(\''+a.id+'\',1)"'+(i===cparAutos.length-1?' disabled':'')+'>↓</button></td>'
+      +'<td style="padding:7px 8px"><b style="font-weight:600">'+cparEsc(a.nome)+'</b></td>'
+      +'<td style="padding:7px 8px">'+cparEsc(cparAutoResumoFiltro(a))+'</td>'
+      +'<td style="padding:7px 8px">'+cparEsc(cparAutoResumoGatilho(a))+'</td>'
+      +'<td style="padding:7px 8px;font-size:11.5px">'+ue+'</td>'
+      +'<td style="padding:7px 8px;white-space:nowrap;text-align:right"><button class="btn btn-sm" onclick="cparAutoAtivar(\''+a.id+'\','+(!a.ativo)+')">'+(a.ativo?'Desativar':'Ativar')+'</button> <button class="btn btn-sm" onclick="cparAutoExecutar(\''+a.id+'\')">Executar agora</button> <button class="btn btn-sm" onclick="cparAutoModal(\''+a.id+'\')">Editar</button></td></tr>'; }).join('');
+  var nomes={}; cparAutos.forEach(function(a){nomes[a.id]=a.nome;});
+  var hist=cparExecs.slice(0,15).map(function(e){ return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px solid var(--border);font-size:12px'+(e.resultado==='gerou'?'':';color:var(--text3)')+'"><span>'+cparHora(e.em)+' · '+cparEsc(nomes[e.automacao_id]||'')+' · '+cparEsc(e.gatilho||'')+'</span><span>'+(e.resultado==='gerou'?(e.qtd_pedidos+' pedido(s) · '+(e.os_ids||[]).length+' OS'):(e.resultado==='erro'?'<span style="color:var(--red-text,#b91c1c)">erro: '+cparEsc(e.motivo||'')+'</span>':'não gerou · '+cparEsc(e.motivo||'')))+'</span></div>'; }).join('');
+  return '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:var(--text3)">Geram OS sozinhas para os pedidos aptos (nota + etiqueta) dos lojistas do e-commerce ligados a este cliente. A OS sai com operador "Automação" e aparece na lista de OS. Um pedido entra só na primeira automação da lista que o cobrir.</div><button class="btn btn-p btn-sm" style="margin-left:auto;white-space:nowrap" onclick="cparAutoModal(null)">+ Nova automação</button></div>'
+    +'<div style="border:1px solid var(--border);border-radius:8px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px"><thead><tr style="background:var(--bg2);text-align:left;font-size:11px;color:var(--text3)"><th style="padding:6px 8px;width:70px">Ordem</th><th style="padding:6px 8px">Automação</th><th style="padding:6px 8px">Agrupa</th><th style="padding:6px 8px">Gera quando</th><th style="padding:6px 8px">Última execução</th><th></th></tr></thead><tbody>'
+    +(linhas||'<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text3)">Nenhuma automação.</td></tr>')+'</tbody></table></div>'
+    +'<div style="margin-top:12px;font-weight:600;font-size:13px">Histórico</div>'+(hist||'<div style="font-size:12px;color:var(--text3);padding:6px 0">Ainda sem execuções.</div>');
+}
+function cparAutoModal(id){
+  var a=id?cparAutos.find(function(x){return x.id===id;}):{nome:'',ativo:true,filtro:{},gatilho_volume:null,horarios:[],janela_ini:'07:00',janela_fim:'18:00',dias_semana:[1,2,3,4,5],params:{tipo_os:'pedido',min:5,max:60}};
+  var f=a.filtro||{}, pr=a.params||{};
+  var chipsPlat=CPAR_PLATS.map(function(p){ var on=(f.plataformas||[]).indexOf(p)>=0; return '<label style="display:inline-flex;gap:4px;align-items:center;margin:0 10px 6px 0;font-size:12.5px"><input type="checkbox" class="cpar-plat" value="'+p+'"'+(on?' checked':'')+'>'+p+'</label>'; }).join('');
+  var dias=CPAR_DIAS.map(function(d){ var on=(a.dias_semana||[]).indexOf(d[0])>=0; return '<label style="display:inline-flex;gap:3px;align-items:center;margin-right:8px;font-size:12.5px"><input type="checkbox" class="cpar-dia" value="'+d[0]+'"'+(on?' checked':'')+'>'+d[1]+'</label>'; }).join('');
+  var h='<div class="modal-overlay" id="cpar-auto-modal" style="z-index:10050" onclick="if(event.target===this)this.remove()"><div class="modal" style="width:620px;max-width:96vw;max-height:92vh;overflow:auto">'
+    +'<div style="font-weight:600;font-size:15px;margin-bottom:10px">'+(id?'Editar automação':'Nova automação')+'</div>'
+    +'<div class="fg"><label class="fl">Nome</label><input class="fi" id="cpar-a-nome" value="'+cparEsc(a.nome)+'" placeholder="ex.: TikTok · corte 14h"></div>'
+    +'<div class="fl" style="margin-top:4px">Agrupar pedidos de (vazio = todos)</div>'
+    +'<div style="padding:6px 0">'+chipsPlat+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div class="fg"><label class="fl">Transportadoras (separe por vírgula)</label><input class="fi" id="cpar-a-transp" value="'+cparEsc((f.transportadoras||[]).join(', '))+'" placeholder="ex.: Correios, J&T"></div>'
+      +'<div class="fg"><label class="fl">UFs (separe por vírgula)</label><input class="fi" id="cpar-a-ufs" value="'+cparEsc((f.ufs||[]).join(', '))+'" placeholder="ex.: SP, RJ, MG"></div>'
+      +'<div class="fg"><label class="fl">Gerar ao acumular (pedidos aptos)</label><input class="fi" type="number" min="0" id="cpar-a-vol" value="'+(a.gatilho_volume||'')+'" placeholder="vazio = não usa"></div>'
+      +'<div class="fg"><label class="fl">E nos horários de corte (HH:MM, vírgula)</label><input class="fi" id="cpar-a-hor" value="'+cparEsc((a.horarios||[]).join(', '))+'" placeholder="ex.: 10:00, 14:00"></div>'
+      +'<div class="fg"><label class="fl">Mínimo de pedidos por OS</label><input class="fi" type="number" min="1" id="cpar-a-min" value="'+(pr.min||5)+'"></div>'
+      +'<div class="fg"><label class="fl">Máximo de pedidos por OS</label><input class="fi" type="number" min="1" id="cpar-a-max" value="'+(pr.max||60)+'"></div>'
+      +'<div class="fg"><label class="fl">Tipo de OS</label>'+cparSel('cpar-a-tipo',pr.tipo_os||'pedido',[['pedido','Por pedido'],['sku','Consolidado SKU']])+'</div>'
+      +'<div class="fg"><label class="fl">Funciona das … às …</label><div style="display:flex;gap:6px"><input class="fi" type="time" id="cpar-a-ini" value="'+String(a.janela_ini||'07:00').slice(0,5)+'"><input class="fi" type="time" id="cpar-a-fim" value="'+String(a.janela_fim||'18:00').slice(0,5)+'"></div></div>'
+    +'</div>'
+    +'<div class="fl">Dias</div><div style="padding:4px 0 8px">'+dias+'</div>'
+    +'<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="cpar-a-ativo"'+(a.ativo!==false?' checked':'')+'> Ativa</label>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:6px">No horário de corte gera com o que estiver apto (respeitando o mínimo); fora dele, gera assim que acumular a quantidade. Acima do máximo, divide em mais de uma OS.</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">'+(id?'<button class="btn btn-sm" style="margin-right:auto;color:var(--red-text,#b91c1c)" onclick="cparAutoExcluir(\''+id+'\')">Excluir</button>':'')
+      +'<button class="btn btn-sm" onclick="ge(\'cpar-auto-modal\').remove()">Cancelar</button><button class="btn btn-p btn-sm" onclick="cparAutoSalvar('+(id?'\''+id+'\'':'null')+')">Salvar</button></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+}
+function cparLista(v,up){ return String(v||'').split(/[,;]+/).map(function(x){x=x.trim();return up?x.toUpperCase():x;}).filter(Boolean); }
+async function cparAutoSalvar(id){
+  var nome=ge('cpar-a-nome').value.trim(); if(!nome){ showToast('Dê um nome à automação','amber'); return; }
+  var hor=cparLista(ge('cpar-a-hor').value), ruim=hor.filter(function(h){return !/^([01]?\d|2[0-3]):[0-5]\d$/.test(h);});
+  if(ruim.length){ showToast('Horário inválido: '+ruim.join(', ')+' (use HH:MM)','amber'); return; }
+  hor=hor.map(function(h){ var p=h.split(':'); return String(p[0]).padStart(2,'0')+':'+p[1]; }).sort();
+  var vol=parseInt(ge('cpar-a-vol').value,10); vol=isNaN(vol)||vol<=0?null:vol;
+  if(!vol&&!hor.length){ showToast('Informe a quantidade, os horários ou os dois','amber'); return; }
+  var mn=Math.max(parseInt(ge('cpar-a-min').value,10)||1,1), mx=Math.max(parseInt(ge('cpar-a-max').value,10)||60,1);
+  if(mn>mx){ showToast('O mínimo não pode ser maior que o máximo','amber'); return; }
+  var dias=[...document.querySelectorAll('.cpar-dia:checked')].map(function(x){return +x.value;}); if(!dias.length){ showToast('Escolha ao menos um dia','amber'); return; }
+  var obj={nome:nome,ativo:!!ge('cpar-a-ativo').checked,
+    filtro:{plataformas:[...document.querySelectorAll('.cpar-plat:checked')].map(function(x){return x.value;}),transportadoras:cparLista(ge('cpar-a-transp').value),ufs:cparLista(ge('cpar-a-ufs').value,true)},
+    gatilho_volume:vol,horarios:hor,janela_ini:ge('cpar-a-ini').value||'07:00',janela_fim:ge('cpar-a-fim').value||'18:00',dias_semana:dias,
+    params:{tipo_os:ge('cpar-a-tipo').value,min:mn,max:mx},updated_at:new Date().toISOString()};
+  try{
+    if(id){ await dbUpdate('automacoes',id,obj); }
+    else{ obj.company_id=company?.id; obj.cliente_id=cparCli.id; obj.tipo='gerar_os'; obj.ordem=(cparAutos.reduce(function(m,a){return Math.max(m,a.ordem||0);},0))+1; await dbInsert('automacoes',obj); }
+    var m=ge('cpar-auto-modal'); if(m) m.remove();
+    showToast('Automação salva','green'); await cparLoad(cparCli.id); cparSub='auto'; cparRender();
+  }catch(e){ showToast('Erro ao salvar: '+(e.message||e),'red'); }
+}
+async function cparAutoExcluir(id){
+  if(!confirm('Excluir esta automação? O histórico dela também deixa de aparecer.')) return;
+  try{ await dbDelete('automacoes',id); var m=ge('cpar-auto-modal'); if(m) m.remove(); await cparLoad(cparCli.id); cparSub='auto'; cparRender(); }
+  catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function cparAutoAtivar(id,on){ try{ await dbUpdate('automacoes',id,{ativo:on,updated_at:new Date().toISOString()}); await cparLoad(cparCli.id); cparSub='auto'; cparRender(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); } }
+async function cparAutoMover(id,dir){
+  var i=cparAutos.findIndex(function(a){return a.id===id;}), j=i+dir; if(i<0||j<0||j>=cparAutos.length) return;
+  var L=cparAutos.slice(); var t=L[i]; L[i]=L[j]; L[j]=t;
+  try{ for(var k=0;k<L.length;k++){ if((L[k].ordem||0)!==k+1) await dbUpdate('automacoes',L[k].id,{ordem:k+1}); } await cparLoad(cparCli.id); cparSub='auto'; cparRender(); }
+  catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function cparAutoExecutar(id){
+  if(!confirm('Gerar agora a OS desta automação com todos os pedidos aptos do agrupador (ignora horário e quantidade)?')) return;
+  try{
+    var r=await sbFetch('POST','/rest/v1/rpc/verus_automacoes_rodar',{p_id:id,p_forcar:true},tok);
+    if(!r.ok) throw new Error((r.data&&r.data.message)||('HTTP '+r.status));
+    var x=(Array.isArray(r.data)?r.data[0]:r.data)||{};
+    showToast(x.erro?('Erro: '+x.erro):(x.gerou?(x.pedidos+' pedido(s) em '+((x.os||[]).length)+' OS'):'Nenhuma OS: '+(x.aptos||0)+' pedido(s) apto(s)'), x.erro?'red':(x.gerou?'green':'amber'));
+    if(typeof _ecomLoaded!=='undefined') _ecomLoaded=false;
+    await cparLoad(cparCli.id); cparSub='auto'; cparRender();
+  }catch(e){ showToast('Erro ao executar: '+(e.message||e),'red'); }
+}
+
 
 async function loadClienteContatos(clienteId){
   const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=created_at.asc`);
@@ -33614,6 +33826,8 @@ function wmsMultiploDe(produtoId,sku,clienteId){
 function wmsProdutoDe(produtoId,sku,clienteId){
   let p=produtoId?wmsProdutos.find(x=>x.id===produtoId):null;
   if(!p&&sku)p=wmsProdutos.find(x=>x.cliente_id===clienteId&&String(x.sku).trim()===String(sku).trim());
+  // v1.0.1081: código extra do produto (fabricante, fornecedor, cliente final, barras) cadastrado no de-para
+  if(!p&&sku&&clienteId){ const d=(wmsProdutoDepara||[]).find(x=>x.depositante_id===clienteId&&String(x.cod_fornecedor||'').trim().toUpperCase()===String(sku).trim().toUpperCase()); if(d)p=wmsProdutos.find(x=>x.id===d.produto_id); }
   return p||null;
 }
 
