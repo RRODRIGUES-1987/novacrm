@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1081 | Gerado: 2026-10-02 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1082 | Gerado: 2026-10-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1081';
+const APP_VERSION='v1.0.1082';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5419,6 +5419,26 @@ function switchClienteTab(tab){
   // v1.0.1081: parâmetros do cliente (carrega ao abrir a aba)
   if(tab==='params'){ const el=ge('cli-tab-params-content'); if(el&&el.dataset.cli) cparLoad(el.dataset.cli); }
 }
+// ───── LEITURA DA CAIXA (v1.0.1082) ─────
+// Configuração do depositante (clientes.parametros.leitura_caixa). Devolve null quando o cliente não usa leitura de caixa —
+// assim nenhum fluxo muda para quem não configurou.
+function wmsCaixaCfg(clienteId){
+  var c=(clientes||[]).find(function(x){return x.id===clienteId;}); var L=c&&c.parametros&&c.parametros.leitura_caixa;
+  return (L&&L.tipo==='separador'&&L.pos_id&&L.pos_qtd)?L:null;
+}
+// Lê o QR conforme a configuração: {id, qtd, lote, cod_forn, fab} ou {erro}
+function wmsCaixaLer(raw,cfg){
+  if(!cfg||cfg.tipo!=='separador') return {erro:'Cliente sem leitura de caixa configurada'};
+  var s=String(raw==null?'':raw).replace(/[\r\n\t]+/g,'').trim(); if(!s) return {erro:'Leitura vazia'};
+  var sep=cfg.separador||'&'; if(s.indexOf(sep)<0) return {erro:'Não é um QR de caixa (separador "'+sep+'" não encontrado)'};
+  var f=s.split(sep), g=function(pos){ return pos?String(f[pos-1]==null?'':f[pos-1]).trim():''; };
+  var id=g(cfg.pos_id), qs=g(cfg.pos_qtd).replace(',','.'), qtd=Number(qs);
+  if(!id) return {erro:'QR sem ID da caixa na posição '+cfg.pos_id};
+  if(!qs||!isFinite(qtd)||qtd<=0) return {erro:'Quantidade inválida na posição '+cfg.pos_qtd+(qs?' ("'+qs+'")':'')};
+  var lote=g(cfg.pos_lote)||null, fab=null;
+  if(lote&&cfg.fab_do_lote==='prefixo_aaaammdd'){ var m=lote.match(/^[A-Za-z]*(\d{4})(\d{2})(\d{2})/); if(m){ var d=new Date(+m[1],+m[2]-1,+m[3]); if(d.getFullYear()==+m[1]&&d.getMonth()==+m[2]-1&&d.getDate()==+m[3]&&d<=new Date()) fab=m[1]+'-'+m[2]+'-'+m[3]; } }
+  return {id:id, qtd:qtd, lote:lote, cod_forn:g(cfg.pos_cod_forn)||null, fab:fab, campos:f.length};
+}
 // ───── PARÂMETROS DO CLIENTE (v1.0.1081): Operação · Etiquetas · Códigos de produto · Automações ─────
 var cparCli=null, cparSub='op', cparProds=[], cparCodigos=[], cparAutos=[], cparExecs=[], cparBusca='';
 var CPAR_PLATS=['TikTok','Shopee','Mercado Livre','Amazon','Magalu','Outros'];
@@ -5474,12 +5494,57 @@ function cparEtqHtml(){
       +chk('cpar-etq-cx',p.imprimir_caixa!==false,'Imprimir etiqueta MK da caixa','Desligado: usa a etiqueta do fornecedor (ex.: QR da Amphenol na CASCO)')
       +chk('cpar-etq-pl',p.imprimir_pallet!==false,'Imprimir etiqueta MK do pallet','Desligado: o pallet existe no sistema, sem etiqueta física')
     +'</div></div>'
+    +cparLeituraHtml()
     +'<button class="btn btn-p btn-sm" style="margin-top:10px" onclick="cparSalvarParams(\'etiquetas\')">Salvar etiquetas</button>';
+}
+// v1.0.1082: leitura da etiqueta da caixa do fornecedor (QR com separador) — só vale para este depositante; padrão: nenhuma
+function cparLeituraHtml(){
+  var L=cparP().leitura_caixa||{}, on=L.tipo==='separador';
+  var num=function(id,v,ph){ return '<input class="fi" type="number" min="1" id="'+id+'" value="'+cparEsc(v==null?'':v)+'" placeholder="'+(ph||'')+'" oninput="cparLeituraTestar()">'; };
+  return '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">'
+    +'<div style="font-weight:600;margin-bottom:2px">Leitura da caixa (etiqueta do fornecedor)</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Liga o recebimento e a separação caixa a caixa só para este cliente. Com "Nenhuma", o cliente segue o fluxo padrão.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div class="fg"><label class="fl">Tipo de leitura</label><select class="fi" id="cpar-lc-tipo" onchange="cparLeituraToggle()"><option value="nenhuma"'+(on?'':' selected')+'>Nenhuma (padrão)</option><option value="separador"'+(on?' selected':'')+'>QR com separador</option></select></div>'
+      +'<div class="fg cpar-lc" style="'+(on?'':'display:none')+'"><label class="fl">Separador</label><input class="fi" id="cpar-lc-sep" maxlength="3" value="'+cparEsc(L.separador||'&')+'" oninput="cparLeituraTestar()" style="font-family:monospace"></div>'
+    +'</div>'
+    +'<div class="cpar-lc" style="'+(on?'':'display:none')+'">'
+      +'<div class="fl" style="margin-top:2px">Posição de cada campo no QR (1 = primeiro campo)</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'
+        +'<div class="fg"><label class="fl">ID da caixa *</label>'+num('cpar-lc-id',L.pos_id,'ex.: 1')+'</div>'
+        +'<div class="fg"><label class="fl">Quantidade *</label>'+num('cpar-lc-qtd',L.pos_qtd,'ex.: 4')+'</div>'
+        +'<div class="fg"><label class="fl">Lote</label>'+num('cpar-lc-lote',L.pos_lote,'ex.: 3')+'</div>'
+        +'<div class="fg"><label class="fl">Cód. do fornecedor</label>'+num('cpar-lc-forn',L.pos_cod_forn,'ex.: 2')+'</div>'
+      +'</div>'
+      +'<div class="fg"><label class="fl">Data de fabricação a partir do lote</label><select class="fi" id="cpar-lc-fab" onchange="cparLeituraTestar()"><option value=""'+(L.fab_do_lote?'':' selected')+'>Não extrair</option><option value="prefixo_aaaammdd"'+(L.fab_do_lote==='prefixo_aaaammdd'?' selected':'')+'>Letra + aaaammdd + sequência (ex.: S20260528246)</option></select></div>'
+      +'<div class="fg"><label class="fl">Testar: cole ou bipe um QR</label><input class="fi" id="cpar-lc-teste" style="font-family:monospace;font-size:12px" placeholder="9EE52D90AC0A48C7&1002512260147777&S20260528246&270&…" oninput="cparLeituraTestar()"></div>'
+      +'<div id="cpar-lc-res" style="font-size:12.5px"></div>'
+    +'</div></div>';
+}
+function cparLeituraLer(){
+  var t=ge('cpar-lc-tipo'); if(!t) return null;
+  if(t.value!=='separador') return {tipo:'nenhuma'};
+  var n=function(id){ var v=parseInt((ge(id)||{}).value,10); return v>0?v:null; };
+  return {tipo:'separador', separador:(ge('cpar-lc-sep').value||'&'), pos_id:n('cpar-lc-id'), pos_qtd:n('cpar-lc-qtd'), pos_lote:n('cpar-lc-lote'), pos_cod_forn:n('cpar-lc-forn'), fab_do_lote:(ge('cpar-lc-fab').value||'')};
+}
+function cparLeituraToggle(){ var on=ge('cpar-lc-tipo').value==='separador'; document.querySelectorAll('.cpar-lc').forEach(function(e){ e.style.display=on?'':'none'; }); cparLeituraTestar(); }
+function cparLeituraTestar(){
+  var el=ge('cpar-lc-res'); if(!el) return; var cfg=cparLeituraLer(), raw=(ge('cpar-lc-teste')||{}).value||'';
+  if(!cfg||cfg.tipo!=='separador'||!raw.trim()){ el.innerHTML=''; return; }
+  var r=wmsCaixaLer(raw,cfg);
+  el.innerHTML = r.erro ? '<div style="background:var(--red-bg);color:var(--red-text);border-radius:8px;padding:7px 10px">✗ '+cparEsc(r.erro)+'</div>'
+    : '<div style="background:var(--green-bg);color:var(--green-text);border-radius:8px;padding:7px 10px">✓ caixa <b>'+cparEsc(r.id)+'</b> · <b>'+r.qtd.toLocaleString('pt-BR')+' pç</b>'+(r.lote?' · lote '+cparEsc(r.lote):'')+(r.fab?' · fabricação '+new Date(r.fab+'T12:00').toLocaleDateString('pt-BR'):'')+(r.cod_forn?' · cód. fornecedor '+cparEsc(r.cod_forn):'')+'</div>';
 }
 async function cparSalvarParams(sec){
   var p=Object.assign({},cparP());
   if(sec==='operacao') p.operacao={regra_saida:ge('cpar-regra').value,onda:ge('cpar-onda').value,fora_multiplo:ge('cpar-multiplo').value,obs:ge('cpar-obs').value.trim()};
-  if(sec==='etiquetas') p.etiquetas={modelo_embarque:ge('cpar-etq-modelo').value,origem:ge('cpar-etq-origem').value,imprimir_caixa:!!ge('cpar-etq-cx').checked,imprimir_pallet:!!ge('cpar-etq-pl').checked};
+  if(sec==='etiquetas'){
+    p.etiquetas={modelo_embarque:ge('cpar-etq-modelo').value,origem:ge('cpar-etq-origem').value,imprimir_caixa:!!ge('cpar-etq-cx').checked,imprimir_pallet:!!ge('cpar-etq-pl').checked};
+    var lc=cparLeituraLer();   // v1.0.1082
+    if(lc&&lc.tipo==='separador'&&(!lc.pos_id||!lc.pos_qtd)){ showToast('Leitura da caixa: informe a posição do ID da caixa e da quantidade','amber'); return; }
+    if(lc&&lc.tipo==='separador'&&lc.pos_id===lc.pos_qtd){ showToast('Leitura da caixa: ID e quantidade não podem estar na mesma posição','amber'); return; }
+    if(lc) p.leitura_caixa=lc;
+  }
   try{ await dbUpdate('clientes',cparCli.id,{parametros:p}); cparCli.parametros=p;
     var c=(clientes||[]).find(function(x){return x.id===cparCli.id;}); if(c) c.parametros=p;
     showToast('Parâmetros salvos','green'); }
