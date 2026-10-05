@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1083 | Gerado: 2026-10-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1084 | Gerado: 2026-10-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1083';
+const APP_VERSION='v1.0.1084';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38930,8 +38930,144 @@ function wmsConfEntSaldoLinha(){
             validade:s.validade,saldo:s.saldo-noPallet};
   });
 }
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1084 · RECEBIMENTO POR CAIXA (depositante com "QR da caixa" na Entrada)
+//  Cada caixa bipada nasce como um pallet (RG) com o ID do QR como código externo.
+//  Usa os mesmos registros da conferência (tarefa, itens contra a nota, pallet, conteúdo,
+//  evento e leitura), sem passar pelas funções do fluxo padrão — nada muda para os demais.
+// ═══════════════════════════════════════════════════════════════════
+var _cxr={prod:null, sessao:[], stg:undefined, ocupado:false};
+function wmsConfEntCaixasAbrir(){
+  var ctx=_confEntCtx; if(!ctx)return;
+  _cxr={prod:null, sessao:[], stg:undefined, ocupado:false};
+  var r=(wmsRomaneios||[]).find(function(x){return x.id===ctx.romaneio_id;})||{};
+  var doc=(wmsEntradas||[]).find(function(x){return x.id===ctx.entrada_id;})||{};
+  var esc=function(v){return (v==null?'':String(v)).replace(/</g,'&lt;').replace(/"/g,'&quot;');};
+  var inner=''
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Romaneio <b style="font-family:monospace">'+esc(r.numero||'')+'</b> · Doc <b>#'+esc(doc.numero_entrada||'')+'</b> · recebimento caixa a caixa</div>'
+    +'<div style="border:1px solid var(--blue-text);background:var(--blue-bg);border-radius:9px;padding:11px">'
+    +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px">Bipe o <b>código de barras do produto</b> (CUST P/N) e depois o <b>QR de cada caixa</b>. Para caixas iguais seguidas, basta bipar os QRs.</div>'
+    +'<input id="cxr-cod" class="fi" autocomplete="off" placeholder="Código de barras do produto ou QR da caixa…" style="width:100%;font-family:monospace" '
+    +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();var v=this.value;this.value=\'\';wmsCxrBip(v);}">'
+    +'<div id="cxr-prod" style="font-size:12px;margin-top:8px;color:var(--text3)">Nenhum produto selecionado.</div>'
+    +'<div id="cxr-msg" style="margin-top:6px"></div>'
+    +'</div>'
+    +'<div id="cxr-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 0"></div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px"><div style="font-weight:600;font-size:13px">Caixas recebidas <span id="cxr-cont" style="color:var(--text3);font-weight:400">· 0</span></div><div id="cxr-etq" style="font-size:11px;color:var(--text3)"></div></div>'
+    +'<div id="cxr-lista" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:340px;overflow-y:auto"></div>';
+  portClose();
+  portModal('Receber caixas',inner,'wmsConfEntCaixasConcluir()',{saveLabel:'Concluir',width:'880px'});
+  wmsCxrRender();
+  setTimeout(function(){var b=ge('cxr-cod');if(b)b.focus();},40);
+}
+function wmsCxrMsg(ok,txt){
+  var el=ge('cxr-msg'); if(!el)return;
+  el.innerHTML='<div style="border-radius:8px;padding:7px 10px;font-size:12.5px;font-weight:600;background:'+(ok?'var(--green-bg)':'var(--red-bg)')+';color:'+(ok?'var(--green-text)':'var(--red-text)')+'">'+(ok?'✓ ':'✗ ')+txt+'</div>';
+  wmsBeep(!ok); if(navigator.vibrate)navigator.vibrate(ok?60:[80,50,80]);
+}
+function wmsCxrRender(){
+  var ctx=_confEntCtx; if(!ctx)return;
+  var esc=function(v){return (v==null?'':String(v)).replace(/</g,'&lt;');};
+  var saldo=wmsConfEntSaldoLinha();
+  var chips=ge('cxr-chips');
+  if(chips) chips.innerHTML=saldo.map(function(s){ var c=s.previsto-s.saldo, done=s.saldo<=0;
+    return '<span style="font-size:11px;padding:3px 9px;border-radius:999px;background:'+(done?'var(--green-bg)':'var(--bg2)')+';color:'+(done?'var(--green-text)':'var(--text2)')+';font-family:monospace">'+esc(s.sku)+' · '+c.toLocaleString('pt-BR')+' / '+Number(s.previsto).toLocaleString('pt-BR')+'</span>'; }).join('');
+  var p=_cxr.prod, pe=ge('cxr-prod');
+  if(pe){ if(p){ var at=saldo.find(function(s){return s.produto_id===p.produto_id;})||p;
+      pe.innerHTML='Produto: <b style="font-family:monospace;color:var(--text)">'+esc(p.sku)+'</b> · '+esc(p.descricao||'')+' · saldo na nota <b>'+Number(at.saldo).toLocaleString('pt-BR')+' '+esc(at.un&&at.un.unFiscal||'')+'</b>'+(at.converte?' · saco de '+at.un.fator:'');
+    } else pe.innerHTML='Nenhum produto selecionado.'; }
+  var lst=ge('cxr-lista'), cont=ge('cxr-cont');
+  if(cont) cont.textContent='· '+_cxr.sessao.length;
+  if(lst) lst.innerHTML=_cxr.sessao.map(function(c){
+    return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 12px;border-top:1px solid var(--border);font-size:12.5px">'
+      +'<span><b style="font-family:monospace">'+esc(c.rgFmt)+'</b> · <span style="font-family:monospace">'+esc(c.sku)+'</span> · cx '+esc(c.idCurto)+(c.lote?' · lote '+esc(c.lote):'')+'</span>'
+      +'<span style="white-space:nowrap">'+c.qtd.toLocaleString('pt-BR')+' pç'+(c.sacos!=null?' · '+c.sacos+' sc':'')+'</span></div>'; }).reverse().join('')
+    || '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Nenhuma caixa recebida ainda.</div>';
+  var cli=(clientes||[]).find(function(x){return x.id===ctx.dep;})||{}, im=((cli.parametros||{}).etiquetas||{}).imprimir_caixa;
+  var et=ge('cxr-etq'); if(et) et.textContent = im===false ? 'sem etiqueta MK (parâmetro do cliente)' : '';
+}
+async function wmsCxrBip(raw){
+  var ctx=_confEntCtx; if(!ctx)return;
+  var cfg=wmsCaixaCfg(ctx.dep); if(!cfg){ wmsCxrMsg(false,'Depositante sem QR da caixa configurado.'); return; }
+  var s=String(raw==null?'':raw).trim(); if(!s)return;
+  if(_cxr.ocupado){ wmsCxrMsg(false,'Aguarde: gravando a caixa anterior.'); return; }
+  var sep=cfg.separador||'&';
+  // ── código de barras do produto (sem separador) ──
+  if(s.indexOf(sep)<0){
+    var saldo=wmsConfEntSaldoLinha(), cod=wmsNorm(wmsLeituraLimpa(s));
+    var prod=wmsProdutoDe(null,s,ctx.dep);
+    var it=saldo.find(function(x){ return wmsNorm(x.sku)===cod || (prod&&x.produto_id===prod.id); });
+    if(!it){ wmsCxrMsg(false,'Produto '+s+' não pertence a esta nota.'); return; }
+    _cxr.prod=it; wmsCxrRender(); wmsCxrMsg(true,'Produto '+it.sku+' selecionado. Bipe os QRs das caixas.'); return;
+  }
+  // ── QR da caixa ──
+  var cx=wmsCaixaLer(s,cfg); if(cx.erro){ wmsCxrMsg(false,cx.erro); return; }
+  if(!_cxr.prod){ wmsCxrMsg(false,'Bipe primeiro o código de barras do produto (CUST P/N).'); return; }
+  var dupS=_cxr.sessao.find(function(c){return c.id===cx.id;});
+  var dupP=(wmsPallets||[]).find(function(p){return p.depositante_id===ctx.dep && p.codigo_externo===cx.id;});
+  if(dupS||dupP){ wmsCxrMsg(false,'Caixa '+cx.id+' já foi recebida ('+(dupS?dupS.rgFmt:wmsRgFmt(dupP.rg))+').'); return; }
+  var item=wmsConfEntSaldoLinha().find(function(x){return x.produto_id===_cxr.prod.produto_id;});
+  if(!item){ wmsCxrMsg(false,'Produto fora da nota.'); return; }
+  var u=item.un||wmsProdUnidades(item.produto_id);
+  var fator=item.converte?(Number(u.fator)||1):1;
+  if(item.converte && (cx.qtd % fator)!==0){ wmsCxrMsg(false,'Caixa '+cx.id+' com '+cx.qtd+' '+u.unFiscal+' não fecha em sacos de '+fator+'. Separe para conferência.'); return; }
+  if(cx.qtd>item.saldo){
+    if(ctx.cfg&&ctx.cfg.bloqueia){ wmsCxrMsg(false,'Caixa de '+cx.qtd+' passa do saldo da nota ('+item.saldo+' '+u.unFiscal+').'); return; }
+  }
+  _cxr.ocupado=true;
+  try{
+    var rg=await wmsCxrGravar(ctx,item,cx,u,fator);
+    _cxr.sessao.push({id:cx.id, idCurto:cx.id.length>10?cx.id.slice(0,4)+'…'+cx.id.slice(-4):cx.id, sku:item.sku, qtd:cx.qtd, sacos:item.converte?cx.qtd/fator:null, lote:cx.lote, rgFmt:wmsRgFmt(rg&&rg.rg)});
+    wmsCxrRender();
+    wmsCxrMsg(true,'Caixa '+(cx.id.length>10?cx.id.slice(0,4)+'…'+cx.id.slice(-4):cx.id)+' · '+item.sku+' · '+cx.qtd+' '+u.unFiscal+(item.converte?(' = '+(cx.qtd/fator)+' sacos de '+fator):'')+(cx.qtd>item.saldo?' · ⚠ acima do saldo (divergência registrada)':''));
+  }catch(e){
+    var m=String(e&&e.message||e);
+    wmsCxrMsg(false,/duplicate|unique|wms_pallets_dep_codext_ux/i.test(m)?('Caixa '+cx.id+' já foi recebida.'):('Erro ao gravar a caixa: '+m));
+  }finally{ _cxr.ocupado=false; var b=ge('cxr-cod'); if(b)b.focus(); }
+}
+async function wmsCxrGravar(ctx,item,cx,u,fator){
+  var cid=company?.id, agora=new Date().toISOString();
+  var r=(wmsRomaneios||[]).find(function(x){return x.id===ctx.romaneio_id;})||{};
+  var seq=wmsConfEntPallets(ctx.romaneio_id,null).reduce(function(m,p){return Math.max(m,p.sequencia||0);},0)+1;
+  var qtdControle=item.converte?cx.qtd/fator:cx.qtd;
+  var controles={}; if(cx.lote)controles['Lote']=cx.lote; if(cx.fab)controles['Fabricação']=cx.fab; controles['Caixa']=cx.id; if(cx.cod_forn)controles['Cód. fornecedor']=cx.cod_forn;
+  // 1) conferência: tarefa + item contra a nota (mesmos registros do fluxo padrão)
+  var cab=await dbInsert('wms_tarefas_conf_entrada',{company_id:cid,unit_id:r.unit_id||activeUnit||null,romaneio_id:ctx.romaneio_id,
+    evento_id:r.evento_id||null,entrada_id:ctx.entrada_id,etapa:1,sequencia:seq,tipo_volume:'pallet',status:'concluida',
+    conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,concluida_em:agora,owner_id:cu?.id||null});
+  var tar=Array.isArray(cab)?cab[0]:cab; if(!tar||!tar.id)throw new Error('conferência não registrada');
+  var li=await dbInsert('wms_conf_entrada_itens',{company_id:cid,pallet_id:tar.id,entrada_id:ctx.entrada_id,produto_id:item.produto_id,sku:item.sku,descricao:item.descricao,
+    quantidade:qtdControle,unidade:item.converte?u.unControle:u.unFiscal,qtd_fiscal:cx.qtd,fator_conversao:fator,controles:controles,owner_id:cu?.id||null});
+  wmsTarefasConfEnt=[tar].concat(wmsTarefasConfEnt||[]); wmsConfEntItens=(Array.isArray(li)?li:[li]).concat(wmsConfEntItens||[]);
+  // 2) a caixa nasce como pallet (RG), com o ID do QR como código externo
+  if(_cxr.stg===undefined){ try{ _cxr.stg=await wmsStageDaDescarga(ctx.romaneio_id); }catch(e){ _cxr.stg=null; } }
+  var stg=_cxr.stg, doca=(wmsDocas||[]).find(function(d){return d.id===r.doca_id;}), galpao=(doca&&doca.galpao)||null;
+  var tipoCx=(wmsPalletTipos||[]).find(function(t){return /caixa/i.test(t.nome||'');});
+  var pal=await dbInsert('wms_pallets',{company_id:cid,unit_id:r.unit_id||activeUnit||null,status:stg?'enderecado':'montado',galpao:(stg&&stg.galpao)||galpao,
+    endereco_id:stg?stg.id:null,endereco_codigo:stg?stg.codigo:null,pallet_tipo_id:(tipoCx&&tipoCx.id)||wmsPalletTipoDoProduto(item.produto_id)||null,
+    romaneio_id:ctx.romaneio_id,entrada_id:ctx.entrada_id,depositante_id:ctx.dep,conf_pallet_id:tar.id,conferente_id:cu?.id||null,
+    conferente_nome:profile?.full_name||cu?.email||null,nascido_em:agora,owner_id:cu?.id||null,codigo_externo:cx.id,qtd_original_controle:qtdControle});
+  var novo=Array.isArray(pal)?pal[0]:pal; if(!novo||!novo.id)throw new Error('RG da caixa não gerado');
+  var ct=await dbInsert('wms_pallet_conteudo',{company_id:cid,pallet_id:novo.id,produto_id:item.produto_id,sku:item.sku,descricao:item.descricao,
+    qtd_controle:qtdControle,un_controle:u.unControle,qtd_fiscal:cx.qtd,un_fiscal:u.unFiscal,fator_conversao:u.fator,
+    lote:cx.lote||null,data_fabricacao:cx.fab||null,validade:null,controles:controles,entrada_id:ctx.entrada_id,status:'ativo',owner_id:cu?.id||null});
+  wmsPallets=[novo].concat(wmsPallets||[]); wmsPalletConteudo=(Array.isArray(ct)?ct:[ct]).concat(wmsPalletConteudo||[]);
+  try{ await wmsPalletEvento(novo.id,'nascimento',{romaneio_id:ctx.romaneio_id,entrada_id:ctx.entrada_id,
+    endereco_para:stg?stg.codigo:(galpao?('DOCA · '+galpao):'DOCA'),observacao:'Caixa '+cx.id+' recebida por QR · '+cx.qtd+' '+u.unFiscal,
+    dados:{caixa:cx.id,lote:cx.lote,itens:[{sku:item.sku,qtd:qtdControle,un:u.unControle,lote:cx.lote}]}}); }catch(e){}
+  // 3) rastro do bipe (mesma trilha das demais etapas)
+  try{ await wmsRegistrarLeituras('recebimento',[{sku:item.sku,descricao:item.descricao,produto_id:item.produto_id,tipo_volume:'pallet',quantidade:cx.qtd}],{pallet_id:novo.id,modo:'bipe',unit_id:r.unit_id||null}); }catch(e){}
+  return novo;
+}
+async function wmsConfEntCaixasConcluir(){
+  try{ await wmsConfEntAtualizaStatus(); }catch(e){}
+  if(_cxr.sessao.length) showToast(_cxr.sessao.length+' caixa(s) recebida(s).','green');
+  wmsConfEntListaModal();
+}
+
 function wmsConfEntNovoPallet(){
   var ctx=_confEntCtx; if(!ctx)return;
+  if(wmsCaixaCfg(ctx.dep)) return wmsConfEntCaixasAbrir();   // v1.0.1084: só depositante com QR da caixa na Entrada
   var saldo=wmsConfEntSaldoLinha().filter(function(s){return s.saldo>0;});
   if(!saldo.length){showToast('Não há saldo a conferir.','amber');return;}
   _confEntPalletItens=[]; _confEntLinhaProd=null;
