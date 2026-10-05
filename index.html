@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1082 | Gerado: 2026-10-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1083 | Gerado: 2026-10-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1082';
+const APP_VERSION='v1.0.1083';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5424,7 +5424,7 @@ function switchClienteTab(tab){
 // assim nenhum fluxo muda para quem não configurou.
 function wmsCaixaCfg(clienteId){
   var c=(clientes||[]).find(function(x){return x.id===clienteId;}); var L=c&&c.parametros&&c.parametros.leitura_caixa;
-  return (L&&L.tipo==='separador'&&L.pos_id&&L.pos_qtd)?L:null;
+  return (c&&c.wms_conf_ent_usa_etiqueta===true&&L&&L.tipo==='separador'&&L.pos_id&&L.pos_qtd)?L:null;   // v1.0.1083: só com a etiqueta do cliente ligada na entrada
 }
 // Lê o QR conforme a configuração: {id, qtd, lote, cod_forn, fab} ou {erro}
 function wmsCaixaLer(raw,cfg){
@@ -5494,7 +5494,7 @@ function cparEtqHtml(){
       +chk('cpar-etq-cx',p.imprimir_caixa!==false,'Imprimir etiqueta MK da caixa','Desligado: usa a etiqueta do fornecedor (ex.: QR da Amphenol na CASCO)')
       +chk('cpar-etq-pl',p.imprimir_pallet!==false,'Imprimir etiqueta MK do pallet','Desligado: o pallet existe no sistema, sem etiqueta física')
     +'</div></div>'
-    +cparLeituraHtml()
+    +'<div style="margin-top:12px;font-size:11px;color:var(--text3)">A leitura da etiqueta da caixa do fornecedor fica em WMS → Configurar depositante → Entrada.</div>'
     +'<button class="btn btn-p btn-sm" style="margin-top:10px" onclick="cparSalvarParams(\'etiquetas\')">Salvar etiquetas</button>';
 }
 // v1.0.1082: leitura da etiqueta da caixa do fornecedor (QR com separador) — só vale para este depositante; padrão: nenhuma
@@ -5522,8 +5522,9 @@ function cparLeituraHtml(){
     +'</div></div>';
 }
 function cparLeituraLer(){
-  var t=ge('cpar-lc-tipo'); if(!t) return null;
-  if(t.value!=='separador') return {tipo:'nenhuma'};
+  var rT=document.querySelector('input[name="wms-ent-etiq-tipo"]:checked'), t=ge('cpar-lc-tipo');
+  var tipo=rT?rT.value:(t?t.value:null); if(!tipo) return null;
+  if(tipo!=='separador') return {tipo:'mascara'};
   var n=function(id){ var v=parseInt((ge(id)||{}).value,10); return v>0?v:null; };
   return {tipo:'separador', separador:(ge('cpar-lc-sep').value||'&'), pos_id:n('cpar-lc-id'), pos_qtd:n('cpar-lc-qtd'), pos_lote:n('cpar-lc-lote'), pos_cod_forn:n('cpar-lc-forn'), fab_do_lote:(ge('cpar-lc-fab').value||'')};
 }
@@ -5540,10 +5541,6 @@ async function cparSalvarParams(sec){
   if(sec==='operacao') p.operacao={regra_saida:ge('cpar-regra').value,onda:ge('cpar-onda').value,fora_multiplo:ge('cpar-multiplo').value,obs:ge('cpar-obs').value.trim()};
   if(sec==='etiquetas'){
     p.etiquetas={modelo_embarque:ge('cpar-etq-modelo').value,origem:ge('cpar-etq-origem').value,imprimir_caixa:!!ge('cpar-etq-cx').checked,imprimir_pallet:!!ge('cpar-etq-pl').checked};
-    var lc=cparLeituraLer();   // v1.0.1082
-    if(lc&&lc.tipo==='separador'&&(!lc.pos_id||!lc.pos_qtd)){ showToast('Leitura da caixa: informe a posição do ID da caixa e da quantidade','amber'); return; }
-    if(lc&&lc.tipo==='separador'&&lc.pos_id===lc.pos_qtd){ showToast('Leitura da caixa: ID e quantidade não podem estar na mesma posição','amber'); return; }
-    if(lc) p.leitura_caixa=lc;
   }
   try{ await dbUpdate('clientes',cparCli.id,{parametros:p}); cparCli.parametros=p;
     var c=(clientes||[]).find(function(x){return x.id===cparCli.id;}); if(c) c.parametros=p;
@@ -41763,14 +41760,51 @@ function wmsCliTabEntrada(c){
         <div style="font-size:11px;color:var(--text3)">Bipa a etiqueta do próprio depositante (máscara cadastrada no produto). <b>Rotina de leitura da entrada em desenvolvimento.</b></div></div>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="wms-conf-ent-usa-etiq" ${usaEtiqE?'checked':''} onchange="wmsToggleUsaEtiqEnt('${c.id}',this)" style="width:16px;height:16px;cursor:pointer"><span style="font-size:12px;color:var(--text2)">Sim</span></label>
       </div>
-      <div id="wms-conf-ent-etiq-faltando" style="margin-top:10px">${usaEtiqE?wmsEtiqFaltandoHtml(c.id):''}</div>
+      <div id="wms-ent-etiq-tipo-box" style="margin-top:10px;${usaEtiqE?'':'display:none'}">${wmsEntEtiqTipoHtml(c)}</div>
+      <div id="wms-conf-ent-etiq-faltando" style="margin-top:10px">${(usaEtiqE&&!wmsEntEtiqEhQr(c))?wmsEtiqFaltandoHtml(c.id):''}</div>
     </div>
     ${wmsOpContratoSecao(c,'entrada')}
   </div>`;
 }
 function wmsToggleUsaEtiqEnt(clienteId,el){
+  const on=!!(el&&el.checked), tb=ge('wms-ent-etiq-tipo-box'); if(tb) tb.style.display=on?'':'none';
+  const qr=on&&(document.querySelector('input[name="wms-ent-etiq-tipo"]:checked')||{}).value==='separador';
   const box=ge('wms-conf-ent-etiq-faltando');
-  if(box)box.innerHTML=el&&el.checked?wmsEtiqFaltandoHtml(clienteId):'';
+  if(box)box.innerHTML=(on&&!qr)?wmsEtiqFaltandoHtml(clienteId):'';
+}
+// v1.0.1083: tipo da etiqueta do cliente na ENTRADA. Sem nada gravado = máscara por produto (comportamento de sempre).
+function wmsEntEtiqEhQr(c){ const L=c&&c.parametros&&c.parametros.leitura_caixa; return !!(L&&L.tipo==='separador'); }
+function wmsEntEtiqTipoHtml(c){
+  const L=(c.parametros&&c.parametros.leitura_caixa)||{}, qr=L.tipo==='separador';
+  const opt=(v,t,d,on)=>`<label style="display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border:1.5px solid ${on?'var(--blue-text)':'var(--border)'};border-radius:9px;cursor:pointer;background:${on?'var(--blue-bg)':'var(--bg)'}">
+      <input type="radio" name="wms-ent-etiq-tipo" value="${v}" ${on?'checked':''} onchange="wmsEntEtiqTipoTroca('${c.id}')" style="margin-top:2px">
+      <div><div style="font-weight:600;font-size:12px">${t}</div><div style="font-size:10.5px;color:var(--text3)">${d}</div></div></label>`;
+  const num=(id,v,ph)=>`<input class="fi" type="number" min="1" id="${id}" value="${v==null?'':v}" placeholder="${ph}" oninput="cparLeituraTestar()">`;
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${opt('mascara','Máscara por produto','Posição e valor cadastrados em cada produto (modelo atual).',!qr)}
+      ${opt('separador','QR da caixa (separador)','Uma regra para todos os produtos; o produto vem do código de barras.',qr)}
+    </div>
+    <div id="wms-ent-qr-cfg" style="margin-top:10px;${qr?'':'display:none'}">
+      <div style="display:grid;grid-template-columns:80px repeat(4,1fr) 1.6fr;gap:8px">
+        <div class="fg"><label class="fl">Separador</label><input class="fi" id="cpar-lc-sep" maxlength="3" value="${(L.separador||'&').replace(/"/g,'&quot;')}" oninput="cparLeituraTestar()" style="font-family:monospace"></div>
+        <div class="fg"><label class="fl">ID da caixa *</label>${num('cpar-lc-id',L.pos_id,'ex.: 1')}</div>
+        <div class="fg"><label class="fl">Quantidade *</label>${num('cpar-lc-qtd',L.pos_qtd,'ex.: 4')}</div>
+        <div class="fg"><label class="fl">Lote</label>${num('cpar-lc-lote',L.pos_lote,'ex.: 3')}</div>
+        <div class="fg"><label class="fl">Cód. fornecedor</label>${num('cpar-lc-forn',L.pos_cod_forn,'ex.: 2')}</div>
+        <div class="fg"><label class="fl">Fabricação</label><select class="fi" id="cpar-lc-fab" onchange="cparLeituraTestar()"><option value="" ${L.fab_do_lote?'':'selected'}>Não extrair</option><option value="prefixo_aaaammdd" ${L.fab_do_lote==='prefixo_aaaammdd'?'selected':''}>Do lote (letra + aaaammdd)</option></select></div>
+      </div>
+      <div class="fg"><label class="fl">Testar: cole ou bipe um QR</label><input class="fi" id="cpar-lc-teste" style="font-family:monospace;font-size:12px" placeholder="9EE52D90AC0A48C7&1002512260147777&S20260528246&270&…" oninput="cparLeituraTestar()"></div>
+      <div id="cpar-lc-res" style="font-size:12.5px"></div>
+      <div style="font-size:10.5px;color:var(--text3);margin-top:6px">Com o QR da caixa, nada precisa ser cadastrado produto a produto. Vale só para este depositante.</div>
+    </div>`;
+}
+function wmsEntEtiqTipoTroca(clienteId){
+  const qr=(document.querySelector('input[name="wms-ent-etiq-tipo"]:checked')||{}).value==='separador';
+  const cfg=ge('wms-ent-qr-cfg'); if(cfg) cfg.style.display=qr?'':'none';
+  const box=ge('wms-conf-ent-etiq-faltando'), on=!!(ge('wms-conf-ent-usa-etiq')||{}).checked;
+  if(box) box.innerHTML=(on&&!qr)?wmsEtiqFaltandoHtml(clienteId):'';
+  document.querySelectorAll('input[name="wms-ent-etiq-tipo"]').forEach(r=>{ const l=r.closest('label'); if(l){ l.style.borderColor=r.checked?'var(--blue-text)':'var(--border)'; l.style.background=r.checked?'var(--blue-bg)':'var(--bg)'; } });
+  cparLeituraTestar();
 }
 function wmsCliTabSaida(c){
   const modo=c.wms_modo_separacao||'manual';
@@ -41983,6 +42017,16 @@ async function wmsSalvarParamCliente(clienteId){
   const cmE=document.querySelector('input[name="wms-conf-ent-modo"]:checked'); if(cmE)dados.wms_conf_ent_modo=cmE.value;
   const csE=document.querySelector('input[name="wms-conf-ent-sugestao"]:checked'); if(csE)dados.wms_conf_ent_sugestao=csE.value;
   const etqE=ge('wms-conf-ent-usa-etiq'); if(etqE)dados.wms_conf_ent_usa_etiqueta=etqE.checked;
+  { // v1.0.1083: tipo da etiqueta do cliente na entrada
+    const rT=document.querySelector('input[name="wms-ent-etiq-tipo"]:checked');
+    const cAt=clientes.find(x=>x.id===clienteId)||{}, tinha=!!(cAt.parametros&&cAt.parametros.leitura_caixa);
+    if(rT && (rT.value==='separador' || tinha)){
+      const lc=cparLeituraLer();
+      if(lc&&lc.tipo==='separador'&&(!lc.pos_id||!lc.pos_qtd)){ showToast('QR da caixa: informe a posição do ID da caixa e da quantidade','amber'); return; }
+      if(lc&&lc.tipo==='separador'&&lc.pos_id===lc.pos_qtd){ showToast('QR da caixa: ID e quantidade não podem estar na mesma posição','amber'); return; }
+      if(lc) dados.parametros=Object.assign({},cAt.parametros||{},{leitura_caixa:lc});
+    }
+  }
   const bloqE=ge('wms-conf-ent-bloqueia-div'); if(bloqE)dados.wms_conf_ent_bloqueia_div=bloqE.checked;
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
   // aba Saída: documentos de saída
