@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1085 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1086 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1085';
+const APP_VERSION='v1.0.1086';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54769,6 +54769,9 @@ function ecomCodLimpo(code){
   // 2) Order ID da Shopee embutido (AAMMDD + 8 alfanuméricos)
   var s2=U.match(/\d{6}[A-Z0-9]{8}/);
   if(s2 && U.length>20) return s2[0];
+  // 2b) QR do Mercado Envios: {"id":"48164306497","t":"lm",...} — o envio vem no campo id (v1.0.1086)
+  var mq=c.match(/"id"\s*:\s*"?(\d{10,12})"?/i);
+  if(mq) return mq[1];
   // 3) ID do Mercado Livre (Venda/Pack, 16 dígitos começando por 2000)
   var ml=U.match(/2000\d{12}/);
   if(ml && U.length>20) return ml[0];
@@ -55173,8 +55176,15 @@ async function ecomEtiqImportFile(input){
         // ancorar no "Despachar:" — senao pega o Pack ID partido ou o ID do vendedor.
         var _colado=(tc.items||[]).map(function(it){return it.str;}).join('');
         if(!/PACK\s*ID|VENDA:\s*2000|DESPACHAR:/i.test(_colado))return;
-        var m=_colado.match(/Despachar:[^0-9]*\d{1,2}\/[a-z\u00e7]+(\d{11})/i);
+        // v1.0.1086: o layout novo traz "Despachar quarta 7/out" SEM os dois-pontos
+        var m=_colado.match(/Despachar:?[^0-9]*\d{1,2}\/[a-z\u00e7]+\.?(\d{11})(?!\d)/i);
         if(m) mlTrk=m[1];
+        // reserva: numero de envio isolado de 11 digitos comecando com 4 (o Pack ID tem 16 e o ID do vendedor 10)
+        if(!mlTrk){
+          // no texto colado o envio gruda no hub ("XSP2"+"48164306497"); com espaços entre os itens ele fica isolado
+          var _esp=(tc.items||[]).map(function(it){return it.str;}).join(' ');
+          var m2=_esp.match(/(?:^|\D)(4\d{5}\s?\d{5})(?!\d)/); if(m2) mlTrk=m2[1].replace(/\s/g,'');
+        }
       })();
       // Shopee: "ID pedido: 260906A5GWQFVU" — 6 dígitos + 8 alfanuméricos
       if(!oid){
@@ -55377,15 +55387,17 @@ async function ecomEtiqImportFile(input){
           // corrige tambem o que ficou gravado com o Order ID no lugar do
           // codigo dos Correios (quando a extracao falhava)
           var _ehCor=/^[A-Z]{2}\d{9}BR$/i.test(String(_trkAgora||''));
+          var _ehMlEnv=/^4\d{10}$/.test(String(_trkAgora||''));   // v1.0.1086: numero do envio do Mercado Envios
           var _semTrk=(_exist||[]).filter(function(e){
             if(!e.tracking) return true;
+            if(_ehMlEnv && /^2000\d{12}$/.test(String(e.tracking))) return true;   // estava com o Pack ID no lugar do envio
             return _ehCor && !/^[A-Z]{2}\d{9}BR$/i.test(String(e.tracking));
           });
           for(var _st=0;_st<_semTrk.length;_st++){
             await dbUpdate('ecom_etiquetas',_semTrk[_st].id,{tracking:_trkAgora});
             _trkFix++;
           }
-          if(!ped.tracking || (_ehCor && !/^[A-Z]{2}\d{9}BR$/i.test(String(ped.tracking)))){
+          if(!ped.tracking || (_ehCor && !/^[A-Z]{2}\d{9}BR$/i.test(String(ped.tracking))) || (_ehMlEnv && /^2000\d{12}$/.test(String(ped.tracking)))){
             await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkAgora}); ped.tracking=_trkAgora; }
         }catch(_eu){ console.warn('atualiza tracking',_eu); }
       } else { _trkVazio++; }
@@ -55397,11 +55409,11 @@ async function ecomEtiqImportFile(input){
         // Rede de segurança: sem nenhum deles, grava o ORDER ID — o leitor
         // também devolve o order id embutido, e o normalizador o extrai.
         var _trkFinal=(trk||jt||cor||mlTrk||oid||null);
-        _diagTrk.push({pg:pg, trk:_trkFinal||'SEM TRACKING', via:(trk?'xpress':jt?'j&t':cor?'correios':oid?'order id':'-'),
+        _diagTrk.push({pg:pg, trk:_trkFinal||'SEM TRACKING', via:(trk?'xpress':jt?'j&t':cor?'correios':mlTrk?'mercado envios':oid?'order id':'-'),
                        amostra:String(txt||'').replace(/\s+/g,' ').slice(0,90)});
         await dbInsert('ecom_etiquetas',await ecomEtiqLinha(cid,ped.id,{company_id:cid,pedido_id:ped.id,order_id:oid||null,tracking:_trkFinal,nfe_chave:chNfe||null,pagina:pg},img,pg));   // v1.0.1033: imagem no armazenamento
         // sobe o tracking para o pedido, para o romaneio e o checkout acharem
-        try{ if(_trkFinal && !ped.tracking){ await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkFinal}); ped.tracking=_trkFinal; } }catch(_et){}
+        try{ if(_trkFinal && (!ped.tracking || (/^4\d{10}$/.test(String(_trkFinal)) && /^2000\d{12}$/.test(String(ped.tracking))))){ await dbUpdate('ecom_pedidos',ped.id,{tracking:_trkFinal}); ped.tracking=_trkFinal; } }catch(_et){}
         for(var _kb=0;_kb<_antB.length;_kb++){ try{ await dbDelete('ecom_etiquetas',_antB[_kb].id); }catch(e){} }
       }catch(_ei){
         // falha ao gravar: mantém a etiqueta anterior, conta como pendente e
