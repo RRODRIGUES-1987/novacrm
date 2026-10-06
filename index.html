@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1086 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1088 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1086';
+const APP_VERSION='v1.0.1088';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4171,7 +4171,9 @@ async function armzPdf(){
 function cpMedPendente(cp){ return !!(cp&&cp.depende_medicao&&cp.medicao_status!=='aprovada'); }
 function cpMedHtmlForm(ed){
   var on=!!(ed&&ed.depende_medicao);
-  var us=(profiles||[]).filter(function(p){return !p.company_id||!company||p.company_id===company.id;}).sort(function(a,b){return String(a.full_name||a.email).localeCompare(String(b.full_name||b.email));});
+  // v1.0.1088: só usuários marcados como "Aprova medição"; o indicado atual continua na lista para não travar títulos antigos
+  var _atual=ed&&ed.medicao_aprovador_id;
+  var us=(profiles||[]).filter(function(p){return (!p.company_id||!company||p.company_id===company.id) && (p.aprova_medicao===true || p.id===_atual);}).sort(function(a,b){return String(a.full_name||a.email).localeCompare(String(b.full_name||b.email));});
   return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:10px 0">'
     +'<label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;cursor:pointer"><input type="checkbox" id="cp-med" style="width:auto"'+(on?' checked':'')+' onchange="ge(\'cp-med-box\').style.display=this.checked?\'grid\':\'none\'"> 📐 Depende de medição</label>'
     +'<div id="cp-med-box" style="display:'+(on?'grid':'none')+';grid-template-columns:150px 1fr;gap:8px 10px;margin-top:10px;align-items:start;font-size:12.5px">'
@@ -25968,6 +25970,13 @@ function openModal(mode,id=null){
       </div>
       <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
+          <input type="checkbox" id="fu-aprova-medicao" ${p?.aprova_medicao?'checked':''} style="width:16px;height:16px;accent-color:#0A2540">
+          <div>
+            <div style="font-size:13px;font-weight:600">Aprova medição (contas a pagar)</div>
+            <div style="font-size:11px;color:var(--text2)">Aparece na lista "Quem aprova a medição" ao lançar um título</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px">
           <input type="checkbox" id="fu-aprovacao" ${p?.realiza_aprovacao?'checked':''} style="width:16px;height:16px;accent-color:#0A2540" onchange="toggleAssinaturaUpload(this.checked)">
           <div>
             <div style="font-size:13px;font-weight:600">Realiza aprovação</div>
@@ -27036,6 +27045,7 @@ async function saveModal(){
         return;
       }
       const obj={full_name:name,role,company_id:comp||null,realiza_aprovacao:realizaAprovacao,pessoa_id:_pessoaVinc};
+      if(ge('fu-aprova-medicao')) obj.aprova_medicao=!!ge('fu-aprova-medicao').checked;   // v1.0.1088
       if(email)obj.email=email;
 
       // Processa upload de assinatura se houver
@@ -51216,6 +51226,9 @@ async function ecomImportConfirm(){
       'Nada foi gravado.'],'red');
     return;
   }
+  // v1.0.1087: número do Mercado Livre (16 dígitos) cortado pelo Excel em 15 — não bloqueia: a etiqueta completa depois
+  var _ml15=ecomImportRows.pedidos.map(function(p){return String(p.numero_pedido||'').trim();}).filter(function(n){return /^2000\d{11}$/.test(n);});
+  if(_ml15.length) showToast(_ml15.length+' pedido(s) do Mercado Livre com o número cortado pelo Excel (15 dígitos, ex.: '+_ml15[0]+'). A importação segue; a etiqueta completa o número. Prefira o arquivo original, sem abrir no Excel.','amber');
   // gêmeo por proximidade: o arredondado fica a menos de 1.000 do número verdadeiro
   var _n18Base=[]; ecomPedidosDoLojista().forEach(function(p){ var n=String(p.numero_pedido||'').trim(); if(/^\d{18}$/.test(n)&&p.status!=='cancelado') _n18Base.push(p); });
   function _gemeoProximo(n){ try{ var b=BigInt(n); for(var k=0;k<_n18Base.length;k++){ var bn=String(_n18Base[k].numero_pedido).trim(); if(bn===n) continue; var d=BigInt(bn)-b; if(d<0n)d=-d; if(d<1000n) return _n18Base[k]; } }catch(e){} return null; }
@@ -55109,6 +55122,18 @@ async function ecomEtiqImportFile(input){
     await ecomLoadPdfjs();
     var buf=await f.arrayBuffer();
     var pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
+    // v1.0.1087: PDF convertido em imagem (ex.: passou pelo iLovePDF) não tem texto — nada casaria e tudo iria para o vínculo manual
+    { var _amostra=Math.min(3,pdf.numPages), _comTexto=0;
+      for(var _ap=1;_ap<=_amostra;_ap++){ try{ var _tca=await (await pdf.getPage(_ap)).getTextContent(); if(_tca.items.map(function(i){return i.str;}).join('').replace(/\s/g,'').length>20) _comTexto++; }catch(_ae){} }
+      if(_amostra && !_comTexto){
+        ecomProgFechar();
+        ecomAvisoCentro('Este PDF não tem texto legível',[
+          'As páginas deste arquivo são <b>imagem</b> — provavelmente ele passou por um conversor (iLovePDF, "salvar como imagem", impressão para PDF).',
+          'Sem texto, o VERUS não consegue ler o número do pedido, a NF nem o rastreio, e o vínculo manual gravaria a etiqueta <b>sem o rastreio</b> (o bipe do checkout não casaria).',
+          '<b>Importe o arquivo original, como baixado do marketplace.</b> Para conferir antes: no leitor de PDF, tente selecionar o número do pedido; se der para selecionar, o arquivo serve.',
+          'Nada foi gravado.'],'red');
+        return;
+      } }
     var casadas=0, orfas=0, liberados=0, diag=[], porNome=0, porNfe=0, reimp=0;
     _ecomEtiqPend=[];
     // pedidos ja com etiqueta -> ficam fora do pool do fallback por nome
@@ -55257,7 +55282,7 @@ async function ecomEtiqImportFile(input){
         });
         if(ped)viaTxt='order id';
         // v1.0.1062: pedido com número provisório (15 dígitos) e etiqueta com os 18: completa o número do pedido
-        if(ped && /^\d{15}$/.test(String(ped.numero_pedido||'')) && /^\d{18}$/.test(oidN) && oidN.indexOf(String(ped.numero_pedido))===0){
+        if(ped && /^\d{15}$/.test(String(ped.numero_pedido||'')) && /^\d{16,18}$/.test(oidN) && oidN.indexOf(String(ped.numero_pedido))===0){   // v1.0.1087: também Mercado Livre (16)
           try{ await dbUpdate('ecom_pedidos',ped.id,{numero_pedido:oidN}); ped.numero_pedido=oidN; }catch(_cn){}
         }
       }
