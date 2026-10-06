@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1088 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1089 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1088';
+const APP_VERSION='v1.0.1089';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4191,6 +4191,24 @@ function cpMedBadge(cp){
   return '<div style="font-size:11.5px;margin-top:4px;padding:3px 8px;border-radius:6px;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);display:inline-block">📐 Depende de medição · aguardando <b>'+ecomEsc(quem)+'</b> · "'+ecomEsc(d)+'"</div>';
 }
 function cpMedMinhas(){ return (contasPagar||[]).filter(function(cp){ return cp.depende_medicao&&cp.medicao_aprovador_id===(cu&&cu.id)&&(cp.medicao_status||'pendente')==='pendente'&&['pago','pago_atraso','cancelado','baixado'].indexOf(cp.status)<0; }); }
+// v1.0.1089: as medições indicadas para o usuário logado são carregadas à parte (só as dele) e juntadas ao contasPagar
+var _cpMedCarregado=false, _cpMedCarregando=false;
+async function cpMedCarregar(){
+  if(_cpMedCarregando||!cu||!company) return; _cpMedCarregando=true;
+  try{
+    var r=await dbSelect('contas_pagar','company_id=eq.'+company.id+'&depende_medicao=eq.true&medicao_aprovador_id=eq.'+cu.id+'&order=vencimento.asc')||[];
+    var ids={}; (contasPagar||[]).forEach(function(x){ ids[x.id]=1; });
+    var novos=r.filter(function(x){ return !ids[x.id]; });
+    if(novos.length) contasPagar=(contasPagar||[]).concat(novos);
+    _cpMedCarregado=true;
+    if(novos.length && curPage==='dashboard' && typeof render==='function') render();
+  }catch(e){ console.warn('medições',e); _cpMedCarregado=true; }
+  finally{ _cpMedCarregando=false; }
+}
+function rCPMedicoesPagina(){
+  if(!_cpMedCarregado){ cpMedCarregar().then(function(){ if(curPage==='cp-medicoes'){ var c=ge('content'); if(c) c.innerHTML=rCPMedicoesPagina(); } }); }
+  return '<div style="max-width:960px">'+rCPMedicoes()+'</div>';
+}
 function rCPMedicoes(){
   var l=cpMedMinhas().sort(function(a,b){return String(a.vencimento||'').localeCompare(String(b.vencimento||''));});
   var h='<div style="margin-bottom:12px"><div style="font-size:15px;font-weight:600">Medições para aprovar</div><div style="font-size:11px;color:var(--text3)">Títulos que só podem ser aprovados para pagamento depois da sua aprovação da medição</div></div>';
@@ -4210,7 +4228,7 @@ async function cpMedDecidir(id,aprovar){
   if(!aprovar){ motivo=prompt('Motivo da recusa da medição:',''); if(motivo==null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
   else if(!confirm('Aprovar a medição de '+(cp.fornecedor_nome||'')+' ('+fmtV(cp.valor)+')?')) return;
   var up={medicao_status:aprovar?'aprovada':'recusada',medicao_aprovada_por:cu&&cu.id,medicao_aprovada_em:new Date().toISOString(),medicao_motivo:motivo};
-  try{ await dbUpdate('contas_pagar',id,up); Object.assign(cp,up); showToast(aprovar?'Medição aprovada.':'Medição recusada.','green'); cpSetTab('medicoes'); }catch(e){ alert('Erro: '+(e.message||e)); }
+  try{ await dbUpdate('contas_pagar',id,up); Object.assign(cp,up); showToast(aprovar?'Medição aprovada.':'Medição recusada.','green'); if(curPage==='cp-medicoes'){ var _c=ge('content'); if(_c) _c.innerHTML=rCPMedicoesPagina(); } else cpSetTab('medicoes'); }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 
 function canDo(tela, acao){
@@ -4573,7 +4591,7 @@ function pg(p){
   // Guard: não navega para páginas sem permissão
   const _pgRole=profile?.role||'vendedor';
   if(_pgRole!=='admin'&&_pgRole!=='portaria'){
-    if(p!=='dashboard'&&!canDo(p,'pode_ver')){
+    if(p!=='dashboard'&&p!=='cp-medicoes'&&!canDo(p,'pode_ver')){   // v1.0.1089: medições do próprio usuário não dependem do acesso ao financeiro
       return; // silencioso — sidebar já esconde o link
     }
   }
@@ -4731,6 +4749,7 @@ function render(){
   else if(curPage==='tabelas-tarifarias')c.innerHTML=rTabelasTarifarias();
   else if(curPage==='contas-receber'){c.innerHTML=rContasReceber();initContasReceber();}
   else if(curPage==='contas-pagar'){c.innerHTML=rContasPagar();initContasPagar();}
+  else if(curPage==='cp-medicoes'){c.innerHTML=rCPMedicoesPagina();}   // v1.0.1089
   else if(curPage==='controladoria'){ctrlView=ctrlPend||'hub';ctrlPend=null;c.innerHTML=rControladoria();initControladoria();}
   else if(curPage==='fin-relatorios'){finRelView='hub';c.innerHTML=rFinRelatorios();initFinRelatorios();}
   else if(curPage==='orcamento'){c.innerHTML=rOrcamento();initOrcamento();}
@@ -12402,9 +12421,14 @@ function avisosCalcular(){
   var add=function(modulo,n,sing,plur,pag,acao){ if(n>0)A.push({modulo:modulo,n:n,texto:n===1?sing:plur.replace('{n}',n),pg:pag,acao:acao||null}); };
   var money=function(v){ try{ return fmtV(v); }catch(e){ return 'R$ '+Math.round(v); } };
 
+  // v1.0.1089: medição indicada para o usuário aparece para ELE, com ou sem acesso ao financeiro
+  try{ if(!_cpMedCarregado) cpMedCarregar();
+    var _nMedA=cpMedMinhas().length;
+    if(_nMedA) add('Financeiro',_nMedA,'1 medição aguardando sua aprovação','{n} medições aguardando sua aprovação',
+      pode('contas-pagar')?'contas-pagar':'cp-medicoes', pode('contas-pagar')?"cpTab='medicoes';pg('contas-pagar')":"pg('cp-medicoes')");
+  }catch(_ma){}
   try{ if(pode('contas-pagar')){
-    var cpAprov=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status==='pendente'&&(x.aprovacao_status||'')==='pendente';}).length;
-    try{ var _nMedA=cpMedMinhas().length; if(_nMedA) add('Financeiro',_nMedA,'1 medição aguardando sua aprovação','{n} medições aguardando sua aprovação','contas-pagar',"cpTab='medicoes';pg('contas-pagar')"); }catch(_ma){}   // v1.0.1072
+    var cpAprov=(contasPagar||[]).filter(function(x){return x.company_id===cid&&x.status==='pendente'&&(x.aprovacao_status||'')==='pendente';}).length;   // v1.0.1072
     add('Financeiro',cpAprov,'1 título a pagar aguardando sua aprovação','{n} títulos a pagar aguardando sua aprovação','contas-pagar');
     // contas a PAGAR em atraso — mesma regua da lista (aprovado, nao pago, vencimento efetivo)
     var cpVenc=(contasPagar||[]).filter(function(x){ return x.company_id===cid && typeof cpLisStatusDe==='function' && cpLisStatusDe(x)==='vencido'; });
