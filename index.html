@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1091 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1092 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1091';
+const APP_VERSION='v1.0.1092';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36191,8 +36191,127 @@ async function invNumerarNovas(novas,byEnd,cega){
   for(var m=0;m<invFichas.length;m++){ if(fmap[invFichas[m].id]!=null) invFichas[m].folha=fmap[invFichas[m].id]; }
 }
 /* ---------- gerar fichas ---------- */
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1092 · INVENTÁRIO DE DEPOSITANTE com base no saldo do WMS
+//  A aba Importação fica bloqueada; na aba Fichas o escopo é aplicado
+//  sobre os RGs ativos do depositante, lidos na hora de gerar.
+// ═══════════════════════════════════════════════════════════════════
+function invEhWms(inv){ inv=inv||invData; return !!(inv && inv.tipo==='depositante' && inv.cliente_id); }
+var _invWms={inv:null,rows:null}, _invSelEnds={}, _invSelF={q:'',rua:'',nivel:''}, _invSelAgg=null, _invSelQtd={}, _invSelTem={};
+async function invWmsCarregar(force){
+  if(!invData) return [];
+  if(!force && _invWms.inv===invSel && _invWms.rows) return _invWms.rows;
+  var cid=company&&company.id, dep=invData.cliente_id;
+  var pals=await invFetchAll('wms_pallets','company_id=eq.'+cid+'&depositante_id=eq.'+dep+'&endereco_id=not.is.null&select=id,rg,endereco_id,endereco_codigo,status')||[];
+  pals=pals.filter(function(p){ return !/expedid|cancel|estorn|baixad|consum|vazio|inativ|carregad/i.test(String(p.status||'')); });
+  var ends=await invFetchAll('wms_enderecos','company_id=eq.'+cid+'&select=id,codigo,rua,posicao,nivel,galpao')||[];
+  var em={}; ends.forEach(function(e){ em[e.id]=e; });
+  var pm={}; pals.forEach(function(p){ pm[p.id]=p; });
+  var ids=pals.map(function(p){return p.id;}), rows=[];
+  for(var i=0;i<ids.length;i+=150){
+    var ct=await invFetchAll('wms_pallet_conteudo','pallet_id=in.('+ids.slice(i,i+150).join(',')+')&status=eq.ativo&select=pallet_id,sku,descricao,qtd_fiscal,un_fiscal,controles')||[];
+    ct.forEach(function(c){
+      var p=pm[c.pallet_id]; if(!p) return; var e=em[p.endereco_id]||{};
+      var ant=c.controles&&(c.controles['RG anterior']||c.controles.rg_anterior);
+      rows.push({endereco:String(e.codigo||p.endereco_codigo||'').toUpperCase(), cod_produto:c.sku, desc_produto:c.descricao||null,
+        referencia:(typeof wmsRgFmt==='function'?wmsRgFmt(p.rg):('RG '+p.rg))+(ant?(' · ant. '+ant):''),
+        qtde_saldo:Number(c.qtd_fiscal)||0, qtde_empenhada:0, unidade_medida:c.un_fiscal||null,
+        _rua:e.rua||null, _nivel:e.nivel||null, _posicao:e.posicao||null, _dep:e.galpao||null});
+    });
+  }
+  rows=rows.filter(function(r){ return r.endereco; });
+  _invWms={inv:invSel,rows:rows};
+  return rows;
+}
+async function invSelRender(){
+  var box=ge('inv-ger-valor'); if(!box) return;
+  box.innerHTML='<span style="font-size:12px;color:var(--text3)">Lendo o saldo do WMS…</span>';
+  try{
+    var rows=await invWmsCarregar();
+    _invSelAgg=invAggBase(rows,null); _invSelQtd={};
+    rows.forEach(function(r){ _invSelQtd[r.endereco]=(_invSelQtd[r.endereco]||0)+1; });
+    var ex=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=endereco')||[];
+    _invSelTem={}; ex.forEach(function(f){ _invSelTem[String(f.endereco||'').toUpperCase()]=1; });
+    invSelLista();
+  }catch(e){ box.innerHTML='<span style="font-size:12px;color:var(--red-text)">Erro ao ler o saldo do WMS: '+(e.message||e)+'</span>'; }
+}
+function invSelFiltrados(){
+  var A=_invSelAgg||{}, f=_invSelF, q=String(f.q||'').trim().toUpperCase();
+  return Object.keys(A).sort().filter(function(k){
+    var a=A[k];
+    if(f.rua && String(a.rua||'')!==f.rua) return false;
+    if(f.nivel && String(a.nivel||'')!==f.nivel) return false;
+    if(q && k.indexOf(q)<0 && !Object.keys(a.prods).some(function(s){return String(s).toUpperCase().indexOf(q)>=0;})) return false;
+    return true;
+  });
+}
+function invSelLista(){
+  var box=ge('inv-ger-valor'); if(!box||!_invSelAgg) return;
+  var A=_invSelAgg, keys=Object.keys(A), F=invSelFiltrados(), esc=function(v){return String(v==null?'':v).replace(/</g,'&lt;');};
+  var ruas={}, nivs={}; keys.forEach(function(k){ if(A[k].rua) ruas[A[k].rua]=1; if(A[k].nivel) nivs[A[k].nivel]=1; });
+  var opts=function(o,sel){ return '<option value="">todas</option>'+Object.keys(o).sort().map(function(v){return '<option value="'+esc(v)+'"'+(v===sel?' selected':'')+'>'+esc(v)+'</option>';}).join(''); };
+  var marc=Object.keys(_invSelEnds).filter(function(k){return _invSelEnds[k]&&A[k];});
+  var rgM=0, pcM=0; marc.forEach(function(k){ rgM+=(_invSelQtd[k]||0); pcM+=(A[k].saldo||0); });
+  var lim=400, mostra=F.slice(0,lim);
+  box.innerHTML='<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:4px;min-width:560px">'
+    +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">'
+      +'<div><label class="fl" style="font-size:11px">Endereço ou SKU</label><input class="fi" style="height:34px;width:190px" value="'+esc(_invSelF.q)+'" oninput="_invSelF.q=this.value;invSelLista();this.focus();this.setSelectionRange(this.value.length,this.value.length)"></div>'
+      +'<div><label class="fl" style="font-size:11px">Rua</label><select class="fi" style="height:34px" onchange="_invSelF.rua=this.value;invSelLista()">'+opts(ruas,_invSelF.rua)+'</select></div>'
+      +'<div><label class="fl" style="font-size:11px">Nível</label><select class="fi" style="height:34px" onchange="_invSelF.nivel=this.value;invSelLista()">'+opts(nivs,_invSelF.nivel)+'</select></div>'
+      +'<div style="margin-left:auto;font-size:12.5px;font-weight:700;padding-bottom:8px">'+marc.length+' marcado(s) · '+rgM+' RG(s) · '+Math.round(pcM).toLocaleString('pt-BR')+' pç</div>'
+    +'</div>'
+    +'<div style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+      +'<thead><tr style="position:sticky;top:0;background:var(--bg2)"><th style="width:30px"></th><th style="text-align:left;padding:6px">Endereço</th><th style="text-align:left">Rua</th><th style="text-align:left">Nível</th><th style="text-align:right">RGs</th><th style="text-align:right">SKUs</th><th style="text-align:right;padding-right:8px">Peças</th></tr></thead><tbody>'
+      +mostra.map(function(k){ var a=A[k], on=!!_invSelEnds[k], ja=!!_invSelTem[k];
+        return '<tr style="border-top:1px solid var(--border);'+(on?'background:var(--blue-bg)':'')+(ja?';opacity:.5':'')+'">'
+          +'<td style="text-align:center"><input type="checkbox" '+(on?'checked':'')+(ja?' disabled title="Já tem ficha neste inventário"':'')+' onchange="_invSelEnds[\''+k+'\']=this.checked;invSelLista()"></td>'
+          +'<td style="padding:5px 6px;font-family:monospace">'+esc(k)+(ja?' <span style="font-size:10px;color:var(--text3)">já tem ficha</span>':'')+'</td><td>'+esc(a.rua||'')+'</td><td>'+esc(a.nivel||'')+'</td>'
+          +'<td style="text-align:right">'+(_invSelQtd[k]||0)+'</td><td style="text-align:right">'+a.itens+'</td><td style="text-align:right;padding-right:8px">'+Math.round(a.saldo).toLocaleString('pt-BR')+'</td></tr>'; }).join('')
+      +(F.length>lim?'<tr><td colspan="7" style="padding:8px;text-align:center;color:var(--text3)">mostrando '+lim+' de '+F.length+' — refine o filtro</td></tr>':'')
+      +(!F.length?'<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--text3)">Nenhum endereço com esse filtro.</td></tr>':'')
+    +'</tbody></table></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" onclick="invSelFiltrados().forEach(function(k){ if(!_invSelTem[k]) _invSelEnds[k]=true; });invSelLista()">Marcar todos os filtrados</button>'
+    +'<button class="btn btn-sm" onclick="_invSelEnds={};invSelLista()">Limpar marcação</button></div>'
+  +'</div>';
+}
+async function invGerarFichasWms(){
+  var escopo=invGerEscopo||(ge('inv-ger-escopo')&&ge('inv-ger-escopo').value)||'selecionados';
+  var valor=invGerValor||(ge('inv-ger-valor-sel')&&ge('inv-ger-valor-sel').value)||'';
+  if((escopo==='produto'||escopo==='rua'||escopo==='nivel') && !valor){ showToast('Selecione o valor do escopo','amber'); return; }
+  try{
+    showToast('Lendo o saldo do WMS…','blue');
+    var rows=await invWmsCarregar(true);
+    if(!rows.length){ showToast('Nenhum saldo no WMS para este depositante.','amber'); return; }
+    var agg=invAggBase(rows,null);
+    var ends=(escopo==='selecionados')
+      ? Object.keys(_invSelEnds).filter(function(k){ return _invSelEnds[k] && agg[k]; })
+      : Object.keys(agg).filter(function(e){ return invMatchEscopo(agg[e],escopo,valor); });
+    if(!ends.length){ showToast(escopo==='selecionados'?'Marque ao menos um endereço.':'Nenhum endereço no escopo.','amber'); return; }
+    var ex=await invFetchAll('inventario_fichas','inventario_id=eq.'+invSel+'&select=endereco,ficha_num')||[];
+    var tem={}, maxN=0; ex.forEach(function(f){ tem[String(f.endereco||'').toUpperCase()]=1; maxN=Math.max(maxN,Number(f.ficha_num)||0); });
+    var novos=ends.filter(function(e){ return !tem[e]; }).sort();
+    if(!novos.length){ showToast('Esses endereços já têm ficha neste inventário.','amber'); return; }
+    if(!confirm('Gerar '+novos.length+' ficha(s) com o saldo atual do WMS?'+(ends.length>novos.length?'\n('+(ends.length-novos.length)+' endereço(s) já tinham ficha e foram ignorados.)':''))) return;
+    var set={}; novos.forEach(function(e){ set[e]=1; });
+    var base=rows.filter(function(r){ return set[r.endereco]; }).map(function(r){
+      return {inventario_id:invSel,endereco:r.endereco,endereco_raw:r.endereco,cod_produto:r.cod_produto,desc_produto:r.desc_produto,
+              referencia:r.referencia,qtde_saldo:r.qtde_saldo,qtde_empenhada:0,unidade_medida:r.unidade_medida}; });
+    if(base.length) await invBulkInsert('inventario_base',base);
+    var fichas=novos.map(function(e,j){ var a=agg[e];
+      return {inventario_id:invSel,ficha_num:maxN+j+1,endereco:a.end,dep:a.dep,nivel:a.nivel,rua:a.rua,posicao:a.posicao,tem_estrutura:true,
+              qtd_itens:a.itens,qtd_sistema_total:a.saldo,modo:'',rodada_liberada:0,status:'gerada'}; });
+    await invBulkInsert('inventario_fichas',fichas);
+    var tot=ex.length+fichas.length;
+    await dbUpdate('inventarios',invSel,{status:'em_contagem',fichas_count:tot,base_count:(Number(invData.base_count)||0)+base.length,end_count:tot,escopo:escopo,escopo_valor:valor||null});
+    invBaseCache=null; _invSelEnds={};
+    showToast(fichas.length+' ficha(s) gerada(s) com o saldo do WMS','green');
+    invLoad();
+  }catch(e){ showToast('Erro ao gerar fichas: '+(e.message||e),'red'); }
+}
+
 async function invGerarFichas(){
   if(!invData)return;
+  if(invEhWms()) return invGerarFichasWms();   // v1.0.1092
   if(!invData.base_count){ if(typeof showToast==='function')showToast('Importe o saldo antes','amber'); return; }
   var escopo=invGerEscopo||(ge('inv-ger-escopo')&&ge('inv-ger-escopo').value)||'geral';
   var valor=invGerValor||(ge('inv-ger-valor-sel')&&ge('inv-ger-valor-sel').value)||'';
@@ -36282,7 +36401,7 @@ function invAggBase(rows, mask){
   var agg={};
   for(var i=0;i<rows.length;i++){
     var e=(rows[i].endereco||'').toUpperCase(); if(!e)continue;
-    if(!agg[e]){ var mm=invApplyMask(e,mask); agg[e]={end:e,itens:0,saldo:0,prods:{},dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem:mm.tem}; }
+    if(!agg[e]){ var mm=(rows[i]._rua!=null||rows[i]._nivel!=null)?{dep:rows[i]._dep,nivel:rows[i]._nivel,rua:rows[i]._rua,posicao:rows[i]._posicao,tem:true}:invApplyMask(e,mask); agg[e]={end:e,itens:0,saldo:0,prods:{},dep:mm.dep,nivel:mm.nivel,rua:mm.rua,posicao:mm.posicao,tem:mm.tem}; }
     var cod=rows[i].cod_produto;
     if(cod){ if(!agg[e].prods[cod]){ agg[e].prods[cod]=1; agg[e].itens++; } }
     agg[e].saldo+=(parseFloat(rows[i].qtde_saldo)||0);
@@ -36303,10 +36422,11 @@ function invMatchEscopo(a, escopo, valor){
 async function invGerEscopoChange(v){
   invGerEscopo=v; invGerValor='';
   var box=ge('inv-ger-valor'); if(!box)return;
+  if(v==='selecionados'){ invSelRender(); return; }   // v1.0.1092
   if(v!=='produto'&&v!=='rua'&&v!=='nivel'){ box.innerHTML=''; return; }
   box.innerHTML='<span style="font-size:12px;color:var(--text3)">Carregando...</span>';
   try{
-    var rows=await invLoadBase();
+    var rows=invEhWms()?await invWmsCarregar():await invLoadBase();   // v1.0.1092
     var agg=invAggBase(rows, invData&&invData.mascara||null);
     var vals={};
     if(v==='produto'){ for(var i=0;i<rows.length;i++){ if(rows[i].cod_produto)vals[rows[i].cod_produto]=1; } }
@@ -37507,7 +37627,7 @@ function invDTab(tab){
     if(b){ b.style.borderBottomColor=(t===tab)?'var(--accent)':'transparent'; b.style.color=(t===tab)?'var(--accent)':'var(--text2)'; b.style.fontWeight=(t===tab)?'700':'500'; }
   });
   if(tab==='import'){ invMaskPreview(); invEtiqProdRuler(); }
-  if(tab==='fichas'){ if(ge('inv-quadro')) invLoadQuadro(); }
+  if(tab==='fichas'){ if(ge('inv-quadro')) invLoadQuadro(); if(invEhWms() && ge('inv-ger-escopo') && ge('inv-ger-escopo').value==='selecionados'){ invGerEscopo='selecionados'; invSelRender(); } }
 }
 function invDetailHTML(inv){
   var mk=inv.mascara||{};
@@ -37535,7 +37655,9 @@ function invDetailHTML(inv){
   // abas de topo (sublinhado, estilo colaborador)
   var tb=function(t,lbl){var a=(t==='resumo'); return '<button id="idtb-'+t+'" onclick="invDTab(\''+t+'\')" style="padding:8px 14px;font-size:13px;font-weight:'+(a?'700':'500')+';border:none;background:none;cursor:pointer;border-bottom:2px solid '+(a?'var(--accent)':'transparent')+';color:'+(a?'var(--accent)':'var(--text2)')+'">'+lbl+'</button>';};
   h+='<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px;flex-wrap:wrap">'
-    +tb('resumo','Resumo')+tb('import','Importacao')+tb('fichas','Fichas')+'</div>';
+    +tb('resumo','Resumo')
+    +(invEhWms(inv)?'<button id="idtb-import" disabled title="Inventário de depositante: a base vem do saldo do WMS" style="padding:8px 14px;font-size:13px;border:none;background:none;cursor:not-allowed;opacity:.45;border-bottom:2px solid transparent;color:var(--text2)">Importacao 🔒</button>':tb('import','Importacao'))
+    +tb('fichas','Fichas')+'</div>';
   // ===== RESUMO =====
   var resumo=card(
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
@@ -37590,10 +37712,13 @@ function invDetailHTML(inv){
   var fichas=card(
     sub('Gerar fichas')
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:8px">Fichas geradas: <b style="color:var(--text)">'+(inv.fichas_count||0)+'</b>'+(inv.fichas_count&&inv.escopo?' <span style="color:var(--text3)">(escopo: '+inv.escopo+(inv.escopo_valor?' '+inv.escopo_valor:'')+')</span>':'')+'</div>'
-    +'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">As fichas saem do saldo importado &mdash; uma por endereco, ja decomposta pela mascara. Escolha o escopo:</div>'
+    +(invEhWms(inv)
+      ?'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">As fichas saem do <b>saldo atual do WMS</b> deste depositante (RGs ativos: endereço, produto, RG e quantidade), lido no momento de gerar. Rua e nível vêm do cadastro do endereço. Novas fichas se somam às existentes.</div>'
+      :'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">As fichas saem do saldo importado &mdash; uma por endereco, ja decomposta pela mascara. Escolha o escopo:</div>')
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'
       +'<div><label class="fl" style="font-size:11px">Escopo</label>'
         +'<select class="fi" id="inv-ger-escopo" onchange="invGerEscopoChange(this.value)" style="height:36px;max-width:230px">'
+          +(invEhWms(inv)?'<option value="selecionados" selected>Endereços selecionados</option>':'')
           +'<option value="geral">Geral (todos os enderecos)</option>'
           +'<option value="comsaldo">Com saldo (produto e saldo &gt; 0)</option>'
           +'<option value="vazio">Vazio (sem produto ou saldo 0)</option>'
@@ -37603,7 +37728,7 @@ function invDetailHTML(inv){
         +'</select></div>'
       +'<div id="inv-ger-valor"></div>'
     +'</div>'
-    +'<button class="btn btn-p btn-sm" onclick="invGerarFichas()">'+(inv.fichas_count?'Regerar fichas':'Gerar fichas')+'</button>'
+    +'<button class="btn btn-p btn-sm" onclick="invGerarFichas()">'+(invEhWms(inv)?(inv.fichas_count?'Gerar mais fichas':'Gerar fichas'):(inv.fichas_count?'Regerar fichas':'Gerar fichas'))+'</button>'
   );
   if(inv.fichas_count>0){
     fichas+='<div style="height:14px"></div>'+card(
