@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1096 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1097 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1096';
+const APP_VERSION='v1.0.1097';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1497,9 +1497,16 @@ async function sbAuth(path,body){
   const r=await fetch(SB_URL+'/auth/v1/'+path,{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify(body)});
   const data=await r.json();return{ok:r.ok,data};
 }
+// v1.0.1097: tabelas sem created_at (ex.: workflow_empresa) — a ordenação automática dava erro no banco a cada
+// abertura do VERUS e a leitura voltava vazia em silêncio. Agora repete sem a ordenação e memoriza a tabela.
+var _dbSemCreatedAt={workflow_empresa:1};
 async function dbSelect(table,filter=''){
-  var ord=/(^|&)order=/.test(filter)?'':'&order=created_at.desc';
-  const r=await sbFetch('GET',`/rest/v1/${table}?${filter}${ord}`,null,tok);
+  var ord=(/(^|&)order=/.test(filter)||_dbSemCreatedAt[table])?'':'&order=created_at.desc';
+  var r=await sbFetch('GET',`/rest/v1/${table}?${filter}${ord}`,null,tok);
+  if(!r.ok && ord && (r.status===400 || /created_at/.test(JSON.stringify(r.data||'')))){
+    _dbSemCreatedAt[table]=1;
+    r=await sbFetch('GET',`/rest/v1/${table}?${filter}`,null,tok);
+  }
   bootTick(); // alimenta a barra de progresso durante o boot
   return r.ok?(Array.isArray(r.data)?r.data:[]):[];
 }
