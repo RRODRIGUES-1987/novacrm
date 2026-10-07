@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1105 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1106 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1105';
+const APP_VERSION='v1.0.1106';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52412,6 +52412,115 @@ function ecomCloseRel(){ var m=ge('ecom-rel-modal'); if(m)m.remove(); }
 // ── Central de Relatórios (hub -> relatório na mesma tela) ──
 var ecomRelView='hub';
 async function ecomRelInit(){ if(!_ecomLoaded){ try{ await ecomLoadAll(); }catch(e){} } }
+// ───── RELATÓRIO · LINHA DO TEMPO DO PEDIDO (v1.0.1106) ─────
+// Só marcos com data e hora gravadas, em ordem cronológica. Nenhuma dedução: o texto do log aparece como foi registrado.
+var _tl={busca:'',dados:null,carregando:false,erro:''};
+function tlFmt(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''; var p=function(n){return String(n).padStart(2,'0');};
+  return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+function tlMarcoDoLog(m){
+  m=String(m||'');
+  if(/preparando_envio \(c[oó]digo 4\)/.test(m)) return '"Pode faturar" enviado (código 4)';
+  if(/pronto_envio \(c[oó]digo 7\)/.test(m)) return '"Pronto para envio" enviado (código 7)';
+  if(/^NF .* ligada ao pedido/.test(m)) return 'Nota ligada ao pedido';
+  if(/^Etiqueta .* guardada no VERUS/.test(m)) return 'Etiqueta guardada no VERUS';
+  if(/^Etiqueta .* obtida do agrupamento/.test(m)) return 'Etiqueta obtida do agrupamento';
+  if(/^Importa[cç][aã]o autom[aá]tica/.test(m)) return 'Importação automática';
+  if(/agrupamento/i.test(m)) return 'Agrupamento';
+  return 'Evento registrado';
+}
+function ecomRelTimelineView(){
+  var e=ecomEsc, d=_tl.dados;
+  var h='<div style="max-width:1180px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><button class="btn btn-sm" onclick="ecomRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Linha do tempo do pedido</b></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--bg)">'
+      +'<input class="fi" id="tl-busca" value="'+e(_tl.busca)+'" placeholder="Pedido do Olist, E- do VERUS ou rastreio" style="flex:1;min-width:240px;height:36px" onkeydown="if(event.key===\'Enter\'){_tl.busca=this.value;tlBuscar();}">'
+      +'<button class="btn btn-p btn-sm" onclick="_tl.busca=ge(\'tl-busca\').value;tlBuscar()">Buscar</button>'
+      +(d&&d.ev.length?'<button class="btn btn-sm" onclick="tlExcel()">Exportar Excel</button>':'')
+    +'</div>';
+  if(_tl.carregando) return h+'<div style="padding:30px;text-align:center;color:var(--text3)"><span class="spin"></span> Montando a linha do tempo&hellip;</div></div>';
+  if(_tl.erro) return h+'<div style="padding:24px;text-align:center;color:var(--red-text);border:1px dashed var(--border);border-radius:10px">'+e(_tl.erro)+'</div></div>';
+  if(!d) return h+'<div style="padding:30px;text-align:center;color:var(--text3);border:1px dashed var(--border);border-radius:10px">Busque um pedido para ver todos os marcos registrados, com data e hora.</div></div>';
+  var kv=function(k,v){ return '<div><div style="font-size:10.5px;color:var(--text3)">'+k+'</div><div style="font-size:13px;font-weight:600">'+(v||'—')+'</div></div>'; };
+  var cor={'integração':'background:var(--bg2);color:var(--text2)','log':'background:var(--amber-bg);color:var(--amber-text)','VERUS':'background:var(--bg2);color:var(--text2)','operação':'background:var(--green-bg);color:var(--green-text)','Olist':'background:var(--blue-bg);color:var(--blue-text)'};
+  h+='<div style="border:1px solid var(--border);border-radius:12px;padding:14px;background:var(--bg)">'
+    +'<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px">'
+      +kv('Pedido Olist',e(d.cab.olist))+kv('VERUS',e(d.cab.verus))+kv('Plataforma',e(d.cab.plat))+kv('NF',e(d.cab.nf))+kv('Transportadora',e(d.cab.transp))+kv('Status no VERUS',e(d.cab.status))
+    +'</div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    +'<thead><tr style="background:var(--bg2)"><th style="text-align:left;padding:7px 8px;width:130px">Data e hora</th><th style="text-align:left;padding:7px 8px">Marco</th><th style="text-align:left;padding:7px 8px;width:96px">Fonte</th><th style="text-align:left;padding:7px 8px">Detalhe registrado</th></tr></thead><tbody>'
+    +(d.ev.length?d.ev.map(function(x){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px;font-family:monospace;white-space:nowrap">'+tlFmt(x.ts)+'</td><td style="padding:6px 8px">'+e(x.marco)+'</td>'
+        +'<td style="padding:6px 8px"><span style="font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:99px;white-space:nowrap;'+(cor[x.fonte]||'')+'">'+e(x.fonte)+'</span></td><td style="padding:6px 8px;color:var(--text2)">'+e(x.det||'')+'</td></tr>'; }).join('')
+      :'<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--text3)">Nenhum marco registrado.</td></tr>')
+    +'</tbody></table></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:8px">Somente registros com data e hora, em ordem cronol&oacute;gica. O texto do log aparece como foi gravado. "Nota vista pelo VERUS" &eacute; a hora em que o VERUS leu a nota no Olist, n&atilde;o a hora da emiss&atilde;o.</div>'
+  +'</div></div>';
+  return h;
+}
+function tlRender(){ var c=ge('content'); if(c && ecomRelView==='timeline') c.innerHTML=ecomRelTimelineView(); }
+async function tlBuscar(){
+  var v=String(_tl.busca||'').trim(), cid=ecomCid(); if(!v||!cid) return;
+  _tl.carregando=true; _tl.erro=''; _tl.dados=null; tlRender();
+  try{
+    var ip=null, ep=null, so=v.replace(/\D/g,'');
+    var q=function(t,f){ return dbSelect(t,f).catch(function(){return [];}); };
+    // 1) acha o pedido
+    if(/^e-?\d{1,7}$/i.test(v) || (so && so.length<=7 && so===v)){
+      ep=((await q('ecom_pedidos','company_id=eq.'+cid+'&numero_interno=eq.'+parseInt(so,10)+'&order=created_at.desc'))||[])[0]||null;
+    }
+    if(!ep){
+      ip=((await q('intg_pedidos','company_id=eq.'+cid+'&numero=eq.'+encodeURIComponent(v)))||[])[0]||null;
+      if(!ip) ep=((await q('ecom_pedidos','company_id=eq.'+cid+'&or=(order_id.eq.'+encodeURIComponent(v)+',tracking.eq.'+encodeURIComponent(v)+',numero_pedido.eq.'+encodeURIComponent(v)+')'))||[])[0]||null;
+    }
+    if(ep && !ip) ip=((await q('intg_pedidos','company_id=eq.'+cid+'&pedido_verus_id=eq.'+ep.id+'&order=created_at.desc'))||[])[0]||null;
+    if(ip && !ep && ip.pedido_verus_id) ep=((await q('ecom_pedidos','id=eq.'+ip.pedido_verus_id))||[])[0]||null;
+    if(!ip && !ep){ _tl.carregando=false; _tl.erro='Pedido não encontrado para "'+v+'".'; tlRender(); return; }
+    var ev=[], add=function(ts,marco,fonte,det){ if(ts) ev.push({ts:ts,marco:marco,fonte:fonte,det:det||''}); };
+    // 2) integração
+    if(ip){
+      add(ip.created_at,'Pedido registrado na integração','integração','pedido '+(ip.numero||'')+(ip.pedido_externo_id?' · id Olist '+ip.pedido_externo_id:''));
+      add(ip.pode_faturar_em,'1º "pode faturar" registrado','integração','código 4');
+      add(ip.situacao_confirmada_em,'Situação confirmada no Olist','integração','último código enviado: '+(ip.situacao_enviada||'—'));
+      add(ip.nf_autorizada_em,'Nota vista pelo VERUS','Olist','NF '+(ip.nf_numero||'—')+(ip.nf_situacao?' · situação '+ip.nf_situacao:''));
+      add(ip.pronto_envio_em,'"Pronto para envio" registrado','integração','');
+      // log da integração que cita o pedido
+      if(ip.numero){
+        var logs=await q('intg_logs','integracao_id=eq.'+ip.integracao_id+'&created_at=gte.'+new Date(new Date(ip.created_at).getTime()-864e5).toISOString()+'&mensagem=ilike.*'+encodeURIComponent(ip.numero)+'*&order=created_at.asc&limit=300');
+        (logs||[]).forEach(function(l){ add(l.created_at,tlMarcoDoLog(l.mensagem),'log',String(l.mensagem||'').slice(0,240)); });
+      }
+    }
+    // 3) VERUS e operação
+    if(ep){
+      add(ep.created_at,'Importado no VERUS','VERUS','E-'+String(ep.numero_interno||'').padStart(6,'0')+(ip&&ip.erro_msg?' · '+ip.erro_msg:''));
+      var ets=await q('ecom_etiquetas','pedido_id=eq.'+ep.id+'&select=created_at,tracking,pagina&order=created_at.asc');
+      (ets||[]).forEach(function(t){ add(t.created_at,'Etiqueta registrada no VERUS','VERUS',(t.tracking?'rastreio '+t.tracking:'')); });
+      var bips=await q('ecom_bips','company_id=eq.'+cid+'&pedido_id=eq.'+ep.id+'&order=created_at.asc');
+      var porEt={}; (bips||[]).forEach(function(b){ (porEt[b.etapa]=porEt[b.etapa]||[]).push(b); });
+      Object.keys(porEt).forEach(function(et){ var a=porEt[et], lbl=(typeof ecomLaudoEtapaLbl==='function')?ecomLaudoEtapaLbl(et):et;
+        add(a[0].created_at,lbl+(a.length>1?' · 1º bipe':''),'operação','operador: '+(a[0].operador||'—')+(a[0].codigo_lido?' · código '+a[0].codigo_lido:'')+(a.length>1?' · '+a.length+' bipes':''));
+        if(a.length>1) add(a[a.length-1].created_at,lbl+' · último bipe','operação','operador: '+(a[a.length-1].operador||'—')); });
+      var emb=await q('ecom_embarque_conf','company_id=eq.'+cid+'&pedido_id=eq.'+ep.id+'&order=created_at.asc');
+      (emb||[]).forEach(function(x){ var rom=x.romaneio_id?(ecomRomaneios||[]).find(function(r){return r.id===x.romaneio_id;}):null;
+        add(x.created_at,'Volume conferido no box de coleta','operação','operador: '+(x.operador||'—')+(rom&&rom.numero?' · romaneio '+rom.numero:'')); });
+      add(ep.data_expedicao,'Expedição registrada','VERUS','');
+    }
+    ev.sort(function(a,b){ return String(a.ts).localeCompare(String(b.ts)); });
+    var plat=(ip&&typeof intgPlataforma==='function')?intgPlataforma(ip):null;
+    _tl.dados={ev:ev,cab:{olist:ip?ip.numero:(ep&&ep.order_id)||'',verus:ep?('E-'+String(ep.numero_interno||'').padStart(6,'0')):'',
+      plat:plat?plat.nome:(ep&&ep.canal)||'',nf:(ip&&ip.nf_numero)||'',transp:(ep&&ep.transportadora)||(ip&&ip.transportadora)||'',status:ep?String(ep.status||'').replace(/_/g,' '):''}};
+  }catch(err){ _tl.erro='Erro ao montar a linha do tempo: '+(err.message||err); }
+  _tl.carregando=false; tlRender();
+}
+async function tlExcel(){
+  var d=_tl.dados; if(!d||!d.ev.length) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var rows=d.ev.map(function(x){ return {Data_hora:tlFmt(x.ts),Marco:x.marco,Fonte:x.fonte,Detalhe:x.det}; });
+    var wb=XLSX.utils.book_new(), ws=XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb,ws,'Linha do tempo');
+    XLSX.writeFile(wb,'Linha_do_tempo_'+String(d.cab.olist||d.cab.verus||'pedido').replace(/[^A-Za-z0-9-]/g,'')+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
+}
+function tlAbrirPedido(numero){ _tl.busca=String(numero||''); try{ ecomModalClose(); }catch(_){} ecomRelAbrir('timeline'); tlBuscar(); }
 function ecomRelAbrir(which){ ecomRelView=which; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function ecomRelVoltar(){ ecomRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function rEcomRelatorios(){
@@ -52419,6 +52528,7 @@ function rEcomRelatorios(){
   if(ecomRelView==='produtividade') return ecomRelProdutividadeView();
   if(ecomRelView==='laudo') return ecomLaudoView();
   if(ecomRelView==='intgstatus') return ecomRelIntgStatusView();
+  if(ecomRelView==='timeline') return ecomRelTimelineView();   // v1.0.1106
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -52445,6 +52555,12 @@ function rEcomRelatorios(){
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M7 7h13l-3-3"/><path d="M17 17H4l3 3"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Status pedidos integra&ccedil;&atilde;o</div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Pedido a pedido: onde cada um est&aacute; no vai e vem com o Olist, a hora de cada passo e de quem &eacute; a vez.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
+      +'<div onclick="ecomRelAbrir(\'timeline\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Linha do tempo do pedido</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Todos os marcos registrados de um pedido, com data e hora: integra&ccedil;&atilde;o, log, VERUS e opera&ccedil;&atilde;o. Para depurar e demonstrar.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
     +'</div></div>';
@@ -52624,7 +52740,7 @@ function isiAbrir(id){
   var p=(isiRows||[]).find(function(x){return x.id===id;}); if(!p)return;
   var ficha=''; try{ ficha=intgFichaHTML(p); }catch(e){ ficha='<div style="padding:16px;color:var(--text3)">N\u00e3o foi poss\u00edvel montar a ficha: '+ecomEsc(e.message||String(e))+'</div>'; }
   var html='<div class="modal-overlay" id="ecom-modal" onclick="if(event.target===this)ecomModalClose()"><div class="modal" style="width:860px;max-width:96vw;max-height:92vh;overflow:auto;padding:0">'
-    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:15px">Pedido '+ecomEsc(p.numero||p.pedido_externo_id||'')+'</b><button class="btn btn-sm" style="margin-left:auto" onclick="ecomModalClose()">Fechar</button></div>'
+    +'<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)"><b style="font-size:15px">Pedido '+ecomEsc(p.numero||p.pedido_externo_id||'')+'</b><button class="btn btn-sm" style="margin-left:auto" onclick="tlAbrirPedido(\''+ecomEsc(p.numero||'')+'\')">Linha do tempo</button><button class="btn btn-sm" onclick="ecomModalClose()">Fechar</button></div>'
     +ficha+'</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
 }
