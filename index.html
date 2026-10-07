@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1098 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1099 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1098';
+const APP_VERSION='v1.0.1099';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -32911,6 +32911,22 @@ async function wmsCapaAutoCriar(opts){
 }
 
 // ── TELA PRINCIPAL ──
+// v1.0.1099: o rastro de bipes era baixado inteiro a cada abertura do WMS (41 páginas, ~6 mil páginas por manhã) e
+// enfileirava o banco no login. As telas só usam leituras de pedidos EM ANDAMENTO e a unitização de pallets recentes.
+async function wmsLeiturasCarregar(cid){
+  var fim='embarcado,carregado,concluido,concluida,cancelado,cancelada,faturado,faturada,finalizado,finalizada,expedido';
+  var ativos=await dbSelectAll('wms_pedidos','company_id=eq.'+cid+'&status=not.in.('+fim+')&select=id').catch(function(){return [];})||[];
+  var ids=ativos.map(function(p){return p.id;}), out=[], vistos={};
+  for(var i=0;i<ids.length;i+=120){
+    var lote=await dbSelectAll('wms_leituras','company_id=eq.'+cid+'&pedido_id=in.('+ids.slice(i,i+120).join(',')+')').catch(function(){return [];})||[];
+    lote.forEach(function(l){ if(!vistos[l.id]){ vistos[l.id]=1; out.push(l); } });
+  }
+  var desde=new Date(Date.now()-3*864e5).toISOString();
+  var unit=await dbSelectAll('wms_leituras','company_id=eq.'+cid+'&etapa=eq.unitizacao&created_at=gte.'+desde).catch(function(){return [];})||[];
+  unit.forEach(function(l){ if(!vistos[l.id]){ vistos[l.id]=1; out.push(l); } });
+  return out;
+}
+
 async function loadWmsData(cid){
   [wmsProdutos,wmsPedidos,wmsPedidoItens,wmsListasSeparacao,wmsListaPedidos,wmsTarefasSeparacao]=await Promise.all([
     dbSelectAll('wms_produtos',`company_id=eq.${cid}${unitFilter()}&order=sku.asc`).catch(()=>[]),
@@ -32951,7 +32967,7 @@ async function loadWmsData(cid){
     dbSelectAll('wms_pallet_itens',`company_id=eq.${cid}`).catch(()=>[]),
     dbSelectAll('wms_etiquetas',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
     dbSelectAll('wms_prismas_caminhao',`company_id=eq.${cid}${unitFilter()}&order=codigo.asc`).catch(()=>[]),
-    dbSelectAll('wms_leituras',`company_id=eq.${cid}&created_at=gte.${new Date(Date.now()-45*864e5).toISOString()}`).catch(()=>[]),   // v1.0.1093: só os últimos 45 dias (antes baixava o rastro de bipes inteiro a cada abertura do WMS e derrubou o banco em 06/10)
+    wmsLeiturasCarregar(cid).catch(()=>[]),   // v1.0.1099: só as leituras dos pedidos em andamento + unitização recente
   ]);
   // Backfill: recalcula totais de pedidos importados que ainda não têm (uma vez)
   wmsBackfillTotais(cid);
