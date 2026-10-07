@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1097 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1098 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1097';
+const APP_VERSION='v1.0.1098';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35792,7 +35792,7 @@ function invCxArea(){
   var esc=function(v){return String(v==null?'':v).replace(/</g,'&lt;');};
   if(!invCol.cx) invCxReset();
   var cx=invCol.cx, lista=invCol.cxByEnd[invCol.end]||[], nL=0; lista.forEach(function(x){ if(cx.lidas[x.key]!=null) nL++; });
-  var head='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:11px;color:var(--text3)">ENDEREÇO · MODO CAIXA</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+esc(invCol.end)+'</div></div>'
+  var head='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:11px;color:var(--text3)">ENDEREÇO · MODO CAIXA'+(invCol.rodada>1?' · <b style="color:var(--amber-text)">'+invCol.rodada+'ª CONTAGEM</b>':'')+'</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+esc(invCol.end)+'</div></div>'
     +'<button class="btn btn-sm" onclick="invColVoltar()">← trocar</button></div>';
   if(cx.pend){
     var p=cx.pend;
@@ -35813,8 +35813,8 @@ function invCxArea(){
   return invColProgresso()+head+(cx.msg||'')
     +'<div style="display:flex;justify-content:space-between;margin:10px 0 4px;font-weight:700;font-size:13px"><span>Caixas</span><span>'+nL+' de '+lista.length+'</span></div>'
     +'<div style="height:6px;border-radius:3px;background:var(--bg2);overflow:hidden;margin-bottom:6px"><div style="width:'+pct+'%;height:100%;background:#76B82A"></div></div>'
-    +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:300px;overflow-y:auto">'+(linhas||'<div style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Endereço sem caixas no sistema.</div>')+extras+'</div>'
-    +'<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1" onclick="invCol.semCaixa=true;invColRender()">Contar por produto</button>'
+    +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:max(140px,min(300px,calc(100dvh - 470px)));overflow-y:auto">'+(linhas||'<div style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Endereço sem caixas no sistema.</div>')+extras+'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px;position:sticky;bottom:0;background:var(--bg);padding:8px 0 4px;z-index:3"><button class="btn" style="flex:1" onclick="invCol.semCaixa=true;invColRender()">Contar por produto</button>'
     +'<button class="btn btn-p" style="flex:2;padding:12px" onclick="invCxConfirmar()">✓ Confirmar endereço</button></div>';
 }
 function invCxAcha(digs, end){
@@ -35899,8 +35899,12 @@ async function invColCarregar(id){
     // fichas e contagens já existentes (para não contar duas vezes)
     var fichas=await invFetchAll('inventario_fichas','inventario_id=eq.'+id+'&select=id,endereco,rodada_liberada,status');
     invCol.fichaByEnd={}; fichas.forEach(function(f){invCol.fichaByEnd[invNorm(f.endereco)]=f;});
-    var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&rodada=eq.'+invCol.rodada+'&qtd_contada=not.is.null&select=endereco');
-    invCol.contadosEnd={}; tar.forEach(function(x){invCol.contadosEnd[invNorm(x.endereco)]=1;});
+    // v1.0.1098: a 2ª/3ª contagem liberada na ficha passa a valer no coletor (antes ele ficava preso na 1ª)
+    var tar=await invFetchAll('inventario_tarefas','inventario_id=eq.'+id+'&qtd_contada=not.is.null&select=endereco,rodada');
+    invCol.contadosRod={}; tar.forEach(function(x){ var e=invNorm(x.endereco); (invCol.contadosRod[e]=invCol.contadosRod[e]||{})[Number(x.rodada)||1]=1; });
+    invCol.contadosEnd={};
+    Object.keys(invCol.fichaByEnd).forEach(function(e){ var lib=Math.max(1,Number(invCol.fichaByEnd[e].rodada_liberada)||1); if(invCol.contadosRod[e]&&invCol.contadosRod[e][lib]) invCol.contadosEnd[e]=1; });
+    Object.keys(invCol.contadosRod).forEach(function(e){ if(!invCol.fichaByEnd[e] && invCol.contadosRod[e][1]) invCol.contadosEnd[e]=1; });
 }
 // Modal de mesa (mantido): mesma lógica, dentro de um modal
 async function invColetor(id){
@@ -35995,6 +35999,8 @@ function invColLerEndCode(raw){
   var code=invParseEnd(raw,invCol.parser)||invNorm(raw);
   if(!code){if(msg)msg.innerHTML='<span style="color:var(--red-text)">Etiqueta vazia.</span>';return;}
   code=invNorm(code);
+  { var _f=invCol.fichaByEnd[code]; invCol.rodada=Math.max(1,(_f&&Number(_f.rodada_liberada))||1);   // v1.0.1098: rodada da ficha
+    if(invCol.contadosRod&&invCol.contadosRod[code]&&invCol.contadosRod[code][invCol.rodada]) invCol.contadosEnd[code]=1; else delete invCol.contadosEnd[code]; }
   if(invCol.contadosEnd[code]){
     var av='Endereço <b>'+code+'</b> já foi contado nesta rodada. Para recontar, exclua a contagem no monitor.';
     if(msg)msg.innerHTML='<span style="color:var(--amber-text)">'+av+'</span>';
@@ -36086,7 +36092,7 @@ async function invColConfirmar(){
       cod_produto:x.cod||null,qtd_contada:x.qtd,origem:'coletor'};});
     await invBulkInsert('inventario_tarefas',batch);
     await dbUpdate('inventario_fichas',f.id,{status:'contada'});
-    invCol.contadosEnd[end]=1;
+    invCol.contadosEnd[end]=1; (invCol.contadosRod=invCol.contadosRod||{}); (invCol.contadosRod[end]=invCol.contadosRod[end]||{})[invCol.rodada]=1;
     if(typeof showToast==='function')showToast(end+' gravado ('+invCol.itens.length+' item(ns))','green');
     invColVoltar();
   }catch(e){
@@ -38830,7 +38836,7 @@ function wmsUnidadesModal(){
     +'<div style="width:96px"><label class="fl">Código</label><input class="fi" id="un-cod" maxlength="6" placeholder="CX" style="text-transform:uppercase"></div>'
     +'<div style="flex:1"><label class="fl">Nome</label><input class="fi" id="un-nome" placeholder="Caixa"></div>'
     +'<button class="btn btn-p" onclick="wmsUnidadeAdd()" style="white-space:nowrap">+ Incluir</button></div>'
-    +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:300px;overflow-y:auto">'
+    +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:max(140px,min(300px,calc(100dvh - 470px)));overflow-y:auto">'
     +(linhas||'<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px">Nenhuma unidade ativa.</div>')+'</div>',
     '',{width:'560px',noFooter:true});
 }
