@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1094 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1095 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1094';
+const APP_VERSION='v1.0.1095';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -34853,6 +34853,13 @@ async function coletorInvAbrir(id){
 }
 function coletorInvRender(){
   var titulo=(invCol.inv&&invCol.inv.numero)||'Inventário';
+  if(invCol.modoCaixa && !invCol.semCaixa){   // v1.0.1095: modo caixa na tela de coletor
+    if(ge('cx-area') && invCol.end && invCol._cxEnd===invCol.end){ ge('cx-area').innerHTML=invCxArea(); return; }
+    invCol._cxEnd=invCol.end;
+    coletorShow(titulo,'coletorInvListas()',invCxHTML());
+    setTimeout(function(){var e=ge('col-scan');if(e){e.value='';e.focus();}},60);
+    return;
+  }
   // o único campo de bipe do portal lê endereço OU produto conforme o passo
   _colScanHandler=function(raw){
     // o AI da etiqueta manda: 9502 é endereço, 9501 é produto.
@@ -35771,28 +35778,32 @@ function invCxHTML(){
       +'<div style="font-size:11px;color:var(--text3)">Modo caixa: depois do endereço, bipe a etiqueta de cada caixa.</div><div id="col-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>';
   }
   if(!invCol.cx) invCxReset();
+  _colScanHandler=function(raw){ invCxBip(raw); };
+  return box+'<div id="cx-area">'+invCxArea()+'</div>';
+}
+function invCxArea(){
+  var esc=function(v){return String(v==null?'':v).replace(/</g,'&lt;');};
+  if(!invCol.cx) invCxReset();
   var cx=invCol.cx, lista=invCol.cxByEnd[invCol.end]||[], nL=0; lista.forEach(function(x){ if(cx.lidas[x.key]!=null) nL++; });
   var head='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:11px;color:var(--text3)">ENDEREÇO · MODO CAIXA</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+esc(invCol.end)+'</div></div>'
     +'<button class="btn btn-sm" onclick="invColVoltar()">← trocar</button></div>';
   if(cx.pend){
     var p=cx.pend;
-    _colScanHandler=function(){ invCxMsg('aviso','Informe a quantidade da caixa aberta antes de bipar outra.'); invColRender(); };
     return head+'<div style="border:2px solid var(--amber-text);border-radius:12px;padding:12px;background:var(--amber-bg)">'
       +'<div style="font-size:11px;font-weight:700;color:var(--amber-text)">CAIXA ESPERADA INCOMPLETA</div>'
       +'<div style="font-size:15px;font-weight:700;margin:4px 0">RG '+esc(p.ant||p.rg)+' · '+esc(p.cod)+'</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">No sistema esta caixa está aberta'+(invCol.cega?'':': <b>'+p.qtd.toLocaleString('pt-BR')+' pç</b>')+' (a caixa padrão tem '+(invCol.cxPadrao[p.cod]||0).toLocaleString('pt-BR')+'). Conte e informe a quantidade.</div>'
       +'<input class="fi" id="cx-qtd" type="number" inputmode="numeric" min="0" step="1" value="'+(invCol.cega?'':p.qtd)+'" placeholder="peças" style="font-size:22px;padding:10px;text-align:center" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invCxQtd();}">'
-      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><button class="btn" onclick="invCol.cx.pend=null;invColRender()">Voltar</button><button class="btn btn-p" onclick="invCxQtd()">Confirmar</button></div></div>';
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><button class="btn" onclick="invCol.cx.pend=null;invCxRefresh()">Voltar</button><button class="btn btn-p" onclick="invCxQtd()">Confirmar</button></div></div>';
   }
-  _colScanHandler=function(raw){ invCxBip(raw); };
   var linhas=lista.slice().sort(function(a,b){ return (cx.lidas[a.key]!=null)-(cx.lidas[b.key]!=null) || String(a.cod).localeCompare(String(b.cod)); }).map(function(x){
     var ok=cx.lidas[x.key]!=null;
     return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-top:1px solid var(--border);font-size:12.5px;'+(ok?'background:var(--green-bg)':'')+'">'
       +'<span><b>'+esc(x.ant||('P-'+x.rg))+'</b> · '+esc(x.cod)+(x.aberta?' <span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text)">aberta</span>':'')+'</span>'
       +'<span style="white-space:nowrap">'+(ok?('<b>'+cx.lidas[x.key].toLocaleString('pt-BR')+'</b> ✓'):(invCol.cega?'—':x.qtd.toLocaleString('pt-BR')))+'</span></div>'; }).join('');
-  var extras=cx.extras.map(function(x,i){ return '<div style="display:flex;justify-content:space-between;padding:6px 8px;border-top:1px solid var(--border);font-size:12.5px;background:var(--amber-bg)"><span><b>'+esc(x.ant||('P-'+x.rg))+'</b> · '+esc(x.cod)+' <span style="font-size:11px;color:var(--amber-text)">no sistema: '+esc(x.de)+'</span></span><span>'+x.qtd.toLocaleString('pt-BR')+' <span onclick="invCol.cx.extras.splice('+i+',1);invColRender()" style="cursor:pointer;color:#9b1c1c;margin-left:6px">✕</span></span></div>'; }).join('');
+  var extras=cx.extras.map(function(x,i){ return '<div style="display:flex;justify-content:space-between;padding:6px 8px;border-top:1px solid var(--border);font-size:12.5px;background:var(--amber-bg)"><span><b>'+esc(x.ant||('P-'+x.rg))+'</b> · '+esc(x.cod)+' <span style="font-size:11px;color:var(--amber-text)">no sistema: '+esc(x.de)+'</span></span><span>'+x.qtd.toLocaleString('pt-BR')+'  <span onclick="invCol.cx.extras.splice('+i+',1);invCxRefresh()" style="cursor:pointer;color:#9b1c1c;margin-left:6px">✕</span></span></div>'; }).join('');
   var pct=lista.length?Math.round(100*nL/lista.length):0;
-  return invColProgresso()+head+box+(cx.msg||'')
+  return invColProgresso()+head+(cx.msg||'')
     +'<div style="display:flex;justify-content:space-between;margin:10px 0 4px;font-weight:700;font-size:13px"><span>Caixas</span><span>'+nL+' de '+lista.length+'</span></div>'
     +'<div style="height:6px;border-radius:3px;background:var(--bg2);overflow:hidden;margin-bottom:6px"><div style="width:'+pct+'%;height:100%;background:#76B82A"></div></div>'
     +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:300px;overflow-y:auto">'+(linhas||'<div style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Endereço sem caixas no sistema.</div>')+extras+'</div>'
@@ -35806,26 +35817,28 @@ function invCxAcha(digs, end){
 }
 function invCxBip(raw){
   var s=String(raw||'').trim(); if(!s) return;
+  if(invCol.cx && invCol.cx.pend){ invCxMsg('aviso','Informe a quantidade da caixa aberta antes de bipar outra.'); invCxRefresh(); return; }
   var digs=s.replace(/^P-?/i,'').replace(/[^0-9A-Za-z]/g,'');
   var cx=invCol.cx, x=invCxAcha(digs, invCol.end);
   if(x){
-    if(cx.lidas[x.key]!=null){ invCxMsg('aviso','RG '+(x.ant||x.rg)+' já foi bipado neste endereço.'); invColRender(); return; }
-    if(x.aberta){ cx.pend=x; cx.msg=''; invColRender(); setTimeout(function(){ var q=ge('cx-qtd'); if(q){q.focus();q.select();} },60); return; }
-    cx.lidas[x.key]=x.qtd; invCxMsg('ok','✓ RG '+(x.ant||x.rg)+' · '+x.cod+(invCol.cega?'':' · '+x.qtd.toLocaleString('pt-BR')+' pç')); invColRender(); return;
+    if(cx.lidas[x.key]!=null){ invCxMsg('aviso','RG '+(x.ant||x.rg)+' já foi bipado neste endereço.'); invCxRefresh(); return; }
+    if(x.aberta){ cx.pend=x; cx.msg=''; invCxRefresh(); setTimeout(function(){ var q=ge('cx-qtd'); if(q){q.focus();q.select();} },60); return; }
+    cx.lidas[x.key]=x.qtd; invCxMsg('ok','✓ RG '+(x.ant||x.rg)+' · '+x.cod+(invCol.cega?'':' · '+x.qtd.toLocaleString('pt-BR')+' pç')); invCxRefresh(); return;
   }
   // caixa de outro endereço?
   var ends=Object.keys(invCol.cxByEnd);
   for(var k=0;k<ends.length;k++){ if(ends[k]===invCol.end) continue; var y=invCxAcha(digs, ends[k]);
-    if(y){ if(cx.extras.some(function(e){return e.key===y.key;})){ invCxMsg('aviso','RG '+(y.ant||y.rg)+' já registrado como a mais.'); invColRender(); return; }
+    if(y){ if(cx.extras.some(function(e){return e.key===y.key;})){ invCxMsg('aviso','RG '+(y.ant||y.rg)+' já registrado como a mais.'); invCxRefresh(); return; }
       cx.extras.push({key:y.key,rg:y.rg,ant:y.ant,cod:y.cod,desc:y.desc,qtd:y.qtd,de:ends[k]});
-      invCxMsg('aviso','RG '+(y.ant||y.rg)+' · '+y.cod+' está no '+ends[k]+' no sistema — registrado como a mais aqui.'); invColRender(); return; } }
-  invCxMsg('erro','Etiqueta '+s+' não identificada. Separe a caixa e conte-a em "Contar por produto".'); invColRender();
+      invCxMsg('aviso','RG '+(y.ant||y.rg)+' · '+y.cod+' está no '+ends[k]+' no sistema — registrado como a mais aqui.'); invCxRefresh(); return; } }
+  invCxMsg('erro','Etiqueta '+s+' não identificada. Separe a caixa e conte-a em "Contar por produto".'); invCxRefresh();
 }
+function invCxRefresh(){ var a=ge('cx-area'); if(a && invCol.end){ a.innerHTML=invCxArea(); } else invColRender(); }
 function invCxQtd(){
   var cx=invCol.cx, p=cx.pend; if(!p) return;
   var q=parseFloat((ge('cx-qtd')||{}).value);
   if(isNaN(q)||q<0){ var i=ge('cx-qtd'); if(i) i.focus(); return; }
-  cx.lidas[p.key]=q; cx.pend=null; invCxMsg('ok','✓ RG '+(p.ant||p.rg)+' · '+p.cod+' · '+q.toLocaleString('pt-BR')+' pç (contado)'); invColRender();
+  cx.lidas[p.key]=q; cx.pend=null; invCxMsg('ok','✓ RG '+(p.ant||p.rg)+' · '+p.cod+' · '+q.toLocaleString('pt-BR')+' pç (contado)'); invCxRefresh();
 }
 async function invCxConfirmar(){
   var cx=invCol.cx, lista=invCol.cxByEnd[invCol.end]||[];
@@ -35911,7 +35924,7 @@ function invColRender(){
   setTimeout(function(){var e=ge(invCol.end?'col-prod':'col-end');if(e)e.focus();},60);
 }
 function invColBodyHTML(){
-  if(invCol.modoCaixa && !invCol.semCaixa && !invCol.portal) return invCxHTML();   // v1.0.1094
+  if(invCol.modoCaixa && !invCol.semCaixa && !invCol.portal) return invCxHTML();   // v1.0.1094 (no portal, coletorInvRender cuida)
   if(!invCol.end){
     // ── passo 1 · endereço ──
     return invColProgresso()
