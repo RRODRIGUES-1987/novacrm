@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1106 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1107 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1106';
+const APP_VERSION='v1.0.1107';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52521,7 +52521,113 @@ async function tlExcel(){
   }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
 }
 function tlAbrirPedido(numero){ _tl.busca=String(numero||''); try{ ecomModalClose(); }catch(_){} ecomRelAbrir('timeline'); tlBuscar(); }
-function ecomRelAbrir(which){ ecomRelView=which; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
+// ───── RELATÓRIO · FILAS DA INTEGRAÇÃO (v1.0.1107) ─────
+// Relatório sob demanda (só lê o banco ao abrir/atualizar): o que está na conta do cliente aguardando nota,
+// o que o VERUS vai disparar sozinho (com o horário previsto pela regra) e o que está travado.
+var _fl={dados:null,carregando:false,erro:'',em:null};
+function flHora(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''; var p=function(n){return String(n).padStart(2,'0');}; return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+function flHm(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''; return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function flDur(ms){ if(ms==null||ms<0) return ''; var m=Math.floor(ms/60000), h=Math.floor(m/60); return h?(h+'h'+String(m%60).padStart(2,'0')):(m+' min'); }
+function flProxMin(passo,resto){ var d=new Date(); d.setSeconds(0,0); do{ d=new Date(d.getTime()+60000); }while(d.getMinutes()%passo!==resto); return d; }
+function flVerus(ep){ return ep?('E-'+String(ep.numero_interno||'').padStart(6,'0')):'—'; }
+async function flCarregar(){
+  var cid=ecomCid(); if(!cid) return;
+  _fl.carregando=true; _fl.erro=''; flRender();
+  try{
+    var ints=await dbSelect('integracoes','company_id=eq.'+cid+'&select=id,nome,config').catch(function(){return [];})||[];
+    var cfg={}; ints.forEach(function(g){ cfg[g.id]=g; });
+    var desde=new Date(Date.now()-7*864e5).toISOString();
+    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em';
+    var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
+    if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols.replace(',pode_faturar_em','').replace(',nf_autorizada_em','')).catch(function(){return [];})||[];
+    var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
+    for(var i=0;i<ids.length;i+=150){
+      var lote=ids.slice(i,i+150).join(',');
+      (await dbSelect('ecom_pedidos','id=in.('+lote+')&select=id,numero_interno,status').catch(function(){return [];})||[]).forEach(function(p){ ped[p.id]=p; });
+      (await dbSelect('ecom_etiquetas','pedido_id=in.('+lote+')&select=pedido_id').catch(function(){return [];})||[]).forEach(function(e){ etq[e.pedido_id]=1; });
+    }
+    var agora=Date.now(), cli=[], prox=[], trav=[];
+    var proxSync=flProxMin(10,0), proxAgr=flProxMin(2,0), proxEtq=flProxMin(2,1);
+    rows.forEach(function(r){
+      var ep=r.pedido_verus_id?ped[r.pedido_verus_id]:null, sit=String(r.situacao_tiny||'').toLowerCase();
+      if(sit==='cancelado'||sit==='enviado'||sit==='entregue') return;
+      var noVerusAndou=ep && ['importado','aguardando_etiqueta'].indexOf(String(ep.status||''))<0;
+      if(noVerusAndou || (ep&&etq[ep.id]) || r.etiqueta_url || r.etiqueta_arquivo) return;   // já com etiqueta ou em operação
+      var base={r:r,ep:ep};
+      if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?String(r.alerta).replace(/_/g,' '):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
+      if(r.status_importacao!=='importado' || !ep){
+        if(['aprovado','preparando_envio','faturado','pronto_envio'].indexOf(sit)>=0 || (sit==='aberto'&&r.nf_numero)) prox.push({...base,reg:'situação no Olist: '+(sit||'—')+' · ainda não importado',regra:'importação na sincronização',prev:proxSync});
+        return;
+      }
+      var nfOk=!!r.nf_numero && ['6','7'].indexOf(String(r.nf_situacao||''))>=0;
+      if(nfOk){
+        if(r.agrupamento_id){ prox.push({...base,reg:'agrupado · sem etiqueta',regra:'passada de etiquetas a cada 2 min',prev:proxEtq}); return; }
+        var car=Number((cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_carencia_min)!=null?cfg[r.integracao_id].config.agrupar_carencia_min:20);
+        var libera=r.nf_autorizada_em?new Date(new Date(r.nf_autorizada_em).getTime()+car*60000):null;
+        var prev=(libera&&libera.getTime()>agora)?flProxDepois(libera):proxAgr;
+        prox.push({...base,reg:'NF '+r.nf_numero+(r.nf_autorizada_em?' vista às '+flHm(r.nf_autorizada_em):' autorizada'),regra:'agrupamento após '+car+' min da nota',prev:prev}); return;
+      }
+      if(r.nf_numero){ prox.push({...base,reg:'NF '+r.nf_numero+' · situação '+(r.nf_situacao||'—'),regra:'leitura da nota na passada de etiquetas',prev:proxEtq}); return; }
+      if(!r.situacao_enviada && sit==='aprovado'){ prox.push({...base,reg:'aprovado · "pode faturar" ainda não enviado',regra:'envio do "pode faturar" na sincronização',prev:proxSync}); return; }
+      if(r.situacao_confirmada_em){ cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:sit,lida:r.updated_at}); return; }
+      if(r.situacao_enviada){ prox.push({...base,reg:'"pode faturar" enviado às '+flHm(r.situacao_enviada_em)+' · sem confirmação',regra:'conferência/reenvio na sincronização',prev:proxSync}); return; }
+    });
+    cli.sort(function(a,b){ return String(a.pf||a.conf).localeCompare(String(b.pf||b.conf)); });
+    prox.sort(function(a,b){ return a.prev-b.prev; });
+    trav.sort(function(a,b){ return String(a.desde).localeCompare(String(b.desde)); });
+    _fl.dados={cli:cli,prox:prox,trav:trav}; _fl.em=new Date();
+  }catch(e){ _fl.erro='Erro ao montar as filas: '+(e.message||e); }
+  _fl.carregando=false; flRender();
+}
+function flProxDepois(dt){ var d=new Date(dt.getTime()); d.setSeconds(0,0); d=new Date(d.getTime()+60000); while(d.getMinutes()%2!==0) d=new Date(d.getTime()+60000); return d; }
+function flRender(){ var c=ge('content'); if(c && ecomRelView==='filas') c.innerHTML=ecomRelFilasView(); }
+function ecomRelFilasView(){
+  var e=ecomEsc, d=_fl.dados, agora=Date.now();
+  if(!d && !_fl.carregando && !_fl.erro) setTimeout(flCarregar,30);
+  var h='<div style="max-width:1180px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Filas da integra&ccedil;&atilde;o</b>'
+    +(_fl.em?'<span style="font-size:12px;color:var(--text3)">atualizado &agrave;s '+flHm(_fl.em)+':'+String(_fl.em.getSeconds()).padStart(2,'0')+'</span>':'')
+    +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-sm" onclick="flCarregar()">&#8635; Atualizar</button>'+(d?'<button class="btn btn-sm" onclick="flExcel()">Exportar Excel</button>':'')+'</span></div>';
+  if(_fl.carregando && !d) return h+'<div style="padding:30px;text-align:center;color:var(--text3)"><span class="spin"></span> Montando as filas&hellip;</div></div>';
+  if(_fl.erro) return h+'<div style="padding:24px;text-align:center;color:var(--red-text);border:1px dashed var(--border);border-radius:10px">'+e(_fl.erro)+'</div></div>';
+  if(!d) return h+'</div>';
+  var kpi=function(t,n,sub,cor){ return '<div style="flex:1;min-width:180px;border:1px solid var(--border);border-radius:11px;padding:11px 13px;background:var(--bg)"><div style="font-size:11.5px;color:var(--text3)">'+t+'</div><div style="font-size:24px;font-weight:800'+(cor?';color:'+cor:'')+'">'+n+'</div><div style="font-size:11.5px;color:var(--text3)">'+sub+'</div></div>'; };
+  var maisAnt=d.cli.length?flDur(agora-new Date(d.cli[0].pf||d.cli[0].conf).getTime()):'—';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +kpi('Na conta do cliente · aguardando nota',d.cli.length,d.cli.length?('mais antigo h&aacute; '+maisAnt):'nenhum')
+    +kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length,d.prox.length?('pr&oacute;ximo a partir das '+flHm(d.prox[0].prev)):'nenhum')
+    +kpi('Travados · precisam de algu&eacute;m',d.trav.length,d.trav.length?'ver motivo':'nenhum',d.trav.length?'var(--red-text)':'')
+  +'</div>';
+  var tab=function(tit,sub,cab,linhas,vazio){ return '<div style="border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--bg);margin-bottom:12px">'
+    +'<div style="font-weight:700;font-size:14px">'+tit+'</div><div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">'+sub+'</div>'
+    +'<div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:var(--bg2);position:sticky;top:0">'+cab.map(function(c){return '<th style="text-align:left;padding:6px 8px;white-space:nowrap">'+c+'</th>';}).join('')+'</tr></thead><tbody>'
+    +(linhas.length?linhas.join(''):'<tr><td colspan="'+cab.length+'" style="padding:14px;text-align:center;color:var(--text3)">'+vazio+'</td></tr>')+'</tbody></table></div></div>'; };
+  var td=function(v,mono){ return '<td style="padding:6px 8px;border-top:1px solid var(--border)'+(mono?';font-family:monospace;white-space:nowrap':'')+'">'+v+'</td>'; };
+  var lnk=function(x){ return '<span style="cursor:pointer;color:var(--accent)" onclick="tlAbrirPedido(\''+e(x.r.numero||'')+'\')">'+e(x.r.numero||'')+'</span> · '+e(flVerus(x.ep)); };
+  var sitLbl=function(s){ return ({preparando_envio:'Preparando envio',aprovado:'Aprovado',faturado:'Faturado',pronto_envio:'Pronto para envio',aberto:'Em aberto'})[s]||s||'—'; };
+  h+=tab('Na conta do cliente · "pode faturar" confirmado, sem nota','Evid&ecirc;ncia por pedido: quando enviamos, quando o Olist confirmou e a situa&ccedil;&atilde;o lida no Olist (com a hora da leitura).',
+    ['Pedido Olist · VERUS','1º "pode faturar"','Confirmado no Olist','Situa&ccedil;&atilde;o no Olist','Lida &agrave;s','Aguardando'],
+    d.cli.map(function(x){ return '<tr>'+td(lnk(x),1)+td(flHora(x.pf),1)+td(flHora(x.conf),1)+td(e(sitLbl(x.sit)))+td(flHm(x.lida),1)+td(flDur(agora-new Date(x.pf||x.conf).getTime()))+'</tr>'; }),'Nenhum pedido aguardando nota na conta do cliente.');
+  h+=tab('Pr&oacute;ximos disparos do VERUS · andam sozinhos','Regra que move cada pedido e o hor&aacute;rio previsto por ela (a partir de).',
+    ['Pedido Olist · VERUS','Situa&ccedil;&atilde;o registrada','Regra','Previsto a partir de'],
+    d.prox.map(function(x){ return '<tr>'+td(lnk(x),1)+td(e(x.reg))+td(e(x.regra))+td(flHm(x.prev),1)+'</tr>'; }),'Nenhum disparo previsto.');
+  h+=tab('Travados · precisam de algu&eacute;m','Alerta ou erro registrado no pedido.',
+    ['Pedido Olist · VERUS','Alerta registrado','Desde'],
+    d.trav.map(function(x){ return '<tr>'+td(lnk(x),1)+td('<span style="color:var(--red-text)">'+e(x.motivo)+'</span>')+td(flHora(x.desde),1)+'</tr>'; }),'Nenhum pedido travado.');
+  h+='<div style="font-size:11px;color:var(--text3)">Relat&oacute;rio sob demanda: l&ecirc; o banco ao abrir e ao clicar em Atualizar (pedidos dos &uacute;ltimos 7 dias). "Lida &agrave;s" &eacute; a &uacute;ltima leitura do pedido no Olist pelo VERUS. Clique no pedido para abrir a linha do tempo.</div></div>';
+  return h;
+}
+async function flExcel(){
+  var d=_fl.dados; if(!d) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs'), agora=Date.now(), wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.cli.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Pode_faturar_1o:flHora(x.pf),Confirmado_no_Olist:flHora(x.conf),Situacao_no_Olist:x.sit,Lida_as:flHora(x.lida),Aguardando:flDur(agora-new Date(x.pf||x.conf).getTime())}; })),'Na conta do cliente');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.prox.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Situacao_registrada:x.reg,Regra:x.regra,Previsto_a_partir_de:flHora(x.prev)}; })),'Proximos disparos');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.trav.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Alerta:x.motivo,Desde:flHora(x.desde)}; })),'Travados');
+    XLSX.writeFile(wb,'Filas_integracao_'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
+}
+function ecomRelAbrir(which){ ecomRelView=which; if(which==='filas') _fl.dados=null; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function ecomRelVoltar(){ ecomRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function rEcomRelatorios(){
   if(ecomRelView==='expedicao') return ecomRelExpedicaoView();
@@ -52529,6 +52635,7 @@ function rEcomRelatorios(){
   if(ecomRelView==='laudo') return ecomLaudoView();
   if(ecomRelView==='intgstatus') return ecomRelIntgStatusView();
   if(ecomRelView==='timeline') return ecomRelTimelineView();   // v1.0.1106
+  if(ecomRelView==='filas') return ecomRelFilasView();          // v1.0.1107
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -52561,6 +52668,12 @@ function rEcomRelatorios(){
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Linha do tempo do pedido</div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Todos os marcos registrados de um pedido, com data e hora: integra&ccedil;&atilde;o, log, VERUS e opera&ccedil;&atilde;o. Para depurar e demonstrar.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
+      +'<div onclick="ecomRelAbrir(\'filas\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h6"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Filas da integra&ccedil;&atilde;o</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">O que est&aacute; na conta do cliente aguardando nota, o que o VERUS vai disparar sozinho e o que est&aacute; travado. Com evid&ecirc;ncia, para enviar ao cliente.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
     +'</div></div>';
