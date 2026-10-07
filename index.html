@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1110 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1111 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1110';
+const APP_VERSION='v1.0.1111';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35332,11 +35332,15 @@ async function wmsGerarListas(tipo){
           }
           itens.forEach(it=>{
             const rs=res.filter(r=>r.pedido_item_id===it.id);
+            const prodIt=wmsProdutoDe(it.produto_id,it.sku,p.cliente_id), saco=Number(prodIt&&prodIt.fator_conversao)||0;   // peças por saco
             rs.forEach(r=>{
               const pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{};
               const cod=String(pl.endereco_codigo||''), end=cod?{raw:cod,rua:cod.slice(0,2),posicao:cod.slice(2,5),nivel:cod.slice(5)}:null;
-              tarefas.push({tipo_volume:(c.qtd_fiscal!=null&&Number(r.qtd)>=Number(c.qtd_fiscal))?'pallet':'fracao',quantidade:Number(r.qtd),it,end,frente:null,
-                            pallet_id:r.pallet_id,reserva_id:r.id,ordem:tarefas.length+1});
+              const base={it,end,frente:null,pallet_id:r.pallet_id,reserva_id:r.id};
+              if(c.qtd_fiscal!=null&&Number(r.qtd)>=Number(c.qtd_fiscal)){ tarefas.push({...base,tipo_volume:'pallet',quantidade:Number(r.qtd),ordem:tarefas.length+1}); return; }   // caixa inteira = 1 bipe
+              // v1.0.1111: retirada parcial = 1 tarefa (bipe) por saco
+              if(saco>1 && Number(r.qtd)%saco===0){ const n=Number(r.qtd)/saco; for(let k=0;k<n;k++) tarefas.push({...base,tipo_volume:'fracao',quantidade:saco,ordem:tarefas.length+1}); }
+              else tarefas.push({...base,tipo_volume:'fracao',quantidade:Number(r.qtd),ordem:tarefas.length+1});   // sem saco cadastrado: 1 bipe com a quantidade
             });
             const emp=rs.reduce((a,r)=>a+Number(r.qtd||0),0), falta=Number(it.quantidade||0)-emp;
             if(falta>0) tarefas.push({tipo_volume:'fracao',quantidade:falta,it,end:{raw:'SEM SALDO',rua:null,posicao:null,nivel:null},frente:null,sem_saldo:true,ordem:tarefas.length+1});
@@ -40552,14 +40556,20 @@ async function wmsImpProcessar(input){
       if(d===null || !d.length){ ignorados.push(f.name); continue; }
       casco.push(...d); lidos.push(f.name+' · '+d.length+' item(ns)');
     }
+    // v1.0.1111: linha fora do múltiplo do saco trava o PEDIDO inteiro (não só a linha)
+    const bloqueados={}, motivos=[];
+    casco.forEach(d=>{ const pr=wmsProdutoDe(null,d.sku,wmsImpCliente), saco=Number(pr&&pr.fator_conversao)||0;
+      if(saco>1 && Number(d.qtd)%saco!==0){ bloqueados[d.documento]=1; motivos.push(d.documento+' · '+d.sku+': '+Number(d.qtd).toLocaleString('pt-BR')+' pç não é múltiplo do saco de '+saco); } });
+    const casco2=casco.filter(d=>!bloqueados[d.documento]);
     if(casco.length){
-      wmsImpDados=casco; wmsImpFormato='v1'; wmsImpOsVerus=true;   // v1.0.1104
+      wmsImpDados=casco2; wmsImpFormato='v1'; wmsImpOsVerus=true;   // v1.0.1104
       wmsImpRenderPreview();
       wmsImpAviso(lidos.length+' planilha(s) de pedido lida(s)',
-        '<b>'+new Set(casco.map(d=>d.documento)).size+'</b> pedido(s) · <b>'+casco.length+'</b> item(ns). Confira a prévia e importe.'
+        '<b>'+new Set(casco2.map(d=>d.documento)).size+'</b> pedido(s) · <b>'+casco2.length+'</b> item(ns) prontos para importar.'
         +'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+lidos.map(x=>'&#10003; '+ecomEsc(x)).join('<br>')+'</div>'
+        +(motivos.length?'<div style="margin-top:10px;font-size:12px;color:var(--red-text)"><b>'+Object.keys(bloqueados).length+' pedido(s) NÃO importado(s)</b> — linha fora do múltiplo do saco (o pedido inteiro fica de fora até a CASCO corrigir):<br>'+motivos.map(x=>'&bull; '+ecomEsc(x)).join('<br>')+'</div>':'')
         +(ignorados.length?'<div style="margin-top:10px;font-size:12px;color:var(--amber-text)"><b>'+ignorados.length+' arquivo(s) ignorado(s)</b> (não são planilha de pedido):<br>'+ignorados.map(x=>'&bull; '+ecomEsc(x)).join('<br>')+'</div>':''),
-        ignorados.length?'aviso':'ok');
+        (ignorados.length||motivos.length)?'aviso':'ok');
       input.value='';
       return;
     }
