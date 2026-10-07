@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1101 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1104 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1101';
+const APP_VERSION='v1.0.1104';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -13618,21 +13618,19 @@ async function iniciarSessao(){
     try{
       if(document.hidden) return;                 // aba em segundo plano não conta como uso
       _hbN++;
-      if(_hbN%5===0){
-        const rows = await dbSelect('user_sessions', 'session_token=eq.'+_sessionToken+'&select=id,force_logout');
-        if(rows&&rows[0]&&rows[0].force_logout){
-          await encerrarSessao();
-          alert('Sua sessão foi encerrada pelo administrador.');
-          window.location.reload();
-          return;
-        }
+      // v1.0.1102: a própria batida devolve o force_logout (sem Realtime e sem leitura extra)
+      const hb = await sbFetch('PATCH','/rest/v1/user_sessions?session_token=eq.'+encodeURIComponent(_sessionToken)+'&select=force_logout',{last_seen: new Date().toISOString()},tok,{'Prefer':'return=representation'});
+      if(hb && hb.ok && Array.isArray(hb.data) && hb.data[0] && hb.data[0].force_logout){
+        await encerrarSessao();
+        alert('Sua sessão foi encerrada pelo administrador.');
+        window.location.reload();
+        return;
       }
-      await sbFetch('PATCH','/rest/v1/user_sessions?session_token=eq.'+encodeURIComponent(_sessionToken),{last_seen: new Date().toISOString()},tok);
     }catch(e){ console.warn('heartbeat:', e); }
   }, SESSAO_HEARTBEAT_MS);
 
-  // Realtime — detectar force_logout instantaneamente
-  if(window.supabase&&window.supabase.channel){
+  // v1.0.1102: Realtime desligado — o force_logout chega pela batida de 3 min (o Realtime era o 2º maior consumo do banco)
+  if(false && window.supabase&&window.supabase.channel){
     _sessionChannel = window.supabase.channel('session_'+_sessionToken)
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -40135,7 +40133,7 @@ function rWmsImportarPedidos(){
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       <div style="font-size:13px;font-weight:500">Clique para selecionar a planilha (.xlsx)</div>
       <div style="font-size:11px;margin-top:4px;color:var(--text3)">Selecione a unidade e o depositante antes</div>
-      <input type="file" id="wms-imp-file" accept=".xlsx,.xls" style="display:none" onchange="wmsImpProcessar(this)">
+      <input type="file" id="wms-imp-file" accept=".xlsx,.xls" multiple style="display:none" onchange="wmsImpProcessar(this)">
     </div>
 
     <div id="wms-imp-preview"></div>
@@ -40375,12 +40373,42 @@ function wmsImpClienteOk(){
   return true;
 }
 
+var wmsImpOsVerus=false;   // v1.0.1104: a OS é o número do VERUS (planilha da CASCO)
 async function wmsImpProcessar(input){
+  wmsImpOsVerus=false;
   const file=input.files[0]; if(!file)return;
   const prev=ge('wms-imp-preview');
   prev.innerHTML='<div style="padding:16px;color:var(--text2)"><span class="spin"></span> Lendo planilha...</div>';
   try{
     const XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    // v1.0.1103: planilha de separação da CASCO (portal do cliente) — uma por OS; aceita vários arquivos de uma vez
+    const normC=c=>String(c||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const lerCasco=async function(f){
+      const wb0=XLSX.read(await f.arrayBuffer(),{type:'array'}); const r0=XLSX.utils.sheet_to_json(wb0.Sheets[wb0.SheetNames[0]],{header:1,defval:''});
+      const h=r0.findIndex(r=>r.some(c=>normC(c)==='numero do item')&&r.some(c=>normC(c).startsWith('qtde separar')));
+      if(h<0) return null;
+      const hd=r0[h].map(normC), ci=n=>hd.findIndex(x=>x===n||x.startsWith(n));
+      const cSku=ci('numero do item'), cQtd=ci('qtde separar'), cPn=ci('item fornecedor'), cCli=ci('nome cliente'), cOv=ci('ov casco');
+      // v1.0.1104: pedido do cliente = OV(s) da CASCO; a OS passa a ser o número do VERUS (gerado na gravação)
+      const ovs=[]; for(let i=h+1;i<r0.length;i++){ const ov=String((r0[i]||[])[cOv]||'').trim().split('-')[0]; if(ov && /^\d+$/.test(ov) && ovs.indexOf(ov)<0) ovs.push(ov); }
+      const mOs=String(f.name||'').match(/(\d{4,})/);
+      // a mesma OV pode vir em mais de uma planilha (a CASCO divide): a referência leva também a OS anterior ou o nome do arquivo
+      const base=String(f.name||'').replace(/\.[^.]+$/,'').replace(/^separa[cç][aã]o de carga\s*-\s*/i,'').slice(0,40);
+      const doc='OV '+(ovs.join('/')||'?')+(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
+      const out=[];
+      for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
+        out.push({documento:doc,sku,descricao:'',qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0,um:'PC',
+                  destinatario:cCli>=0?String(r[cCli]||'').trim():'',pn:cPn>=0?String(r[cPn]||'').trim():'',ov:cOv>=0?String(r[cOv]||'').trim():'',arquivo:f.name}); }
+      return out;
+    };
+    const casco=[]; let ehCasco=true;
+    for(const f of Array.from(input.files)){ const d=await lerCasco(f); if(d===null){ ehCasco=false; break; } casco.push(...d); }
+    if(ehCasco && casco.length){
+      wmsImpDados=casco; wmsImpFormato='v1'; wmsImpOsVerus=true;   // v1.0.1104
+      wmsImpRenderPreview();
+      showToast(Array.from(input.files).length+' planilha(s) da CASCO lida(s) · '+new Set(casco.map(d=>d.documento)).size+' OS(s) · '+casco.length+' item(ns)','green');
+      return;
+    }
     const buf=await file.arrayBuffer();
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
@@ -40485,6 +40513,8 @@ async function wmsImpSalvar(){
         numero_pedido:doc, numero_curto:numCurto, tipo:'saida', status:'importado', owner_id:cu?.id,
       });
       const pedObj=Array.isArray(ped)?ped[0]:ped;
+      // v1.0.1104: a OS é o número do VERUS — vira o número curto (listas, etiquetas, agendamento)
+      if(pedObj && wmsImpOsVerus && pedObj.numero_interno){ try{ await dbUpdate('wms_pedidos',pedObj.id,{numero_curto:String(pedObj.numero_interno)}); pedObj.numero_curto=String(pedObj.numero_interno); }catch(_e){} }
       if(pedObj){wmsPedidos=[pedObj,...wmsPedidos];okPed++;okIds.push(pedObj.id);}
       // itens (mantém separados, não soma)
       for(const it of itens){
