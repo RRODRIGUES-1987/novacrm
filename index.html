@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1109 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1110 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1109';
+const APP_VERSION='v1.0.1110';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35305,7 +35305,7 @@ async function wmsGerarListas(tipo){
   const cid=company?.id;
   portSaving();
   document.querySelectorAll('.wms-tipo-opt').forEach(b=>{b.disabled=true;b.style.opacity='.35';b.style.pointerEvents='none';});
-  const criadas=[];const pulados=[];
+  const criadas=[];const pulados=[];const empenhos=[];   // v1.0.1110
   let nPed=0;
   try{
     const seq=async()=>await dbRpc('next_numero',{p_company:cid,p_prefixo:'LIST'});
@@ -35318,12 +35318,36 @@ async function wmsGerarListas(tipo){
         const itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
         // monta tarefas (cada linha do Excel = SKU × endereço × qtd; qtd = múltiplo → pallet)
         const tarefas=[];
-        itens.forEach(it=>{
+        if(wmsSaldoVerus(p.cliente_id)){
+          // v1.0.1110: depositante com saldo no VERUS — empenha primeiro e cada RG empenhado vira UMA tarefa
+          // (caixa inteira = volume cheio; retirada parcial = fração com a quantidade). O que faltar vira tarefa "SEM SALDO".
+          let empR=null; try{ empR=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:p.id}); }catch(eE){ empR={erro:eE.message||String(eE)}; }
+          empenhos.push({p,r:empR});
+          const res=(await dbSelect('wms_reservas','pedido_id=eq.'+p.id+'&status=eq.reservada&order=created_at.asc').catch(()=>[]))||[];
+          const pids=[...new Set(res.map(r=>r.pallet_id))], pals={}, conts={};
+          for(let i0=0;i0<pids.length;i0+=150){
+            const lote=pids.slice(i0,i0+150).join(',');
+            ((await dbSelect('wms_pallets','id=in.('+lote+')&select=id,rg,endereco_codigo').catch(()=>[]))||[]).forEach(x=>{pals[x.id]=x;});
+            ((await dbSelect('wms_pallet_conteudo','pallet_id=in.('+lote+')&select=id,pallet_id,qtd_fiscal').catch(()=>[]))||[]).forEach(x=>{conts[x.id]=x;});
+          }
+          itens.forEach(it=>{
+            const rs=res.filter(r=>r.pedido_item_id===it.id);
+            rs.forEach(r=>{
+              const pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{};
+              const cod=String(pl.endereco_codigo||''), end=cod?{raw:cod,rua:cod.slice(0,2),posicao:cod.slice(2,5),nivel:cod.slice(5)}:null;
+              tarefas.push({tipo_volume:(c.qtd_fiscal!=null&&Number(r.qtd)>=Number(c.qtd_fiscal))?'pallet':'fracao',quantidade:Number(r.qtd),it,end,frente:null,
+                            pallet_id:r.pallet_id,reserva_id:r.id,ordem:tarefas.length+1});
+            });
+            const emp=rs.reduce((a,r)=>a+Number(r.qtd||0),0), falta=Number(it.quantidade||0)-emp;
+            if(falta>0) tarefas.push({tipo_volume:'fracao',quantidade:falta,it,end:{raw:'SEM SALDO',rua:null,posicao:null,nivel:null},frente:null,sem_saldo:true,ordem:tarefas.length+1});
+          });
+          tarefas.sort((a,b)=>String(a.end&&a.end.raw||'~').localeCompare(String(b.end&&b.end.raw||'~'))); tarefas.forEach((t,i)=>{t.ordem=i+1;});
+        } else itens.forEach(it=>{
           const m=wmsMultiploDe(it.produto_id,it.sku,p.cliente_id);
           const end=frentes?wmsEndDoItem(it):null;
           wmsCalcTarefas(it.quantidade,m).forEach((t,idx)=>tarefas.push({...t,it,end,frente:frentes?wmsFrenteDe(end):null,ordem:tarefas.length+1}));
         });
-        if(frentes){
+        if(frentes&&!wmsSaldoVerus(p.cliente_id)){
           // rota: frente > rua > posição > nível; sem endereço vai para o fim da frente
           tarefas.sort((a,b)=>{const ka=wmsRotaKey(a,p.cliente_id),kb=wmsRotaKey(b,p.cliente_id);return ka<kb?-1:(ka>kb?1:0);});
           tarefas.forEach((t,i)=>{t.ordem=i+1;});
@@ -35348,7 +35372,8 @@ async function wmsGerarListas(tipo){
             company_id:cid,lista_id:listaObj.id,pedido_id:p.id,pedido_item_id:t.it.id,
             produto_id:t.it.produto_id||null,sku:t.it.sku,descricao:t.it.descricao,
             tipo_volume:t.tipo_volume,quantidade:t.quantidade,ordem:t.ordem,status:'pendente',
-            ...(frentes?{frente:t.frente,endereco_origem:t.end?.raw||null,endereco_rua:t.end?.rua||null,endereco_nivel:t.end?.nivel||null,endereco_posicao:t.end?.posicao||null}:{}),
+            ...((frentes||t.pallet_id||t.sem_saldo)?{frente:t.frente,endereco_origem:t.end?.raw||null,endereco_rua:t.end?.rua||null,endereco_nivel:t.end?.nivel||null,endereco_posicao:t.end?.posicao||null}:{}),
+            ...(t.pallet_id?{pallet_id:t.pallet_id,reserva_id:t.reserva_id}:{}),   // v1.0.1110
           });
           if(tar)wmsTarefasSeparacao=[Array.isArray(tar)?tar[0]:tar,...wmsTarefasSeparacao];
         }
@@ -35401,8 +35426,8 @@ async function wmsGerarListas(tipo){
     wmsPedSelecionados.clear();
     wmsUltimasListasGeradas=criadas;
     const nums=criadas.map(id=>wmsListasSeparacao.find(l=>l.id===id)?.numero_lista).filter(Boolean).sort();
-    let empHtml='';   // v1.0.1109: empenho de estoque (depositante com saldo no VERUS)
-    try{ portProgress(peds.length,peds.length,'Empenhando estoque…',''); empHtml=await wmsEmpenharPedidos(peds.filter(p=>!pulados.includes(p.numero_curto||p.numero_pedido||p.id))); }catch(_e){}
+    let empHtml='';   // v1.0.1109/1110: empenho de estoque (depositante com saldo no VERUS) — já feito no laço
+    try{ empHtml=wmsEmpenhoResumoHtml(empenhos); }catch(_e){}
     portClose();
     portModal('Listas geradas',`
       <div style="font-size:14px;margin-bottom:8px"><b>${criadas.length}</b> lista(s) de separação gerada(s)${nums.length?` — ${nums[0]}${nums.length>1?' a '+nums[nums.length-1]:''}`:''}.</div>
@@ -40080,23 +40105,25 @@ async function estoqueEmpenhoModal(conteudoId,palletId,ev){
 function wmsSaldoVerus(clienteId){ var c=(clientes||[]).find(function(x){return x.id===clienteId;}); return !!(c&&c.parametros&&c.parametros.saldo_verus===true); }
 async function wmsRpc(fn,args){ var r=await sbFetch('POST','/rest/v1/rpc/'+fn,args||{},tok); if(!r.ok){ var m=(r.data&&(r.data.message||r.data.hint||r.data.details))||('erro '+r.status); throw new Error(m); } return r.data; }
 // empenha uma lista de pedidos (só os de depositante com saldo no VERUS) e devolve um resumo em HTML
-async function wmsEmpenharPedidos(peds){
-  var alvo=(peds||[]).filter(function(p){return wmsSaldoVerus(p.cliente_id);});
-  if(!alvo.length) return '';
+function wmsEmpenhoResumoHtml(empenhos){
+  if(!empenhos||!empenhos.length) return '';
   var linhas=[], faltouTot=0;
-  for(var i=0;i<alvo.length;i++){
-    var p=alvo[i];
-    try{
-      var r=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:p.id});
-      var its=(r&&r.itens)||[], falt=its.filter(function(x){return Number(x.faltou)>0;});
-      faltouTot+=Number(r&&r.faltou_total||0);
-      linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · '+its.length+' item(ns) · '
-        +(falt.length?'<span style="color:var(--red-text)">'+falt.length+' sem saldo: '+falt.map(function(x){return ecomEsc(x.sku)+' (faltam '+Number(x.faltou).toLocaleString('pt-BR')+')';}).join(', ')+'</span>':'<span style="color:var(--green-text)">empenho completo</span>')+'</div>');
-    }catch(e){ linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border);color:var(--red-text)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · erro ao empenhar: '+ecomEsc(e.message||e)+'</div>'); }
-  }
-  return '<div style="margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg2)"><div style="font-weight:700;font-size:12.5px;margin-bottom:4px">Empenho de estoque ('+alvo.length+' pedido(s))</div>'
+  empenhos.forEach(function(x){
+    var p=x.p, r=x.r||{};
+    if(r.erro){ linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border);color:var(--red-text)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · erro ao empenhar: '+ecomEsc(r.erro)+'</div>'); return; }
+    var its=r.itens||[], falt=its.filter(function(i){return Number(i.faltou)>0;});
+    faltouTot+=Number(r.faltou_total||0);
+    linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · '+its.length+' item(ns) · '
+      +(falt.length?'<span style="color:var(--red-text)">'+falt.length+' sem saldo: '+falt.map(function(i){return ecomEsc(i.sku)+' (faltam '+Number(i.faltou).toLocaleString('pt-BR')+')';}).join(', ')+'</span>':'<span style="color:var(--green-text)">empenho completo</span>')+'</div>');
+  });
+  return '<div style="margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg2)"><div style="font-weight:700;font-size:12.5px;margin-bottom:4px">Empenho de estoque ('+empenhos.length+' pedido(s))</div>'
     +'<div style="font-size:12px">'+linhas.join('')+'</div>'
-    +(faltouTot>0?'<div style="font-size:11.5px;color:var(--amber-text);margin-top:6px">Itens sem saldo ficam sem RG empenhado; a separação deles depende de entrada ou de ajuste de estoque.</div>':'')+'</div>';
+    +(faltouTot>0?'<div style="font-size:11.5px;color:var(--amber-text);margin-top:6px">Itens sem saldo viram tarefa "SEM SALDO" na lista; a separação deles depende de entrada ou de ajuste de estoque.</div>':'')+'</div>';
+}
+async function wmsEmpenharPedidos(peds){
+  var alvo=(peds||[]).filter(function(p){return wmsSaldoVerus(p.cliente_id);}), out=[];
+  for(var i=0;i<alvo.length;i++){ try{ out.push({p:alvo[i],r:await wmsRpc('wms_empenhar_pedido',{p_pedido_id:alvo[i].id})}); }catch(e){ out.push({p:alvo[i],r:{erro:e.message||String(e)}}); } }
+  return wmsEmpenhoResumoHtml(out);
 }
 // detalhe do pedido: seção de empenho
 async function wmsPedEmpenhoCarregar(pedidoId){
