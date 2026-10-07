@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1107 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1108 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1107';
+const APP_VERSION='v1.0.1108';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -40105,9 +40105,35 @@ function wmsImpSetCliente(v){
   const cli=clientes.find(c=>c.id===v);
   if(cli&&cli.unit_id){ wmsImpUnidade=cli.unit_id; const us=ge('wms-imp-unidade'); if(us)us.value=cli.unit_id; }
 }
+// v1.0.1108: a unidade filtra os depositantes (cadastro do depositante); sem unidade definida aparece marcado
+function wmsImpOpcoesCliente(){
+  const cid=company?.id;
+  const lst=clientes.filter(c=>c.company_id===cid && (!wmsImpUnidade || !c.unit_id || c.unit_id===wmsImpUnidade))
+    .sort((a,b)=>(!!a.unit_id===!!b.unit_id)?String(a.nome||'').localeCompare(String(b.nome||'')):(a.unit_id?-1:1));
+  return lst.map(c=>`<option value="${c.id}" ${wmsImpCliente===c.id?'selected':''}>${c.nome}${(wmsImpUnidade&&!c.unit_id)?' (sem unidade)':''}</option>`).join('');
+}
+function wmsImpSetUnidade(v){
+  wmsImpUnidade=v;
+  const cli=clientes.find(c=>c.id===wmsImpCliente);
+  if(cli && cli.unit_id && v && cli.unit_id!==v) wmsImpCliente='';
+  const sel=ge('wms-imp-cliente');
+  if(sel){ sel.innerHTML='<option value="">'+(v?'Selecione o depositante...':'Selecione a unidade antes')+'</option>'+wmsImpOpcoesCliente(); sel.disabled=!v; if(wmsImpCliente) sel.value=wmsImpCliente; }
+}
+// v1.0.1108: mensagens da importação no meio da tela (em vez do aviso no canto)
+function wmsImpAviso(titulo,corpo,tipo){
+  const cor=tipo==='erro'?'var(--red-text)':tipo==='aviso'?'var(--amber-text)':'var(--green-text)';
+  const old=ge('wms-imp-aviso'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='wms-imp-aviso'; ov.className='modal-overlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35)';
+  ov.innerHTML='<div class="modal" style="max-width:520px;width:92%;padding:20px 22px;border-radius:14px;background:var(--bg)">'
+    +'<div style="font-size:16px;font-weight:700;color:'+cor+';margin-bottom:10px">'+titulo+'</div>'
+    +'<div style="font-size:13px;color:var(--text);line-height:1.55;max-height:55vh;overflow:auto">'+corpo+'</div>'
+    +'<div style="text-align:right;margin-top:16px"><button class="btn btn-p" onclick="ge(\'wms-imp-aviso\').remove()">OK</button></div></div>';
+  document.body.appendChild(ov);
+}
 function rWmsImportarPedidos(){
   const cid=company?.id;
-  const opcoes=clientes.filter(c=>c.company_id===cid).map(c=>`<option value="${c.id}" ${wmsImpCliente===c.id?'selected':''}>${c.nome}</option>`).join('');
+  const opcoes=wmsImpOpcoesCliente();
   const uOpcoes=userUnits.filter(u=>u.company_id===cid).map(u=>`<option value="${u.id}" ${wmsImpUnidade===u.id?'selected':''}>${u.name}</option>`).join('');
   return `<div style="max-width:680px">
     ${wmsImpSelos(wmsImpDados?3:(wmsImpCliente&&wmsImpUnidade?2:1))}
@@ -40115,7 +40141,7 @@ function rWmsImportarPedidos(){
 
     <div style="margin-bottom:14px">
       <label class="fl">Unidade *</label>
-      <select class="fi" id="wms-imp-unidade" onchange="wmsImpUnidade=this.value" style="height:38px">
+      <select class="fi" id="wms-imp-unidade" onchange="wmsImpSetUnidade(this.value)" style="height:38px">
         <option value="">Selecione a unidade...</option>
         ${uOpcoes}
       </select>
@@ -40123,8 +40149,8 @@ function rWmsImportarPedidos(){
 
     <div style="margin-bottom:14px">
       <label class="fl">Depositante (cliente) *</label>
-      <select class="fi" id="wms-imp-cliente" onchange="wmsImpSetCliente(this.value)" style="height:38px">
-        <option value="">Selecione o depositante...</option>
+      <select class="fi" id="wms-imp-cliente" onchange="wmsImpSetCliente(this.value)" style="height:38px" ${wmsImpUnidade?'':'disabled'}>
+        <option value="">${wmsImpUnidade?'Selecione o depositante...':'Selecione a unidade antes'}</option>
         ${opcoes}
       </select>
     </div>
@@ -40401,14 +40427,25 @@ async function wmsImpProcessar(input){
                   destinatario:cCli>=0?String(r[cCli]||'').trim():'',pn:cPn>=0?String(r[cPn]||'').trim():'',ov:cOv>=0?String(r[cOv]||'').trim():'',arquivo:f.name}); }
       return out;
     };
-    const casco=[]; let ehCasco=true;
-    for(const f of Array.from(input.files)){ const d=await lerCasco(f); if(d===null){ ehCasco=false; break; } casco.push(...d); }
-    if(ehCasco && casco.length){
+    // v1.0.1108: cada arquivo é lido; os que não são pedido da CASCO ficam de fora e aparecem na mensagem
+    const casco=[], lidos=[], ignorados=[], todos=Array.from(input.files);
+    for(const f of todos){
+      let d=null; try{ d=await lerCasco(f); }catch(_e){ d=null; }
+      if(d===null || !d.length){ ignorados.push(f.name); continue; }
+      casco.push(...d); lidos.push(f.name+' · '+d.length+' item(ns)');
+    }
+    if(casco.length){
       wmsImpDados=casco; wmsImpFormato='v1'; wmsImpOsVerus=true;   // v1.0.1104
       wmsImpRenderPreview();
-      showToast(Array.from(input.files).length+' planilha(s) da CASCO lida(s) · '+new Set(casco.map(d=>d.documento)).size+' OS(s) · '+casco.length+' item(ns)','green');
+      wmsImpAviso(lidos.length+' planilha(s) de pedido lida(s)',
+        '<b>'+new Set(casco.map(d=>d.documento)).size+'</b> pedido(s) · <b>'+casco.length+'</b> item(ns). Confira a prévia e importe.'
+        +'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+lidos.map(x=>'&#10003; '+ecomEsc(x)).join('<br>')+'</div>'
+        +(ignorados.length?'<div style="margin-top:10px;font-size:12px;color:var(--amber-text)"><b>'+ignorados.length+' arquivo(s) ignorado(s)</b> (não são planilha de pedido):<br>'+ignorados.map(x=>'&bull; '+ecomEsc(x)).join('<br>')+'</div>':''),
+        ignorados.length?'aviso':'ok');
+      input.value='';
       return;
     }
+    if(todos.length>1) wmsImpAviso('Formato padrão: um arquivo por vez','Nenhum dos arquivos é planilha de pedido da CASCO. No formato padrão, a importação lê um arquivo por vez: vou ler só <b>'+ecomEsc(file.name)+'</b>.','aviso');
     const buf=await file.arrayBuffer();
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
@@ -40552,6 +40589,18 @@ async function wmsImpSalvar(){
       <button class="btn btn-sm" onclick="portClose();pg('wms-pedidos')">Ver pedidos →</button>
     </div>
   </div>`;
+  // v1.0.1108: resultado também no meio da tela, com as OSs geradas
+  try{
+    const novos=(wmsPedidos||[]).filter(x=>okIds.indexOf(x.id)>=0);
+    wmsImpAviso(erros?'Importação concluída com erro(s)':'Importação concluída',
+      '<b>'+okPed+'</b> pedido(s) e <b>'+okItens+'</b> item(ns) importado(s).'
+      +(novos.length?'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+novos.map(x=>'&#10003; OS <b>'+ecomEsc(x.numero_curto||x.numero_interno||'')+'</b> &larr; '+ecomEsc(x.numero_pedido||'')).join('<br>')+'</div>':'')
+      +(ignorados?'<div style="margin-top:8px;color:var(--amber-text)">'+ignorados+' pedido(s) já existente(s) ignorado(s).</div>':'')
+      +(autoVinc?'<div style="margin-top:8px">'+autoVinc+' pedido(s) amarrado(s) a romaneio(s) que os aguardavam.</div>':'')
+      +(erros?'<div style="margin-top:8px;color:var(--red-text)">'+erros+' erro(s).</div>':'')
+      +(okIds.length?'<div style="margin-top:10px;font-size:12px;color:var(--text3)">Próximo passo: "Gerar separação" na tela da importação.</div>':''),
+      erros?'erro':(ignorados?'aviso':'ok'));
+  }catch(_e){}
   wmsImpDados=null;
   wmsImpUltimosIds=okIds;
 }
