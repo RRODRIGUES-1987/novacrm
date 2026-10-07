@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1104 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1105 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1104';
+const APP_VERSION='v1.0.1105';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52538,7 +52538,8 @@ async function isiCarregar(){
     if(fim){ var d=new Date(fim+'T12:00:00'); d.setDate(d.getDate()+1); per.push('created_at.lt.'+isiDataIso(d)+'T00:00:00-03:00'); }
     if(per.length) f+='&and=('+per.join(',')+')';
     // situacao_enviada_em/situacao_reenvios vêm da edge v7.31 (SQL); sem as colunas, carrega sem elas
-    var rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+',situacao_enviada_em,situacao_reenvios,situacao_confirmada_em&order=created_at.desc');
+    var rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+',situacao_enviada_em,situacao_reenvios,situacao_confirmada_em,pode_faturar_em&order=created_at.desc');   // v1.0.1105
+    if(!rows.length) rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+',situacao_enviada_em,situacao_reenvios,situacao_confirmada_em&order=created_at.desc');
     _isiTemConfirm=rows.length>0;   // v1.0.1076: a coluna de confirmação existe (SQL da edge v7.32)
     if(!rows.length) rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+',situacao_enviada_em,situacao_reenvios&order=created_at.desc');
     if(!rows.length) rows=await dbSelectAll('intg_pedidos',f+'&select='+ISI_COLS+'&order=created_at.desc');
@@ -52590,8 +52591,13 @@ function isiRender(){
     var pf='<span style="'+cinza+'">\u2014</span>';
     if(p.situacao_enviada){
       var _semConf=_isiTemConfirm&&!p.situacao_confirmada_em&&!p.nf_numero&&intgSitDe(p)==='aprovado';
-      pf='<span style="color:'+(_semConf?'var(--amber-text,#8a6d1a)':'#166534')+'" title="'+(_semConf?'enviado, mas o Olist ainda n\u00e3o mostrou o pedido em preparando envio':'enviado e confirmado no Olist')+'">'+(_semConf?'\u26a0 ':'\u2713 ')+isiHora(p.situacao_enviada_em||(ped&&ped.created_at))+(_semConf?' <span style="font-size:10px">sem confirma\u00e7\u00e3o</span>':'')+'</span>'
-        +(Number(p.situacao_reenvios||0)>0?' <span title="reenvios autom\u00e1ticos" style="font-size:10px;color:var(--amber-text,#8a6d1a)">\u21bb'+p.situacao_reenvios+'</span>':'');
+      // v1.0.1105: em destaque, o PRIMEIRO "pode faturar"; embaixo, reenvios e o último envio de situação (ex.: pronto p/ envio)
+      var _cod=String(p.situacao_enviada||''), _prim=p.pode_faturar_em||(_cod==='4'?p.situacao_enviada_em:null), _nRe=Number(p.situacao_reenvios||0);
+      var _sub=function(t){ return '<div style="font-size:10.5px;color:var(--text3);margin-top:1px;white-space:nowrap">'+t+'</div>'; };
+      pf='<span style="color:'+(_semConf?'var(--amber-text,#8a6d1a)':'#166534')+'" title="'+(_semConf?'enviado, mas o Olist ainda n\u00e3o mostrou o pedido em preparando envio':'enviado e confirmado no Olist')+'">'+(_semConf?'\u26a0 ':'\u2713 ')+isiHora(_prim||p.situacao_enviada_em||(ped&&ped.created_at))+(_semConf?' <span style="font-size:10px">sem confirma\u00e7\u00e3o</span>':'')+'</span>'
+        +(p.situacao_confirmada_em&&!_semConf?_sub('confirmado no Olist'):'')
+        +(_nRe>0?_sub('<span style="color:var(--amber-text,#8a6d1a)">\u21bb '+_nRe+' reenvio'+(_nRe>1?'s':'')+'</span>'+(_cod==='4'&&p.situacao_enviada_em?' \u00b7 \u00faltimo '+isiHora(p.situacao_enviada_em):'')):'')
+        +(_cod&&_cod!=='4'&&p.situacao_enviada_em?_sub('\u00faltimo envio: '+(_cod==='7'?'pronto p/ envio':'c\u00f3digo '+_cod)+' \u00b7 '+isiHora(p.situacao_enviada_em)):'');
     }
     else if(ped) pf='<span style="color:var(--amber-text,#8a6d1a)">pendente</span>';
     var temEtq=!!(p.etiqueta_url||p.etiqueta_arquivo);
@@ -52631,7 +52637,7 @@ async function isiExcel(){
       return {Pedido_Olist:p.numero||'', ID_Olist:p.pedido_externo_id||'', Pedido_VERUS:isiNumVerus(ped), Plataforma:plat?plat.nome:'', Destinatario:p.destinatario_nome||'',
         Situacao_Olist:intgSitCfg(p).lbl, Status_VERUS:ped?String(ped.status||'').replace(/_/g,' '):'',
         Sincronizado:isiHora(p.created_at), Importado:ped?isiHora(ped.created_at):'',
-        Pode_faturar:p.situacao_enviada?isiHora(p.situacao_enviada_em||(ped&&ped.created_at)):'', Confirmado_em:isiHora(p.situacao_confirmada_em), Reenvios:Number(p.situacao_reenvios||0)||'',
+        Pode_faturar_1o:p.situacao_enviada?isiHora(p.pode_faturar_em||(String(p.situacao_enviada)==='4'?p.situacao_enviada_em:null)||p.situacao_enviada_em):'', Ultimo_envio:isiHora(p.situacao_enviada_em), Ultimo_codigo:p.situacao_enviada||'', Confirmado_em:isiHora(p.situacao_confirmada_em), Reenvios:Number(p.situacao_reenvios||0)||'',
         NF:p.nf_numero||'', Situacao_NF:p.nf_situacao||'', Agrupamento:p.agrupamento_id||'', Disponivel_em:isiHora(isiDisponivelEm(p)),
         Separado_avisado:isiHora(p.pronto_envio_em), Etapa:x.e.lbl, Vez_de:ISI_GRUPOS[x.e.g].lbl,
         Parado_h:x.h!=null?Number(x.h.toFixed(1)):'', Observacao:(x.e.k==='a_erro'?p.erro_msg:p.alerta)||''}; });
