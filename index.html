@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1108 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1109 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1108';
+const APP_VERSION='v1.0.1109';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35401,9 +35401,12 @@ async function wmsGerarListas(tipo){
     wmsPedSelecionados.clear();
     wmsUltimasListasGeradas=criadas;
     const nums=criadas.map(id=>wmsListasSeparacao.find(l=>l.id===id)?.numero_lista).filter(Boolean).sort();
+    let empHtml='';   // v1.0.1109: empenho de estoque (depositante com saldo no VERUS)
+    try{ portProgress(peds.length,peds.length,'Empenhando estoque…',''); empHtml=await wmsEmpenharPedidos(peds.filter(p=>!pulados.includes(p.numero_curto||p.numero_pedido||p.id))); }catch(_e){}
     portClose();
     portModal('Listas geradas',`
       <div style="font-size:14px;margin-bottom:8px"><b>${criadas.length}</b> lista(s) de separação gerada(s)${nums.length?` — ${nums[0]}${nums.length>1?' a '+nums[nums.length-1]:''}`:''}.</div>
+      ${empHtml}
       ${pulados.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${pulados.length} pedido(s) pulado(s) por já terem lista vinculada: ${pulados.slice(0,8).join(', ')}${pulados.length>8?' +'+(pulados.length-8):''}</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button>`:''}
@@ -40048,6 +40051,92 @@ function filterWmsPedidos(q){
   wmsPedAtualizaSelbar();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1109 · EMPENHO DE SAÍDA (reserva de estoque por pedido) — entrega 1
+//  Ligado por depositante (parametros.saldo_verus). A alocação roda no banco
+//  (wms_empenhar_pedido) com trava de linha; aqui só chamamos e mostramos.
+// ═══════════════════════════════════════════════════════════════════
+// drilldown do empenho no estoque (clique no número)
+async function estoqueEmpenhoModal(conteudoId,palletId,ev){
+  if(ev){ ev.stopPropagation(); }
+  var pal=(wmsPallets||[]).find(function(x){return x.id===palletId;})||{}, it=(typeof estoqueConteudoDe==='function'?estoqueConteudoDe(palletId):[]).find(function(x){return x.id===conteudoId;})||{};
+  var fis=Number(it.qtd_fiscal!=null?it.qtd_fiscal:it.quantidade)||0, esc=ecomEsc;
+  portModal('Empenho · '+wmsRgFmt(pal.rg)+(it.sku?' · '+esc(it.sku):''),'<div id="est-emp-body" style="padding:10px 0;color:var(--text3);font-size:12px">Carregando…</div>','portClose()',{saveLabel:'Fechar',width:'560px'});
+  try{
+    var rs=await dbSelect('wms_reservas','conteudo_id=eq.'+conteudoId+'&status=in.(reservada,consumida)&order=created_at.asc')||[];
+    var pids=rs.map(function(r){return r.pedido_id;}).filter(function(v,i,a){return a.indexOf(v)===i;}), peds={};
+    if(pids.length) (await dbSelect('wms_pedidos','id=in.('+pids.join(',')+')&select=id,numero_curto,numero_pedido,status')||[]).forEach(function(x){peds[x.id]=x;});
+    var emp=rs.filter(function(r){return r.status==='reservada';}).reduce(function(a,r){return a+Number(r.qtd||0);},0);
+    var kv=function(k,v,c){ return '<div style="flex:1;border:1px solid var(--border);border-radius:9px;padding:9px 11px"><div style="font-size:10.5px;color:var(--text3)">'+k+'</div><div style="font-size:18px;font-weight:800;color:'+(c||'var(--text)')+'">'+v.toLocaleString('pt-BR')+'</div></div>'; };
+    var b=ge('est-emp-body'); if(!b) return;
+    b.innerHTML='<div style="display:flex;gap:8px;margin-bottom:10px">'+kv('Físico',fis)+kv('Empenhado',emp,'var(--amber-text)')+kv('Disponível',fis-emp,'var(--green-text)')+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg2)"><th style="padding:6px 8px;text-align:left;font-size:10px">OS · PEDIDO</th><th style="padding:6px 8px;text-align:right;font-size:10px">QTD</th><th style="padding:6px 8px;text-align:left;font-size:10px">SITUAÇÃO</th><th style="padding:6px 8px;text-align:left;font-size:10px">DESDE</th></tr></thead><tbody>'
+      +(rs.length?rs.map(function(r){ var pd=peds[r.pedido_id]||{};
+          return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px"><b>'+esc(pd.numero_curto||'')+'</b> <span style="color:var(--text3)">'+esc(pd.numero_pedido||'')+'</span></td><td style="padding:6px 8px;text-align:right;font-weight:700">'+Number(r.qtd).toLocaleString('pt-BR')+'</td><td style="padding:6px 8px">'+(r.status==='consumida'?'baixado':'empenhado')+(r.motivo?' · '+esc(r.motivo):'')+(r.origem==='troca'?' · trocado no coletor':'')+'</td><td style="padding:6px 8px;font-family:monospace">'+esc(String(r.created_at||'').replace('T',' ').slice(5,16))+'</td></tr>'; }).join('')
+        :'<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text3)">Sem empenho.</td></tr>')
+      +'</tbody></table>';
+  }catch(e){ var bb=ge('est-emp-body'); if(bb) bb.innerHTML='<span style="color:var(--red-text)">Erro: '+ecomEsc(e.message||e)+'</span>'; }
+}
+function wmsSaldoVerus(clienteId){ var c=(clientes||[]).find(function(x){return x.id===clienteId;}); return !!(c&&c.parametros&&c.parametros.saldo_verus===true); }
+async function wmsRpc(fn,args){ var r=await sbFetch('POST','/rest/v1/rpc/'+fn,args||{},tok); if(!r.ok){ var m=(r.data&&(r.data.message||r.data.hint||r.data.details))||('erro '+r.status); throw new Error(m); } return r.data; }
+// empenha uma lista de pedidos (só os de depositante com saldo no VERUS) e devolve um resumo em HTML
+async function wmsEmpenharPedidos(peds){
+  var alvo=(peds||[]).filter(function(p){return wmsSaldoVerus(p.cliente_id);});
+  if(!alvo.length) return '';
+  var linhas=[], faltouTot=0;
+  for(var i=0;i<alvo.length;i++){
+    var p=alvo[i];
+    try{
+      var r=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:p.id});
+      var its=(r&&r.itens)||[], falt=its.filter(function(x){return Number(x.faltou)>0;});
+      faltouTot+=Number(r&&r.faltou_total||0);
+      linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · '+its.length+' item(ns) · '
+        +(falt.length?'<span style="color:var(--red-text)">'+falt.length+' sem saldo: '+falt.map(function(x){return ecomEsc(x.sku)+' (faltam '+Number(x.faltou).toLocaleString('pt-BR')+')';}).join(', ')+'</span>':'<span style="color:var(--green-text)">empenho completo</span>')+'</div>');
+    }catch(e){ linhas.push('<div style="padding:6px 0;border-top:1px solid var(--border);color:var(--red-text)"><b>OS '+ecomEsc(p.numero_curto||p.numero_pedido||'')+'</b> · erro ao empenhar: '+ecomEsc(e.message||e)+'</div>'); }
+  }
+  return '<div style="margin:10px 0;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg2)"><div style="font-weight:700;font-size:12.5px;margin-bottom:4px">Empenho de estoque ('+alvo.length+' pedido(s))</div>'
+    +'<div style="font-size:12px">'+linhas.join('')+'</div>'
+    +(faltouTot>0?'<div style="font-size:11.5px;color:var(--amber-text);margin-top:6px">Itens sem saldo ficam sem RG empenhado; a separação deles depende de entrada ou de ajuste de estoque.</div>':'')+'</div>';
+}
+// detalhe do pedido: seção de empenho
+async function wmsPedEmpenhoCarregar(pedidoId){
+  var box=ge('wms-ped-emp'); if(!box) return;
+  var p=(wmsPedidos||[]).find(function(x){return x.id===pedidoId;}); if(!p||!wmsSaldoVerus(p.cliente_id)){ box.innerHTML=''; return; }
+  box.innerHTML='<div style="font-size:12px;color:var(--text3);padding:8px 0">Carregando empenho…</div>';
+  try{
+    var res=await dbSelect('wms_reservas','pedido_id=eq.'+pedidoId+'&status=in.(reservada,consumida)&order=created_at.asc')||[];
+    var pids=res.map(function(r){return r.pallet_id;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+    var pals={}, conts={};
+    if(pids.length){
+      (await dbSelect('wms_pallets','id=in.('+pids.join(',')+')&select=id,rg,endereco_codigo')||[]).forEach(function(x){pals[x.id]=x;});
+      (await dbSelect('wms_pallet_conteudo','pallet_id=in.('+pids.join(',')+')&select=id,pallet_id,qtd_fiscal,controles')||[]).forEach(function(x){conts[x.id]=x;});
+    }
+    var itens=(wmsPedidoItens||[]).filter(function(it){return it.pedido_id===pedidoId;});
+    var esc=ecomEsc, rows=itens.map(function(it){
+      var rs=res.filter(function(r){return r.pedido_item_id===it.id;}), emp=rs.reduce(function(a,r){return a+Number(r.qtd||0);},0), ped=Number(it.quantidade||0);
+      var rgs=rs.map(function(r){ var pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{}, ant=c.controles&&(c.controles['RG anterior']||c.controles.rg_anterior);
+        return '<span title="'+esc(pl.endereco_codigo||'')+'" style="white-space:nowrap">'+esc(ant||wmsRgFmt(pl.rg))+' <span style="color:var(--text3)">('+Number(r.qtd).toLocaleString('pt-BR')+(c.qtd_fiscal&&Number(r.qtd)<Number(c.qtd_fiscal)?' de '+Number(c.qtd_fiscal).toLocaleString('pt-BR'):'')+(r.status==='consumida'?' · baixado':'')+')</span></span>'; }).join(' · ');
+      var tag=emp>=ped?'<span style="font-size:10px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px">completo</span>':(emp>0?'<span style="font-size:10px;background:var(--amber-bg);color:var(--amber-text);padding:2px 8px;border-radius:99px">parcial</span>':'<span style="font-size:10px;background:var(--red-bg);color:var(--red-text);padding:2px 8px;border-radius:99px">sem saldo</span>');
+      return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-family:monospace;font-size:12px">'+esc(it.sku)+'</td><td style="padding:6px 10px;text-align:right">'+ped.toLocaleString('pt-BR')+'</td><td style="padding:6px 10px;font-size:11.5px">'+(rgs||'<span style="color:var(--text3)">—</span>')+'</td><td style="padding:6px 10px;text-align:right;font-weight:700">'+emp.toLocaleString('pt-BR')+'</td><td style="padding:6px 10px">'+tag+'</td></tr>';
+    }).join('');
+    box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px"><div style="font-weight:700;font-size:13px">Empenho de estoque</div>'
+      +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="wmsPedEmpenhar(\''+pedidoId+'\')">'+(res.length?'Empenhar de novo':'Empenhar')+'</button>'+(res.some(function(r){return r.status==='reservada';})?'<button class="btn btn-sm" onclick="wmsPedLiberarEmpenho(\''+pedidoId+'\')">Liberar empenho</button>':'')+'</span></div>'
+      +'<div style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:260px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg2)"><th style="padding:6px 10px;text-align:left;font-size:10px">SKU</th><th style="padding:6px 10px;text-align:right;font-size:10px">PEDIDO</th><th style="padding:6px 10px;text-align:left;font-size:10px">RGs EMPENHADOS (RG antigo · qtd)</th><th style="padding:6px 10px;text-align:right;font-size:10px">EMPENHADO</th><th style="padding:6px 10px;font-size:10px"></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div style="font-size:11px;color:var(--text3);margin-top:5px">Regra: caixas inteiras que cabem no pedido (fabricação mais antiga), depois a caixa que completa (retirada parcial). Passe o mouse no RG para ver o endereço.</div>';
+  }catch(e){ box.innerHTML='<div style="font-size:12px;color:var(--red-text);padding:8px 0">Erro ao carregar o empenho: '+ecomEsc(e.message||e)+'</div>'; }
+}
+async function wmsPedEmpenhar(pedidoId){
+  try{ var r=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:pedidoId}); var f=Number(r&&r.faltou_total||0);
+    showToast(f>0?('Empenho feito com '+f.toLocaleString('pt-BR')+' peça(s) sem saldo'):'Empenho completo',f>0?'amber':'green'); }
+  catch(e){ showToast('Erro ao empenhar: '+(e.message||e),'red'); }
+  wmsPedEmpenhoCarregar(pedidoId);
+}
+async function wmsPedLiberarEmpenho(pedidoId){
+  if(!confirm('Liberar o empenho deste pedido? O saldo volta a ficar disponível para outros pedidos.')) return;
+  try{ var n=await wmsRpc('wms_liberar_empenho',{p_pedido_id:pedidoId}); showToast(n+' reserva(s) liberada(s)','green'); }
+  catch(e){ showToast('Erro ao liberar: '+(e.message||e),'red'); }
+  wmsPedEmpenhoCarregar(pedidoId);
+}
 function wmsPedidoDetalhe(id){
   const p=wmsPedidos.find(x=>x.id===id);if(!p)return;
   const cli=clientes.find(c=>c.id===p.cliente_id);
@@ -40079,8 +40168,10 @@ function wmsPedidoDetalhe(id){
         </tr></thead>
         <tbody>${linhasItens}</tbody>
       </table>
-    </div>`,
+    </div>
+    <div id="wms-ped-emp"></div>`,
     'portClose()',{saveLabel:'Fechar',width:'640px'});
+  if(wmsSaldoVerus(p.cliente_id)) setTimeout(function(){ wmsPedEmpenhoCarregar(id); },30);   // v1.0.1109
 }
 
 // ── WMS · IMPORTAR PEDIDOS ──
@@ -42350,7 +42441,13 @@ function wmsCliTabSaida(c){
     <div><div style="font-weight:600;font-size:13px;color:var(--text)">${lbl}</div><div style="font-size:11px;color:var(--text3);margin-top:1px">${desc}</div></div>
   </label>`;
   const semEtiq=modo==='manual'; // 'manual' puro não usa etiqueta; demais sim
-  return `<div style="font-weight:700;font-size:13px;margin-bottom:4px">Separação</div>
+  const saldoVerus=!!(c.parametros&&c.parametros.saldo_verus===true);
+  return `<div style="padding:11px 13px;background:var(--bg2);border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px">
+      <div><div style="font-weight:600;font-size:12px;color:var(--text)">Saldo controlado no VERUS (empenho de saída)</div>
+      <div style="font-size:11px;color:var(--text3)">Ao gerar a lista, o VERUS empenha os RGs do pedido (caixas inteiras primeiro, depois a que completa) e o estoque passa a mostrar físico, empenhado e disponível.</div></div>
+      <input type="checkbox" id="wms-saldo-verus" ${saldoVerus?'checked':''} style="width:18px;height:18px">
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">Separação</div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:11px">Define como o separador trabalha as listas deste depositante.</div>
     <div style="display:grid;gap:8px">
       ${modoOpt('manual','Manual','Gera a lista; confirmação na tela administrativa, sem etiqueta nem bipe.')}
@@ -42562,6 +42659,10 @@ async function wmsSalvarParamCliente(clienteId){
       if(lc&&lc.tipo==='separador'&&lc.pos_id===lc.pos_qtd){ showToast('QR da caixa: ID e quantidade não podem estar na mesma posição','amber'); return; }
       if(lc) dados.parametros=Object.assign({},cAt.parametros||{},{leitura_caixa:lc});
     }
+  }
+  { // v1.0.1109: saldo controlado no VERUS (empenho de saída)
+    const sv=ge('wms-saldo-verus');
+    if(sv){ const cA=clientes.find(x=>x.id===clienteId)||{}; dados.parametros=Object.assign({},cA.parametros||{},dados.parametros||{},{saldo_verus:sv.checked}); }
   }
   const bloqE=ge('wms-conf-ent-bloqueia-div'); if(bloqE)dados.wms_conf_ent_bloqueia_div=bloqE.checked;
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
@@ -45217,6 +45318,7 @@ async function estoqueConsultar(){
         ? invFetchAll('wms_enderecos',filter)
         : dbSelect('wms_enderecos',filter)))||[];
   }catch(e){ _estoque.enderecos=[]; showToast('Erro ao consultar endereços: '+(e.message||e),'red'); }
+  try{ _estoque.emp={}; (await dbSelectAll('wms_empenho_conteudo','company_id=eq.'+cid)||[]).forEach(function(x){ _estoque.emp[x.conteudo_id]={q:Number(x.empenhado)||0,ped:x.pedidos||''}; }); }catch(_e){ _estoque.emp={}; }   // v1.0.1109
   _estoque.loading=false;_estoque.carregado=true;
   if(curPage==='wms-estoque')render();
 }
@@ -45392,7 +45494,12 @@ function rWmsEstoque(){
                 +'<td style="padding:6px 10px;color:var(--text2)">'+esc((i.descricao||'').slice(0,40))+'</td>'
                 +'<td style="padding:6px 10px;color:var(--text2)">'+esc(estoqueDepNome(p.depositante_id))+'</td>'
                 +'<td style="padding:6px 10px;text-align:right;color:var(--text2)">'+esc(estoqueFmtCtrl(i))+'</td>'
-                +'<td style="padding:6px 14px;text-align:right;font-weight:700">'+(Number(i.qtd_fiscal!=null?i.qtd_fiscal:i.quantidade)||0).toLocaleString('pt-BR')+'</td></tr>';
+                +'<td style="padding:6px 14px;text-align:right;font-weight:700">'
+                +(function(){ var fis=Number(i.qtd_fiscal!=null?i.qtd_fiscal:i.quantidade)||0, em=_estoque.emp&&_estoque.emp[i.id];
+                    if(!em||!(em.q>0)||!wmsSaldoVerus(p.depositante_id)) return fis.toLocaleString('pt-BR');
+                    // v1.0.1109: com empenho, o número vira um drilldown (clique abre físico · empenhado · disponível · por pedido)
+                    return '<span onclick="estoqueEmpenhoModal(\''+i.id+'\',\''+p.id+'\',event)" title="empenhado '+em.q.toLocaleString('pt-BR')+' · clique para ver" style="cursor:pointer;color:var(--amber-text);border-bottom:1.5px dotted var(--amber-text)">'+fis.toLocaleString('pt-BR')+'</span>'; })()
+                +'</td></tr>';
             });
           });
           det+='</tbody></table>';
