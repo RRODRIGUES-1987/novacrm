@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1093 | Gerado: 2026-10-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1094 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1093';
+const APP_VERSION='v1.0.1094';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35733,6 +35733,117 @@ var invCol={id:null,inv:null,parser:null,mask:null,cega:true,rodada:1,
             baseByEnd:{},catalog:[],fichaByEnd:{},contadosEnd:{},
             end:null,itens:[],prodAtual:null};
 // Carga compartilhada: usada pelo modal de mesa e pelo portal do celular
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1094 · COLETOR DO INVENTÁRIO EM MODO CAIXA
+//  Inventário de depositante (base do WMS, uma linha por RG): bipa o endereço
+//  e depois cada caixa pela etiqueta (RG antigo ou RG do VERUS). Caixa esperada
+//  cheia conta sozinha; caixa esperada incompleta pede a quantidade. Ao confirmar,
+//  soma as caixas por produto e grava como a contagem normal (mesma apuração).
+// ═══════════════════════════════════════════════════════════════════
+function invCxRefParse(ref){
+  var s=String(ref||''), m1=s.match(/P-?0*(\d+)/i), m2=s.match(/ant\.?\s*(\S+)/i);
+  return {rg:m1?m1[1]:null, ant:m2?String(m2[1]).replace(/[^0-9A-Za-z]/g,''):null};
+}
+function invCxMontar(base){
+  invCol.cxByEnd={}; var qtds={};
+  base.forEach(function(b){
+    if(!b.referencia) return;
+    var e=invNorm(b.endereco); if(!e) return;
+    var p=invCxRefParse(b.referencia), q=parseFloat(b.qtde_saldo)||0;
+    (invCol.cxByEnd[e]=invCol.cxByEnd[e]||[]).push({key:e+'|'+(p.rg||p.ant||Math.random()),rg:p.rg,ant:p.ant,ref:b.referencia,cod:b.cod_produto||'',desc:b.desc_produto||'',qtd:q});
+    (qtds[b.cod_produto]=qtds[b.cod_produto]||{})[q]=((qtds[b.cod_produto]||{})[q]||0)+1;
+  });
+  // caixa padrão do produto = o tamanho mais comum entre as caixas daquele SKU
+  invCol.cxPadrao={};
+  Object.keys(qtds).forEach(function(c){ var best=0,bn=-1; Object.keys(qtds[c]).forEach(function(q){ if(qtds[c][q]>bn||(qtds[c][q]===bn&&+q>best)){bn=qtds[c][q];best=+q;} }); invCol.cxPadrao[c]=best; });
+  Object.keys(invCol.cxByEnd).forEach(function(e){ invCol.cxByEnd[e].forEach(function(x){ x.aberta = (invCol.cxPadrao[x.cod]||0)>0 && x.qtd < invCol.cxPadrao[x.cod]; }); });
+  invCol.modoCaixa = Object.keys(invCol.cxByEnd).length>0;
+}
+function invCxReset(){ invCol.cx={lidas:{},extras:[],pend:null,msg:''}; }
+function invCxMsg(tipo,txt){ invCol.cx.msg='<div style="border-radius:8px;padding:8px 10px;font-weight:600;font-size:13px;background:'+(tipo==='ok'?'var(--green-bg)':tipo==='aviso'?'var(--amber-bg)':'var(--red-bg)')+';color:'+(tipo==='ok'?'var(--green-text)':tipo==='aviso'?'var(--amber-text)':'var(--red-text)')+'">'+txt+'</div>';
+  if(typeof wmsBeep==='function') wmsBeep(tipo==='erro'); }
+function invCxHTML(){
+  var esc=function(v){return String(v==null?'':v).replace(/</g,'&lt;');};
+  var box=(typeof coletorScanBox==='function')?coletorScanBox():'<input id="col-scan" class="fi" onkeydown="if(event.key===\'Enter\'){event.preventDefault();coletorScanSubmit(this.value);}">';
+  if(!invCol.end){
+    _colScanHandler=function(raw){ invColLerEndCode(raw); };
+    return invColProgresso()+'<div style="font-size:13px;font-weight:600;color:#0A2540;margin-bottom:6px">Bipe o endereço</div>'+box
+      +'<div style="font-size:11px;color:var(--text3)">Modo caixa: depois do endereço, bipe a etiqueta de cada caixa.</div><div id="col-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>';
+  }
+  if(!invCol.cx) invCxReset();
+  var cx=invCol.cx, lista=invCol.cxByEnd[invCol.end]||[], nL=0; lista.forEach(function(x){ if(cx.lidas[x.key]!=null) nL++; });
+  var head='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:11px;color:var(--text3)">ENDEREÇO · MODO CAIXA</div><div style="font-size:22px;font-weight:800;color:#0A2540">'+esc(invCol.end)+'</div></div>'
+    +'<button class="btn btn-sm" onclick="invColVoltar()">← trocar</button></div>';
+  if(cx.pend){
+    var p=cx.pend;
+    _colScanHandler=function(){ invCxMsg('aviso','Informe a quantidade da caixa aberta antes de bipar outra.'); invColRender(); };
+    return head+'<div style="border:2px solid var(--amber-text);border-radius:12px;padding:12px;background:var(--amber-bg)">'
+      +'<div style="font-size:11px;font-weight:700;color:var(--amber-text)">CAIXA ESPERADA INCOMPLETA</div>'
+      +'<div style="font-size:15px;font-weight:700;margin:4px 0">RG '+esc(p.ant||p.rg)+' · '+esc(p.cod)+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">No sistema esta caixa está aberta'+(invCol.cega?'':': <b>'+p.qtd.toLocaleString('pt-BR')+' pç</b>')+' (a caixa padrão tem '+(invCol.cxPadrao[p.cod]||0).toLocaleString('pt-BR')+'). Conte e informe a quantidade.</div>'
+      +'<input class="fi" id="cx-qtd" type="number" inputmode="numeric" min="0" step="1" value="'+(invCol.cega?'':p.qtd)+'" placeholder="peças" style="font-size:22px;padding:10px;text-align:center" onkeydown="if(event.key===\'Enter\'){event.preventDefault();invCxQtd();}">'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px"><button class="btn" onclick="invCol.cx.pend=null;invColRender()">Voltar</button><button class="btn btn-p" onclick="invCxQtd()">Confirmar</button></div></div>';
+  }
+  _colScanHandler=function(raw){ invCxBip(raw); };
+  var linhas=lista.slice().sort(function(a,b){ return (cx.lidas[a.key]!=null)-(cx.lidas[b.key]!=null) || String(a.cod).localeCompare(String(b.cod)); }).map(function(x){
+    var ok=cx.lidas[x.key]!=null;
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-top:1px solid var(--border);font-size:12.5px;'+(ok?'background:var(--green-bg)':'')+'">'
+      +'<span><b>'+esc(x.ant||('P-'+x.rg))+'</b> · '+esc(x.cod)+(x.aberta?' <span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text)">aberta</span>':'')+'</span>'
+      +'<span style="white-space:nowrap">'+(ok?('<b>'+cx.lidas[x.key].toLocaleString('pt-BR')+'</b> ✓'):(invCol.cega?'—':x.qtd.toLocaleString('pt-BR')))+'</span></div>'; }).join('');
+  var extras=cx.extras.map(function(x,i){ return '<div style="display:flex;justify-content:space-between;padding:6px 8px;border-top:1px solid var(--border);font-size:12.5px;background:var(--amber-bg)"><span><b>'+esc(x.ant||('P-'+x.rg))+'</b> · '+esc(x.cod)+' <span style="font-size:11px;color:var(--amber-text)">no sistema: '+esc(x.de)+'</span></span><span>'+x.qtd.toLocaleString('pt-BR')+' <span onclick="invCol.cx.extras.splice('+i+',1);invColRender()" style="cursor:pointer;color:#9b1c1c;margin-left:6px">✕</span></span></div>'; }).join('');
+  var pct=lista.length?Math.round(100*nL/lista.length):0;
+  return invColProgresso()+head+box+(cx.msg||'')
+    +'<div style="display:flex;justify-content:space-between;margin:10px 0 4px;font-weight:700;font-size:13px"><span>Caixas</span><span>'+nL+' de '+lista.length+'</span></div>'
+    +'<div style="height:6px;border-radius:3px;background:var(--bg2);overflow:hidden;margin-bottom:6px"><div style="width:'+pct+'%;height:100%;background:#76B82A"></div></div>'
+    +'<div style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:300px;overflow-y:auto">'+(linhas||'<div style="padding:12px;text-align:center;color:var(--text3);font-size:12px">Endereço sem caixas no sistema.</div>')+extras+'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1" onclick="invCol.semCaixa=true;invColRender()">Contar por produto</button>'
+    +'<button class="btn btn-p" style="flex:2;padding:12px" onclick="invCxConfirmar()">✓ Confirmar endereço</button></div>';
+}
+function invCxAcha(digs, end){
+  var lista=invCol.cxByEnd[end]||[];
+  for(var i=0;i<lista.length;i++){ var x=lista[i]; if((x.ant&&x.ant===digs)||(x.rg&&String(+x.rg)===String(+digs))) return x; }
+  return null;
+}
+function invCxBip(raw){
+  var s=String(raw||'').trim(); if(!s) return;
+  var digs=s.replace(/^P-?/i,'').replace(/[^0-9A-Za-z]/g,'');
+  var cx=invCol.cx, x=invCxAcha(digs, invCol.end);
+  if(x){
+    if(cx.lidas[x.key]!=null){ invCxMsg('aviso','RG '+(x.ant||x.rg)+' já foi bipado neste endereço.'); invColRender(); return; }
+    if(x.aberta){ cx.pend=x; cx.msg=''; invColRender(); setTimeout(function(){ var q=ge('cx-qtd'); if(q){q.focus();q.select();} },60); return; }
+    cx.lidas[x.key]=x.qtd; invCxMsg('ok','✓ RG '+(x.ant||x.rg)+' · '+x.cod+(invCol.cega?'':' · '+x.qtd.toLocaleString('pt-BR')+' pç')); invColRender(); return;
+  }
+  // caixa de outro endereço?
+  var ends=Object.keys(invCol.cxByEnd);
+  for(var k=0;k<ends.length;k++){ if(ends[k]===invCol.end) continue; var y=invCxAcha(digs, ends[k]);
+    if(y){ if(cx.extras.some(function(e){return e.key===y.key;})){ invCxMsg('aviso','RG '+(y.ant||y.rg)+' já registrado como a mais.'); invColRender(); return; }
+      cx.extras.push({key:y.key,rg:y.rg,ant:y.ant,cod:y.cod,desc:y.desc,qtd:y.qtd,de:ends[k]});
+      invCxMsg('aviso','RG '+(y.ant||y.rg)+' · '+y.cod+' está no '+ends[k]+' no sistema — registrado como a mais aqui.'); invColRender(); return; } }
+  invCxMsg('erro','Etiqueta '+s+' não identificada. Separe a caixa e conte-a em "Contar por produto".'); invColRender();
+}
+function invCxQtd(){
+  var cx=invCol.cx, p=cx.pend; if(!p) return;
+  var q=parseFloat((ge('cx-qtd')||{}).value);
+  if(isNaN(q)||q<0){ var i=ge('cx-qtd'); if(i) i.focus(); return; }
+  cx.lidas[p.key]=q; cx.pend=null; invCxMsg('ok','✓ RG '+(p.ant||p.rg)+' · '+p.cod+' · '+q.toLocaleString('pt-BR')+' pç (contado)'); invColRender();
+}
+async function invCxConfirmar(){
+  var cx=invCol.cx, lista=invCol.cxByEnd[invCol.end]||[];
+  var falt=lista.filter(function(x){ return cx.lidas[x.key]==null; });
+  var txt='Confirmar '+invCol.end+'?\n\nCaixas encontradas: '+(lista.length-falt.length)+' de '+lista.length
+    +(falt.length?'\nFaltaram: '+falt.length+' ('+falt.slice(0,8).map(function(x){return x.ant||x.rg;}).join(', ')+(falt.length>8?'…':'')+')':'')
+    +(cx.extras.length?'\nA mais (de outro endereço): '+cx.extras.length:'')
+    +'\n\nAs caixas que faltaram contam como zero.';
+  if(!confirm(txt)) return;
+  var soma={}, desc={};
+  lista.forEach(function(x){ desc[x.cod]=x.desc; if(soma[x.cod]==null) soma[x.cod]=0; if(cx.lidas[x.key]!=null) soma[x.cod]+=cx.lidas[x.key]; });
+  cx.extras.forEach(function(x){ desc[x.cod]=x.desc; soma[x.cod]=(soma[x.cod]||0)+x.qtd; });
+  var itens=Object.keys(soma).map(function(c){ return {cod:c,desc:desc[c]||'',qtd:soma[c]}; });
+  if(!itens.length) itens=[{cod:null,desc:'',qtd:0}];
+  invCol.itens=itens;
+  await invColConfirmar();
+}
+
 async function invColCarregar(id){
     var arr=await dbSelect('inventarios','id=eq.'+id); var inv=arr[0];
     if(!inv)throw new Error('Inventário não encontrado');
@@ -35740,7 +35851,9 @@ async function invColCarregar(id){
     invCol.cega=(inv.contagem_cega!==false); invCol.rodada=1; invCol.portal=false;
     invCol.end=null; invCol.itens=[]; invCol.prodAtual=null;
     // base importada, agrupada por endereço
-    var base=await invFetchAll('inventario_base','inventario_id=eq.'+id+'&select=endereco,cod_produto,qtde_saldo,tipo_embalagem,desc_produto');
+    var base=await invFetchAll('inventario_base','inventario_id=eq.'+id+'&select=endereco,cod_produto,qtde_saldo,tipo_embalagem,desc_produto,referencia');
+    invCol.modoCaixa=false; invCol.semCaixa=false; invCol.cx=null;
+    if(inv.tipo==='depositante' && inv.cliente_id){ try{ invCxMontar(base); }catch(_cx){ invCol.modoCaixa=false; } }   // v1.0.1094
     // de-para de EAN: permite bipar o código de barras do próprio produto
     invCol.eans={};
     try{
@@ -35798,6 +35911,7 @@ function invColRender(){
   setTimeout(function(){var e=ge(invCol.end?'col-prod':'col-end');if(e)e.focus();},60);
 }
 function invColBodyHTML(){
+  if(invCol.modoCaixa && !invCol.semCaixa && !invCol.portal) return invCxHTML();   // v1.0.1094
   if(!invCol.end){
     // ── passo 1 · endereço ──
     return invColProgresso()
@@ -35865,7 +35979,7 @@ function invColLerEndCode(raw){
     // fora da base: pode ser posição vazia não listada ou achado — segue, avisando
     if(msg)msg.innerHTML='<span style="color:var(--amber-text)">Endereço <b>'+code+'</b> não está na base importada — será gravado como achado.</span>';
   }
-  invCol.end=code; invCol.itens=[]; invCol.prodAtual=null;
+  invCol.end=code; invCol.itens=[]; invCol.prodAtual=null; invCol.cx=null; invCol.semCaixa=false;   // v1.0.1094
   invColRender();
   // endereço reconhecido: já joga o operador no campo do produto
   setTimeout(function(){
