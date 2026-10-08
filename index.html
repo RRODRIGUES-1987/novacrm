@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1115 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1116 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1115';
+const APP_VERSION='v1.0.1116';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52892,7 +52892,7 @@ async function flCarregar(){
     var ints=await dbSelect('integracoes','company_id=eq.'+cid+'&select=id,nome,config').catch(function(){return [];})||[];
     var cfg={}; ints.forEach(function(g){ cfg[g.id]=g; });
     var desde=new Date(Date.now()-7*864e5).toISOString();
-    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,canal_olist:payload->ecommerce->>nome';
+    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,nf_lida_em,canal_olist:payload->ecommerce->>nome';
     var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
     if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols.replace(',pode_faturar_em','').replace(',nf_autorizada_em','')).catch(function(){return [];})||[];
     var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
@@ -52929,7 +52929,16 @@ async function flCarregar(){
         var prev=(libera&&libera.getTime()>agora)?flProxDepois(libera):proxAgr;
         prox.push({...base,reg:'NF '+r.nf_numero+(r.nf_autorizada_em?' vista às '+flHm(r.nf_autorizada_em):' autorizada'),regra:'agrupamento após '+car+' min da nota',prev:prev,desde:r.nf_autorizada_em||r.updated_at,prazo:car+10}); return;
       }
-      if(r.nf_numero){ prox.push({...base,reg:'NF '+r.nf_numero+' · situação '+(r.nf_situacao||'—'),regra:'leitura da nota na passada de etiquetas',prev:proxEtq,desde:r.updated_at,prazo:10}); return; }
+      // v1.0.1116: nota emitida mas NÃO autorizada é espera do cliente/SEFAZ, não do VERUS
+      var nfs=String(r.nf_situacao||'');
+      if(r.nf_numero && ['1','2','4','9'].indexOf(nfs)>=0){
+        var nfTxt={'1':'pendente','2':'emitida, aguardando SEFAZ','4':'enviada, aguardando recibo','9':'aguardando protocolo'}[nfs];
+        cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:'Nota '+r.nf_numero+' '+nfTxt+' (não autorizada)',lida:r.nf_lida_em||r.updated_at}); return;
+      }
+      if(r.nf_numero && ['5','10','3'].indexOf(nfs)>=0){
+        trav.push({...base,motivo:'nota '+r.nf_numero+' '+({'5':'REJEITADA pela SEFAZ','10':'DENEGADA','3':'CANCELADA'}[nfs])+' · o cliente precisa corrigir/emitir de novo',desde:r.updated_at}); return;
+      }
+      if(r.nf_numero){ prox.push({...base,reg:'NF '+r.nf_numero+' · situação '+(r.nf_situacao||'—'),regra:'leitura da nota na passada de etiquetas',prev:proxEtq,desde:r.nf_lida_em||r.updated_at,prazo:10}); return; }
       if(!r.situacao_enviada && sit==='aprovado'){ prox.push({...base,reg:'aprovado · "pode faturar" ainda não enviado',regra:'envio do "pode faturar" na sincronização',prev:proxSync,desde:r.created_at,prazo:20}); return; }
       if(r.situacao_confirmada_em){ cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:sit,lida:r.updated_at}); return; }
       if(r.situacao_enviada){ prox.push({...base,reg:'"pode faturar" enviado às '+flHm(r.situacao_enviada_em)+' · sem confirmação',regra:'conferência/reenvio na sincronização',prev:proxSync,desde:r.situacao_enviada_em||r.updated_at,prazo:20}); return; }
