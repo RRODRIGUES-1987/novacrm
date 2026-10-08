@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1112 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1113 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1112';
+const APP_VERSION='v1.0.1113';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52720,6 +52720,14 @@ function tlAbrirPedido(numero){ _tl.busca=String(numero||''); try{ ecomModalClos
 var _fl={dados:null,carregando:false,erro:'',em:null};
 function flHora(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''; var p=function(n){return String(n).padStart(2,'0');}; return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
 function flHm(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''; return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+// v1.0.1113: mesma regra da edge (v7.42) — o pedido é de uma plataforma de importação automática?
+function flPlatAuto(r,integ){
+  var plats=integ&&integ.config&&Array.isArray(integ.config.importar_auto_plataformas)?integ.config.importar_auto_plataformas.map(String):[];
+  if(!plats.length) return false;
+  var canal=String(r.canal_olist||'').toLowerCase(), num=String(r.numero||'');
+  var mapa={'TikTok':[/tiktok/,/^5\d{17}$/],'Shopee':[/shopee/],'Mercado Livre':[/mercado/,/^2000\d{12}$/],'Amazon':[/amazon/],'Magalu':[/magalu/,/magazine/]};
+  return plats.some(function(pl){ var t=mapa[pl]||[new RegExp(pl.toLowerCase())]; return t.some(function(rx){ return rx.test(canal)||rx.test(num); }); });
+}
 function flDur(ms){ if(ms==null||ms<0) return ''; var m=Math.floor(ms/60000), h=Math.floor(m/60); return h?(h+'h'+String(m%60).padStart(2,'0')):(m+' min'); }
 function flProxMin(passo,resto){ var d=new Date(); d.setSeconds(0,0); do{ d=new Date(d.getTime()+60000); }while(d.getMinutes()%passo!==resto); return d; }
 function flVerus(ep){ return ep?('E-'+String(ep.numero_interno||'').padStart(6,'0')):'—'; }
@@ -52730,7 +52738,7 @@ async function flCarregar(){
     var ints=await dbSelect('integracoes','company_id=eq.'+cid+'&select=id,nome,config').catch(function(){return [];})||[];
     var cfg={}; ints.forEach(function(g){ cfg[g.id]=g; });
     var desde=new Date(Date.now()-7*864e5).toISOString();
-    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em';
+    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,canal_olist:payload->ecommerce->>nome';
     var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
     if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols.replace(',pode_faturar_em','').replace(',nf_autorizada_em','')).catch(function(){return [];})||[];
     var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
@@ -52749,6 +52757,10 @@ async function flCarregar(){
       var base={r:r,ep:ep};
       if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?String(r.alerta).replace(/_/g,' '):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
       if(r.status_importacao!=='importado' || !ep){
+        // v1.0.1113: só conta como "próximo disparo" o que a integração importa SOZINHA (plataformas automáticas, ex.: TikTok);
+        // MELI/Shopee entram pela planilha e não são atraso do VERUS; pedido já com E- (importado à mão) também sai daqui
+        if(ep || r.pedido_verus_id) return;
+        if(!flPlatAuto(r,cfg[r.integracao_id])) return;
         if(['aprovado','preparando_envio','faturado','pronto_envio'].indexOf(sit)>=0 || (sit==='aberto'&&r.nf_numero)) prox.push({...base,reg:'situação no Olist: '+(sit||'—')+' · ainda não importado',regra:'importação na sincronização',prev:proxSync,desde:r.created_at,prazo:20});
         return;
       }
