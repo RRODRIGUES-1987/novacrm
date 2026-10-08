@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1116 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1117 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1116';
+const APP_VERSION='v1.0.1117';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52893,7 +52893,8 @@ async function flCarregar(){
     var cfg={}; ints.forEach(function(g){ cfg[g.id]=g; });
     var desde=new Date(Date.now()-7*864e5).toISOString();
     var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,nf_lida_em,canal_olist:payload->ecommerce->>nome';
-    var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
+    var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols+',acomp_lido_em').catch(function(){return null;});   // v1.0.1117
+    if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
     if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols.replace(',pode_faturar_em','').replace(',nf_autorizada_em','')).catch(function(){return [];})||[];
     var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
     for(var i=0;i<ids.length;i+=150){
@@ -52901,7 +52902,8 @@ async function flCarregar(){
       (await dbSelect('ecom_pedidos','id=in.('+lote+')&select=id,numero_interno,status').catch(function(){return [];})||[]).forEach(function(p){ ped[p.id]=p; });
       (await dbSelect('ecom_etiquetas','pedido_id=in.('+lote+')&select=pedido_id').catch(function(){return [];})||[]).forEach(function(e){ etq[e.pedido_id]=1; });
     }
-    var agora=Date.now(), cli=[], prox=[], trav=[], disp={n:0,sep:0,ids:[]};   // v1.0.1114: disp
+    var agora=Date.now(), cli=[], prox=[], trav=[], disp={n:0,sep:0,ids:[]};
+    var travaLote={}; (rows||[]).forEach(function(x){ if(x.agrupamento_id&&x.alerta==='nf_nao_enviada_marketplace'&&!x.etiqueta_url) (travaLote[x.agrupamento_id]=travaLote[x.agrupamento_id]||[]).push(x.numero); });   // v1.0.1117   // v1.0.1114: disp
     var proxSync=flProxMin(10,0), proxAgr=flProxMin(2,0), proxEtq=flProxMin(2,1);
     rows.forEach(function(r){
       var ep=r.pedido_verus_id?ped[r.pedido_verus_id]:null, sit=String(r.situacao_tiny||'').toLowerCase();
@@ -52923,7 +52925,21 @@ async function flCarregar(){
       }
       var nfOk=!!r.nf_numero && ['6','7'].indexOf(String(r.nf_situacao||''))>=0;
       if(nfOk){
-        if(r.agrupamento_id){ prox.push({...base,reg:'agrupado · sem etiqueta',regra:'passada de etiquetas a cada 2 min',prev:proxEtq,desde:r.updated_at,prazo:15}); return; }
+        if(r.agrupamento_id){
+          // v1.0.1117: preso em lote travado por pedido do cliente (nota não transmitida) → travados, não atraso do VERUS
+          var tl=travaLote[r.agrupamento_id];
+          if(tl&&tl.length&&tl.indexOf(r.numero)<0){ trav.push({...base,motivo:'preso no lote '+r.agrupamento_id+' pelo pedido '+tl.join(', ')+' (nota não transmitida ao TikTok)',desde:r.updated_at}); return; }
+          prox.push({...base,reg:'agrupado · sem etiqueta',regra:'passada de etiquetas a cada 2 min',prev:proxEtq,desde:r.updated_at,prazo:15}); return; }
+        // v1.0.1117: com "agrupar só com nota transmitida" ligado, nota autorizada em pedido ainda em aprovado/preparando
+        // é espera do CLIENTE (transmitir a nota ao TikTok) — desde que o VERUS tenha relido a situação há pouco
+        var exige=!!(cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_exige_nf_enviada);
+        if(exige && (sit==='aprovado'||sit==='preparando_envio')){
+          var relida=r.acomp_lido_em||null, minRel=relida?Math.round((agora-new Date(relida).getTime())/60000):null;
+          if(relida===null || minRel<=30){
+            cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:'Nota '+r.nf_numero+' autorizada, NÃO transmitida ao TikTok',lida:relida||r.updated_at}); return;
+          }
+          prox.push({...base,reg:'NF '+r.nf_numero+' autorizada · situação no Olist relida há '+flDur(minRel*60000),regra:'releitura da situação (acompanhamento)',prev:proxSync,desde:relida,prazo:30}); return;
+        }
         var car=Number((cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_carencia_min)!=null?cfg[r.integracao_id].config.agrupar_carencia_min:20);
         var libera=r.nf_autorizada_em?new Date(new Date(r.nf_autorizada_em).getTime()+car*60000):null;
         var prev=(libera&&libera.getTime()>agora)?flProxDepois(libera):proxAgr;
