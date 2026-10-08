@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1111 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1112 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1111';
+const APP_VERSION='v1.0.1112';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52749,24 +52749,26 @@ async function flCarregar(){
       var base={r:r,ep:ep};
       if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?String(r.alerta).replace(/_/g,' '):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
       if(r.status_importacao!=='importado' || !ep){
-        if(['aprovado','preparando_envio','faturado','pronto_envio'].indexOf(sit)>=0 || (sit==='aberto'&&r.nf_numero)) prox.push({...base,reg:'situação no Olist: '+(sit||'—')+' · ainda não importado',regra:'importação na sincronização',prev:proxSync});
+        if(['aprovado','preparando_envio','faturado','pronto_envio'].indexOf(sit)>=0 || (sit==='aberto'&&r.nf_numero)) prox.push({...base,reg:'situação no Olist: '+(sit||'—')+' · ainda não importado',regra:'importação na sincronização',prev:proxSync,desde:r.created_at,prazo:20});
         return;
       }
       var nfOk=!!r.nf_numero && ['6','7'].indexOf(String(r.nf_situacao||''))>=0;
       if(nfOk){
-        if(r.agrupamento_id){ prox.push({...base,reg:'agrupado · sem etiqueta',regra:'passada de etiquetas a cada 2 min',prev:proxEtq}); return; }
+        if(r.agrupamento_id){ prox.push({...base,reg:'agrupado · sem etiqueta',regra:'passada de etiquetas a cada 2 min',prev:proxEtq,desde:r.updated_at,prazo:15}); return; }
         var car=Number((cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_carencia_min)!=null?cfg[r.integracao_id].config.agrupar_carencia_min:20);
         var libera=r.nf_autorizada_em?new Date(new Date(r.nf_autorizada_em).getTime()+car*60000):null;
         var prev=(libera&&libera.getTime()>agora)?flProxDepois(libera):proxAgr;
-        prox.push({...base,reg:'NF '+r.nf_numero+(r.nf_autorizada_em?' vista às '+flHm(r.nf_autorizada_em):' autorizada'),regra:'agrupamento após '+car+' min da nota',prev:prev}); return;
+        prox.push({...base,reg:'NF '+r.nf_numero+(r.nf_autorizada_em?' vista às '+flHm(r.nf_autorizada_em):' autorizada'),regra:'agrupamento após '+car+' min da nota',prev:prev,desde:r.nf_autorizada_em||r.updated_at,prazo:car+10}); return;
       }
-      if(r.nf_numero){ prox.push({...base,reg:'NF '+r.nf_numero+' · situação '+(r.nf_situacao||'—'),regra:'leitura da nota na passada de etiquetas',prev:proxEtq}); return; }
-      if(!r.situacao_enviada && sit==='aprovado'){ prox.push({...base,reg:'aprovado · "pode faturar" ainda não enviado',regra:'envio do "pode faturar" na sincronização',prev:proxSync}); return; }
+      if(r.nf_numero){ prox.push({...base,reg:'NF '+r.nf_numero+' · situação '+(r.nf_situacao||'—'),regra:'leitura da nota na passada de etiquetas',prev:proxEtq,desde:r.updated_at,prazo:10}); return; }
+      if(!r.situacao_enviada && sit==='aprovado'){ prox.push({...base,reg:'aprovado · "pode faturar" ainda não enviado',regra:'envio do "pode faturar" na sincronização',prev:proxSync,desde:r.created_at,prazo:20}); return; }
       if(r.situacao_confirmada_em){ cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:sit,lida:r.updated_at}); return; }
-      if(r.situacao_enviada){ prox.push({...base,reg:'"pode faturar" enviado às '+flHm(r.situacao_enviada_em)+' · sem confirmação',regra:'conferência/reenvio na sincronização',prev:proxSync}); return; }
+      if(r.situacao_enviada){ prox.push({...base,reg:'"pode faturar" enviado às '+flHm(r.situacao_enviada_em)+' · sem confirmação',regra:'conferência/reenvio na sincronização',prev:proxSync,desde:r.situacao_enviada_em||r.updated_at,prazo:20}); return; }
     });
+    // v1.0.1112: espera real em cada etapa x prazo normal — passou, é atraso do VERUS (avisar a TI)
+    prox.forEach(function(x){ x.espMin=x.desde?Math.max(0,Math.round((agora-new Date(x.desde).getTime())/60000)):0; x.atras=x.espMin>x.prazo; });
     cli.sort(function(a,b){ return String(a.pf||a.conf).localeCompare(String(b.pf||b.conf)); });
-    prox.sort(function(a,b){ return a.prev-b.prev; });
+    prox.sort(function(a,b){ if(a.atras!==b.atras) return a.atras?-1:1; return a.atras?(b.espMin-a.espMin):(a.prev-b.prev); });
     trav.sort(function(a,b){ return String(a.desde).localeCompare(String(b.desde)); });
     _fl.dados={cli:cli,prox:prox,trav:trav}; _fl.em=new Date();
   }catch(e){ _fl.erro='Erro ao montar as filas: '+(e.message||e); }
@@ -52788,7 +52790,8 @@ function ecomRelFilasView(){
   var maisAnt=d.cli.length?flDur(agora-new Date(d.cli[0].pf||d.cli[0].conf).getTime()):'—';
   h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     +kpi('Na conta do cliente · aguardando nota',d.cli.length,d.cli.length?('mais antigo h&aacute; '+maisAnt):'nenhum')
-    +kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length,d.prox.length?('pr&oacute;ximo a partir das '+flHm(d.prox[0].prev)):'nenhum')
+    +(function(){ var at=d.prox.filter(function(x){return x.atras;}); if(!at.length) return kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length,d.prox.length?('todos no prazo · pr&oacute;ximo a partir das '+flHm(d.prox[0].prev)):'nenhum');
+        var pior=at[0]; return kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length+' <span style="font-size:14px;color:var(--red-text)">· '+at.length+' atrasado(s)</span>','<span style="color:var(--red-text)">VERUS parado em "'+e(pior.regra)+'" h&aacute; '+flDur(pior.espMin*60000)+' · avisar a TI</span>',''); })()
     +kpi('Travados · precisam de algu&eacute;m',d.trav.length,d.trav.length?'ver motivo':'nenhum',d.trav.length?'var(--red-text)':'')
   +'</div>';
   var tab=function(tit,sub,cab,linhas,vazio){ return '<div style="border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--bg);margin-bottom:12px">'
@@ -52801,9 +52804,11 @@ function ecomRelFilasView(){
   h+=tab('Na conta do cliente · "pode faturar" confirmado, sem nota','Evid&ecirc;ncia por pedido: quando enviamos, quando o Olist confirmou e a situa&ccedil;&atilde;o lida no Olist (com a hora da leitura).',
     ['Pedido Olist · VERUS','1º "pode faturar"','Confirmado no Olist','Situa&ccedil;&atilde;o no Olist','Lida &agrave;s','Aguardando'],
     d.cli.map(function(x){ return '<tr>'+td(lnk(x),1)+td(flHora(x.pf),1)+td(flHora(x.conf),1)+td(e(sitLbl(x.sit)))+td(flHm(x.lida),1)+td(flDur(agora-new Date(x.pf||x.conf).getTime()))+'</tr>'; }),'Nenhum pedido aguardando nota na conta do cliente.');
-  h+=tab('Pr&oacute;ximos disparos do VERUS · andam sozinhos','Regra que move cada pedido e o hor&aacute;rio previsto por ela (a partir de).',
-    ['Pedido Olist · VERUS','Situa&ccedil;&atilde;o registrada','Regra','Previsto a partir de'],
-    d.prox.map(function(x){ return '<tr>'+td(lnk(x),1)+td(e(x.reg))+td(e(x.regra))+td(flHm(x.prev),1)+'</tr>'; }),'Nenhum disparo previsto.');
+  h+=tab('Pr&oacute;ximos disparos do VERUS · andam sozinhos','Cada etapa tem um prazo normal. Passou do prazo, o VERUS est&aacute; atrasado: avise a TI com o print. Atrasados primeiro, do mais antigo para o mais novo.',
+    ['Pedido Olist · VERUS','Situa&ccedil;&atilde;o registrada','Regra','Prazo normal','Esperando h&aacute;',''],
+    d.prox.map(function(x){ return '<tr'+(x.atras?' style="background:var(--red-bg)"':'')+'>'+td(lnk(x),1)+td(e(x.reg))+td(e(x.regra))+td('at&eacute; '+x.prazo+' min',1)
+      +td(x.desde?'<span style="'+(x.atras?'color:var(--red-text);font-weight:700':'')+'">'+flDur(x.espMin*60000)+'</span>':'—',1)
+      +td(x.atras?'<span style="font-size:10.5px;background:var(--red-bg);color:var(--red-text);font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap">ATRASADO · avisar TI</span>':'<span style="font-size:10.5px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px;white-space:nowrap">no prazo · '+flHm(x.prev)+'</span>')+'</tr>'; }),'Nenhum disparo previsto.');
   h+=tab('Travados · precisam de algu&eacute;m','Alerta ou erro registrado no pedido.',
     ['Pedido Olist · VERUS','Alerta registrado','Desde'],
     d.trav.map(function(x){ return '<tr>'+td(lnk(x),1)+td('<span style="color:var(--red-text)">'+e(x.motivo)+'</span>')+td(flHora(x.desde),1)+'</tr>'; }),'Nenhum pedido travado.');
@@ -52815,7 +52820,7 @@ async function flExcel(){
   try{
     var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs'), agora=Date.now(), wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.cli.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Pode_faturar_1o:flHora(x.pf),Confirmado_no_Olist:flHora(x.conf),Situacao_no_Olist:x.sit,Lida_as:flHora(x.lida),Aguardando:flDur(agora-new Date(x.pf||x.conf).getTime())}; })),'Na conta do cliente');
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.prox.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Situacao_registrada:x.reg,Regra:x.regra,Previsto_a_partir_de:flHora(x.prev)}; })),'Proximos disparos');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.prox.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Situacao_registrada:x.reg,Regra:x.regra,Prazo_min:x.prazo,Esperando_min:x.espMin,Atrasado:x.atras?'SIM':'',Previsto_a_partir_de:flHora(x.prev)}; })),'Proximos disparos');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.trav.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Alerta:x.motivo,Desde:flHora(x.desde)}; })),'Travados');
     XLSX.writeFile(wb,'Filas_integracao_'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.xlsx');
   }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
