@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1113 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1114 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1113';
+const APP_VERSION='v1.0.1114';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52747,12 +52747,15 @@ async function flCarregar(){
       (await dbSelect('ecom_pedidos','id=in.('+lote+')&select=id,numero_interno,status').catch(function(){return [];})||[]).forEach(function(p){ ped[p.id]=p; });
       (await dbSelect('ecom_etiquetas','pedido_id=in.('+lote+')&select=pedido_id').catch(function(){return [];})||[]).forEach(function(e){ etq[e.pedido_id]=1; });
     }
-    var agora=Date.now(), cli=[], prox=[], trav=[];
+    var agora=Date.now(), cli=[], prox=[], trav=[], disp={n:0,sep:0,ids:[]};   // v1.0.1114: disp
     var proxSync=flProxMin(10,0), proxAgr=flProxMin(2,0), proxEtq=flProxMin(2,1);
     rows.forEach(function(r){
       var ep=r.pedido_verus_id?ped[r.pedido_verus_id]:null, sit=String(r.situacao_tiny||'').toLowerCase();
       if(sit==='cancelado'||sit==='enviado'||sit==='entregue') return;
       var noVerusAndou=ep && ['importado','aguardando_etiqueta'].indexOf(String(ep.status||''))<0;
+      // v1.0.1114: disponível para separação = com etiqueta e ainda não entrou na separação
+      if(ep && ['importado','aguardando_etiqueta'].indexOf(String(ep.status||''))>=0 && (etq[ep.id] || r.etiqueta_url || r.etiqueta_arquivo)){ disp.n++; disp.ids.push(ep.id); }
+      else if(ep && String(ep.status||'')==='separando') disp.sep++;
       if(noVerusAndou || (ep&&etq[ep.id]) || r.etiqueta_url || r.etiqueta_arquivo) return;   // já com etiqueta ou em operação
       var base={r:r,ep:ep};
       if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?String(r.alerta).replace(/_/g,' '):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
@@ -52782,7 +52785,7 @@ async function flCarregar(){
     cli.sort(function(a,b){ return String(a.pf||a.conf).localeCompare(String(b.pf||b.conf)); });
     prox.sort(function(a,b){ if(a.atras!==b.atras) return a.atras?-1:1; return a.atras?(b.espMin-a.espMin):(a.prev-b.prev); });
     trav.sort(function(a,b){ return String(a.desde).localeCompare(String(b.desde)); });
-    _fl.dados={cli:cli,prox:prox,trav:trav}; _fl.em=new Date();
+    _fl.dados={cli:cli,prox:prox,trav:trav,disp:disp}; _fl.em=new Date();
   }catch(e){ _fl.erro='Erro ao montar as filas: '+(e.message||e); }
   _fl.carregando=false; flRender();
 }
@@ -52801,6 +52804,7 @@ function ecomRelFilasView(){
   var kpi=function(t,n,sub,cor){ return '<div style="flex:1;min-width:180px;border:1px solid var(--border);border-radius:11px;padding:11px 13px;background:var(--bg)"><div style="font-size:11.5px;color:var(--text3)">'+t+'</div><div style="font-size:24px;font-weight:800'+(cor?';color:'+cor:'')+'">'+n+'</div><div style="font-size:11.5px;color:var(--text3)">'+sub+'</div></div>'; };
   var maisAnt=d.cli.length?flDur(agora-new Date(d.cli[0].pf||d.cli[0].conf).getTime()):'—';
   h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +kpi('Dispon&iacute;vel para separa&ccedil;&atilde;o',(d.disp?d.disp.n:0),'com etiqueta · aguardando separar'+(d.disp&&d.disp.sep?' · '+d.disp.sep+' em separa&ccedil;&atilde;o agora':''),'var(--green-text)')   // v1.0.1114
     +kpi('Na conta do cliente · aguardando nota',d.cli.length,d.cli.length?('mais antigo h&aacute; '+maisAnt):'nenhum')
     +(function(){ var at=d.prox.filter(function(x){return x.atras;}); if(!at.length) return kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length,d.prox.length?('todos no prazo · pr&oacute;ximo a partir das '+flHm(d.prox[0].prev)):'nenhum');
         var pior=at[0]; return kpi('Pr&oacute;ximos disparos do VERUS',d.prox.length+' <span style="font-size:14px;color:var(--red-text)">· '+at.length+' atrasado(s)</span>','<span style="color:var(--red-text)">VERUS parado em "'+e(pior.regra)+'" h&aacute; '+flDur(pior.espMin*60000)+' · avisar a TI</span>',''); })()
