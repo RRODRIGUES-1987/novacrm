@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1118 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1119 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1118';
+const APP_VERSION='v1.0.1119';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3192,6 +3192,7 @@ async function ecomNfeDoDanfe(file){
   var emissao=dt?(dt[3]+'-'+dt[2]+'-'+dt[1]+'T'+dt[4]):null;
   var oid=(t.match(/xPed:\s*([A-Za-z0-9]+)/)||[])[1]||null;
   var dest=((t.match(/DESTINAT[ÁA]RIO:\s*(.+?)\s+-\s/i)||[])[1]||'').trim()||null;
+  if(!dest && /EBAZAR\.COM\.BR/i.test(t)) dest='EBAZAR.COM.BR LTDA (Mercado Livre Full)';   // v1.0.1119: DANFE de remessa ao Full ML (layout sem "DESTINATÁRIO:")
   var itens=[], vistos={}, m;
   // código começando por letra (evita pegar o resto do preço unitário, que o PDF quebra em pedaços); sem nenhum, aceita código numérico
   var _res=[/(?:^|\s)([A-Z][A-Z0-9._-]*\d[A-Z0-9._-]*)\s+(.+?)\s+(\d{8})\s+(\d{2,4})\s+(\d{4})\s+([A-Z]{1,6})\s+(\d+(?:[.,]\d+)?)\s/g,
@@ -55990,6 +55991,13 @@ async function ecomNfeImportFiles(input){
           var oi=String(nf.order_id||'').toUpperCase();
           return np===oi || np.indexOf(oi)===0 || oi.indexOf(np)===0;
         });
+      }
+      // v1.0.1118: NF de remessa para o Full do Mercado Livre (destinatário EBAZAR/Mercado Livre, sem Order ID) → casa com o pedido Full ML
+      if(!ped && /EBAZAR|MERCADO\s*LIVRE/i.test(String(nf.destinatario||''))){
+        var _totNf=nf.itens.reduce(function(a,y){return a+ecomN(y.qtd);},0);
+        var _fulls=ecomPedidos.filter(function(p){ return ecomEhFull(p)&&ecomFullMeta(p).ml&&['aguardando_etiqueta','importado'].indexOf(p.status)>=0; });
+        ped=_fulls.find(function(p){ var u=ecomFullUnid(p); return Object.keys(u).reduce(function(a,k){return a+ecomN(u[k]);},0)===_totNf; })||(_fulls.length===1?_fulls[0]:null);
+        if(!ped){ erros.push('NF '+nf.numero+': remessa para o Full ML, mas nenhum pedido Full ML pendente com '+_totNf+' unidade(s) — importe primeiro o PDF das etiquetas de produtos'); continue; }
       }
       if(!ped){
         // NF sem pedido -> cria em aguardando_etiqueta (a etiqueta continua sendo o gatilho)
