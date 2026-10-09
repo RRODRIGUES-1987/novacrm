@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1122 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1123 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1122';
+const APP_VERSION='v1.0.1123';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52956,7 +52956,7 @@ function flHm(ts){ if(!ts) return ''; var d=new Date(ts); if(isNaN(d)) return ''
 function flPlatAuto(r,integ){
   var plats=integ&&integ.config&&Array.isArray(integ.config.importar_auto_plataformas)?integ.config.importar_auto_plataformas.map(String):[];
   if(!plats.length) return false;
-  var canal=String(r.canal_olist||'').toLowerCase(), num=String(r.numero||'');
+  var canal=String(r.canal_olist||'').toLowerCase(), num=String(r.numero||'');   // v1.0.1123: sem canal (leitura leve) decide pelo formato do número
   var mapa={'TikTok':[/tiktok/,/^5\d{17}$/],'Shopee':[/shopee/],'Mercado Livre':[/mercado/,/^2000\d{12}$/],'Amazon':[/amazon/],'Magalu':[/magalu/,/magazine/]};
   return plats.some(function(pl){ var t=mapa[pl]||[new RegExp(pl.toLowerCase())]; return t.some(function(rx){ return rx.test(canal)||rx.test(num); }); });
 }
@@ -52970,10 +52970,14 @@ async function flCarregar(){
     var ints=await dbSelect('integracoes','company_id=eq.'+cid+'&select=id,nome,config').catch(function(){return [];})||[];
     var cfg={}; ints.forEach(function(g){ cfg[g.id]=g; });
     var desde=new Date(Date.now()-7*864e5).toISOString();
-    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,nf_lida_em,canal_olist:payload->ecommerce->>nome';
-    var rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols+',acomp_lido_em').catch(function(){return null;});   // v1.0.1117
-    if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols).catch(function(){return null;});
-    if(!rows) rows=await invFetchAll('intg_pedidos','company_id=eq.'+cid+'&created_at=gte.'+desde+'&select='+cols.replace(',pode_faturar_em','').replace(',nf_autorizada_em','')).catch(function(){return [];})||[];
+    // v1.0.1123: leitura LEVE — sem abrir o JSON do pedido (payload) e só pedidos ainda em andamento no Olist.
+    //           Antes: 7 dias inteiros + campo de dentro do JSON, em até 3 tentativas → lento e, no tempo esgotado, "tudo 0".
+    var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,nf_lida_em';
+    var filtro='company_id=eq.'+cid+'&created_at=gte.'+desde+'&or=(situacao_tiny.is.null,situacao_tiny.not.in.(cancelado,enviado,entregue))';
+    var _errLeit=null;
+    var rows=await invFetchAll('intg_pedidos',filtro+'&select='+cols+',acomp_lido_em').catch(function(e){ _errLeit=e; return null; });
+    if(!rows) rows=await invFetchAll('intg_pedidos',filtro+'&select='+cols).catch(function(e){ _errLeit=e; return null; });
+    if(!rows){ _fl.erro='Não consegui ler os pedidos da integração agora (banco ocupado ou tempo esgotado). Tente de novo em 1 minuto.'+(_errLeit&&_errLeit.message?' · '+_errLeit.message:''); _fl.carregando=false; flRender(); return; }
     var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
     for(var i=0;i<ids.length;i+=150){
       var lote=ids.slice(i,i+150).join(',');
