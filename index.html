@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1123 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1124 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1123';
+const APP_VERSION='v1.0.1124';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54938,7 +54938,10 @@ async function ecomEtiqPrintAuto(pedidoId){
     try{
       await ecomQzConnect(true);
       var _pr=await ecomQzResolvePrinter();
-      await ecomQzPrintImg(_pr, img);
+      try{ await ecomQzPrintImg(_pr, img); }
+      catch(_e1){   // v1.0.1124: conexão ainda assentando → espera e tenta de novo, sem derrubar a conexão
+        await new Promise(function(r){setTimeout(r,900);}); await ecomQzConnect(true); _pr=await ecomQzResolvePrinter(); await ecomQzPrintImg(_pr, img);
+      }
       showToast('Etiqueta enviada para: '+_pr,'green');
       return true;
     }catch(qzerr){
@@ -55685,10 +55688,18 @@ function ecomQzApplySecurity(signed){
     try{ qz.security.setSignaturePromise(function(toSign){ return function(resolve){ resolve(); }; }); }catch(e){}
   }
 }
+// v1.0.1124: conexão com o QZ serializada. A 1ª impressão do dia acontecia enquanto outra conexão ainda estava
+// abrindo (tela do checkout listando impressoras, ou duas impressões seguidas): o connect "resolvia" sem conexão
+// pronta → "versionCompare … reading '0'" e "Connection attempt cancelled". A reimpressão, segundos depois, funcionava.
+var _qzConnPromise=null;
 async function ecomQzConnect(signed){
   await ecomLoadQz();
+  if(_qzConnPromise){ try{ await _qzConnPromise; }catch(_e){} }
+  if(qz.websocket.isActive()) return;
   ecomQzApplySecurity(signed!==false);
-  if(!qz.websocket.isActive()){ await qz.websocket.connect({retries:2,delay:1}); }
+  _qzConnPromise=qz.websocket.connect({retries:2,delay:1});
+  try{ await _qzConnPromise; } finally { _qzConnPromise=null; }
+  for(var i=0;i<20&&!qz.websocket.isActive();i++) await new Promise(function(r){setTimeout(r,100);});   // espera a conexão ficar pronta
 }
 async function ecomQzResolvePrinter(){
   try{
