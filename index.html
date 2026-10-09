@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1120 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1121 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1120';
+const APP_VERSION='v1.0.1121';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54461,6 +54461,37 @@ function ecomCxFlash(msg,color){ if(!ecomCx) ecomCx={fila:[],msg:'',msgcolor:''}
 function ecomBeep(){
   try{ var A=window.AudioContext||window.webkitAudioContext; if(!A)return; var ctx=new A(); var o=ctx.createOscillator(); var g=ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.type='square'; o.frequency.value=300; g.gain.value=0.09; o.start(); setTimeout(function(){o.stop(); ctx.close();},240); }catch(e){}
 }
+// v1.0.1121: confere a etiqueta com os dados atuais do banco (rastreio gravado depois que a tela abriu).
+// Se o pedido ainda não tem rastreio em lugar nenhum, aceita o código lido como rastreio — desde que ele não seja
+// rastreio/número de OUTRO pedido — e grava (o próximo bipe desse pedido já casa).
+async function ecomCxRecheckEtiqueta(pedId, code){
+  ecomCx._rechecando=true;
+  try{
+    var p1=(await dbSelect('ecom_pedidos','id=eq.'+pedId+'&select=id,numero_pedido,tracking,numero_interno').catch(function(){return [];}))||[];
+    var e1=(await dbSelect('ecom_etiquetas','pedido_id=eq.'+pedId+'&select=id,pedido_id,order_id,tracking,pagina,nfe_chave,created_at').catch(function(){return [];}))||[];
+    var i1=(await dbSelect('intg_pedidos','pedido_verus_id=eq.'+pedId+'&select=tracking,numero').catch(function(){return [];}))||[];
+    var ped=ecomPedidos.find(function(x){return x.id===pedId;});
+    if(ped&&p1[0]){ if(p1[0].tracking) ped.tracking=p1[0].tracking; if(p1[0].numero_pedido) ped.numero_pedido=p1[0].numero_pedido; }
+    e1.forEach(function(e){ var k=ecomEtiquetas.findIndex(function(x){return x.id===e.id;}); if(k>=0) ecomEtiquetas[k]=e; else ecomEtiquetas.push(e); });
+    var trInt=(i1[0]&&i1[0].tracking)||'';
+    if(ped&&!ped.tracking&&trInt){ ped.tracking=trInt; dbUpdate('ecom_pedidos',pedId,{tracking:trInt}).catch(function(){}); }
+    var semRastreio=!(ped&&ped.tracking) && !e1.some(function(e){return e.tracking;}) && !trInt;
+    if(semRastreio){
+      var lim=(ecomCodLimpo(code)||String(code)).trim(), nrm=function(v){ return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,''); };
+      var cod=nrm(lim), ehOutro=cod.length<8 || ecomPedidos.some(function(x){ return x.id!==pedId && (nrm(x.tracking)===cod || nrm(x.numero_pedido)===cod); })
+        || ecomEtiquetas.some(function(e){ return e.pedido_id!==pedId && nrm(e.tracking)===cod; });
+      if(!ehOutro){
+        if(ped) ped.tracking=lim;
+        dbUpdate('ecom_pedidos',pedId,{tracking:lim}).catch(function(){});
+        e1.forEach(function(e){ if(!e.tracking){ e.tracking=lim; dbUpdate('ecom_etiquetas',e.id,{tracking:lim}).catch(function(){}); } });
+        ecomCx.pendingLabel=null; ecomCx._rechecando=false;
+        ecomCxFlash('Etiqueta confirmada · rastreio '+lim+' gravado · proximo pedido','green'); ecomCxRender(); return;
+      }
+    }
+  }catch(_e){}
+  ecomCxScan(code);   // tenta de novo com os dados atualizados
+  ecomCx._rechecando=false;
+}
 async function ecomCxBuscarOs(num,code){
   if(!ecomCx) ecomCx={fila:[],msg:'',msgcolor:''};
   ecomCx._buscandoOs=true;
@@ -54502,6 +54533,8 @@ function ecomCxScan(code){
     var okp=false; for(var _ci=0;_ci<_cands.length;_ci++){ var _cv=_cands[_ci].toLowerCase(); if(!_cv)continue; if(_cv===lc){okp=true;break;} if(lc.length>=6 && _cv.length>=6 && (lc.indexOf(_cv)>=0 || _cv.indexOf(lc)>=0)){okp=true;break;}
       var _cvN=_nrm(_cv); if(_cvN.length>=8 && lcN.length>=8 && (_cvN===lcN || _cvN.indexOf(lcN)>=0 || lcN.indexOf(_cvN)>=0)){okp=true;break;} }
     if(okp){ ecomCx.pendingLabel=null; ecomCxFlash('Etiqueta confirmada · proximo pedido','green'); ecomCxRender(); return; }
+    // v1.0.1121: o rastreio pode ter chegado DEPOIS que esta tela carregou → confere no banco antes de recusar
+    if(!ecomCx._rechecando){ ecomCxFlash('Conferindo a etiqueta…','amber'); ecomCxRender(); ecomCxRecheckEtiqueta(ecomCx.pendingLabel, code); return; }
     ecomBeep(); ecomCxFlash('Bipe a etiqueta do pedido E-'+String((pend&&pend.numero_interno)||0).padStart(6,'0')+' para liberar o proximo','amber'); ecomCxRender(); return;
   }
   var _mos=code.match(/^OS0*(\d+)[-_](.+)$/i);
