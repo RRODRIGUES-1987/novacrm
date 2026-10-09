@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1119 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1120 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1119';
+const APP_VERSION='v1.0.1120';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54461,6 +54461,31 @@ function ecomCxFlash(msg,color){ if(!ecomCx) ecomCx={fila:[],msg:'',msgcolor:''}
 function ecomBeep(){
   try{ var A=window.AudioContext||window.webkitAudioContext; if(!A)return; var ctx=new A(); var o=ctx.createOscillator(); var g=ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.type='square'; o.frequency.value=300; g.gain.value=0.09; o.start(); setTimeout(function(){o.stop(); ctx.close();},240); }catch(e){}
 }
+async function ecomCxBuscarOs(num,code){
+  if(!ecomCx) ecomCx={fila:[],msg:'',msgcolor:''};
+  ecomCx._buscandoOs=true;
+  try{
+    var cid=ecomCid();
+    var os=(await dbSelect('ecom_ordens_sep','company_id=eq.'+cid+'&numero=eq.'+num).catch(function(){return [];}))||[];
+    if(os.length){
+      os.forEach(function(o){ if(!ecomOrdensSep.some(function(x){return x.id===o.id;})) ecomOrdensSep.unshift(o); });
+      var vinc=(await dbSelect('ecom_os_pedidos','company_id=eq.'+cid+'&os_id=eq.'+os[0].id).catch(function(){return [];}))||[];
+      vinc.forEach(function(v){ if(!ecomOsPedidos.some(function(x){return x.id===v.id;})) ecomOsPedidos.push(v); });
+      var ids=vinc.map(function(v){return v.pedido_id;}).filter(Boolean);
+      for(var i=0;i<ids.length;i+=150){ var lote=ids.slice(i,i+150).join(',');
+        var peds=(await dbSelect('ecom_pedidos','id=in.('+lote+')').catch(function(){return [];}))||[];
+        peds.forEach(function(pn){ var k=ecomPedidos.findIndex(function(x){return x.id===pn.id;}); if(k>=0) ecomPedidos[k]=pn; else ecomPedidos.push(pn); });
+        var its=(await dbSelect('ecom_pedido_itens','pedido_id=in.('+lote+')').catch(function(){return [];}))||[];
+        var setP={}; ids.slice(i,i+150).forEach(function(x){setP[x]=1;});
+        ecomPedidoItens=ecomPedidoItens.filter(function(x){return !setP[x.pedido_id];}).concat(its);
+        var ets=(await dbSelect('ecom_etiquetas','pedido_id=in.('+lote+')&select=id,pedido_id,order_id,tracking,pagina,nfe_chave,created_at').catch(function(){return [];}))||[];
+        ets.forEach(function(e){ if(!ecomEtiquetas.some(function(x){return x.id===e.id;})) ecomEtiquetas.push(e); });
+      }
+    }
+  }catch(_e){}
+  ecomCxScan(code);   // tenta de novo com a OS carregada (se não existir, mostra "não encontrada")
+  ecomCx._buscandoOs=false;
+}
 function ecomCxScan(code){
   code=String(code||'').trim(); if(!code)return;
   var lc=code.toLowerCase();
@@ -54487,6 +54512,8 @@ function ecomCxScan(code){
       if(ecomCx && ecomCx.fila && ecomCx.fila.length){ ecomSepFolhaRegistrar(ecomCx.fila.slice(), _os.id, code); }
       return;
     }
+    // v1.0.1120: OS gerada depois que esta tela carregou (outra pessoa/sessão) → busca no banco e tenta de novo
+    if(!ecomCx||!ecomCx._buscandoOs){ ecomCxFlash('Buscando a OS '+parseInt(_mos[1],10)+'…','amber'); ecomCxRender(); ecomCxBuscarOs(parseInt(_mos[1],10),code); return; }
     ecomCxFlash('OS da folha nao encontrada','amber'); ecomCxRender(); return;
   }
   var ped=ecomPedidos.find(function(p){ return (p.numero_pedido&&String(p.numero_pedido)===code)||(p.tracking&&String(p.tracking).toLowerCase()===lc); });
