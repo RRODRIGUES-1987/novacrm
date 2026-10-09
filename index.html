@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1117 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1118 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1117';
+const APP_VERSION='v1.0.1118';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2884,6 +2884,50 @@ function ecomFullRowsDaAsn(a){
            unid_desc:a.itens.reduce(function(o,i){ o[i.sku]=i.descricao; return o; },{})}}],totalItens:a.itens.length};
   ecomAvisoCentro('ASN '+(a.asn||'')+' lida',[a.itens.length+' SKU(s) \u00b7 <b>'+a.total+' unidade(s)</b> \u00b7 armaz\u00e9m '+ecomEsc(a.armazem||'?'),'Confira a lista e grave. Depois: a NF (XML) e as etiquetas de unidade e de caixa, um PDF de cada vez.'],'green');
 }
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1118 · FULL MERCADO LIVRE (envio por fora da integração)
+//  1) Importar: PDF "Etiquetas de produtos" do envio → pedido Full (SKUs e unidades; código ML de cada produto)
+//  2) Etiquetas: o mesmo PDF de produtos (unidades) + PDF "Etiquetas dos volumes" (caixas, 3 por folha)
+//  3) Checkout: bipa o código ML da unidade; fecha a caixa e imprime a etiqueta do volume (recortada da folha)
+// ═══════════════════════════════════════════════════════════════════
+function ecomEhTextoMlProdutos(t){ var s=String(t||''); return !/seller sku/i.test(s) && /SKU:\s*\S+/.test(s) && /\b[A-Z]{4}\d{5}\b/.test(s); }
+function ecomEhTextoMlVolumes(t){ return /ENTREGAR NA COLETA FULL/i.test(String(t||'')) && /Envio:\s*\d+\/\d+/.test(String(t||'')); }
+// lê código ML e SKU na mesma ordem (cada etiqueta tem os dois); descrição pelo cadastro
+function ecomMlLerProdutos(paginas){
+  var porCod={}, porSku={}, total=0, pagsSku={};
+  paginas.forEach(function(t,i){
+    var cods=String(t).match(/\b[A-Z]{4}\d{5}\b/g)||[], skus=(String(t).match(/SKU:\s*([A-Za-z0-9._-]+)/g)||[]).map(function(x){return x.replace(/SKU:\s*/,'').toUpperCase();});
+    var n=Math.min(cods.length,skus.length);
+    for(var k=0;k<n;k++){ var c=cods[k], s=skus[k]; porCod[c]=porCod[c]||{sku:s,qtd:0}; porCod[c].qtd++; porSku[s]=(porSku[s]||0)+1; total++; (pagsSku[s]=pagsSku[s]||[]); if(pagsSku[s].indexOf(i+1)<0) pagsSku[s].push(i+1); }
+  });
+  var mlcodes={}; Object.keys(porCod).forEach(function(c){ mlcodes[c]=porCod[c].sku; });
+  return {porCod:porCod, porSku:porSku, total:total, mlcodes:mlcodes, pagsSku:pagsSku};
+}
+function ecomMlRowsDoEnvio(envio,lido){
+  var skus=Object.keys(lido.porSku);
+  var itens=skus.map(function(s){ var pr=(typeof ecomProdByCode==='function')?ecomProdByCode(s):null;
+    var cods=Object.keys(lido.porCod).filter(function(c){return lido.porCod[c].sku===s;});
+    return {sku:s,ean:'',descricao:(pr&&(pr.nome||pr.descricao))||('Full ML · '+cods.join(' / ')),qtd:lido.porSku[s]}; });
+  var num=envio?('ML-'+envio):('ML-FULL-'+Date.now());
+  var dupl=skus.filter(function(s){ return Object.keys(lido.porCod).filter(function(c){return lido.porCod[c].sku===s;}).length>1; });
+  ecomImportRows={pedidos:[{numero_pedido:num,tracking:'',destinatario_nome:'Mercado Livre Full',transportadora:'Mercado Livre (coleta Full)',canal:'Mercado Livre Full',
+    itens:ecomExplodeKits(itens,ecomLojistaId),
+    _full:{ml:true,envio:envio||'',total:lido.total,skuids:skus.reduce(function(o,s){ o[s]=Object.keys(lido.porCod).find(function(c){return lido.porCod[c].sku===s;}); return o; },{}),
+           mlcodes:lido.mlcodes,caixas:[],cx_atual:1,unidades:lido.porSku,unid_desc:itens.reduce(function(o,i){ o[i.sku]=i.descricao; return o; },{})}}],totalItens:itens.length};
+  var avisos=[skus.length+' SKU(s) · '+Object.keys(lido.porCod).length+' produto(s) ML · <b>'+lido.total+' unidade(s)</b>','Confira e grave. Depois, no passo das etiquetas: o MESMO PDF de produtos (unidades) e o PDF das etiquetas dos volumes (caixas), um de cada vez.'];
+  if(dupl.length) avisos.push('<span style="color:var(--amber-text)">●</span> Mesmo SKU para produtos ML diferentes: '+dupl.map(function(s){return '<b>'+ecomEsc(s)+'</b> ('+Object.keys(lido.porCod).filter(function(c){return lido.porCod[c].sku===s;}).join(', ')+')';}).join('; ')+'. A separação junta pelo SKU; confirme com o cliente se é o mesmo produto.');
+  ecomAvisoCentro('Envio Full ML '+(envio||'')+' lido',avisos,dupl.length?'amber':'green');
+}
+// volumes: cada folha tem até 3 etiquetas; ordem de leitura = ordem dos números do envio
+function ecomMlLerVolumes(paginas){
+  var cx=[], envio='';
+  paginas.forEach(function(t,i){
+    var ns=[], m, re=/Envio:\s*(\d+)\/(\d+)/g; while((m=re.exec(t))){ envio=envio||m[1]; var n=+m[2]; if(ns.indexOf(n)<0) ns.push(n); }
+    var cods=(String(t).match(/\b\d{6}\s?\d{5}\b/g)||[]).map(function(c){return c.replace(/\s/g,'');}); cods=cods.filter(function(c,k,a){return a.indexOf(c)===k;});
+    ns.forEach(function(n,k){ cx.push({n:n, spx:cods[k]||'', pagina:i+1, slot:k, de:Math.max(ns.length,3), itens:{}, qtd:0, fechada_em:null}); });
+  });
+  return {envio:envio, caixas:cx.sort(function(a,b){return a.n-b.n;})};
+}
 // ── 2) etiquetas do Full (unidade 60×40 e caixa master) no passo das etiquetas ──
 async function ecomFullPdfTexto(pdf,pg){ var tc=await (await pdf.getPage(pg)).getTextContent(); return tc.items.map(function(i){return i.str;}).join(' ').replace(/\s+/g,' '); }
 async function ecomFullEtiqDetectar(file){
@@ -2892,7 +2936,10 @@ async function ecomFullEtiqDetectar(file){
   var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise;
   var t1=await ecomFullPdfTexto(pdf,1);
   var tipo=/seller sku\s*:/i.test(t1)?'unidade':(/ETIQUETA DA CAIXA/i.test(t1)?'master':'');
-  return tipo?{tipo:tipo,pdf:pdf,buf:buf}:null;
+  var ml=false;   // v1.0.1118: Full Mercado Livre
+  if(!tipo&&ecomEhTextoMlProdutos(t1)){ tipo='unidade'; ml=true; }
+  if(!tipo&&ecomEhTextoMlVolumes(t1)){ tipo='master'; ml=true; }
+  return tipo?{tipo:tipo,pdf:pdf,buf:buf,ml:ml,nome:file&&file.name||''}:null;
 }
 async function ecomFullEtiqImportar(file,det){
   var cid=ecomCid(), pdf=det.pdf, pags=[];
@@ -2900,7 +2947,23 @@ async function ecomFullEtiqImportar(file,det){
   for(var pg=1;pg<=pdf.numPages;pg++){ pags.push(await ecomFullPdfTexto(pdf,pg)); if(pg%10===0||pg===pdf.numPages){ ecomProgSet(pg,'p\u00e1gina '+pg+' de '+pdf.numPages); await ecomTick(); } }
   var cands=ecomPedidosDoLojista().filter(function(p){ return ecomEhFull(p)&&['aguardando_etiqueta','importado'].indexOf(p.status)>=0; });
   var ped=null, meta=null;
-  if(det.tipo==='master'){
+  if(det.ml){   // v1.0.1118: Full Mercado Livre
+    if(det.tipo==='master'){
+      var vol=ecomMlLerVolumes(pags);
+      ped=cands.find(function(p){ return String(p.numero_pedido||'')==='ML-'+vol.envio || ecomFullMeta(p).envio===vol.envio; });
+      if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Etiquetas dos volumes do envio <b>'+ecomEsc(vol.envio)+'</b>, mas não há pedido Full ML com esse envio aguardando etiqueta.','Importe e grave o PDF das etiquetas de produtos antes.'],'red'); return; }
+      meta=ecomFullMeta(ped); meta.caixas=vol.caixas; meta.caixas_total=vol.caixas.length;
+    } else {
+      var lido=ecomMlLerProdutos(pags), envN=((det.nome||'').match(/Envio-(\d+)/i)||[])[1]||'';
+      ped=cands.find(function(p){ return envN&&(String(p.numero_pedido||'')==='ML-'+envN||ecomFullMeta(p).envio===envN); })
+        ||cands.find(function(p){ var u=ecomFullUnid(p), ks=Object.keys(u); return ecomFullMeta(p).ml&&ks.length&&ks.every(function(k){ return (lido.porSku[k]||0)===ecomN(u[k]); }); })
+        ||(cands.length===1?cands[0]:null);
+      if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Nenhum pedido Full ML aguardando etiqueta tem as mesmas quantidades destas etiquetas.','Importe e grave o PDF das etiquetas de produtos na importação antes.'],'red'); return; }
+      meta=ecomFullMeta(ped); meta.unidades_paginas=lido.pagsSku; meta.mlcodes=Object.assign(meta.mlcodes||{},lido.mlcodes); meta.unid_por_folha=true;
+      var _uu=ecomFullUnid(ped), div=Object.keys(_uu).filter(function(k){ return (lido.porSku[k]||0)!==ecomN(_uu[k]); });
+      var _divTxt=div.length?('<span style="color:var(--amber-text,#b45309)">●</span> '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(k){return ecomEsc(k)+' ('+(lido.porSku[k]||0)+'/'+ecomN(_uu[k])+')';}).join(', ')):'';
+    }
+  } else if(det.tipo==='master'){
     var asn=(pags[0].replace(/\s+/g,'').match(/INBR[A-Z]{2,4}\d{8,14}/)||[])[0]||'';
     ped=cands.find(function(p){ return String(p.numero_pedido||'').toUpperCase()===asn; });
     if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Etiquetas de caixa da ASN <b>'+ecomEsc(asn)+'</b>, mas n\u00e3o h\u00e1 pedido Full com essa ASN aguardando etiqueta.','Importe e grave a lista de separa\u00e7\u00e3o antes.'],'red'); return; }
@@ -2965,11 +3028,20 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
   await ecomLoadPdfjs();
   var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, imgs=[], wmm=60, hmm=40;
   for(var k=0;k<paginas.length;k++){
-    var pg=await pdf.getPage(paginas[k]), v1=pg.getViewport({scale:1});
+    var _corte=(paginas[k]&&typeof paginas[k]==='object')?paginas[k]:null;   // v1.0.1118: {p,slot,de} = uma etiqueta de uma folha com várias
+    var pg=await pdf.getPage(_corte?_corte.p:paginas[k]), v1=pg.getViewport({scale:1});
     wmm=Math.round(v1.width*25.4/72*10)/10; hmm=Math.round(v1.height*25.4/72*10)/10;
     var vp=pg.getViewport({scale:(formato==='master'?600:300)/72}), cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
     var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);
     await pg.render({canvasContext:cx,viewport:vp}).promise;
+    if(_corte){   // recorta a faixa da etiqueta (folha com 3 lado a lado) e imprime em pé no 100x150
+      var fw=Math.floor(cv.width/(_corte.de||3)), sc=document.createElement('canvas'); sc.width=fw; sc.height=cv.height;
+      sc.getContext('2d').drawImage(cv,_corte.slot*fw,0,fw,cv.height,0,0,fw,cv.height);
+      var W2=1181, H2=1772, rc2=document.createElement('canvas'); rc2.width=W2; rc2.height=H2;
+      var r2=rc2.getContext('2d'); r2.fillStyle='#fff'; r2.fillRect(0,0,W2,H2);
+      var e2=Math.min(W2/sc.width, H2/sc.height); r2.drawImage(sc,(W2-sc.width*e2)/2,(H2-sc.height*e2)/2,sc.width*e2,sc.height*e2);
+      imgs.push(rc2.toDataURL('image/png')); wmm=100; hmm=150; continue;
+    }
     if(formato==='master'){
       // 100 x 150 mm a 300 dpi; etiqueta deitada: gira 90° (sentido horário) e ocupa a área toda, mantendo a proporção
       var W=1181, H=1772, rc=document.createElement('canvas'); rc.width=W; rc.height=H;
@@ -3014,12 +3086,13 @@ function ecomFullSetUpc(pid,v){
   var meta=ecomFullMeta(p), n=parseInt(v,10); if(!(n>0)) return;
   meta.upc=n; p.full_meta=meta; dbUpdate('ecom_pedidos',pid,{full_meta:meta}).catch(function(){});
   var _u=ecomFullUnid(p), tot=Object.keys(_u).reduce(function(s,k){return s+ecomN(_u[k]);},0), cx=meta.caixas_total||0;
-  if(cx&&Math.ceil(tot/n)!==cx) showToast('Com '+n+' por caixa ficam '+Math.ceil(tot/n)+' caixa(s), mas a Shopee mandou '+cx+' etiquetas de caixa.','amber');
+  if(cx&&Math.ceil(tot/n)!==cx) showToast('Com '+n+' por caixa ficam '+Math.ceil(tot/n)+' caixa(s), mas o marketplace mandou '+cx+' etiquetas de caixa.','amber');
   ecomCxRender();
 }
 async function ecomFullBip(p,its,code){
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
-  Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
+  if(meta.mlcodes&&meta.mlcodes[qr]) sk=String(meta.mlcodes[qr]).toUpperCase();   // v1.0.1118: código ML da unidade
+  if(!sk) Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
   if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
   var un=ecomFullUnid(p);
   if(!sk||!(sk in un)){ ecomBeep(); ecomCxFlash(sk?('SKU '+sk+' n\u00e3o est\u00e1 neste Full'):('Etiqueta n\u00e3o \u00e9 deste Full: '+code),'red'); ecomCxRender(); return; }
@@ -3070,8 +3143,8 @@ async function ecomFullImprimirCaixa(pid,n){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
   var meta=ecomFullMeta(p), cx=(meta.caixas||[]).find(function(c){return c.n===n;});
   var pg=cx&&(cx.pagina||((meta.caixas||[]).find(function(c){return c.n===n&&c.pagina;})||{}).pagina);
-  if(!pg){ showToast('Caixa '+n+' sem etiqueta master no PDF da Shopee.','red'); return; }
-  var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,[pg],'master'); }catch(e){ showToast('Erro ao imprimir: '+(e.message||e),'red'); }
+  if(!pg){ showToast('Caixa '+n+' sem etiqueta de caixa no PDF do marketplace.','red'); return; }
+  var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,[(meta.ml&&cx&&cx.slot!=null)?{p:pg,slot:cx.slot,de:cx.de||3}:pg],'master'); }catch(e){ showToast('Erro ao imprimir: '+(e.message||e),'red'); }
   if(ok){ cx.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(e){} ecomCxRender(); }
 }
 function ecomFullPainelCheckout(p){
@@ -51743,12 +51816,16 @@ async function ecomPdfParse(file){
   await ecomLoadPdfjs();
   var buf=await file.arrayBuffer();
   var pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
-  var full='';
+  var full='', _pags=[];
   for(var pg=1;pg<=pdf.numPages;pg++){
     var page=await pdf.getPage(pg);
     var tc=await page.getTextContent();
-    full+=' '+tc.items.map(function(it){return it.str;}).join(' ');
+    var _tp=tc.items.map(function(it){return it.str;}).join(' '); _pags.push(_tp);
+    full+=' '+_tp;
   }
+  // v1.0.1118: Full Mercado Livre (PDF "Etiquetas de produtos" do envio)
+  if(ecomEhTextoMlProdutos(full)){ var _ml=ecomMlLerProdutos(_pags); if(_ml.total){ ecomMlRowsDoEnvio(((file&&file.name||'').match(/Envio-(\d+)/i)||[])[1]||'',_ml); return; } }
+  if(ecomEhTextoMlVolumes(full)){ showToast('Estas são as etiquetas dos VOLUMES do Full ML: use o passo das etiquetas. Na importação, use o PDF das etiquetas de produtos.','amber'); ecomImportRows=null; return; }
   if(ecomEhTextoAsn(full)){ var _asn=ecomParseFullAsn(full); if(_asn){ ecomFullRowsDaAsn(_asn); return; } showToast('ASN da Shopee reconhecida, mas n\u00e3o consegui ler os SKUs','red'); ecomImportRows=null; return; }   // v1.0.1049: Embarque Full
   ecomParseSepText(full);
 }
