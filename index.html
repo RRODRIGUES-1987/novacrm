@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1130 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1131 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1130';
+const APP_VERSION='v1.0.1131';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -42614,7 +42614,115 @@ function wmsAbrirCliente(clienteId){
     `wmsSalvarParamCliente('${clienteId}')`,{saveLabel:'Salvar parâmetros',width:'1100px'});
 }
 let wmsCliAtual=null, wmsCliTab='geral';
-const WMS_CLI_TABS=[['geral','Geral'],['produtos','Produtos'],['entrada','Entrada'],['saida','Saída'],['fiscal','Fiscal']];
+const WMS_CLI_TABS=[['geral','Geral'],['produtos','Produtos'],['entrada','Entrada'],['saida','Saída'],['fiscal','Fiscal'],['portal','Portal']];   // v1.0.1131: Portal
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1131 · CONFIGURAR DEPOSITANTE → ABA PORTAL (acessos do portal do cliente)
+//  Cria o login (signup com senha temporária, como o cadastro de usuários do VERUS), grava o vínculo
+//  com o depositante (portal_usuarios) e envia o e-mail de acesso. NÃO cria perfil do VERUS.
+// ═══════════════════════════════════════════════════════════════════
+var PORTAL_URL='https://rrodrigues-1987.github.io/novacrm/portal.html';
+var _wmsPortal={cid:null,lista:[],novo:false,msg:null};
+function wmsPortalPode(){ return ['admin','gestor'].indexOf(String(profile?.role||''))>=0; }
+function wmsCliTabPortal(c){
+  if(_wmsPortal.cid!==c.id){ _wmsPortal={cid:c.id,lista:null,novo:false,msg:null}; setTimeout(function(){ wmsPortalCarregar(c.id); },0); }
+  return '<div id="wms-portal-box">'+wmsPortalHtml(c)+'</div>';
+}
+async function wmsPortalCarregar(cid){
+  try{ _wmsPortal.lista=(await dbSelect('portal_usuarios','depositante_id=eq.'+cid+'&order=created_at.desc'))||[]; }
+  catch(e){ _wmsPortal.lista=[]; _wmsPortal.msg={t:'erro',x:'Não consegui ler os acessos: '+(e.message||e)+' (o SQL do portal já foi rodado?)'}; }
+  wmsPortalRender();
+}
+function wmsPortalRender(){ var c=clientes.find(function(x){return x.id===_wmsPortal.cid;}); var b=ge('wms-portal-box'); if(b&&c) b.innerHTML=wmsPortalHtml(c); }
+function wmsPortalHtml(c){
+  var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch];});};
+  var pode=wmsPortalPode(), L=_wmsPortal.lista, h='';
+  h+='<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px"><div><div style="font-weight:700;font-size:13px">Acessos ao portal do cliente</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:2px">Quem acessa o portal em nome de <b>'+esc(c.nome)+'</b>. Cada acesso vê só os dados deste depositante. Endereço: <a href="'+PORTAL_URL+'" target="_blank" style="color:var(--blue-text)">'+PORTAL_URL.replace('https://','')+'</a></div></div>'
+    +(pode?'<button class="btn btn-p btn-sm" onclick="_wmsPortal.novo=true;_wmsPortal.msg=null;wmsPortalRender()">+ Novo acesso</button>':'')+'</div>';
+  if(_wmsPortal.msg){ var m=_wmsPortal.msg, cor=m.t==='ok'?'green':(m.t==='erro'?'red':'amber'); h+='<div style="padding:9px 12px;border-radius:8px;margin-bottom:10px;font-size:12px;background:var(--'+cor+'-bg);color:var(--'+cor+'-text)">'+m.x+'</div>'; }
+  if(_wmsPortal.novo&&pode){
+    h+='<div style="border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:12px;background:var(--bg2)">'
+      +'<div style="font-weight:600;font-size:12.5px;margin-bottom:8px">Novo acesso</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
+      +'<div><label class="fl">Nome</label><input class="fi" id="wpt-nome" placeholder="Nome da pessoa"></div>'
+      +'<div><label class="fl">E-mail (login)</label><input class="fi" id="wpt-email" type="email" placeholder="pessoa@cliente.com.br"></div></div>'
+      +'<label style="display:flex;gap:8px;align-items:center;font-size:12px;margin-top:9px;cursor:pointer"><input type="checkbox" id="wpt-mail" checked> Gerar senha temporária e enviar o e-mail de acesso com o link do portal (a pessoa define a senha dela no primeiro acesso)</label>'
+      +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn btn-sm" onclick="_wmsPortal.novo=false;wmsPortalRender()">Cancelar</button><button class="btn btn-p btn-sm" id="wpt-criar" onclick="wmsPortalCriar()">Criar acesso</button></div></div>';
+  }
+  if(L===null){ h+='<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Carregando…</div>'; }
+  else if(!L.length){ h+='<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Nenhum acesso ao portal para este depositante.</div>'; }
+  else{
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3);font-size:10.5px;text-align:left"><th style="padding:6px 8px">Nome</th><th style="padding:6px 8px">E-mail</th><th style="padding:6px 8px">Situação</th><th style="padding:6px 8px">Último acesso</th><th></th></tr></thead><tbody>';
+    L.forEach(function(u){
+      var st=u.ativo?(u.trocar_senha?'<span style="font-size:10.5px;padding:2px 8px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text)">aguardando 1º acesso</span>':'<span style="font-size:10.5px;padding:2px 8px;border-radius:99px;background:var(--green-bg);color:var(--green-text)">ativo</span>'):'<span style="font-size:10.5px;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--text3)">desativado</span>';
+      var ua=u.ultimo_acesso?new Date(u.ultimo_acesso).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'nunca';
+      var ac=!pode?'':(u.ativo?'<button class="btn btn-sm" onclick="wmsPortalReenviar(\''+u.id+'\')">Reenviar acesso</button> <button class="btn btn-sm" onclick="wmsPortalAtivo(\''+u.id+'\',false)">Desativar</button>':'<button class="btn btn-sm" onclick="wmsPortalAtivo(\''+u.id+'\',true)">Reativar</button>');
+      h+='<tr style="border-top:1px solid var(--border)"><td style="padding:8px">'+esc(u.nome)+'</td><td style="padding:8px">'+esc(u.email||'—')+'</td><td style="padding:8px">'+st+'</td><td style="padding:8px;color:var(--text3)">'+ua+'</td><td style="padding:8px;text-align:right;white-space:nowrap">'+ac+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+  h+='<div style="font-size:11px;color:var(--text3);margin-top:10px">O acesso do portal não é usuário do VERUS: não entra no sistema interno nem aparece em Cadastros → Usuários.</div></div>';
+  return h;
+}
+function wmsPortalSenha(){ var a='ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789', s=''; var r=new Uint32Array(10); (window.crypto||window.msCrypto).getRandomValues(r); for(var i=0;i<10;i++) s+=a[r[i]%a.length]; return s+'#'+(r[0]%90+10); }
+function wmsPortalEmailHtml(nome,email,senha,dep,reenvio){
+  return '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1a1a1a">'
+    +'<div style="background:#1a1a1a;color:#fff;padding:18px 22px;border-radius:10px 10px 0 0"><div style="font-size:18px;font-weight:700">MK Logística · Portal do Cliente</div></div>'
+    +'<div style="border:1px solid #e5e5e5;border-top:none;padding:22px;border-radius:0 0 10px 10px">'
+    +'<p>Olá, <b>'+nome+'</b>.</p><p>'+(reenvio?'Geramos uma nova senha temporária para o seu acesso ao':'Seu acesso ao')+' Portal do Cliente da MK Logística'+(dep?' ('+dep+')':'')+' está pronto. Por ele você acompanha o estoque e envia pedidos de saída.</p>'
+    +'<table style="background:#f6f6f6;border-radius:8px;padding:12px 16px;margin:14px 0;font-size:14px"><tr><td style="padding:3px 10px 3px 0;color:#666">Endereço</td><td><a href="'+PORTAL_URL+'">'+PORTAL_URL.replace('https://','')+'</a></td></tr>'
+    +'<tr><td style="padding:3px 10px 3px 0;color:#666">Login</td><td><b>'+email+'</b></td></tr><tr><td style="padding:3px 10px 3px 0;color:#666">Senha temporária</td><td><b style="font-family:monospace;font-size:15px">'+senha+'</b></td></tr></table>'
+    +'<p>No primeiro acesso, o portal pede para você definir a sua própria senha.</p>'
+    +'<p style="color:#888;font-size:12px;margin-top:22px">Se você não esperava este e-mail, ignore-o ou fale com a MK Logística.</p></div></div>';
+}
+async function wmsPortalEnviarEmail(nome,email,senha,reenvio){
+  var c=clientes.find(function(x){return x.id===_wmsPortal.cid;})||{};
+  try{
+    var r=await fetch(SB_URL+'/functions/v1/send-email',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({from:'MK Logística · Portal do Cliente <noreply@mklogistica.com>',to:[email],subject:(reenvio?'Nova senha · ':'Seu acesso · ')+'Portal do Cliente MK Logística',html:wmsPortalEmailHtml(nome,email,senha,c.nome||'',reenvio)})});
+    var j=await r.json().catch(function(){return {};});
+    return (r.ok&&!(j&&(j.error||j.ok===false)))?null:String((j&&(j.error||j.message))||('HTTP '+r.status));
+  }catch(e){ return String(e.message||e); }
+}
+async function wmsPortalCriar(){
+  var nome=(ge('wpt-nome')?.value||'').trim(), email=(ge('wpt-email')?.value||'').trim().toLowerCase(), mail=!!ge('wpt-mail')?.checked;
+  if(!nome||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ _wmsPortal.msg={t:'erro',x:'Informe o nome e um e-mail válido.'}; wmsPortalRender(); return; }
+  if((profiles||[]).some(function(p){return String(p.email||'').toLowerCase()===email;})){ _wmsPortal.msg={t:'erro',x:'Este e-mail é de um usuário interno do VERUS. Use outro e-mail para o acesso do portal.'}; wmsPortalRender(); return; }
+  var bt=ge('wpt-criar'); if(bt){ bt.disabled=true; bt.innerHTML='<span class="spin"></span>'; }
+  var senha=wmsPortalSenha();
+  try{
+    var res=await sbAuth('signup',{email:email,password:senha,data:{full_name:nome,portal_cliente:true}});
+    if(!res.ok){ var m=String(res.data.msg||res.data.error_description||res.data.message||''); throw new Error(/registered|exists/i.test(m)?'Já existe um login com este e-mail. Se for de outro depositante, use outro e-mail.':(m||'Erro ao criar o login.')); }
+    var uid=(res.data.user&&res.data.user.id)||res.data.id; if(!uid) throw new Error('O login não devolveu o ID. Verifique se o e-mail já está cadastrado.');
+    await dbInsert('portal_usuarios',{company_id:company.id,depositante_id:_wmsPortal.cid,auth_user_id:uid,nome:nome,email:email,ativo:true,trocar_senha:true,criado_por:cu?.id||null});
+    var err=mail?await wmsPortalEnviarEmail(nome,email,senha,false):null;
+    _wmsPortal.novo=false;
+    _wmsPortal.msg={t:err?'aviso':'ok',x:'Acesso criado para <b>'+nome+'</b> ('+email+'). '+(mail?(err?'O e-mail NÃO foi enviado ('+err+'). ':'E-mail de acesso enviado. '):'')+'Senha temporária: <b style="font-family:monospace">'+senha+'</b> <span style="opacity:.75">(anote se precisar passar por telefone; ela não fica gravada)</span>'};
+    await wmsPortalCarregar(_wmsPortal.cid);
+  }catch(e){ _wmsPortal.msg={t:'erro',x:String(e.message||e)}; wmsPortalRender(); }
+}
+async function wmsPortalReenviar(id){
+  var u=(_wmsPortal.lista||[]).find(function(x){return x.id===id;}); if(!u) return;
+  if(!confirm('Gerar uma NOVA senha temporária para '+u.nome+' e reenviar o e-mail de acesso?\n\nA senha atual deixa de funcionar.')) return;
+  try{
+    var rp=await fetch(SB_URL+'/functions/v1/reset-password',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({userId:u.auth_user_id,userEmail:u.email,userName:u.nome,companyName:'',skipEmail:true,silent:true})});
+    var dt=await rp.json().catch(function(){return {};});
+    if(!dt.ok||!dt.password) throw new Error(dt.error||'A função de nova senha não devolveu a senha (HTTP '+rp.status+').');
+    await dbUpdate('portal_usuarios',u.id,{trocar_senha:true});
+    var err=await wmsPortalEnviarEmail(u.nome,u.email,dt.password,true);
+    _wmsPortal.msg={t:err?'aviso':'ok',x:'Nova senha gerada para <b>'+u.nome+'</b>. '+(err?'O e-mail NÃO foi enviado ('+err+'). ':'E-mail enviado. ')+'Senha temporária: <b style="font-family:monospace">'+dt.password+'</b>'};
+    await wmsPortalCarregar(_wmsPortal.cid);
+  }catch(e){ _wmsPortal.msg={t:'erro',x:String(e.message||e)}; wmsPortalRender(); }
+}
+async function wmsPortalAtivo(id,ativo){
+  var u=(_wmsPortal.lista||[]).find(function(x){return x.id===id;}); if(!u) return;
+  if(!ativo&&!confirm('Desativar o acesso de '+u.nome+' ao portal?')) return;
+  try{ await dbUpdate('portal_usuarios',id,{ativo:ativo}); _wmsPortal.msg={t:'ok',x:'Acesso de <b>'+u.nome+'</b> '+(ativo?'reativado':'desativado')+'.'}; await wmsPortalCarregar(_wmsPortal.cid); }
+  catch(e){ _wmsPortal.msg={t:'erro',x:String(e.message||e)}; wmsPortalRender(); }
+}
+
 function wmsCliTabIr(t){wmsCliTab=t;
   if(curPage==='wms-cliente-config'){render();return;}
   const box=ge('wms-cli-tab-content');if(box)box.innerHTML=wmsCliTabBody(wmsCliAtual);
@@ -42630,6 +42738,7 @@ function wmsCliTabBody(clienteId){
   if(wmsCliTab==='saida') return wmsCliTabSaida(c) + '<div style="margin-top:14px">'+wmsOpContratoSecao(c,'saida')+'</div>';
   if(wmsCliTab==='entrada') return wmsCliTabEntrada(c);
   if(wmsCliTab==='produtos') return wmsCliProdutosBody(clienteId);
+  if(wmsCliTab==='portal') return wmsCliTabPortal(c);   // v1.0.1131
   const titulos={geral:'Geral',entrada:'Entrada (recebimento)',fiscal:'Fiscal'};
   if(wmsCliTab==='geral'){
     const nd=c.wms_digitos_pedido||5;
