@@ -3072,7 +3072,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.0';
+const PORTAL_VERSION = 'v1.6.1';
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4464,7 +4464,8 @@ function showDone(kind, protocolo, msg){
 </script>
 <script>
 /* =====================================================================
-   VERUS · PORTAL DO CLIENTE · v1.6.0 — MODO REAL (fase 1, entrega 1)
+   VERUS · PORTAL DO CLIENTE · v1.6.1 — MODO REAL (fase 1, entrega 1)
+   v1.6.1: acessos criados pelo VERUS; senha própria no 1º acesso; "Esqueci minha senha".
    Login do cliente, estoque (caixas fechadas + sacos avulsos, sem RG/endereço) e
    pedido de saída conferido (produto, múltiplo do saco, disponível) gravado pelas
    funções portal_* do banco. O modo demonstração continua igual.
@@ -4482,15 +4483,64 @@ function showDone(kind, protocolo, msg){
       sb = sb || supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
       const { error } = await sb.auth.signInWithPassword({ email:$('inEmail').value.trim(), password:$('inSenha').value });
       if(error) throw new Error(error.message==='Invalid login credentials'?'E-mail ou senha incorretos.':error.message);
+      await portalEntrarComSessao();
+    }catch(err){ $('loginErr').textContent = err.message || 'Falha no login.'; }
+  };
+  async function portalEntrarComSessao(){
       const { data:ctx, error:e2 } = await sb.rpc('portal_contexto');
       if(e2 || !ctx){ await sb.auth.signOut(); throw new Error((e2&&e2.message)||'Usuário sem acesso ao portal. Fale com a MKLOG.'); }
+      if(ctx.trocar_senha){ await portalDefinirSenha('Primeiro acesso: defina a sua senha', 'A senha temporária que você recebeu por e-mail serve só para este primeiro acesso.'); }
       DEMO = false;
       state.user = { nome: ctx.usuario };
       state.depositanteId = ctx.depositante_id; state.depositante = ctx.depositante;
       await loadDados();
       enterApp();
-    }catch(err){ $('loginErr').textContent = err.message || 'Falha no login.'; }
+  }
+  // nova senha (1º acesso ou link de recuperação) — resolve quando a senha foi trocada
+  function portalDefinirSenha(titulo, sub){
+    return new Promise(function(resolve){
+      const old=$('mSenha'); if(old) old.remove();
+      document.body.insertAdjacentHTML('beforeend', `<div id="mSenha" class="overlay" role="dialog" aria-modal="true" style="z-index:9999"><div class="modal" style="max-width:420px">
+        <div class="modal-h"><h3>${esc(titulo)}</h3></div>
+        <div class="modal-b"><p class="hint" style="margin:0 0 12px">${esc(sub)}</p>
+          <div class="fgroup"><label for="nsA">Nova senha</label><input id="nsA" type="password" autocomplete="new-password" placeholder="mínimo 8 caracteres"></div>
+          <div class="fgroup"><label for="nsB">Repita a nova senha</label><input id="nsB" type="password" autocomplete="new-password"></div>
+          <div id="nsErr" class="login-err"></div></div>
+        <div class="modal-f"><button class="btn btn-primary" id="nsOk">Salvar senha e entrar</button></div></div></div>`);
+      $('nsOk').onclick = async function(){
+        const a=$('nsA').value, b=$('nsB').value; $('nsErr').textContent='';
+        if(a.length<8){ $('nsErr').textContent='Use pelo menos 8 caracteres.'; return; }
+        if(a!==b){ $('nsErr').textContent='As duas senhas não são iguais.'; return; }
+        this.disabled=true; this.textContent='Salvando…';
+        const { error } = await sb.auth.updateUser({ password:a });
+        if(error){ $('nsErr').textContent=error.message; this.disabled=false; this.textContent='Salvar senha e entrar'; return; }
+        await sb.rpc('portal_senha_trocada');
+        $('mSenha').remove(); resolve();
+      };
+    });
+  }
+  window.portalEsqueci = async function(){
+    if(!SUPABASE_URL) return;
+    const email=($('inEmail').value||'').trim();
+    if(!email){ $('loginErr').textContent='Digite seu e-mail acima e clique de novo em "Esqueci minha senha".'; return; }
+    sb = sb || supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    $('loginErr').style.color = error ? '' : 'var(--green,#4d7a1a)';
+    $('loginErr').textContent = error ? error.message : 'Se este e-mail tiver acesso, enviamos um link para criar uma nova senha. Se não chegar em alguns minutos, fale com a MKLOG.';
   };
+  // link de recuperação de senha (o Supabase devolve com #...type=recovery)
+  if(SUPABASE_URL && /type=recovery/.test(location.hash||'')){
+    sb = sb || supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    sb.auth.onAuthStateChange(async function(ev){
+      if(ev!=='PASSWORD_RECOVERY') return;
+      await portalDefinirSenha('Criar nova senha', 'Defina a sua nova senha de acesso ao portal.');
+      history.replaceState(null,'',location.pathname);
+      try{ await portalEntrarComSessao(); }catch(err){ $('loginErr').textContent = err.message || 'Falha no login.'; }
+    });
+  }
+  // link "Esqueci minha senha" na tela de login
+  (function(){ const er=$('loginErr'); if(er && !$('lnkEsqueci')){ const a=document.createElement('button'); a.id='lnkEsqueci'; a.className='btn btn-ghost'; a.style.cssText='width:100%;margin-top:6px;border:none;font-size:13px';
+    a.textContent='Esqueci minha senha'; a.onclick=function(){ portalEsqueci(); }; er.before(a); } })();
 
   function mapStatus(p){
     if(p.status==='recusado') return 'recusado';
