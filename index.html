@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1131 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1132 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1131';
+const APP_VERSION='v1.0.1132';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53286,14 +53286,27 @@ async function flCarregar(){
   _fl.carregando=false; flRender();
 }
 function flProxDepois(dt){ var d=new Date(dt.getTime()); d.setSeconds(0,0); d=new Date(d.getTime()+60000); while(d.getMinutes()%2!==0) d=new Date(d.getTime()+60000); return d; }
-function flRender(){ var c=ge('content'); if(c && ecomRelView==='filas') c.innerHTML=ecomRelFilasView(); }
+function flRender(){ var c=ge('content'); if(!c || ecomRelView!=='filas') return;
+  try{ c.innerHTML=ecomRelFilasView(); }
+  catch(e){ console.error('[filas]',e); _fl.carregando=false; c.innerHTML='<div style="max-width:900px;margin:30px auto;padding:20px;border:1px dashed var(--border);border-radius:10px;color:var(--red-text)">Erro ao montar o relatório: '+ecomEsc(e.message||e)+' <button class="btn btn-sm" style="margin-left:10px" onclick="flAtualizar()">Tentar de novo</button></div>'; } }
+// v1.0.1132: Atualizar robusto — garante a tela certa, mostra que está atualizando e avisa se não conseguiu
+async function flAtualizar(){
+  if(_fl.carregando){ showToast('Já está atualizando…','blue'); return; }
+  ecomRelView='filas';
+  var antes=_fl.em?_fl.em.getTime():0;
+  try{ await flCarregar(); }catch(e){ _fl.carregando=false; _fl.erro='Erro ao atualizar: '+(e.message||e); flRender(); }
+  if(!_fl.erro && (_fl.em?_fl.em.getTime():0)===antes) showToast('Não consegui atualizar agora. Tente de novo em instantes.','amber');
+}
+// v1.0.1132: atualização automática (a cada 2 min) enquanto o relatório estiver aberto
+var _flAuto=null;
+function flAutoToggle(on){ if(_flAuto){ clearInterval(_flAuto); _flAuto=null; } if(on) _flAuto=setInterval(function(){ if(ecomRelView!=='filas'||!ge('content')){ clearInterval(_flAuto); _flAuto=null; return; } if(!_fl.carregando) flAtualizar(); },120000); }
 function ecomRelFilasView(){
   var e=ecomEsc, d=_fl.dados, agora=Date.now();
   if(!d && !_fl.carregando && !_fl.erro) setTimeout(flCarregar,30);
   var h='<div style="max-width:1180px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Filas da integra&ccedil;&atilde;o</b>'
     +(_fl.em?'<span style="font-size:12px;color:var(--text3)">atualizado &agrave;s '+flHm(_fl.em)+':'+String(_fl.em.getSeconds()).padStart(2,'0')+'</span>':'')
-    +'<span style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-sm" onclick="flCarregar()">&#8635; Atualizar</button>'+(d?'<button class="btn btn-sm" onclick="flExcel()">Exportar Excel</button>':'')+'</span></div>';
+    +'<span style="margin-left:auto;display:flex;gap:8px"><label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text3);cursor:pointer"><input type="checkbox" onchange="flAutoToggle(this.checked)"'+(_flAuto?' checked':'')+'> atualizar a cada 2 min</label><button class="btn btn-sm" onclick="flAtualizar()"'+(_fl.carregando?' disabled':'')+'>&#8635; '+(_fl.carregando?'Atualizando…':'Atualizar')+'</button>'+(d?'<button class="btn btn-sm" onclick="flExcelCliente()" title="Só as pendências do lado do cliente, para enviar a ele">Exportar pendências do cliente</button><button class="btn btn-sm" onclick="flExcel()">Exportar Excel (completo)</button>':'')+'</span></div>';
   if(_fl.carregando && !d) return h+'<div style="padding:30px;text-align:center;color:var(--text3)"><span class="spin"></span> Montando as filas&hellip;</div></div>';
   if(_fl.erro) return h+'<div style="padding:24px;text-align:center;color:var(--red-text);border:1px dashed var(--border);border-radius:10px">'+e(_fl.erro)+'</div></div>';
   if(!d) return h+'</div>';
@@ -53335,6 +53348,23 @@ async function flExcel(){
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.prox.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Situacao_registrada:x.reg,Regra:x.regra,Prazo_min:x.prazo,Esperando_min:x.espMin,Atrasado:x.atras?'SIM':'',Previsto_a_partir_de:flHora(x.prev)}; })),'Proximos disparos');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.trav.map(function(x){ return {Pedido_Olist:x.r.numero,Pedido_VERUS:flVerus(x.ep),Alerta:x.motivo,Desde:flHora(x.desde)}; })),'Travados');
     XLSX.writeFile(wb,'Filas_integracao_'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
+}
+// v1.0.1132: só a parte do cliente — "na conta do cliente" + travados que dependem dele (nota, cancelamento, lote preso)
+async function flExcelCliente(){
+  var d=_fl.dados; if(!d) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs'), agora=Date.now(), wb=XLSX.utils.book_new();
+    var cli=d.cli.map(function(x){ return {'Pedido':x.r.numero,'Pedido MKLOG':flVerus(x.ep),'Situação / o que falta':(x.sit==='aprovado'||x.sit==='preparando_envio')?'"Pode faturar" confirmado · aguardando a nota fiscal':x.sit,
+      '"Pode faturar" enviado em':flHora(x.pf),'Confirmado no Olist em':flHora(x.conf),'Conferido pelo VERUS em':flHora(x.lida),'Aguardando há':flDur(agora-new Date(x.pf||x.conf).getTime())}; });
+    var travCli=d.trav.filter(function(x){ return /nota|cancel|preso no lote|nf nao enviada|marketplace/i.test(String(x.motivo||'')); })
+      .map(function(x){ return {'Pedido':x.r.numero,'Pedido MKLOG':flVerus(x.ep),'Pendência':String(x.motivo||'').replace(/^nf nao enviada marketplace$/i,'nota autorizada, não transmitida ao TikTok'),'Desde':flHora(x.desde)}; });
+    var ws1=XLSX.utils.json_to_sheet(cli.length?cli:[{'Pedido':'Nenhuma pendência na conta do cliente'}]); ws1['!cols']=[{wch:22},{wch:14},{wch:52},{wch:18},{wch:18},{wch:18},{wch:13}];
+    XLSX.utils.book_append_sheet(wb,ws1,'Aguardando o cliente');
+    if(travCli.length){ var ws2=XLSX.utils.json_to_sheet(travCli); ws2['!cols']=[{wch:22},{wch:14},{wch:80},{wch:18}]; XLSX.utils.book_append_sheet(wb,ws2,'Travados (ação do cliente)'); }
+    var _lj=(typeof ecomLojistas!=='undefined'&&ecomLojistas||[]).find(function(l){return l.id===ecomLojistaId;}), dep=(_lj&&(_lj.nome||_lj.razao_social))||'cliente';
+    XLSX.writeFile(wb,'Pendencias_'+String(dep).replace(/\W+/g,'_')+'_'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.xlsx');
+    showToast(cli.length+' pedido(s) aguardando o cliente'+(travCli.length?' + '+travCli.length+' travado(s)':'')+' exportado(s).','green');
   }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
 }
 function ecomRelAbrir(which){ ecomRelView=which; if(which==='filas') _fl.dados=null; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
