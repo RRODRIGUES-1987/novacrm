@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1136 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1137 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1136';
+const APP_VERSION='v1.0.1137';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15002,6 +15002,34 @@ function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
   </div>`;
 }
 
+// v1.0.1137: criar contato direto do "Novo negócio" (pipeline), sem sair da tela
+function dealNovoContatoToggle(abrir){
+  var b=ge('deal-novo-contato'); if(!b) return;
+  var on=(abrir===undefined)?(b.style.display==='none'):abrir; b.style.display=on?'':'none';
+  if(on){ var emp=ge('fdemp'), ne=ge('fnc-emp'); if(emp&&ne&&!ne.value) ne.value=emp.value||''; setTimeout(function(){ var n=ge('fnc-nome'); if(n) n.focus(); },30); }
+}
+async function dealNovoContatoSalvar(){
+  var nome=(ge('fnc-nome')?.value||'').trim(), emp=(ge('fnc-emp')?.value||'').trim(), email=(ge('fnc-email')?.value||'').trim(), tel=(ge('fnc-tel')?.value||'').trim(), er=ge('fnc-err');
+  if(er) er.textContent='';
+  if(!nome){ if(er) er.textContent='Informe o nome do contato.'; return; }
+  if(email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ if(er) er.textContent='E-mail inválido.'; return; }
+  var ja=(contacts||[]).find(function(c){ return String(c.name||'').trim().toLowerCase()===nome.toLowerCase() && String(c.company||'').trim().toLowerCase()===emp.toLowerCase(); });
+  var c=ja;
+  if(!c){
+    var bt=ge('fnc-btn'); if(bt){ bt.disabled=true; bt.textContent='Criando…'; }
+    try{ c=await dbInsert('contacts',{owner_id:cu.id,company_id:company?.id||null,name:nome,company:emp||null,email:email||null,phone:tel||null}); if(c) contacts.unshift(c); }
+    catch(e){ if(er) er.textContent='Erro ao criar o contato: '+(e.message||e); }
+    if(bt){ bt.disabled=false; bt.textContent='Criar e usar neste negócio'; }
+    if(!c) return;
+  }
+  var sel=ge('fdc');
+  if(sel){ [...sel.options].forEach(function(o){ if(!o.value&&/Nenhum contato|Adicione contatos/.test(o.textContent)) o.remove(); });
+    if(![...sel.options].some(function(o){return o.text===c.name;})){ var op=document.createElement('option'); op.textContent=c.name; sel.insertBefore(op, sel.firstChild); }
+    sel.value=c.name; }
+  var empEl=ge('fdemp'); if(empEl&&c.company&&!empEl.value) empEl.value=c.company;
+  dealNovoContatoToggle(false); ['fnc-nome','fnc-emp','fnc-email','fnc-tel'].forEach(function(id){ var el=ge(id); if(el) el.value=''; });
+  showToast(ja?'Contato já existia — selecionado.':'Contato criado e selecionado.','green');
+}
 function autoFillEmpresaDeal(contactName){
   const contato=contacts.find(c=>c.name===contactName);
   const empEl=ge('fdemp');
@@ -25840,8 +25868,19 @@ function openModal(mode,id=null){
       <div id="deal-tab-dados-content">
         <div class="fg"><label class="fl">Nome do negócio</label><input class="fi" id="fdn" value="${d?d.name:''}" placeholder="Ex: Empresa X - Armazenagem"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div class="fg"><label class="fl">Contato</label><select class="fi" id="fdc" onchange="autoFillEmpresaDeal(this.value)">${co||'<option>Adicione contatos primeiro</option>'}</select></div>
+          <div class="fg"><label class="fl" style="display:flex;justify-content:space-between;align-items:center">Contato <a href="javascript:void(0)" onclick="dealNovoContatoToggle()" style="font-size:11px;font-weight:600;color:var(--blue-text);text-transform:none;letter-spacing:0">+ novo contato</a></label><select class="fi" id="fdc" onchange="autoFillEmpresaDeal(this.value)">${co||'<option value="">Nenhum contato — use "+ novo contato"</option>'}</select></div>
           <div class="fg"><label class="fl">Empresa</label><input class="fi" id="fdemp" value="${d?d.empresa||'':''}" placeholder="Nome da empresa"></div>
+        </div>
+        <div id="deal-novo-contato" style="display:none;border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin:-4px 0 12px;background:var(--bg2)">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px">Novo contato</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div><label class="fl">Nome *</label><input class="fi" id="fnc-nome" placeholder="Nome do contato"></div>
+            <div><label class="fl">Empresa</label><input class="fi" id="fnc-emp" placeholder="Empresa do contato"></div>
+            <div><label class="fl">E-mail</label><input class="fi" id="fnc-email" type="email" placeholder="email@empresa.com.br"></div>
+            <div><label class="fl">Telefone</label><input class="fi" id="fnc-tel" placeholder="(11) 99999-9999"></div>
+          </div>
+          <div id="fnc-err" style="font-size:12px;color:var(--red-text);margin-top:6px"></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-sm" type="button" onclick="dealNovoContatoToggle(false)">Cancelar</button><button class="btn btn-p btn-sm" type="button" id="fnc-btn" onclick="dealNovoContatoSalvar()">Criar e usar neste negócio</button></div>
         </div>
         <div class="fg"><label class="fl">Valor (R$)</label><input class="fi" id="fdv" type="number" value="${d?d.value:''}" placeholder="0"></div>
         <div class="fg"><label class="fl">Estágio</label><select class="fi" id="fds">${STAGES.map(s=>`<option ${d&&d.stage===s?'selected':''}>${s}</option>`).join('')}</select></div>
