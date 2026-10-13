@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1132 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1133 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1132';
+const APP_VERSION='v1.0.1133';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53367,6 +53367,160 @@ async function flExcelCliente(){
     showToast(cli.length+' pedido(s) aguardando o cliente'+(travCli.length?' + '+travCli.length+' travado(s)':'')+' exportado(s).','green');
   }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
 }
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1133 · RELATÓRIO "ONDE ESTÃO ESTES PEDIDOS?" (atendimento)
+//  Cola números ou importa a planilha do cliente → classifica cada pedido pela etapa e por quem age.
+//  Regras (as mesmas da consulta manual): romaneado = embalado aguardando coleta; carregado/expedido = saiu.
+// ═══════════════════════════════════════════════════════════════════
+var _od={txt:'',nums:[],linhas:0,arq:'',res:null,carregando:false,erro:'',aberto:null};
+var OD_ETAPAS=[
+  {k:'saiu',      t:'Saiu da MKLOG (carregado)',                         quem:'concluido', cli:'Despachado pela MKLOG'},
+  {k:'coleta',    t:'Embalado e no romaneio — aguardando a coleta',      quem:'transp',    cli:'Embalado, aguardando coleta da transportadora'},
+  {k:'conferido', t:'Conferido/embalado — falta incluir no romaneio',    quem:'mklog',     cli:'Embalado, em preparação para coleta'},
+  {k:'separado',  t:'Separado — falta conferir/embalar',                 quem:'mklog',     cli:'Em conferência e embalagem'},
+  {k:'separando', t:'Em separação',                                      quem:'mklog',     cli:'Em separação'},
+  {k:'etiqueta',  t:'Com etiqueta — disponível para separar',            quem:'mklog',     cli:'Na fila de separação'},
+  {k:'agrupado',  t:'Agrupado — aguardando etiqueta',                    quem:'verus',     cli:'Gerando etiqueta de envio'},
+  {k:'travado',   t:'Travado (ver motivo)',                              quem:'cliente',   cli:'Pendência na conta do vendedor (ver detalhe)'},
+  {k:'nf_ok',     t:'Nota autorizada — aguardando agrupar',              quem:'verus',     cli:'Nota fiscal autorizada, gerando etiqueta'},
+  {k:'nf_pend',   t:'Nota pendente/rejeitada na conta do cliente',       quem:'cliente',   cli:'Nota fiscal pendente de autorização'},
+  {k:'sem_nf',    t:'Sem nota — aguardando o cliente faturar',           quem:'cliente',   cli:'Aguardando emissão da nota fiscal'},
+  {k:'nao_import',t:'Na integração, ainda não importado',                quem:'verus',     cli:'Recebido, em processamento'},
+  {k:'cancelado', t:'Cancelado',                                         quem:'concluido', cli:'Cancelado'},
+  {k:'nao_achou', t:'Não encontrado no VERUS',                           quem:'verificar', cli:'Não localizado na MKLOG'}
+];
+var OD_QUEM={concluido:['concluído','var(--green-bg)','var(--green-text)'],transp:['transportadora','#E0E7FF','#3730A3'],mklog:['operação MKLOG','var(--amber-bg)','var(--amber-text)'],
+  verus:['VERUS','var(--blue-bg)','var(--blue-text)'],cliente:['cliente','var(--bg2)','var(--text2)'],verificar:['verificar','var(--red-bg)','var(--red-text)']};
+function odRender(){ var c=ge('content'); if(c&&ecomRelView==='onde'){ try{ c.innerHTML=ecomRelOndeView(); }catch(e){ c.innerHTML='<div style="padding:20px;color:var(--red-text)">Erro: '+ecomEsc(e.message||e)+'</div>'; } } }
+// extrai números de pedido de um texto/planilha: pega a "coluna" com mais números no formato de pedido
+function odExtrair(celulas){
+  var re=/^(5\d{17}|2000\d{12}|\d{6}[A-Z0-9]{8}|\d{10,20})$/i, out=[], visto={}, n=0;
+  celulas.forEach(function(v){ var s=String(v==null?'':v).trim().replace(/^'/,''); if(!s) return; n++;
+    if(/e\+/i.test(s)){ var f=Number(s); if(isFinite(f)) s=f.toFixed(0); }   // número que o Excel virou notação científica
+    if(re.test(s) && !visto[s.toUpperCase()]){ visto[s.toUpperCase()]=1; out.push(s.toUpperCase()); } });
+  return {nums:out, lidos:n};
+}
+function odTexto(t){ _od.txt=t; var r=odExtrair(String(t||'').split(/[\s,;]+/)); _od.nums=r.nums; _od.linhas=r.lidos; _od.arq=''; _od.res=null; odRender(); }
+async function odArquivo(inp){
+  var f=inp&&inp.files&&inp.files[0]; if(!f) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+    var wb=XLSX.read(await f.arrayBuffer(),{type:'array',raw:false}), melhor={nums:[],lidos:0};
+    wb.SheetNames.forEach(function(sn){
+      var rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:''});
+      var ncol=rows.reduce(function(a,r){return Math.max(a,r.length);},0);
+      for(var c=0;c<ncol;c++){ var r=odExtrair(rows.map(function(x){return x[c];})); if(r.nums.length>melhor.nums.length){ melhor=r; melhor.lidos=rows.length; } }
+    });
+    _od.nums=melhor.nums; _od.linhas=melhor.lidos; _od.arq=f.name; _od.txt=''; _od.res=null;
+    if(!_od.nums.length) showToast('Não encontrei números de pedido nessa planilha.','amber');
+  }catch(e){ showToast('Não consegui ler a planilha: '+(e.message||e),'red'); }
+  odRender();
+}
+function odClassificar(p,e,temEtq){
+  if(!p&&!e) return {k:'nao_achou'};
+  var st=e&&e.status, nf=String(p&&p.nf_situacao||'');
+  if(st==='cancelado'||(!e&&p&&p.situacao_tiny==='cancelado')) return {k:'cancelado'};
+  if(!e) return (['1','2','4','9','3','5','10'].indexOf(nf)>=0)?{k:'nf_pend',mot:'nota '+(p.nf_numero||'')+' situação '+nf+' · ainda não importado'}:{k:'nao_import'};
+  if(st==='carregado'||st==='expedido') return {k:'saiu'};
+  if(st==='romaneado') return {k:'coleta'};
+  if(st==='conferido'||st==='conferindo') return {k:'conferido'};
+  if(st==='separado') return {k:'separado'};
+  if(st==='separando') return {k:'separando'};
+  if(temEtq) return {k:'etiqueta'};
+  if(p&&p.alerta) return {k:'travado',mot:String(p.alerta).replace(/_/g,' ')};
+  if(p&&p.agrupamento_id) return {k:'agrupado'};
+  if(['6','7'].indexOf(nf)>=0) return {k:'nf_ok'};
+  if(['1','2','4','9','3','5','10'].indexOf(nf)>=0) return {k:'nf_pend',mot:'nota '+(p.nf_numero||'')+' situação '+nf};
+  return {k:'sem_nf'};
+}
+async function odConsultar(){
+  if(!_od.nums.length||_od.carregando) return;
+  _od.carregando=true; _od.erro=''; _od.res=null; _od.aberto=null; odRender();
+  try{
+    var cid=company.id, nums=_od.nums, intg={}, ecom={}, porId={}, etq={};
+    var q=function(a){ return a.map(function(x){ return '"'+String(x).replace(/"/g,'')+'"'; }).join(','); };
+    for(var i=0;i<nums.length;i+=150){
+      var lote=nums.slice(i,i+150);
+      ((await dbSelect('intg_pedidos','company_id=eq.'+cid+'&numero=in.('+q(lote)+')&select=numero,pedido_verus_id,status_importacao,situacao_tiny,nf_numero,nf_situacao,agrupamento_id,alerta,etiqueta_url,etiqueta_arquivo,tracking'))||[]).forEach(function(r){ intg[String(r.numero).toUpperCase()]=r; });
+      ((await dbSelect('ecom_pedidos','company_id=eq.'+cid+'&numero_pedido=in.('+q(lote)+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao'))||[]).forEach(function(r){ ecom[String(r.numero_pedido).toUpperCase()]=r; porId[r.id]=r; });
+    }
+    var faltam=Object.values(intg).map(function(r){return r.pedido_verus_id;}).filter(function(id){ return id&&!porId[id]; });
+    for(var j=0;j<faltam.length;j+=150){ ((await dbSelect('ecom_pedidos','id=in.('+faltam.slice(j,j+150).join(',')+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao'))||[]).forEach(function(r){ porId[r.id]=r; }); }
+    var ids=Object.keys(porId);
+    for(var k=0;k<ids.length;k+=150){ ((await dbSelect('ecom_etiquetas','pedido_id=in.('+ids.slice(k,k+150).join(',')+')&select=pedido_id'))||[]).forEach(function(r){ etq[r.pedido_id]=1; }); }
+    var linhas=nums.map(function(n){
+      var p=intg[n]||null, e=(p&&p.pedido_verus_id&&porId[p.pedido_verus_id])||ecom[n]||null;
+      var temEtq=!!(e&&(etq[e.id]))||!!(p&&(p.etiqueta_url||p.etiqueta_arquivo));
+      var c=odClassificar(p,e,temEtq);
+      return {numero:n,p:p,e:e,k:c.k,mot:c.mot||'',desde:e?e.created_at:null};
+    });
+    _od.res={linhas:linhas,em:new Date()};
+  }catch(e){ _od.erro='Erro na consulta: '+(e.message||e); }
+  _od.carregando=false; odRender();
+}
+function odFmt(d){ return d?new Date(d).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—'; }
+function ecomRelOndeView(){
+  var e=ecomEsc, h='<div style="max-width:1180px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Onde est&atilde;o estes pedidos?</b>'
+    +'<span style="font-size:12px;color:var(--text3)">cole a lista do cliente ou importe a planilha dele</span></div>';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;padding:14px;background:var(--bg);margin-bottom:12px">'
+    +'<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">'
+    +'<textarea class="fi" id="od-txt" rows="4" placeholder="Cole aqui os números dos pedidos (um por linha, ou a coluna inteira copiada do Excel)" oninput="clearTimeout(window._odT);window._odT=setTimeout(function(){odTexto(ge(\'od-txt\').value)},350)">'+e(_od.txt)+'</textarea>'
+    +'<label style="border:1px dashed var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:12px;color:var(--text3);cursor:pointer;padding:10px">'
+    +'<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="odArquivo(this)"><b style="color:var(--text)">Importar planilha</b>(.xlsx / .csv)<span style="font-size:11px;margin-top:3px">a coluna do pedido é encontrada sozinha</span>'+(_od.arq?'<span style="margin-top:5px;color:var(--blue-text)">'+e(_od.arq)+'</span>':'')+'</label></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px"><div style="font-size:12px;color:var(--text3)">'
+    +(_od.nums.length?(_od.linhas?e(String(_od.linhas))+' linha(s) lida(s) · ':'')+'<b style="color:var(--text)">'+_od.nums.length+' pedido(s) diferente(s)</b>':'Nenhum número de pedido reconhecido ainda.')+'</div>'
+    +'<button class="btn btn-p btn-sm" onclick="odConsultar()"'+(_od.nums.length&&!_od.carregando?'':' disabled')+'>'+(_od.carregando?'Consultando…':'Consultar')+'</button></div></div>';
+  if(_od.erro) h+='<div style="padding:12px;border-radius:10px;background:var(--red-bg);color:var(--red-text);margin-bottom:12px">'+e(_od.erro)+'</div>';
+  if(_od.carregando) h+='<div style="padding:30px;text-align:center;color:var(--text3)"><span class="spin"></span> Consultando '+_od.nums.length+' pedido(s)…</div>';
+  var R=_od.res; if(!R) return h+'</div>';
+  var grupos={}; R.linhas.forEach(function(l){ (grupos[l.k]=grupos[l.k]||[]).push(l); });
+  var cont=function(f){ return R.linhas.filter(function(l){ var et=OD_ETAPAS.find(function(x){return x.k===l.k;}); return f(et); }).length; };
+  var card=function(n,t,cor){ return '<div style="flex:1;min-width:150px;border:1px solid var(--border);border-radius:11px;padding:10px 12px;background:var(--bg)"><div style="font-size:22px;font-weight:800'+(cor?';color:'+cor:'')+'">'+n.toLocaleString('pt-BR')+'</div><div style="font-size:11.5px;color:var(--text3)">'+t+'</div></div>'; };
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +card((grupos.saiu||[]).length,'saíram da MKLOG','var(--green-text)')
+    +card((grupos.coleta||[]).length,'embalados, aguardando coleta')
+    +card(cont(function(et){return et.quem==='mklog';}),'em operação na MKLOG','var(--amber-text)')
+    +card(cont(function(et){return et.quem==='cliente'||et.quem==='verus';}),'aguardando cliente / integração')
+    +card((grupos.nao_achou||[]).length,'não encontrados no VERUS',(grupos.nao_achou||[]).length?'var(--red-text)':'')
+    +'</div>';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;background:var(--bg);overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:var(--bg2);font-size:11px;color:var(--text3);text-align:left"><th style="padding:8px 10px">Situação</th><th style="padding:8px 10px">Quem age</th><th style="padding:8px 10px;text-align:right">Pedidos</th><th style="padding:8px 10px">Mais antigo</th><th></th></tr></thead><tbody>';
+  OD_ETAPAS.forEach(function(et){ var L=grupos[et.k]; if(!L||!L.length) return;
+    var ant=L.map(function(l){return l.desde;}).filter(Boolean).sort()[0], q=OD_QUEM[et.quem], ab=_od.aberto===et.k;
+    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:9px 10px;font-weight:600">'+et.t+'</td><td style="padding:9px 10px"><span style="font-size:11px;padding:2px 9px;border-radius:99px;background:'+q[1]+';color:'+q[2]+'">'+q[0]+'</span></td>'
+      +'<td style="padding:9px 10px;text-align:right;font-weight:800">'+L.length.toLocaleString('pt-BR')+'</td><td style="padding:9px 10px;font-family:monospace;font-size:12px">'+(ant?odFmt(ant):'—')+'</td>'
+      +'<td style="padding:9px 10px;text-align:right"><button class="btn btn-sm" onclick="_od.aberto=_od.aberto===\''+et.k+'\'?null:\''+et.k+'\';odRender()">'+(ab?'fechar':'ver')+'</button></td></tr>';
+    if(ab){
+      h+='<tr><td colspan="5" style="padding:0 10px 10px;background:var(--bg2)"><div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3);font-size:10.5px;text-align:left"><th style="padding:6px">Pedido</th><th style="padding:6px">MKLOG</th><th style="padding:6px">Situação VERUS</th><th style="padding:6px">Olist</th><th style="padding:6px">Nota</th><th style="padding:6px">Rastreio</th><th style="padding:6px">Entrou</th><th style="padding:6px">Detalhe</th></tr></thead><tbody>'
+        +L.slice().sort(function(a,b){return String(a.desde||'').localeCompare(String(b.desde||''));}).map(function(l){
+          return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 6px;font-family:monospace"><a href="javascript:void(0)" onclick="tlAbrirPedido(\''+e(l.numero)+'\')" style="color:var(--blue-text)">'+e(l.numero)+'</a></td><td style="padding:5px 6px">'+(l.e?'E-'+String(l.e.numero_interno||0).padStart(6,'0'):'—')+'</td>'
+            +'<td style="padding:5px 6px">'+e(l.e?l.e.status:'—')+'</td><td style="padding:5px 6px">'+e(l.p?(l.p.situacao_tiny||'—'):'—')+'</td><td style="padding:5px 6px">'+e(l.p&&l.p.nf_numero||'—')+'</td>'
+            +'<td style="padding:5px 6px;font-family:monospace">'+e((l.e&&l.e.tracking)||(l.p&&l.p.tracking)||'—')+'</td><td style="padding:5px 6px">'+odFmt(l.desde)+'</td><td style="padding:5px 6px;color:var(--text3)">'+e(l.mot||'')+'</td></tr>'; }).join('')
+        +'</tbody></table></div></td></tr>';
+    }
+  });
+  h+='</tbody></table></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px"><span style="font-size:11.5px;color:var(--text3)">Consultado às '+odFmt(R.em)+' · clique no pedido para abrir a linha do tempo</span>'
+    +'<span style="display:flex;gap:8px"><button class="btn btn-sm" onclick="odExportar(false)">Exportar Excel (pedido a pedido)</button><button class="btn btn-sm" onclick="odExportar(true)">Exportar versão para o cliente</button></span></div></div>';
+  return h;
+}
+async function odExportar(cliente){
+  var R=_od.res; if(!R) return;
+  try{
+    var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs'), wb=XLSX.utils.book_new();
+    var ord=function(l){ return OD_ETAPAS.findIndex(function(x){return x.k===l.k;}); };
+    var L=R.linhas.slice().sort(function(a,b){ return ord(a)-ord(b)||String(a.desde||'').localeCompare(String(b.desde||'')); });
+    var rows=L.map(function(l){ var et=OD_ETAPAS.find(function(x){return x.k===l.k;})||{};
+      if(cliente) return {'Pedido':l.numero,'Situação':et.cli,'Nota fiscal':l.p&&l.p.nf_numero||'','Rastreio':(l.e&&l.e.tracking)||(l.p&&l.p.tracking)||''};
+      return {'Pedido':l.numero,'Pedido MKLOG':l.e?'E-'+String(l.e.numero_interno||0).padStart(6,'0'):'','Situação':et.t,'Quem age':(OD_QUEM[et.quem]||[''])[0],'Situação VERUS':l.e?l.e.status:'','Situação Olist':l.p?l.p.situacao_tiny||'':'',
+        'Nota fiscal':l.p&&l.p.nf_numero||'','Rastreio':(l.e&&l.e.tracking)||(l.p&&l.p.tracking)||'','Lote':l.p&&l.p.agrupamento_id||'','Entrou no VERUS':odFmt(l.desde),'Detalhe':l.mot||''}; });
+    var ws=XLSX.utils.json_to_sheet(rows); ws['!cols']=cliente?[{wch:22},{wch:48},{wch:12},{wch:20}]:[{wch:22},{wch:12},{wch:46},{wch:16},{wch:14},{wch:14},{wch:10},{wch:20},{wch:12},{wch:16},{wch:30}];
+    XLSX.utils.book_append_sheet(wb,ws,cliente?'Situação dos pedidos':'Pedido a pedido');
+    if(!cliente){ var res=OD_ETAPAS.map(function(et){ var n=R.linhas.filter(function(l){return l.k===et.k;}).length; return n?{'Situação':et.t,'Quem age':OD_QUEM[et.quem][0],'Pedidos':n}:null; }).filter(Boolean);
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(res),'Resumo'); }
+    XLSX.writeFile(wb,(cliente?'Situacao_pedidos_':'Onde_estao_pedidos_')+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.xlsx');
+  }catch(e){ showToast('Erro ao gerar o Excel: '+(e.message||e),'red'); }
+}
+
 function ecomRelAbrir(which){ ecomRelView=which; if(which==='filas') _fl.dados=null; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function ecomRelVoltar(){ ecomRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rEcomRelatorios(); }
 function rEcomRelatorios(){
@@ -53376,6 +53530,7 @@ function rEcomRelatorios(){
   if(ecomRelView==='intgstatus') return ecomRelIntgStatusView();
   if(ecomRelView==='timeline') return ecomRelTimelineView();   // v1.0.1106
   if(ecomRelView==='filas') return ecomRelFilasView();          // v1.0.1107
+  if(ecomRelView==='onde') return ecomRelOndeView();            // v1.0.1133
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
@@ -53408,6 +53563,12 @@ function rEcomRelatorios(){
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Linha do tempo do pedido</div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Todos os marcos registrados de um pedido, com data e hora: integra&ccedil;&atilde;o, log, VERUS e opera&ccedil;&atilde;o. Para depurar e demonstrar.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
+      +'</div>'
+      +'<div onclick="ecomRelAbrir(\'onde\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>'
+        +'<div style="font-weight:700;font-size:15px">Onde est&atilde;o estes pedidos?</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Cole a lista do cliente ou importe a planilha: cada pedido classificado pela etapa e por quem age, com exporta&ccedil;&atilde;o para o cliente.</div>'
         +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div>'
       +'</div>'
       +'<div onclick="ecomRelAbrir(\'filas\')" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
