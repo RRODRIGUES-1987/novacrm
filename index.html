@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1134 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1136 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1134';
+const APP_VERSION='v1.0.1136';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54902,6 +54902,12 @@ function ecomBeep(){
 // v1.0.1121: confere a etiqueta com os dados atuais do banco (rastreio gravado depois que a tela abriu).
 // Se o pedido ainda não tem rastreio em lugar nenhum, aceita o código lido como rastreio — desde que ele não seja
 // rastreio/número de OUTRO pedido — e grava (o próximo bipe desse pedido já casa).
+// v1.0.1136: o código lido é de PRODUTO (SKU ou EAN de cadastro ou de item de pedido)?
+function ecomCxEhCodigoProduto(code){
+  var c=String(code||'').trim().toLowerCase(); if(!c) return false;
+  return (ecomProdutos||[]).some(function(p){ return (p.sku&&String(p.sku).toLowerCase()===c)||(p.ean&&String(p.ean).toLowerCase()===c); })
+      || (ecomPedidoItens||[]).some(function(i){ return (i.sku&&String(i.sku).toLowerCase()===c)||(i.ean&&String(i.ean).toLowerCase()===c); });
+}
 async function ecomCxRecheckEtiqueta(pedId, code){
   ecomCx._rechecando=true;
   try{
@@ -54916,7 +54922,7 @@ async function ecomCxRecheckEtiqueta(pedId, code){
     var semRastreio=!(ped&&ped.tracking) && !e1.some(function(e){return e.tracking;}) && !trInt;
     if(semRastreio){
       var lim=(ecomCodLimpo(code)||String(code)).trim(), nrm=function(v){ return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,''); };
-      var cod=nrm(lim), ehOutro=cod.length<8 || ecomPedidos.some(function(x){ return x.id!==pedId && (nrm(x.tracking)===cod || nrm(x.numero_pedido)===cod); })
+      var cod=nrm(lim), ehOutro=cod.length<8 || ecomCxEhCodigoProduto(lim) || ecomCxEhCodigoProduto(code) || ecomPedidos.some(function(x){ return x.id!==pedId && (nrm(x.tracking)===cod || nrm(x.numero_pedido)===cod); })
         || ecomEtiquetas.some(function(e){ return e.pedido_id!==pedId && nrm(e.tracking)===cod; });
       if(!ehOutro){
         if(ped) ped.tracking=lim;
@@ -54993,10 +54999,17 @@ function ecomCxScan(code){
     var _pref=ecomPedidos.filter(function(p){ var n=String(p.numero_pedido||''); return /^\d{16,18}$/.test(n) && n.indexOf(code)===0; });
     if(_pref.length===1) ped=_pref[0];
   }
+  var isSku = ecomProdutos.some(function(p){ return p.sku && String(p.sku).toLowerCase()===lc; }) || ecomPedidoItens.some(function(i){ return String(i.sku||'').toLowerCase()===lc; });
+  // v1.0.1135: código que é SKU de produto E número/rastreio de algum pedido (ex.: pedido gravado com "PE065" no número,
+  // de uma planilha lida errada): com o checkout em andamento, é bipe de produto; sem pedido em andamento, vale o produto
+  // (a folha/etiqueta do pedido não tem o formato de SKU)
+  if(ped && (isSku || ecomCxEhCodigoProduto(code))){ ped=null; }   // v1.0.1136: inclui EAN
   if(ped){ ecomCxLoadPedido(ped); return; }
   if(ecomCx && ecomCx.fila && ecomCx.fila.length){ ecomCxBip(code); return; }
-  var isSku = ecomProdutos.some(function(p){ return p.sku && String(p.sku).toLowerCase()===lc; }) || ecomPedidoItens.some(function(i){ return String(i.sku||'').toLowerCase()===lc; });
   if(isSku){ ecomCxLoadSku(code); return; }
+  // v1.0.1136: EAN do produto também inicia o checkout pelo produto
+  var _prEan=(ecomProdutos||[]).find(function(p){ return p.ean&&String(p.ean).toLowerCase()===lc&&p.sku; }) || (ecomPedidoItens||[]).find(function(i){ return i.ean&&String(i.ean).toLowerCase()===lc&&i.sku; });
+  if(_prEan){ ecomCxLoadSku(_prEan.sku); return; }
   ecomCx=null; ecomCxFlash('Nao reconhecido. Bipe a folha (ou etiqueta do cliente) para comecar','amber'); ecomCxRender();
 }
 // v1.0.1134: o pedido pode ter sido separado DEPOIS que a tela do checkout carregou (status antigo na memória):
