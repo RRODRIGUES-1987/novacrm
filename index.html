@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1133 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1134 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1133';
+const APP_VERSION='v1.0.1134';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54999,7 +54999,24 @@ function ecomCxScan(code){
   if(isSku){ ecomCxLoadSku(code); return; }
   ecomCx=null; ecomCxFlash('Nao reconhecido. Bipe a folha (ou etiqueta do cliente) para comecar','amber'); ecomCxRender();
 }
-function ecomCxLoadPedido(ped){
+// v1.0.1134: o pedido pode ter sido separado DEPOIS que a tela do checkout carregou (status antigo na memória):
+// antes de dizer "não está separado", relê a situação no banco.
+async function ecomCxAtualizarStatus(ids){
+  ids=(ids||[]).filter(Boolean); if(!ids.length) return 0; var n=0;
+  for(var i=0;i<ids.length;i+=150){
+    var rs=(await dbSelect('ecom_pedidos','id=in.('+ids.slice(i,i+150).join(',')+')&select=id,status,os_id,tracking,numero_pedido').catch(function(){return [];}))||[];
+    rs.forEach(function(r){ var p=ecomPedidos.find(function(x){return x.id===r.id;}); if(p){ if(p.status!==r.status) n++; p.status=r.status; if(r.os_id) p.os_id=r.os_id; if(r.tracking) p.tracking=r.tracking; } });
+  }
+  return n;
+}
+var _cxRechecando=false;
+async function ecomCxLoadPedidoRecheck(ped){
+  _cxRechecando=true; ecomCxFlash('Conferindo a situação do pedido…','amber'); ecomCxRender();
+  try{ await ecomCxAtualizarStatus([ped.id]); }catch(_e){}
+  _cxRechecando=false; ecomCxLoadPedido(ped,true);
+}
+function ecomCxLoadPedido(ped,_jaRelido){
+  if(!ecomCxReady(ped) && !_jaRelido && !_cxRechecando){ ecomCxLoadPedidoRecheck(ped); return; }
   if(!ecomCxReady(ped)){ ecomCx=null; ecomCxFlash('Pedido E-'+String(ped.numero_interno||0).padStart(6,'0')+' nao esta separado','amber'); ecomCxRender(); return; }
   ecomCx={modo:'pedido', sku:null, fila:[ped.id], msg:'Pedido carregado', msgcolor:'green'};
   ecomSepFolhaRegistrar([ped.id], ped.os_id||null, ped.numero_pedido||ped.tracking||'');
@@ -55050,6 +55067,18 @@ function ecomCxLoadSku(sku, osId){
   var _os=osId?ecomOrdensSep.find(function(o){return o.id===osId;}):null;
   var fila=(osId?_daOs(osId):ecomPedidosDoLojista().filter(_match))
     .sort(ecomOrdTransp);
+  // v1.0.1134: nenhum pedido "separado" na memória → relê a situação no banco (separação concluída depois que a tela abriu)
+  if(!fila.length && !arguments[2] && !_cxRechecando){
+    var _ids=[];
+    if(osId){ ecomOsPedidos.forEach(function(l){ if(l.os_id===osId) _ids.push(l.pedido_id); }); }
+    else{ var _setP={}; ecomPedidoItens.forEach(function(i){ if(String(i.sku||'').toLowerCase()===lc) _setP[i.pedido_id]=1; });
+          _ids=ecomPedidosDoLojista().filter(function(p){ return _setP[p.id] && ['conferido','romaneado','carregado','expedido','cancelado'].indexOf(p.status)<0; }).map(function(p){return p.id;}); }
+    if(_ids.length){
+      _cxRechecando=true; ecomCxFlash('Conferindo a situação dos pedidos…','amber'); ecomCxRender();
+      ecomCxAtualizarStatus(_ids).catch(function(){}).then(function(){ _cxRechecando=false; ecomCxLoadSku(sku,osId,true); });
+      return;
+    }
+  }
   if(!fila.length){
     var _fin=ecomPedidosDoLojista().filter(function(p){
       if(p.status!=='conferido'&&p.status!=='romaneado'&&p.status!=='expedido') return false;
@@ -56340,6 +56369,7 @@ var ECOM_TRANSP={
   'JT'   :{nome:'J&T EXPRESS',   box:'BOX 2', cor:'#b91c1c', bg:'#fee2e2'},
   'CORREIOS':{nome:'CORREIOS',   box:'BOX 3', cor:'#047857', bg:'#d1fae5'},
   'ML'   :{nome:'MERCADO ENVIOS', box:'BOX 4', cor:'#b45309', bg:'#fef3c7'},
+  'SPX'  :{nome:'SHOPEE XPRESS', box:'BOX 5', cor:'#c2410c', bg:'#ffedd5'},   // v1.0.1134: etiqueta nova da Shopee (rastreio BR…)
   '?'    :{nome:'SEM TRANSPORTADORA', box:'BOX —', cor:'#6b7280', bg:'#f3f4f6'}
 };
 // Identifica a transportadora a partir do texto da etiqueta (ou dos codigos lidos)
@@ -56365,7 +56395,7 @@ function ecomCodLimpo(code){
 }
 function ecomTranspDetect(txt,trk,jt,cor){
   var t=String(txt||'').toUpperCase();
-  if(trk) return 'TOTAL';                       // TXAQ...tx = Total Express
+  if(trk) return /^BR\d{12}[A-Z0-9]$/i.test(String(trk))?'SPX':'TOTAL';   // TXAQ...tx = Total Express · BR… = Shopee Xpress (v1.0.1134)
   if(jt)  return 'JT';                          // "Pedido: 9998..." = J&T
   if(cor) return 'CORREIOS';                    // AD/AP...BR = Correios (Shopee)
   // Mercado Envios: "Pack ID:" / "Venda: 2000..." / hubs XSP2 > SDF1
@@ -56385,7 +56415,9 @@ function ecomTranspKey(v){
   if(t.indexOf('J&T')>=0||t.indexOf('JT')===0) return 'JT';
   if(t.indexOf('CORREIO')>=0||t.indexOf('SEDEX')>=0||t.indexOf('PAC')===0) return 'CORREIOS';   // faltava: caía em '?'
   if(t.indexOf('MERCADO')>=0||t==='ML') return 'ML';
+  if(t.indexOf('SHOPEE')>=0||t==='SPX') return 'SPX';   // v1.0.1134
   if(ped && !t.trim()){
+    if(/^BR\d{12}[A-Z0-9]$/.test(String(ped.tracking||'').toUpperCase().replace(/\s+/g,''))) return 'SPX';
     var trk=String(ped.tracking||'').toUpperCase().replace(/\s+/g,'');
     if(/^[A-Z]{2}\d{9}BR$/.test(trk)) return 'CORREIOS';       // AP123456789BR
     if(/^JT/.test(trk)) return 'JT';
@@ -56759,7 +56791,8 @@ async function ecomEtiqImportFile(input){
       // TikTok: 585, 586... (18 digitos) — so como numero ISOLADO. Numa folha da
       // Shopee o "58" aparece colado na chave da NF (ou no horario ":58") e era
       // lido como pedido do TikTok.
-      var _ehShopee=/IDpedido/i.test(flat)||/shopee/i.test(txt);
+      // v1.0.1134: modelo novo da Shopee (out/2026) não traz "ID pedido" nem "Shopee" no texto: traz "Pedido:", "SOC" e o rastreio BR + 12 dígitos + letra
+      var _ehShopee=/IDpedido/i.test(flat)||/shopee/i.test(txt)||(/Pedido:/i.test(txt)&&/\bSOC\b/.test(txt))||/\bBR\d{12}[A-Z0-9]\b/.test(txt);
       var oid='';
       if(!_ehShopee){
         var _semLongas=flat.replace(/\d{19,}/g,'|');           // sequencias longas = chave/codigos
@@ -56791,6 +56824,11 @@ async function ecomEtiqImportFile(input){
           var m2=_esp.match(/(?:^|\D)(4\d{5}\s?\d{5})(?!\d)/); if(m2) mlTrk=m2[1].replace(/\s/g,'');
         }
       })();
+      // v1.0.1134: modelo novo da Shopee — o número do pedido vem num item de texto próprio (6 dígitos + 8 alfanuméricos)
+      if(!oid && _ehShopee){
+        var _itShp=_itensRg.map(function(it){return String(it.str||'').trim().toUpperCase();}).find(function(v){ return /^2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[A-Z0-9]{8}$/.test(v) && /[A-Z]/.test(v.slice(6)); });
+        if(_itShp) oid=_itShp;
+      }
       // Shopee: "ID pedido: 260906A5GWQFVU" — 6 dígitos + 8 alfanuméricos
       if(!oid){
         var shp=txt.replace(/\s+/g,' ').match(/ID\s*pedido:?\s*([A-Z0-9]{10,20})/i);
@@ -56822,6 +56860,8 @@ async function ecomEtiqImportFile(input){
         }
       }
       var trk=(flat.match(/TXAQ\w+?tx/i)||[])[0]||'';
+      // v1.0.1134: Shopee Xpress (modelo novo): código de barras principal "BR..." (15 caracteres)
+      if(!trk){ var _spx=txt.match(/\b(BR\d{12}[A-Z0-9])\b/); if(_spx) trk=_spx[1]; }   // BR + 12 dígitos + letra ou dígito (ex.: BR266228905374Y, BR2610810280811)
       // J&T: nao imprime Order ID; o codigo de barras da caixa e o "Pedido: 9998..."
       var jt=((flat.match(/Pedido:?(\d{12,})/i)||[])[1])||'';
       // Correios (Shopee): AD895838638BR / AP471549556BR
