@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1142 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1143 | Gerado: 2026-10-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1373,7 +1373,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1142';
+const APP_VERSION='v1.0.1143';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3801,6 +3801,8 @@ async function capaDigIniciar(id,modo){
     {k:'local_descarga',t:'Local de '+(exp?'carregamento':'descarga'),tipo:'txt'},   // v1.0.1068: local e operador primeiro
     {k:'operador_resp',t:'Operador responsável',tipo:'txt'},
     {k:'valor_nf',t:'Valor total da NF (R$)',tipo:'num',obrig:true},   // v1.0.1071: soma/subtrai no valor em estoque
+    {k:'tem_nf_pallet',t:'Existe nota de pallet?',tipo:'opc',opc:['Sim','Não'],obrig:true},   // v1.0.1143
+    {k:'valor_nf_pallet',t:'Valor da nota de pallet (R$)',tipo:'num',obrig:true,se:function(r){ return r.tem_nf_pallet==='Sim'; }},
     {k:'nf_numero',t:'NF de '+(exp?'saída':'entrada'),tipo:'txt'},   // v1.0.1130
     {k:'pallets_movimentados',t:'Pallets '+(exp?'separados':'descarregados'),tipo:'num',obrig:true},
     {k:'pallets_pbr',t:'Pallets '+(exp?'carregados':'armazenados'),tipo:'num',obrig:true},
@@ -3811,7 +3813,8 @@ async function capaDigIniciar(id,modo){
   ];
   servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
   perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
-  var resp={}; ['nf_numero','valor_nf','pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ if(c[k]!=null&&c[k]!=='') resp[k]=String(c[k]); });
+  var resp={}; if(c.tem_nf_pallet!=null) resp.tem_nf_pallet=c.tem_nf_pallet?'Sim':'Não';   // v1.0.1143
+  ['valor_nf_pallet','nf_numero','valor_nf','pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ if(c[k]!=null&&c[k]!=='') resp[k]=String(c[k]); });
   if(modo==='corrigir'||c.status!=='aberta') servs.forEach(function(s,ix){ if(s.quantidade!=null) resp['serv_'+ix]=String(s.quantidade); });
   capaDig={id:id,i:0,perg:perg,resp:resp,servs:servs,modo:modo||'digitar'};
   render();
@@ -3821,11 +3824,14 @@ function capaDigAvancar(){
   var d=capaDig; if(!d) return; var q=d.perg[d.i]; var el=ge('capa-q'); var v=el?el.value:'';
   var err=ge('capa-q-err'); var falha=function(m){ if(err){ err.textContent=m; } if(el) el.focus(); };
   if(q.tipo==='num'){ var n=capaNumBR(v); if(n==null) return falha(q.serv!=null?'Responda com um número. Se não houve esse serviço, digite 0.':'Responda com um número (0 se não houve).'); d.resp[q.k]=String(n); }
-  else if(q.tipo==='opc'){ var t=String(v).trim(), idx=parseInt(t,10); var op=(idx>=1&&idx<=q.opc.length)?q.opc[idx-1]:q.opc.find(function(o){return fcdNorm(o)===fcdNorm(t);}); if(!op) return falha('Digite 1, 2 ou 3.'); d.resp[q.k]=op; }
+  else if(q.tipo==='opc'){ var t=String(v).trim(), idx=parseInt(t,10); var op=(idx>=1&&idx<=q.opc.length)?q.opc[idx-1]:q.opc.find(function(o){return fcdNorm(o)===fcdNorm(t);}); if(!op) return falha('Digite '+q.opc.map(function(_o,ix){return ix+1;}).join(', ').replace(/, (\d+)$/,' ou $1')+'.'); d.resp[q.k]=op; }
   else d.resp[q.k]=String(v).trim();
-  d.i++; render();
+  d.i++;
+  // v1.0.1143: pula perguntas condicionais (ex.: valor da nota de pallet só se existir nota de pallet)
+  while(d.i<d.perg.length && d.perg[d.i].se && !d.perg[d.i].se(d.resp)){ delete d.resp[d.perg[d.i].k]; d.i++; }
+  render();
 }
-function capaDigVoltar(){ if(capaDig&&capaDig.i>0){ capaDig.i--; render(); } }
+function capaDigVoltar(){ if(capaDig&&capaDig.i>0){ capaDig.i--; while(capaDig.i>0 && capaDig.perg[capaDig.i].se && !capaDig.perg[capaDig.i].se(capaDig.resp)) capaDig.i--; render(); } }
 function capaDigTecla(ev){ if(ev.key==='Enter'){ ev.preventDefault(); capaDigAvancar(); } else if(ev.key==='ArrowUp'){ ev.preventDefault(); capaDigVoltar(); } }
 function capaCabecalhoHtml(c){   // v1.0.1068
   var respNome=c.responsavel_id?(((profiles||[]).find(function(p){return p.id===c.responsavel_id;})||{}).full_name||''):'';
@@ -3840,7 +3846,8 @@ function capaResumoHtml(c,resp,servs){
   var exp=c.tipo==='expedicao', h='';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px"><div><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">DADOS DA CARGA</div>';
   h+=linha('Local de '+(exp?'carregamento':'descarga'),resp.local_descarga)+linha('Operador responsável',resp.operador_resp)+linha('Valor total da NF',resp.valor_nf!=null&&resp.valor_nf!==''?'R$ '+Number(resp.valor_nf).toLocaleString('pt-BR',{minimumFractionDigits:2}):'');
-  h+=linha('NF de '+(exp?'saída':'entrada'),resp.nf_numero)+linha('Pallets '+(exp?'separados':'descarregados'),resp.pallets_movimentados)+linha('Pallets '+(exp?'carregados':'armazenados'),resp.pallets_pbr)
+  h+=linha('Nota de pallet',resp.tem_nf_pallet==='Sim'?('Sim · R$ '+Number(resp.valor_nf_pallet||0).toLocaleString('pt-BR',{minimumFractionDigits:2})):(resp.tem_nf_pallet||''))+   // v1.0.1143
+    linha('NF de '+(exp?'saída':'entrada'),resp.nf_numero)+linha('Pallets '+(exp?'separados':'descarregados'),resp.pallets_movimentados)+linha('Pallets '+(exp?'carregados':'armazenados'),resp.pallets_pbr)
     +linha('PBR · CHEP · Outros',[resp.qtd_pbr||0,resp.qtd_chep||0,resp.qtd_outros||0].join(' · '))+linha('Tipo de carga',resp.tipo_carga);
   h+='</div><div><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">SERVIÇOS</div>';
   (servs||[]).forEach(function(s,ix){ h+=linha(s.servico+(s.unidade_cobranca?' <small style="color:var(--text3)">('+ecomEsc(s.unidade_cobranca)+')</small>':''),resp['serv_'+ix]); });
@@ -3899,7 +3906,8 @@ async function capaDigFinalizar(acao){
   var r=d.resp, n=function(k){ var v=capaNumBR(r[k]); return v==null?0:v; };
   var tipos=[['PBR',n('qtd_pbr')],['CHEP',n('qtd_chep')],['Outros',n('qtd_outros')]].filter(function(x){return x[1]>0;}).map(function(x){return x[0];}).join(',');
   var agora=new Date().toISOString();
-  var dados={local_descarga:r.local_descarga||null,operador_resp:r.operador_resp||null,nf_numero:r.nf_numero||null,valor_nf:n('valor_nf'),pallets_movimentados:n('pallets_movimentados'),pallets_pbr:n('pallets_pbr'),
+  var dados={local_descarga:r.local_descarga||null,operador_resp:r.operador_resp||null,nf_numero:r.nf_numero||null,valor_nf:n('valor_nf'),
+    tem_nf_pallet:r.tem_nf_pallet==='Sim', valor_nf_pallet:r.tem_nf_pallet==='Sim'?n('valor_nf_pallet'):null,   // v1.0.1143pallets_movimentados:n('pallets_movimentados'),pallets_pbr:n('pallets_pbr'),
     qtd_pbr:n('qtd_pbr'),qtd_chep:n('qtd_chep'),qtd_outros:n('qtd_outros'),tipo_carga:r.tipo_carga||null,tipo_carga_pallet:tipos||null,observacoes:r.observacoes||null,
     digitada_em:agora,digitada_por:cu&&cu.id,consistencia:d.regras||null};
   if(forcarMot){ dados.forcada_em=agora; dados.forcada_por=cu&&cu.id; dados.forcada_motivo=forcarMot; dados.observacoes=capaRegObs(Object.assign({},c,{observacoes:dados.observacoes}),'Digitação forçada com inconsistências: '+forcarMot); }
