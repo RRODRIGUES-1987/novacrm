@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1148 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1149 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1148';
+const APP_VERSION='v1.0.1149';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53795,17 +53795,20 @@ async function odConsultar(){
     for(var i=0;i<nums.length;i+=150){
       var lote=nums.slice(i,i+150);
       ((await dbSelect('intg_pedidos','company_id=eq.'+cid+'&numero=in.('+q(lote)+')&select=numero,pedido_verus_id,status_importacao,situacao_tiny,nf_numero,nf_situacao,agrupamento_id,alerta,etiqueta_url,etiqueta_arquivo,tracking'))||[]).forEach(function(r){ intg[String(r.numero).toUpperCase()]=r; });
-      ((await dbSelect('ecom_pedidos','company_id=eq.'+cid+'&numero_pedido=in.('+q(lote)+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao'))||[]).forEach(function(r){ ecom[String(r.numero_pedido).toUpperCase()]=r; porId[r.id]=r; });
+      ((await dbSelect('ecom_pedidos','company_id=eq.'+cid+'&numero_pedido=in.('+q(lote)+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao,os_id'))||[]).forEach(function(r){ ecom[String(r.numero_pedido).toUpperCase()]=r; porId[r.id]=r; });
     }
     var faltam=Object.values(intg).map(function(r){return r.pedido_verus_id;}).filter(function(id){ return id&&!porId[id]; });
-    for(var j=0;j<faltam.length;j+=150){ ((await dbSelect('ecom_pedidos','id=in.('+faltam.slice(j,j+150).join(',')+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao'))||[]).forEach(function(r){ porId[r.id]=r; }); }
+    for(var j=0;j<faltam.length;j+=150){ ((await dbSelect('ecom_pedidos','id=in.('+faltam.slice(j,j+150).join(',')+')&select=id,numero_pedido,numero_interno,status,tracking,created_at,data_expedicao,os_id'))||[]).forEach(function(r){ porId[r.id]=r; }); }
     var ids=Object.keys(porId);
     for(var k=0;k<ids.length;k+=150){ ((await dbSelect('ecom_etiquetas','pedido_id=in.('+ids.slice(k,k+150).join(',')+')&select=pedido_id'))||[]).forEach(function(r){ etq[r.pedido_id]=1; }); }
+    // v1.0.1149: número da OS em que o pedido entrou (separação em diante)
+    var osIds=[...new Set(Object.values(porId).map(function(r){return r.os_id;}).filter(Boolean))], osNum={};
+    for(var o=0;o<osIds.length;o+=150){ ((await dbSelect('ecom_ordens_sep','id=in.('+osIds.slice(o,o+150).join(',')+')&select=id,numero').catch(function(){return [];}))||[]).forEach(function(r){ osNum[r.id]='OS-'+String(r.numero||0).padStart(4,'0'); }); }
     var linhas=nums.map(function(n){
       var p=intg[n]||null, e=(p&&p.pedido_verus_id&&porId[p.pedido_verus_id])||ecom[n]||null;
       var temEtq=!!(e&&(etq[e.id]))||!!(p&&(p.etiqueta_url||p.etiqueta_arquivo));
       var c=odClassificar(p,e,temEtq);
-      return {numero:n,p:p,e:e,k:c.k,mot:c.mot||'',desde:e?e.created_at:null};
+      return {numero:n,p:p,e:e,k:c.k,mot:c.mot||'',desde:e?e.created_at:null,os:(e&&e.os_id&&osNum[e.os_id])||''};
     });
     _od.res={linhas:linhas,em:new Date()};
   }catch(e){ _od.erro='Erro na consulta: '+(e.message||e); }
@@ -53844,9 +53847,10 @@ function ecomRelOndeView(){
       +'<td style="padding:9px 10px;text-align:right;font-weight:800">'+L.length.toLocaleString('pt-BR')+'</td><td style="padding:9px 10px;font-family:monospace;font-size:12px">'+(ant?odFmt(ant):'—')+'</td>'
       +'<td style="padding:9px 10px;text-align:right"><button class="btn btn-sm" onclick="_od.aberto=_od.aberto===\''+et.k+'\'?null:\''+et.k+'\';odRender()">'+(ab?'fechar':'ver')+'</button></td></tr>';
     if(ab){
-      h+='<tr><td colspan="5" style="padding:0 10px 10px;background:var(--bg2)"><div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3);font-size:10.5px;text-align:left"><th style="padding:6px">Pedido</th><th style="padding:6px">MKLOG</th><th style="padding:6px">Situação VERUS</th><th style="padding:6px">Olist</th><th style="padding:6px">Nota</th><th style="padding:6px">Rastreio</th><th style="padding:6px">Entrou</th><th style="padding:6px">Detalhe</th></tr></thead><tbody>'
+      h+='<tr><td colspan="5" style="padding:0 10px 10px;background:var(--bg2)"><div style="max-height:360px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3);font-size:10.5px;text-align:left"><th style="padding:6px">Pedido</th><th style="padding:6px">MKLOG</th><th style="padding:6px">OS</th><th style="padding:6px">Situação VERUS</th><th style="padding:6px">Olist</th><th style="padding:6px">Nota</th><th style="padding:6px">Rastreio</th><th style="padding:6px">Entrou</th><th style="padding:6px">Detalhe</th></tr></thead><tbody>'
         +L.slice().sort(function(a,b){return String(a.desde||'').localeCompare(String(b.desde||''));}).map(function(l){
           return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 6px;font-family:monospace"><a href="javascript:void(0)" onclick="tlAbrirPedido(\''+e(l.numero)+'\')" style="color:var(--blue-text)">'+e(l.numero)+'</a></td><td style="padding:5px 6px">'+(l.e?'E-'+String(l.e.numero_interno||0).padStart(6,'0'):'—')+'</td>'
+            +'<td style="padding:5px 6px;white-space:nowrap">'+(l.os?'<span style="font-family:monospace;font-weight:700;background:var(--amber-bg);color:var(--amber-text);padding:1px 7px;border-radius:99px">'+e(l.os)+'</span>':'—')+'</td>'
             +'<td style="padding:5px 6px">'+e(l.e?l.e.status:'—')+'</td><td style="padding:5px 6px">'+e(l.p?(l.p.situacao_tiny||'—'):'—')+'</td><td style="padding:5px 6px">'+e(l.p&&l.p.nf_numero||'—')+'</td>'
             +'<td style="padding:5px 6px;font-family:monospace">'+e((l.e&&l.e.tracking)||(l.p&&l.p.tracking)||'—')+'</td><td style="padding:5px 6px">'+odFmt(l.desde)+'</td><td style="padding:5px 6px;color:var(--text3)">'+e(l.mot||'')+'</td></tr>'; }).join('')
         +'</tbody></table></div></td></tr>';
@@ -53863,10 +53867,10 @@ async function odExportar(cliente){
     var ord=function(l){ return OD_ETAPAS.findIndex(function(x){return x.k===l.k;}); };
     var L=R.linhas.slice().sort(function(a,b){ return ord(a)-ord(b)||String(a.desde||'').localeCompare(String(b.desde||'')); });
     var rows=L.map(function(l){ var et=OD_ETAPAS.find(function(x){return x.k===l.k;})||{};
-      if(cliente) return {'Pedido':l.numero,'Situação':et.cli,'Nota fiscal':l.p&&l.p.nf_numero||'','Rastreio':(l.e&&l.e.tracking)||(l.p&&l.p.tracking)||''};
-      return {'Pedido':l.numero,'Pedido MKLOG':l.e?'E-'+String(l.e.numero_interno||0).padStart(6,'0'):'','Situação':et.t,'Quem age':(OD_QUEM[et.quem]||[''])[0],'Situação VERUS':l.e?l.e.status:'','Situação Olist':l.p?l.p.situacao_tiny||'':'',
+      if(cliente) return {'Pedido':l.numero,'Situação':et.cli,'OS':l.os||'','Nota fiscal':l.p&&l.p.nf_numero||'','Rastreio':(l.e&&l.e.tracking)||(l.p&&l.p.tracking)||''};
+      return {'Pedido':l.numero,'Pedido MKLOG':l.e?'E-'+String(l.e.numero_interno||0).padStart(6,'0'):'','OS':l.os||'','Situação':et.t,'Quem age':(OD_QUEM[et.quem]||[''])[0],'Situação VERUS':l.e?l.e.status:'','Situação Olist':l.p?l.p.situacao_tiny||'':'',
         'Nota fiscal':l.p&&l.p.nf_numero||'','Rastreio':(l.e&&l.e.tracking)||(l.p&&l.p.tracking)||'','Lote':l.p&&l.p.agrupamento_id||'','Entrou no VERUS':odFmt(l.desde),'Detalhe':l.mot||''}; });
-    var ws=XLSX.utils.json_to_sheet(rows); ws['!cols']=cliente?[{wch:22},{wch:48},{wch:12},{wch:20}]:[{wch:22},{wch:12},{wch:46},{wch:16},{wch:14},{wch:14},{wch:10},{wch:20},{wch:12},{wch:16},{wch:30}];
+    var ws=XLSX.utils.json_to_sheet(rows); ws['!cols']=cliente?[{wch:22},{wch:48},{wch:10},{wch:12},{wch:20}]:[{wch:22},{wch:12},{wch:10},{wch:46},{wch:16},{wch:14},{wch:14},{wch:10},{wch:20},{wch:12},{wch:16},{wch:30}];
     XLSX.utils.book_append_sheet(wb,ws,cliente?'Situação dos pedidos':'Pedido a pedido');
     if(!cliente){ var res=OD_ETAPAS.map(function(et){ var n=R.linhas.filter(function(l){return l.k===et.k;}).length; return n?{'Situação':et.t,'Quem age':OD_QUEM[et.quem][0],'Pedidos':n}:null; }).filter(Boolean);
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(res),'Resumo'); }
