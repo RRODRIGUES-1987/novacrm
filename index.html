@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1147 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1148 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1147';
+const APP_VERSION='v1.0.1148';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35421,8 +35421,9 @@ async function colRgCarregar(listaId){
 }
 async function coletorSepRgAbrir(listaId){
   if(_colRg.listaId!==listaId){ _colRg={listaId:listaId,pal:{},cont:{},passo:null,msg:null}; coletorShow('Separar','coletorSepListas()','<div style="padding:30px;text-align:center;color:var(--text3)">Carregando caixas…</div>'); await colRgCarregar(listaId); }
-  _colScanHandler=function(code){coletorSepRgBipe(listaId,code);};
-  coletorShow('Separar','coletorSepListas()',coletorScanBox()+'<div id="col-rg-area">'+colRgArea(listaId)+'</div>');
+  if(_sepDlg.listaId!==listaId) sepDlgReset(listaId);   // v1.0.1148: separação em diálogo
+  _colScanHandler=function(code){sepDlgBipe(listaId,code);};
+  coletorShow('Separar','coletorSepListas()',coletorScanBox()+'<div id="col-rg-area">'+sepDlgArea(listaId)+'</div>');
   setTimeout(function(){var i=ge('col-scan');if(i)i.focus();},80);
 }
 function colRgRefresh(listaId){ var a=ge('col-rg-area'); if(a) a.innerHTML=colRgArea(listaId); var i=ge('col-scan'); if(i){i.value='';i.focus();} }
@@ -35536,6 +35537,185 @@ async function coletorSepRgBipe(listaId,code){
     if(t.tipo_volume==='pallet'){ await colRgConcluir(listaId,t); colRgMsg('ok','✓ Caixa '+colRgNome(palId)+' · '+t.sku+' · '+(+t.quantidade).toLocaleString('pt-BR')+' pç'); colRgRefresh(listaId); return; }
     _colRg.passo={tarefaId:t.id}; if(!_colRg.msg||_colRg.msg.tipo!=='aviso') colRgMsg('ok','✓ Caixa '+colRgNome(palId)+' confirmada. Agora bipe o SACO.'); colRgRefresh(listaId);
   }catch(e){ colRgMsg('erro','Erro: '+(e.message||e)); colRgRefresh(listaId); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1148 · SEPARAÇÃO EM DIÁLOGO (motor + tela do coletor)
+//  O MOTOR não sabe nada de tela: diz qual é o próximo passo (endereço → caixa → saco),
+//  o texto da instrução (inclusive a frase falada, para voice picking no futuro) e valida
+//  cada leitura. A TELA do coletor é só um dos "apresentadores" do motor; voz, luz ou
+//  vestível podem usar o mesmo motor depois, sem mudar a regra.
+//  Regras: rota por endereço (rua → coluna → nível); endereço confirmado uma vez para
+//  todas as caixas dali; caixa inteira = 1 bipe; saco = caixa + saco (SEP_DLG_RECONFIRMA_CAIXA);
+//  outra caixa do mesmo produto troca o empenho; "não encontrei" registra falta (houve_falta)
+//  e segue — a tarefa fica pendente para o supervisor.
+// ═══════════════════════════════════════════════════════════════════
+var SEP_DLG_RECONFIRMA_CAIXA=true;   // true = cada saco pede a caixa de novo (regra atual da CASCO)
+var _sepDlg={listaId:null,endOk:null,tarefaId:null,cxOk:null,emMaos:null,msg:null,log:[],falta:false,visao:'dialogo'};
+function sepDlgKey(s){ return String(s==null?'':s).toUpperCase().replace(/[^0-9A-Z]/g,''); }
+function sepDlgEnd(t){ var p=_colRg.pal[t.pallet_id]||{}; return t.endereco_origem||p.endereco_codigo||'—'; }
+function sepDlgReset(listaId){ _sepDlg={listaId:listaId,endOk:null,tarefaId:null,cxOk:null,emMaos:null,msg:null,log:[],falta:false,visao:'dialogo'}; }
+// fila na ordem da rota: endereço (ordem natural), depois a caixa, depois a ordem da tarefa
+function sepDlgFila(listaId){
+  return colRgTarefas(listaId).filter(function(t){ return t.status!=='concluida' && t.pallet_id && !t.houve_falta; })
+    .sort(function(a,b){
+      var e=sepDlgEnd(a).localeCompare(sepDlgEnd(b),'pt-BR',{numeric:true}); if(e) return e;
+      var r=String(a.reserva_id||a.pallet_id).localeCompare(String(b.reserva_id||b.pallet_id)); if(r) return r;
+      return (a.ordem||0)-(b.ordem||0);
+    });
+}
+// MOTOR: próximo passo
+function sepDlgPasso(listaId){
+  var fila=sepDlgFila(listaId);
+  if(!fila.length) return {tipo:'fim'};
+  // caixa já aberta (algum saco tirado) ou na mão do separador vem antes de qualquer outra
+  var todas=colRgTarefas(listaId);
+  var comecada=fila.find(function(x){ return x.pallet_id===_sepDlg.emMaos || (x.reserva_id&&todas.some(function(y){return y.reserva_id===x.reserva_id&&y.status==='concluida';})); });
+  var t=(_sepDlg.tarefaId&&fila.find(function(x){return x.id===_sepDlg.tarefaId;}))||comecada||fila[0];
+  var end=sepDlgEnd(t);
+  if(_sepDlg.endOk!==sepDlgKey(end) && t.pallet_id!==_sepDlg.emMaos){
+    var aqui=fila.filter(function(x){return sepDlgKey(sepDlgEnd(x))===sepDlgKey(end);});
+    var caixas=[...new Set(aqui.map(function(x){return x.pallet_id;}))].length;
+    return {tipo:'endereco',t:t,end:end,caixas:caixas};
+  }
+  if(t.tipo_volume==='pallet') return {tipo:'caixa',t:t,end:end,inteira:true};
+  var irm=colRgTarefas(listaId).filter(function(x){return x.reserva_id&&x.reserva_id===t.reserva_id;});
+  var n=irm.filter(function(x){return x.status==='concluida';}).length+1;
+  var ok=SEP_DLG_RECONFIRMA_CAIXA?_sepDlg.cxOk===t.id:_sepDlg.cxOk===t.pallet_id;
+  return {tipo:ok?'saco':'caixa',t:t,end:end,inteira:false,n:n,de:irm.length};
+}
+// MOTOR: instrução (tela e fala usam o mesmo texto-base)
+function sepDlgInstrucao(p){
+  var t=p.t, nBR=function(v){return (+v||0).toLocaleString('pt-BR');};
+  if(p.tipo==='endereco') return {icone:'📍',titulo:'Vá para o endereço',destaque:p.end,
+    detalhe:p.caixas>1?p.caixas+' caixas para pegar aqui':'1 caixa para pegar aqui',acao:'Bipe a etiqueta do endereço',cor:'var(--blue-text)',
+    fala:'Endereço '+String(p.end).split(/[^0-9A-Za-z]+/).join(' ')};
+  var cx=colRgNome(t.pallet_id), cont=Object.values(_colRg.cont).find(function(c){return c.pallet_id===t.pallet_id&&c.sku===t.sku;});
+  if(p.tipo==='caixa') return {icone:'📦',titulo:p.inteira?'Pegue a caixa inteira':'Abra a caixa'+(p.de>1?' · saco '+p.n+' de '+p.de:''),destaque:cx,
+    detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+(p.inteira?' · '+nBR(t.quantidade)+' pç':(cont?' · caixa com '+nBR(cont.qtd_fiscal)+' pç':'')),
+    acao:'Bipe a etiqueta da caixa',cor:p.inteira?'#8b5cf6':'#f59e0b',
+    fala:(p.inteira?'Caixa inteira ':'Abra a caixa ')+cx+'. '+t.sku+(p.inteira?', '+nBR(t.quantidade)+' peças':'')};
+  return {icone:'🛍️',titulo:'Tire 1 saco · '+p.n+' de '+p.de,destaque:t.sku,
+    detalhe:String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç no saco',acao:'Bipe o saco',cor:'#f59e0b',
+    fala:'Um saco de '+t.sku+'. Saco '+p.n+' de '+p.de};
+}
+function sepDlgLog(txt,falta){ _sepDlg.log.push({txt:txt,falta:!!falta}); if(_sepDlg.log.length>60) _sepDlg.log.shift(); }
+function sepDlgAviso(tipo,txt){ _sepDlg.msg={tipo:tipo,txt:txt}; if(navigator.vibrate) navigator.vibrate(tipo==='erro'?[60,40,60]:40); if(typeof wmsBeep==='function') wmsBeep(tipo==='erro'); }
+// MOTOR: valida uma leitura (bipe, digitação ou, no futuro, fala)
+async function sepDlgLer(listaId,raw){
+  var p=sepDlgPasso(listaId); if(p.tipo==='fim') return;
+  var t=p.t, nBR=function(v){return (+v||0).toLocaleString('pt-BR');};
+  _sepDlg.msg=null;
+  if(p.tipo==='endereco'){
+    if(sepDlgKey(raw)===sepDlgKey(p.end)){ _sepDlg.endOk=sepDlgKey(p.end); sepDlgLog('Endereço '+p.end); return; }
+    if(colRgAcha(raw)) return sepDlgAviso('erro','Primeiro confirme o endereço: bipe a etiqueta de '+p.end+'.');
+    return sepDlgAviso('erro','Endereço errado: lido '+raw+'. Vá para '+p.end+'.');
+  }
+  if(p.tipo==='caixa'){
+    var palId=colRgAcha(raw);
+    if(palId&&palId!==t.pallet_id){
+      // outra caixa da lista no MESMO endereço: atende essa primeiro (o separador escolhe a ordem dentro do endereço)
+      var outra=sepDlgFila(listaId).find(function(x){return x.pallet_id===palId&&sepDlgKey(sepDlgEnd(x))===_sepDlg.endOk;});
+      if(!outra){
+        var ja=colRgTarefas(listaId).some(function(x){return x.pallet_id===palId&&x.status==='concluida';});
+        return sepDlgAviso(ja?'aviso':'erro',ja?'A caixa '+colRgNome(palId)+' já foi separada.':'Caixa errada: '+colRgNome(palId)+'. Pegue a caixa '+colRgNome(t.pallet_id)+' ('+t.sku+').');
+      }
+      _sepDlg.tarefaId=outra.id; return sepDlgLer(listaId,raw);
+    }
+    if(!palId){
+      var cod=wmsNorm(raw);
+      if(cod===wmsNorm(t.sku)) return sepDlgAviso('erro','Bipe primeiro a etiqueta da CAIXA '+colRgNome(t.pallet_id)+'.');
+      var tr=await colRgTrocar(listaId,raw);
+      if(tr.erro) return sepDlgAviso('erro',tr.erro);
+      palId=tr.pallet_id;
+      var nova=colRgTarefas(listaId).find(function(x){return x.status!=='concluida'&&x.pallet_id===palId;});
+      if(!nova) return sepDlgAviso('erro','Caixa trocada, mas a tarefa não foi encontrada — recarregue a lista.');
+      _sepDlg.tarefaId=nova.id; _sepDlg.emMaos=palId;   // a caixa está na mão: não pede endereço de novo
+      sepDlgLog('Troca: caixa '+colRgNome(palId)+' no lugar de '+tr.de);
+      var r=await sepDlgLer(listaId,raw);
+      if(!_sepDlg.msg||_sepDlg.msg.tipo!=='erro') sepDlgAviso('aviso','Caixa trocada: '+colRgNome(palId)+' no lugar de '+tr.de+' (empenho atualizado).');
+      return r;
+    }
+    if(p.inteira){
+      await colRgConcluir(listaId,t); _sepDlg.tarefaId=null; _sepDlg.emMaos=null;
+      sepDlgLog('Caixa '+colRgNome(palId)+' · '+t.sku+' · '+nBR(t.quantidade)+' pç'); return;
+    }
+    _sepDlg.tarefaId=t.id; _sepDlg.emMaos=t.pallet_id; _sepDlg.cxOk=SEP_DLG_RECONFIRMA_CAIXA?t.id:t.pallet_id;
+    sepDlgLog('Caixa '+colRgNome(palId)+' aberta'+(p.de>1?' (saco '+p.n+' de '+p.de+')':'')); return;
+  }
+  // saco
+  var codS=wmsNorm(raw), prod=wmsProdutos.find(function(pr){return pr.id===t.produto_id;})||{};
+  if(codS===wmsNorm(t.sku)||(prod.ean&&codS===wmsNorm(prod.ean))){
+    await colRgConcluir(listaId,t); if(SEP_DLG_RECONFIRMA_CAIXA) _sepDlg.cxOk=null; _sepDlg.tarefaId=null;
+    if(!colRgTarefas(listaId).some(function(x){return x.status!=='concluida'&&x.pallet_id===t.pallet_id;})) _sepDlg.emMaos=null;   // caixa terminada
+    sepDlgLog('Saco '+p.n+' de '+p.de+' · '+t.sku+' · '+nBR(t.quantidade)+' pç'); return;
+  }
+  if(colRgAcha(raw)===t.pallet_id) return sepDlgAviso('aviso','Caixa já confirmada. Agora bipe o SACO.');
+  return sepDlgAviso('erro','O saco não confere: esperado '+t.sku+', lido '+raw+'.');
+}
+// "não encontrei a caixa": marca falta nas tarefas desta caixa que ainda não começaram e segue
+async function sepDlgFalta(listaId){
+  var p=sepDlgPasso(listaId); if(p.tipo!=='caixa') return;
+  var t=p.t, alvo=colRgTarefas(listaId).filter(function(x){return x.status!=='concluida'&&(t.reserva_id?x.reserva_id===t.reserva_id:x.id===t.id);});
+  try{
+    for(var i=0;i<alvo.length;i++){ await dbUpdate('wms_tarefas_separacao',alvo[i].id,{houve_falta:true,separador_informado_nome:(_colOperador&&_colOperador.nome)||null}); alvo[i].houve_falta=true; }
+    sepDlgLog('Falta: caixa '+colRgNome(t.pallet_id)+' · '+t.sku,true);
+    _sepDlg.tarefaId=null; _sepDlg.cxOk=null; _sepDlg.emMaos=null; _sepDlg.falta=false;
+    sepDlgAviso('aviso','Falta registrada. A tarefa fica pendente para o supervisor.');
+  }catch(e){ sepDlgAviso('erro','Erro ao registrar a falta: '+(e.message||e)); }
+  sepDlgRender(listaId);
+}
+async function sepDlgRetomarFaltas(listaId){
+  var fs=colRgTarefas(listaId).filter(function(x){return x.status!=='concluida'&&x.houve_falta;});
+  try{ for(var i=0;i<fs.length;i++){ await dbUpdate('wms_tarefas_separacao',fs[i].id,{houve_falta:false}); fs[i].houve_falta=false; } }catch(e){ sepDlgAviso('erro','Erro: '+(e.message||e)); }
+  _sepDlg.endOk=null; _sepDlg.msg=null; sepDlgRender(listaId);
+}
+// TELA do coletor (um dos apresentadores do motor)
+function sepDlgArea(listaId){
+  var esc=ecomEsc, l=wmsListasSeparacao.find(function(x){return x.id===listaId;})||{}, cli=clientes.find(function(c){return c.id===l.cliente_id;})||{};
+  var ts=colRgTarefas(listaId), feitas=ts.filter(function(t){return t.status==='concluida';}).length, pct=ts.length?Math.round(100*feitas/ts.length):0;
+  var h='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><div style="font-size:13px;font-weight:700">Lista '+esc(l.numero_lista||'')+' · '+esc(cli.nome||'—')+'</div><div style="font-size:12px;color:var(--text3)">'+feitas+'/'+ts.length+'</div></div>'
+    +'<div style="height:6px;background:var(--bg2);border-radius:99px;overflow:hidden;margin-bottom:10px"><div style="height:100%;width:'+pct+'%;background:'+(pct===100?'var(--green-text)':'var(--blue-text)')+'"></div></div>';
+  if(_sepDlg.visao==='lista') return h+colRgArea(listaId)+'<div style="text-align:center;margin-top:10px"><span onclick="_sepDlg.visao=&apos;dialogo&apos;;sepDlgRender(&apos;'+listaId+'&apos;)" style="font-size:13px;color:var(--blue-text);text-decoration:underline;cursor:pointer">← voltar ao passo a passo</span></div>';
+  var lg=_sepDlg.log.slice(-5);
+  if(_sepDlg.log.length>5) h+='<div style="font-size:12px;color:var(--text3);padding:2px 0">… '+(_sepDlg.log.length-5)+' passo(s) antes</div>';
+  h+=lg.map(function(x){return '<div style="font-size:12.5px;color:var(--text3);padding:2px 0;display:flex;gap:6px"><span style="color:'+(x.falta?'var(--red-text)':'var(--green-text)')+';font-weight:800">'+(x.falta?'⛔':'✓')+'</span><span>'+esc(x.txt)+'</span></div>';}).join('');
+  if(_sepDlg.msg){ var m=_sepDlg.msg, cor=m.tipo==='ok'?['var(--green-bg)','var(--green-text)']:m.tipo==='erro'?['var(--red-bg)','var(--red-text)']:['var(--amber-bg)','var(--amber-text)'];
+    h+='<div style="padding:10px 12px;border-radius:10px;margin:8px 0;font-size:13.5px;font-weight:700;background:'+cor[0]+';color:'+cor[1]+'">'+esc(m.txt)+'</div>'; }
+  var semSaldo=ts.filter(function(t){return t.status!=='concluida'&&!t.pallet_id;});
+  var p=sepDlgPasso(listaId);
+  if(p.tipo==='fim'){
+    var faltas=ts.filter(function(t){return t.status!=='concluida'&&t.pallet_id&&t.houve_falta;});
+    if(!faltas.length&&!semSaldo.length) h+='<div style="margin-top:10px;padding:18px;border-radius:14px;background:var(--green-bg);color:var(--green-text);text-align:center"><div style="font-size:18px;font-weight:800">✓ Lista concluída</div><div style="font-size:13px;margin-top:4px">Leve as caixas e os sacos para a mesa de conferência.</div></div>';
+    else h+='<div style="margin-top:10px;padding:16px;border-radius:14px;background:var(--amber-bg);color:var(--amber-text);text-align:center"><div style="font-size:16px;font-weight:800">Lista terminada com pendência</div><div style="font-size:13px;margin-top:4px">'
+      +(faltas.length?faltas.length+' tarefa(s) com falta':'')+(faltas.length&&semSaldo.length?' · ':'')+(semSaldo.length?semSaldo.length+' item(ns) sem saldo':'')+'. Chame o supervisor.</div>'
+      +(faltas.length?'<button onclick="sepDlgRetomarFaltas(&apos;'+listaId+'&apos;)" style="margin-top:10px;padding:9px 16px;border-radius:10px;border:1px solid var(--amber-text);background:var(--bg);color:var(--amber-text);font-weight:700;cursor:pointer">Procurar de novo as faltas</button>':'')+'</div>';
+  } else if(_sepDlg.falta){
+    var tf=p.t;
+    h+='<div style="margin-top:10px;border:2px solid var(--red-text);border-radius:14px;padding:14px"><div style="font-size:15px;font-weight:800">Não encontrou a caixa '+esc(colRgNome(tf.pallet_id))+'?</div>'
+      +'<div style="font-size:13px;color:var(--text3);margin:6px 0 12px">Se houver outra caixa de <b>'+esc(tf.sku)+'</b> aqui, bipe-a: o VERUS troca o empenho. Se não houver nenhuma, registre a falta e siga.</div>'
+      +'<div style="display:flex;gap:8px"><button onclick="_sepDlg.falta=false;sepDlgRender(&apos;'+listaId+'&apos;)" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--border);background:var(--bg);font-weight:700;cursor:pointer">Voltar</button>'
+      +'<button onclick="sepDlgFalta(&apos;'+listaId+'&apos;)" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--red-text);background:var(--red-bg);color:var(--red-text);font-weight:800;cursor:pointer">Registrar falta</button></div></div>';
+  } else {
+    var ins=sepDlgInstrucao(p);
+    h+='<div style="margin-top:10px;border:2px solid '+ins.cor+';border-radius:14px;padding:14px;background:var(--bg)">'
+      +'<div style="font-size:13.5px;color:var(--text3);font-weight:700">'+ins.icone+' '+esc(ins.titulo)+'</div>'
+      +'<div style="font-family:monospace;font-size:32px;font-weight:900;margin:4px 0;color:var(--text);word-break:break-all">'+esc(ins.destaque)+'</div>'
+      +'<div style="font-size:13px;color:var(--text3)">'+esc(ins.detalhe)+'</div>'
+      +'<div style="margin-top:12px;padding:11px;border-radius:10px;text-align:center;font-size:15px;font-weight:800;background:var(--blue-bg);color:var(--blue-text)">'+esc(ins.acao)+'</div>'
+      +(p.tipo==='caixa'?'<div style="text-align:center;margin-top:8px"><span onclick="_sepDlg.falta=true;sepDlgRender(&apos;'+listaId+'&apos;)" style="font-size:12.5px;color:var(--text3);text-decoration:underline;cursor:pointer">não encontrei a caixa</span></div>':'')
+      +'</div>';
+  }
+  if(semSaldo.length&&p.tipo!=='fim') h+='<div style="padding:9px 12px;border-radius:10px;margin-top:10px;background:var(--red-bg);color:var(--red-text);font-size:12px"><b>'+semSaldo.length+' item(ns) SEM SALDO</b> no VERUS: '+semSaldo.map(function(t){return esc(t.sku);}).join(', ')+'</div>';
+  h+='<div style="text-align:center;margin-top:12px"><span onclick="_sepDlg.visao=&apos;lista&apos;;sepDlgRender(&apos;'+listaId+'&apos;)" style="font-size:12.5px;color:var(--text3);text-decoration:underline;cursor:pointer">ver a lista completa</span></div>';
+  return h;
+}
+function sepDlgRender(listaId){ var a=ge('col-rg-area'); if(a) a.innerHTML=sepDlgArea(listaId); var i=ge('col-scan'); if(i){i.value='';i.focus();} }
+async function sepDlgBipe(listaId,code){
+  var raw=wmsLeituraLimpa(code); if(!raw) return;
+  try{ await sepDlgLer(listaId,raw); }catch(e){ sepDlgAviso('erro','Erro: '+(e.message||e)); }
+  if(_sepDlg.falta) _sepDlg.falta=false;
+  sepDlgRender(listaId);
 }
 
 // ── CONFERIR (reusa o fluxo de conferência/unitização existente) ──
