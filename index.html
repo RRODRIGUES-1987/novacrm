@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1161 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1162 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1161';
+const APP_VERSION='v1.0.1162';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -56729,8 +56729,12 @@ async function ecomFullImprimirZpl(imgs,wmm,hmm){
       showToast('Enviando '+imgs.length+' etiqueta(s) para '+nome+' em '+modo.toUpperCase()+'…','blue');
       if(modo==='tspl'){
         var dpiT=(typeof ECOM_UNID_MM!=='undefined'&&ECOM_UNID_MM.dpi)||203, WT=Math.round(wmm/25.4*dpiT), HT=Math.round(hmm/25.4*dpiT);
-        for(var t=0;t<imgs.length;t++){ var u8=await ecomTsplDeImagem(imgs[t],WT,HT,wmm,hmm);
-          await qz.print(qz.configs.create(nome),[{ type:'raw', format:'command', flavor:'base64', data:ecomU8b64(u8) }]); }
+        // v1.0.1162: UM trabalho só — cabeçalho uma vez e as etiquetas em sequência. Antes ia um trabalho por etiqueta,
+        // cada um com SIZE/GAP, e a Xprinter recalibrava o rolo no meio da impressão.
+        var partesT=[ecomTsplCabecalho(wmm,hmm)], totT=partesT[0].length;
+        for(var t=0;t<imgs.length;t++){ var u8=await ecomTsplDeImagem(imgs[t],WT,HT,wmm,hmm); partesT.push(u8); totT+=u8.length; }
+        var lote=new Uint8Array(totT), posT=0; partesT.forEach(function(x){ lote.set(x,posT); posT+=x.length; });
+        await qz.print(qz.configs.create(nome),[{ type:'raw', format:'command', flavor:'base64', data:ecomU8b64(lote) }]);
       } else if(modoZpl){
         var dpi=(typeof ECOM_UNID_MM!=='undefined'&&ECOM_UNID_MM.dpi)||203, W=Math.round(wmm/25.4*dpi), H=Math.round(hmm/25.4*dpi);
         var partes=[]; for(var i=0;i<imgs.length;i++) partes.push(await ecomZplDeImagem(imgs[i],W,H));
@@ -56773,10 +56777,12 @@ async function ecomTsplDeImagem(dataUrl,wDots,hDots,wmm,hmm){
     for(var k=0;k<8;k++){ var x=b*8+k; if(x>=wDots) continue; var o=(y*wDots+x)*4; var lum=0.299*px[o]+0.587*px[o+1]+0.114*px[o+2];
       if(px[o+3]>127 && lum<150) v&=~(0x80>>k); }
     bits[y*rb+b]=v; }
-  var enc=new TextEncoder(), cab=enc.encode('SIZE '+wmm+' mm,'+hmm+' mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 1\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,'+rb+','+hDots+',0,'), fim=enc.encode('\r\nPRINT 1,1\r\n');
+  // v1.0.1162: só a etiqueta (CLS + BITMAP + PRINT); o cabeçalho (SIZE/GAP) vai UMA vez no início do lote
+  var enc=new TextEncoder(), cab=enc.encode('CLS\r\nBITMAP 0,0,'+rb+','+hDots+',0,'), fim=enc.encode('\r\nPRINT 1,1\r\n');
   var out=new Uint8Array(cab.length+bits.length+fim.length); out.set(cab,0); out.set(bits,cab.length); out.set(fim,cab.length+bits.length);
   return out;
 }
+function ecomTsplCabecalho(wmm,hmm){ return new TextEncoder().encode('SIZE '+wmm+' mm,'+hmm+' mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 1\r\nREFERENCE 0,0\r\n'); }
 function ecomU8b64(u8){ var s='', CH=0x8000; for(var i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(s); }
 // v1.0.1161: padrão AUTOMÁTICO pela marca da impressora — Xprinter/TSC/Elgin/Argox → TSPL; Zebra → ZPL; outras → imagem.
 // A escolha manual ("mudar") vale por computador (chave nova: escolhas de teste anteriores não contam).
