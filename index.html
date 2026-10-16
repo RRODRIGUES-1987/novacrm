@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1167 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1168 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1167';
+const APP_VERSION='v1.0.1168';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2948,6 +2948,14 @@ async function ecomMlLer(pdf){
 }
 async function ecomMlCelulas(pdf){ return (await ecomMlLer(pdf)).cel; }
 // borda da etiqueta em volta de um ponto (px), procurando linhas contínuas na imagem da página
+// v1.0.1168: retângulo do conteúdo impresso dentro da etiqueta (ignora a moldura: 1,5 mm para dentro da borda)
+function ecomMlConteudo(px,W,bx,dpmm){
+  var i=Math.round(1.5*dpmm), x0=bx.x+i, x1=bx.x+bx.w-i, y0=bx.y+i, y1=bx.y+bx.h-i, minX=1e9, maxX=-1, minY=1e9, maxY=-1;
+  for(var y=y0;y<y1;y+=1){ for(var x=x0;x<x1;x+=1){ var o=(y*W+x)*4; if(px[o]+px[o+1]+px[o+2]<450){ if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; } } }
+  if(maxX<0) return null;
+  var w=maxX-minX+1, h=maxY-minY+1; if(w<10*dpmm||h<5*dpmm) return null;
+  return {x:minX,y:minY,w:w,h:h};
+}
 function ecomMlCaixa(px,W,H,cx,cy,dpmm){
   var esc=function(x,y){ if(x<0||y<0||x>=W||y>=H) return false; var o=(y*W+x)*4; return (px[o]+px[o+1]+px[o+2])<540; };
   var vlin=function(x,yc,L){ var n=0,t=0; for(var y=yc-L;y<=yc+L;y++){ t++; if(esc(x,y)||esc(x-1,y)||esc(x+1,y)) n++; } return n>=t*0.92; };
@@ -3129,7 +3137,14 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
         var _sc=cvp.width/(await pdf.getPage(_cel.p)).getViewport({scale:1}).width, _dpmm=_sc*72/25.4;
         if(!_pxCache[_cel.p]){ _pxCache={}; _pxCache[_cel.p]=cvp.getContext('2d').getImageData(0,0,cvp.width,cvp.height).data; }
         var _bx=ecomMlCaixa(_pxCache[_cel.p],cvp.width,cvp.height,Math.round(_ps[0]*_sc),Math.round((_ps[1]-1.5)*_sc),_dpmm);
-        if(_bx){ var _mm=Math.round(0.8*_dpmm); sx=_bx.x-_mm; sy=_bx.y-_mm; sw=_bx.w+2*_mm; sh=_bx.h+2*_mm; }
+        if(_bx){
+          // v1.0.1168: recorta só o CONTEÚDO (código, número, descrição), sem a moldura e o branco interno da etiqueta
+          // do ML — assim ela ocupa a bobina 60×30 em vez de sobrar ~1 cm de cada lado.
+          var _in=ecomMlConteudo(_pxCache[_cel.p],cvp.width,_bx,_dpmm);
+          var _pd=Math.round(0.6*_dpmm);
+          if(_in){ sx=_in.x-_pd; sy=_in.y-_pd; sw=_in.w+2*_pd; sh=_in.h+2*_pd; }
+          else { var _mm=Math.round(0.8*_dpmm); sx=_bx.x-_mm; sy=_bx.y-_mm; sw=_bx.w+2*_mm; sh=_bx.h+2*_mm; }
+        }
       }
       var _U=ECOM_ML_UNID_MM, W3=Math.round(_U.w/25.4*300), H3=Math.round(_U.h/25.4*300), rc3=document.createElement('canvas'); rc3.width=W3; rc3.height=H3;   // v1.0.1153: 60×30
       var r3=rc3.getContext('2d'); r3.fillStyle='#fff'; r3.fillRect(0,0,W3,H3);
