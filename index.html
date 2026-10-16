@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1164 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1165 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1164';
+const APP_VERSION='v1.0.1165';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3142,6 +3142,10 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
     +'img{display:block;width:'+wmm+'mm;height:'+hmm+'mm;page-break-after:always;break-after:page}img:last-child{page-break-after:auto;break-after:auto}</style></head><body>'
     +imgs.map(function(s){return '<img src="'+s+'">';}).join('')+'</body></html>';
   if(_temCel){ try{ if(await ecomFullImprimirZpl(imgs,wmm,hmm)) return true; }catch(_z){} }   // v1.0.1157: direto em ZPL
+  if(_temCel && ecomQzUnidRot()){   // v1.0.1165: "girar" vale também na caixa de diálogo
+    for(var _gi=0;_gi<imgs.length;_gi++) imgs[_gi]=await ecomImgGirada(imgs[_gi]);
+    var _tw=wmm; wmm=hmm; hmm=_tw;
+  }
   if(_temCel){
     // v1.0.1155: etiqueta pequena (60×30). Com a imagem do MESMO tamanho da página, qualquer margem da impressora
     // fazia um pedaço transbordar para a página seguinte e as etiquetas iam escorregando (1ª certa, as outras
@@ -56722,6 +56726,7 @@ async function ecomImgGirada(dataUrl){
 }
 async function ecomFullImprimirZpl(imgs,wmm,hmm){
   if(!imgs||!imgs.length) return false;
+  if(ecomQzUnidModo()==='navegador') return false;   // v1.0.1165: vai pela caixa de diálogo
   try{ try{ await ecomQzConnect(true); }catch(_s){ await ecomQzConnect(false); } }
   catch(e){ showToast('QZ Tray não está aberto neste computador — usando a impressão do navegador.','amber'); return false; }
   var modo='imagem', modoZpl=false;   // v1.0.1161: definido pela impressora escolhida (ver enviar)
@@ -56789,12 +56794,15 @@ function ecomTsplCabecalho(wmm,hmm){ return new TextEncoder().encode('SIZE '+wmm
 function ecomU8b64(u8){ var s='', CH=0x8000; for(var i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(s); }
 // v1.0.1161: padrão AUTOMÁTICO pela marca da impressora — Xprinter/TSC/Elgin/Argox → TSPL; Zebra → ZPL; outras → imagem.
 // A escolha manual ("mudar") vale por computador (chave nova: escolhas de teste anteriores não contam).
-function ecomQzUnidModoSalvo(){ try{ var m=localStorage.getItem('verus_qz_unid_modo2'); return (m==='zpl'||m==='tspl'||m==='imagem')?m:''; }catch(e){ return ''; } }
+function ecomQzUnidModoSalvo(){ try{ var m=localStorage.getItem('verus_qz_unid_modo2'); return (m==='zpl'||m==='tspl'||m==='imagem'||m==='navegador')?m:''; }catch(e){ return ''; } }
 // v1.0.1164: padrão volta a ser IMAGEM para todas — o TSPL direto não foi interpretado pela Xprinter do teste (saiu
 // em hexadecimal). TSPL e ZPL ficam como opção manual ("mudar") para impressora que comprovadamente aceite.
-function ecomQzUnidModo(nome){ var m=ecomQzUnidModoSalvo(); return m||'imagem'; }
-function ecomQzUnidModoTrocar(){ var ord=['imagem','tspl','zpl'], m=ord[(ord.indexOf(ecomQzUnidModo())+1)%ord.length]; try{ localStorage.setItem('verus_qz_unid_modo2',m); }catch(e){}
-  showToast('Envio da etiqueta de unidade neste computador: '+({imagem:'imagem (pelo driver)',tspl:'TSPL direto (Xprinter)',zpl:'ZPL direto (Zebra)'})[m],'green');
+// v1.0.1165: padrão NAVEGADOR (caixa de diálogo) só para a etiqueta de unidade — o driver da Xprinter ignora o tamanho
+// pedido pelo QZ; na caixa de diálogo o papel "Unidade 60x30" é escolhido no próprio driver e ele respeita.
+// O checkout (100×150) continua direto pelo QZ. IMAGEM/TSPL/ZPL seguem como opção manual por computador.
+function ecomQzUnidModo(nome){ var m=ecomQzUnidModoSalvo(); return m||'navegador'; }
+function ecomQzUnidModoTrocar(){ var ord=['navegador','imagem','tspl','zpl'], m=ord[(ord.indexOf(ecomQzUnidModo())+1)%ord.length]; try{ localStorage.setItem('verus_qz_unid_modo2',m); }catch(e){}
+  showToast('Envio da etiqueta de unidade neste computador: '+({navegador:'caixa de diálogo do navegador',imagem:'imagem direto pelo QZ',tspl:'TSPL direto',zpl:'ZPL direto (Zebra)'})[m],'green');
   document.querySelectorAll('.qz-unid-modo').forEach(function(x){ x.textContent=m.toUpperCase(); }); }
 async function ecomQzPrintZpl(printer, zpl){
   var cfg=qz.configs.create(printer);
