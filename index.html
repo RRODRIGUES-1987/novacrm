@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1149 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1150 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1149';
+const APP_VERSION='v1.0.1150';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4828,7 +4828,46 @@ function pg(p){
   render();
 }
 
-function render(){
+// ═══════════════════════════════════════════════════════════════════
+//  v1.0.1150 · ÍNDICES DE RENDERIZAÇÃO DO WMS
+//  As telas da Saída (Pedidos, Separação, Conferência, Romaneios) cruzavam listas inteiras para CADA linha
+//  (ex.: para cada pedido, varrer todas as tarefas de separação). Com o volume da CASCO isso virou milhões de
+//  comparações a cada troca de guia — lentidão no navegador, com o banco tranquilo.
+//  Agora, durante uma renderização, cada cruzamento vira um mapa montado UMA vez (sob demanda) e descartado no
+//  fim. Fora da renderização as funções seguem o caminho de sempre (dados sempre frescos).
+// ═══════════════════════════════════════════════════════════════════
+var _wmsIdx=null;
+function wmsIdxGet(nome,build){ if(!_wmsIdx) return null; if(!_wmsIdx[nome]) _wmsIdx[nome]=build(); return _wmsIdx[nome]; }
+function wmsIdxEscopo(fn){ var dono=!_wmsIdx; if(dono) _wmsIdx={}; try{ return fn(); } finally { if(dono) _wmsIdx=null; } }
+function wmsIdxGrupo(arr,campo){ var m=new Map(); (arr||[]).forEach(function(x){ var k=x&&x[campo]; if(k==null) return; var a=m.get(k); if(a) a.push(x); else m.set(k,[x]); }); return m; }
+function wmsIdxPorId(arr){ var m=new Map(); (arr||[]).forEach(function(x){ if(x&&x.id!=null) m.set(x.id,x); }); return m; }
+function wmsIxTarPedido(){ return wmsIdxGet('tarPed',function(){ return wmsIdxGrupo(wmsTarefasSeparacao,'pedido_id'); }); }
+function wmsIxTarLista(){ return wmsIdxGet('tarLista',function(){ var m=new Map(); (wmsTarefasSeparacao||[]).forEach(function(t){ var k=t.lista_id; if(k==null) return; var o=m.get(k); if(!o){ o={tot:0,feitas:0}; m.set(k,o); } o.tot++; if(t.status==='concluida') o.feitas++; }); return m; }); }
+function wmsIxLpPedido(){ return wmsIdxGet('lpPed',function(){ return wmsIdxGrupo(wmsListaPedidos,'pedido_id'); }); }
+function wmsIxLpLista(){ return wmsIdxGet('lpLista',function(){ return wmsIdxGrupo(wmsListaPedidos,'lista_id'); }); }
+function wmsIxLista(){ return wmsIdxGet('lista',function(){ return wmsIdxPorId(wmsListasSeparacao); }); }
+function wmsIxPedido(){ return wmsIdxGet('ped',function(){ return wmsIdxPorId(wmsPedidos); }); }
+function wmsIxPedRom(){ return wmsIdxGet('pedRom',function(){ return wmsIdxGrupo(wmsPedidos,'romaneio_id'); }); }
+function wmsIxCliente(){ return wmsIdxGet('cli',function(){ return wmsIdxPorId(clientes); }); }
+function wmsIxConfPedido(){ return wmsIdxGet('confPed',function(){ return wmsIdxGrupo(wmsConferencias,'pedido_id'); }); }
+function wmsIxItensPedido(){ return wmsIdxGet('itPed',function(){ var m=new Map(); (wmsPedidoItens||[]).forEach(function(it){ var k=it.pedido_id; if(k==null) return; var o=m.get(k); if(!o){ o={n:0,qtd:0,semProd:0}; m.set(k,o); } o.n++; o.qtd+=(+it.quantidade||0); if(it.status==='produto_nao_encontrado') o.semProd++; }); return m; }); }
+function wmsIxPalEmbPedido(){ return wmsIdxGet('palEmb',function(){ var m=new Map(); (typeof wmsPalletsEmbarque!=='undefined'&&wmsPalletsEmbarque||[]).forEach(function(pl){ if(pl.pedido_id!=null) m.set(pl.pedido_id,(m.get(pl.pedido_id)||0)+1); }); return m; }); }
+// pallets de embarque dos pedidos de um romaneio (usado nos cards, nas linhas e na seleção)
+function wmsRomNPallets(romId){
+  var ixR=wmsIxPedRom(), ixE=wmsIxPalEmbPedido();
+  if(ixR&&ixE) return (ixR.get(romId)||[]).reduce(function(a,p){ return a+(ixE.get(p.id)||0); },0);
+  var peds=wmsPedidos.filter(function(p){return p.romaneio_id===romId;});
+  return wmsPalletsEmbarque.filter(function(pl){ return peds.some(function(p){return p.id===pl.pedido_id;}); }).length;
+}
+function wmsRomPedidos(romId){ var ix=wmsIxPedRom(); return ix?(ix.get(romId)||[]):wmsPedidos.filter(function(p){return p.romaneio_id===romId;}); }
+function wmsListaProg(listaId){
+  var ix=wmsIxTarLista();
+  if(ix){ var o=ix.get(listaId)||{tot:0,feitas:0}; return {feitas:o.feitas,tot:o.tot,pct:o.tot?Math.round(o.feitas/o.tot*100):0}; }
+  var tar=wmsTarefasSeparacao.filter(function(t){return t.lista_id===listaId;}), f=tar.filter(function(t){return t.status==='concluida';}).length;
+  return {feitas:f,tot:tar.length,pct:tar.length?Math.round(f/tar.length*100):0};
+}
+function render(){ return wmsIdxEscopo(render_i); }
+function render_i(){
   const c=ge('content');if(!c)return;
   if(typeof helpdeskFabSync==='function')helpdeskFabSync();
   // Guard: bloqueia render de telas sem permissão
@@ -4839,7 +4878,7 @@ function render(){
       c.innerHTML='<div class="empty"><p>Acesso não permitido.</p></div>';return;
     }
   } else if(_rRole!=='admin'){
-    if(curPage!=='dashboard'&&!canDo(curPage,'pode_ver')){
+    if(curPage!=='dashboard'&&curPage!=='cp-medicoes'&&!canDo(curPage,'pode_ver')){   // v1.0.1150: medição indicada para o usuário abre sem acesso ao financeiro (igual ao pg)
       c.innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><p>Você não tem permissão para acessar esta página.<br><small style="color:var(--text3)">Solicite acesso ao administrador.</small></p></div>';return;
     }
   }
@@ -33358,9 +33397,8 @@ async function wmsRecalcRomaneio(romId){
 // Formata o resumo de totais do romaneio
 function wmsRomResumo(r){
   const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
-  const n=r.tot_pedidos!=null?r.tot_pedidos:wmsPedidos.filter(p=>p.romaneio_id===r.id).length;
-  const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
-  const nPallets=wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;
+  const n=r.tot_pedidos!=null?r.tot_pedidos:wmsRomPedidos(r.id).length;   // v1.0.1150
+  const nPallets=wmsRomNPallets(r.id);
   const palTxt=nPallets>0?' · '+nPallets+' pallet(s)':'';
   return n+' pedido(s)'+palTxt+' · '+fmt(r.tot_litragem)+' L · '+fmt(r.tot_peso)+' kg';
 }
@@ -33454,7 +33492,7 @@ function rWmsRomaneios_i(){
   // cards: status + totalizadores por romaneio (sem entrar nos pedidos, usa os totais do próprio romaneio)
   const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
   const cont={}; _srcR.forEach(r=>{cont[r.status]=(cont[r.status]||0)+1;});
-  const totVol=_srcR.reduce((s,r)=>{const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);return s+wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;},0);
+  const totVol=_srcR.reduce((s,r)=>s+wmsRomNPallets(r.id),0);   // v1.0.1150
   const totL=_srcR.reduce((s,r)=>s+(+r.tot_litragem||0),0);
   const totKg=_srcR.reduce((s,r)=>s+(+r.tot_peso||0),0);
   const card=(valor,label,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px">
@@ -33474,9 +33512,8 @@ function rWmsRomaneios_i(){
       <div style="font-size:12px;color:var(--text3)">Nenhum romaneio no período. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
   }
   const rows=_romsView.map(r=>{
-    const cli=clientes.find(c=>c.id===r.cliente_id);
+    const cli=(wmsIxCliente()||new Map()).get(r.cliente_id)||clientes.find(c=>c.id===r.cliente_id);
     const st=WMS_ROM_STATUS[r.status]||{l:r.status,c:'#888',bg:'rgba(136,136,136,.12)'};
-    const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);
     const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
     return `<div class="li" data-busca="${((r.numero||'')+' '+(cli?.nome||'')).toLowerCase().replace(/"/g,'')}" style="cursor:pointer" onclick="wmsRomaneioDetalhe('${r.id}')">
       <div style="display:flex;align-items:center" onclick="event.stopPropagation()">${wmsSelChk('rom',r.id)}</div>
@@ -33714,13 +33751,14 @@ async function wmsRomAddPedido(romId,pedId){
 
 // Referência do(s) pedido(s) de uma lista para exibição
 function wmsRefPedidoLista(l){
+  const _ixLL=wmsIxLpLista(), _ixP=wmsIxPedido();   // v1.0.1150
   if(l.tipo==='consolidada'){
-    const n=l.qtd_pedidos||wmsListaPedidos.filter(lp=>lp.lista_id===l.id).length||0;
+    const n=l.qtd_pedidos||(_ixLL?(_ixLL.get(l.id)||[]):wmsListaPedidos.filter(lp=>lp.lista_id===l.id)).length||0;
     return 'Consolidada ('+n+' pedido'+(n!==1?'s':'')+')';
   }
   // pedido-a-pedido: pega o pedido vinculado
-  const lp=wmsListaPedidos.find(x=>x.lista_id===l.id);
-  const ped=lp?wmsPedidos.find(p=>p.id===lp.pedido_id):null;
+  const lp=_ixLL?((_ixLL.get(l.id)||[])[0]):wmsListaPedidos.find(x=>x.lista_id===l.id);
+  const ped=lp?(_ixP?_ixP.get(lp.pedido_id):wmsPedidos.find(p=>p.id===lp.pedido_id)):null;
   if(ped)return 'Pedido '+(ped.numero_curto||ped.numero_pedido);
   return 'Lista '+(l.numero_lista||'');
 }
@@ -33729,7 +33767,7 @@ function wmsRefPedidoLista(l){
 let _wmsTelaFiltro={sep:{dep:'',de:'',ate:'',st:'',q:''},conf:{dep:'',de:'',ate:'',st:'',q:''},rom:{dep:'',de:'',ate:'',st:'',q:'',mov:''},exp:{dep:'',de:'',ate:'',st:'',q:''}};
 function wmsTFSet(sc,k,v){_wmsTelaFiltro[sc][k]=v;render();}
 function wmsTFLimparPeriodo(sc){_wmsTelaFiltro[sc].de='';_wmsTelaFiltro[sc].ate='';render();}
-function wmsTFBusca(sc,q){
+function wmsTFBusca(sc,q){ /* só DOM: não usa índices */
   const list=ge('wms-'+sc+'-list');if(!list)return;
   const ql=(q||'').toLowerCase();let vis=0;
   list.querySelectorAll('[data-busca]').forEach(function(el){
@@ -33864,7 +33902,7 @@ function wmsSelBarHtml(sc){
 function wmsSelTotais(sc,ids){
   const fmt=n=>(+n||0).toLocaleString('pt-BR',{maximumFractionDigits:1});
   if(sc==='conf'){
-    const peds=ids.map(id=>wmsPedidos.find(p=>p.id===id)).filter(Boolean);
+    const _ixP=wmsIxPedido(); const peds=ids.map(id=>_ixP?_ixP.get(id):wmsPedidos.find(p=>p.id===id)).filter(Boolean);
     const vol=peds.reduce((s,p)=>s+(+p.tot_pallets||0)+(+p.tot_un_fracao||0),0);
     const L=peds.reduce((s,p)=>s+(+p.tot_litragem||0),0);
     const kg=peds.reduce((s,p)=>s+(+p.tot_peso||0),0);
@@ -33873,16 +33911,17 @@ function wmsSelTotais(sc,ids){
   if(sc==='sep'){
     const ls=ids.map(id=>wmsListasSeparacao.find(l=>l.id===id)).filter(Boolean);
     let tar=0,feitas=0;
-    ls.forEach(l=>{const t=wmsTarefasSeparacao.filter(x=>x.lista_id===l.id);tar+=t.length;feitas+=t.filter(x=>x.status==='concluida').length;});
+    ls.forEach(l=>{const pg_=wmsListaProg(l.id);tar+=pg_.tot;feitas+=pg_.feitas;});   // v1.0.1150
     return '<b>'+ls.length+'</b> lista(s) · '+tar+' tarefa(s) · '+feitas+' concluída(s)';
   }
   const rs=ids.map(id=>wmsRomaneios.find(r=>r.id===id)).filter(Boolean);
-  const pal=rs.reduce((s,r)=>{const peds=wmsPedidos.filter(p=>p.romaneio_id===r.id);return s+wmsPalletsEmbarque.filter(pl=>peds.some(p=>p.id===pl.pedido_id)).length;},0);
+  const pal=rs.reduce((s,r)=>s+wmsRomNPallets(r.id),0);   // v1.0.1150
   const L=rs.reduce((s,r)=>s+(+r.tot_litragem||0),0);
   const kg=rs.reduce((s,r)=>s+(+r.tot_peso||0),0);
   return '<b>'+rs.length+'</b> romaneio(s) · '+pal+' pallet(s) · '+fmt(L)+' L · '+fmt(kg)+' kg';
 }
-function wmsSelBarUpd(sc){
+function wmsSelBarUpd(sc){ return wmsIdxEscopo(function(){ return wmsSelBarUpd_i(sc); }); }
+function wmsSelBarUpd_i(sc){
   const bar=ge('wms-'+sc+'-selbar');if(!bar)return;
   const ids=[..._wmsSel[sc]];
   if(!ids.length){bar.style.display='none';return;}
@@ -33904,12 +33943,7 @@ function rWmsSeparacao_i(){
     return rWmsEmConstrucao('Separação','Nenhuma lista de separação gerada ainda. Vá em Pedidos, selecione os pedidos e clique em "Gerar listas de separação".');
   }
   // progresso por lista (tarefas concluídas / total)
-  const prog=l=>{
-    const tar=wmsTarefasSeparacao.filter(t=>t.lista_id===l.id);
-    const feitas=tar.filter(t=>t.status==='concluida').length;
-    const tot=tar.length;
-    return {feitas,tot,pct:tot?Math.round(feitas/tot*100):0};
-  };
+  const prog=l=>wmsListaProg(l.id);   // v1.0.1150: índice por lista
   // macro: totais
   const _srcSep=_wmsSel.sep.size?wmsListasSeparacao.filter(l=>l.company_id===cid&&_wmsSel.sep.has(l.id)):_listasView;
   const totListas=_srcSep.length;
@@ -33939,19 +33973,20 @@ function rWmsSeparacao_i(){
     </div>`;
 
   const rows=_listasView.map(l=>{
-    const cli=clientes.find(c=>c.id===l.cliente_id);
+    const cli=(wmsIxCliente()||new Map()).get(l.cliente_id)||clientes.find(c=>c.id===l.cliente_id);
+    const _ref=wmsRefPedidoLista(l);   // v1.0.1150: uma vez por linha
     const st=WMS_LISTA_STATUS[l.status]||{l:l.status,c:'#888',bg:'rgba(136,136,136,.12)'};
     const p=prog(l);
     const data=l.created_at?new Date(l.created_at).toLocaleDateString('pt-BR'):'';
     const corBar=p.pct===100?'var(--green-text)':'var(--blue-text)';
-    return `<div class="li" data-lista-id="${l.id}" data-busca="${((l.numero_lista||'')+' '+(cli?.nome||'')+' '+wmsRefPedidoLista(l)).toLowerCase().replace(/"/g,'')}" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
+    return `<div class="li" data-lista-id="${l.id}" data-busca="${((l.numero_lista||'')+' '+(cli?.nome||'')+' '+_ref).toLowerCase().replace(/"/g,'')}" style="cursor:pointer;align-items:stretch" onclick="wmsListaDetalhe('${l.id}')">
       <div style="display:flex;align-items:center" onclick="event.stopPropagation()">${wmsSelChk('sep',l.id)}</div>
       <div style="display:flex;flex-direction:column;justify-content:center;min-width:auto;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
         <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Lista</div>
         <div style="font-size:14px;font-weight:800;color:var(--text);line-height:1.1">${l.numero_lista||'—'}</div>
       </div>
       <div class="linfo" style="justify-content:center">
-        <div class="lname">${wmsRefPedidoLista(l)}</div>
+        <div class="lname">${_ref}</div>
         <div class="lsub">${WMS_LISTA_TIPO[l.tipo]||l.tipo} · ${cli?.nome||'—'} · ${data}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:5px;max-width:280px">
           <div style="flex:1;height:6px;background:var(--bg2);border-radius:99px;overflow:hidden">
@@ -40685,10 +40720,11 @@ function wmsResumoTotaisLinha(p){
 }
 
 function wmsPedLinha(p){
-  const cli=clientes.find(c=>c.id===p.cliente_id);
-  const itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
-  const totQtd=itens.reduce((s,it)=>s+(+it.quantidade||0),0);
-  const semProd=itens.filter(it=>it.status==='produto_nao_encontrado').length;
+  const _ixC=wmsIxCliente(), _ixI=wmsIxItensPedido();   // v1.0.1150
+  const cli=_ixC?_ixC.get(p.cliente_id):clientes.find(c=>c.id===p.cliente_id);
+  let itens, totQtd, semProd;
+  if(_ixI){ const o=_ixI.get(p.id)||{n:0,qtd:0,semProd:0}; itens={length:o.n}; totQtd=o.qtd; semProd=o.semProd; }
+  else { itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id); totQtd=itens.reduce((s,it)=>s+(+it.quantidade||0),0); semProd=itens.filter(it=>it.status==='produto_nao_encontrado').length; }
   const data=p.created_at?new Date(p.created_at).toLocaleDateString('pt-BR'):'';
   // Checkbox sempre visível; cada ação valida seu pré-requisito ao clicar
   const chk=`<input type="checkbox" data-wms-ped-chk="${p.id}" ${wmsPedSelecionados.has(p.id)?'checked':''} onclick="wmsPedToggleSel('${p.id}',event)" style="width:17px;height:17px;cursor:pointer;margin-right:12px;flex-shrink:0">`;
@@ -40736,7 +40772,8 @@ function wmsPedMarcarTodos(){
   wmsSelRerender();
   if(!todosMarcados)showToast(cand.length+' pedido(s) marcado(s)'+(wmsPedFiltroStatus?'':' (pendentes)'),'green');
 }
-function filterWmsPedidos(q){
+function filterWmsPedidos(q){ return wmsIdxEscopo(function(){ return filterWmsPedidos_i(q); }); }
+function filterWmsPedidos_i(q){
   const lista=wmsPedVisiveis(q);
   const el=ge('wms-ped-list');if(!el)return;
   if(!lista.length){el.innerHTML='<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11H3v10h6zM21 3h-6v18h6zM15 7H9v14h6z"/></svg><p>Nenhum pedido — importe em WMS → Importar Pedidos</p></div>';return;}
@@ -43504,7 +43541,7 @@ const WMS_CONF_LABELS={1:'1ª Conferência',2:'2ª Conferência',3:'3ª Conferê
 
 // Conferências que um cliente exige (na ordem)
 function wmsConfsDoCliente(clienteId){
-  const c=clientes.find(x=>x.id===clienteId);if(!c)return [];
+  const _ix=wmsIxCliente(); const c=_ix?_ix.get(clienteId):clientes.find(x=>x.id===clienteId);if(!c)return [];   // v1.0.1150
   const arr=[];
   if(c.wms_conf_1)arr.push(1);
   if(c.wms_conf_2)arr.push(2);
@@ -43514,6 +43551,7 @@ function wmsConfsDoCliente(clienteId){
 }
 // Conferências já feitas para um pedido, por tipo
 function wmsConfsFeitas(pedidoId,tipo){
+  const _ix=wmsIxConfPedido(); if(_ix) return (_ix.get(pedidoId)||[]).filter(cf=>cf.tipo===tipo);   // v1.0.1150
   return wmsConferencias.filter(cf=>cf.pedido_id===pedidoId && cf.tipo===tipo);
 }
 // Reagrupa as tarefas/itens de um pedido por SKU (esperado da conferência)
@@ -43531,15 +43569,16 @@ function wmsItensEsperadosPedido(pedidoId){
 // Verifica se a separação de um pedido foi concluída (todas as tarefas concluídas)
 function wmsSeparacaoConcluidaPedido(pedidoId){
   // tarefas diretamente ligadas ao pedido
-  const tDir=wmsTarefasSeparacao.filter(t=>t.pedido_id===pedidoId);
+  const _ixT=wmsIxTarPedido(), _ixLP=wmsIxLpPedido(), _ixL=wmsIxLista();   // v1.0.1150
+  const tDir=_ixT?(_ixT.get(pedidoId)||[]):wmsTarefasSeparacao.filter(t=>t.pedido_id===pedidoId);
   if(tDir.length){
     return tDir.every(t=>t.status==='concluida');
   }
   // caso consolidado (tarefas sem pedido_id): verifica a(s) lista(s) do pedido
-  const listas=wmsListaPedidos.filter(lp=>lp.pedido_id===pedidoId).map(lp=>lp.lista_id);
+  const listas=(_ixLP?(_ixLP.get(pedidoId)||[]):wmsListaPedidos.filter(lp=>lp.pedido_id===pedidoId)).map(lp=>lp.lista_id);
   if(listas.length){
     return listas.every(lid=>{
-      const l=wmsListasSeparacao.find(x=>x.id===lid);
+      const l=_ixL?_ixL.get(lid):wmsListasSeparacao.find(x=>x.id===lid);
       return l && l.status==='concluida';
     });
   }
@@ -43646,7 +43685,7 @@ function wmsConfSaidaBody(){
   if(_fc.de)base=base.filter(p=>_dataP(p)>=_fc.de);
   if(_fc.ate)base=base.filter(p=>_dataP(p)<=_fc.ate);
   const _proxOf=p=>{const passos=wmsConfsDoCliente(p.cliente_id).filter(t=>t<=3);return passos.find(t=>wmsConfsFeitas(p.id,t).length===0)||null;};
-  const _temDiv=p=>wmsConferencias.some(cf=>cf.pedido_id===p.id&&cf.auditoria_status==='pendente');
+  const _temDiv=p=>{ const _ix=wmsIxConfPedido(); return (_ix?(_ix.get(p.id)||[]):wmsConferencias).some(cf=>cf.pedido_id===p.id&&cf.auditoria_status==='pendente'); };   // v1.0.1150
   const _stOf=p=>{if(_temDiv(p))return 'div';const px=_proxOf(p);return px?String(px):'ok';};
   const view=_fc.st?base.filter(p=>_stOf(p)===_fc.st):base;
   const _srcC=_wmsSel.conf.size?base.filter(p=>_wmsSel.conf.has(p.id)):view;
@@ -49078,7 +49117,7 @@ function rWmsPrismas(){
 // Estado das 3 etapas de um pedido: separado, conferido (1ª+2ª), unitizado (3ª)
 // Cada etapa: 'ok' | 'pendente' | 'na' (não exigida pelo cliente)
 function wmsPedidoEtapas(pedidoId){
-  const p=wmsPedidos.find(x=>x.id===pedidoId);
+  const _ix=wmsIxPedido(); const p=_ix?_ix.get(pedidoId):wmsPedidos.find(x=>x.id===pedidoId);   // v1.0.1150
   const exig=p?wmsConfsDoCliente(p.cliente_id):[];
   const separado=wmsSeparacaoConcluidaPedido(pedidoId)?'ok':'pendente';
   // Conferido = 1ª e 2ª exigidas feitas
@@ -49094,7 +49133,7 @@ function wmsPedidoEtapas(pedidoId){
 }
 // Semáforo do romaneio: verde (tudo ok), amarelo (começou, falta), vermelho (nada feito)
 function wmsRomaneioSemaforo(romaneioId){
-  const peds=wmsPedidos.filter(p=>p.romaneio_id===romaneioId);
+  const peds=wmsRomPedidos(romaneioId);   // v1.0.1150
   if(!peds.length)return 'vermelho';
   let algumOk=false, tudoOk=true, algumComecou=false;
   peds.forEach(p=>{
