@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1154 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1156 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1154';
+const APP_VERSION='v1.0.1156';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2925,8 +2925,9 @@ function ecomMlLerProdutos(paginas){
   return {porCod:porCod, porSku:porSku, total:total, mlcodes:mlcodes, pagsSku:pagsSku};
 }
 // v1.0.1126: folha A4 do ML = 4 colunas × 10 linhas de etiquetas 40×25 mm (medida no PDF real do envio 78858724)
-var ECOM_ML_UNID_MM={w:60,h:30,margem:3,escala:0.85};   // v1.0.1153: bobina 60×30 (antes 60×40) · v1.0.1154: margem de 3 mm e conteúdo a 85% (cabe na área útil da impressora)
-var ECOM_ML_GRADE={cols:4,rows:10,x0:34.6,y0:10.1,pw:128.3,ph:83.4,w:113.8,h:70.6,W:595.28,H:841.89};
+var ECOM_ML_UNID_MM={w:60,h:30,margem:1.5,escala:1};   // v1.0.1155: volta ao tamanho cheio — o problema era a quebra de página, não o tamanho
+var ECOM_UNID_MM=ECOM_ML_UNID_MM;   // v1.0.1156: layout único da etiqueta de UNIDADE do Full (Mercado Livre e Shopee): 60×30   // v1.0.1153: bobina 60×30 (antes 60×40) · v1.0.1154: margem de 3 mm e conteúdo a 85% (cabe na área útil da impressora)
+var ECOM_ML_GRADE={cols:4,rows:10,x0:35.15,y0:10.91,pw:128.61,ph:82.97,w:113.95,h:71.01,W:595.28,H:841.89};   // v1.0.1155: remedida no PDF de out/2026 (envio 78858724)
 // posição de cada etiqueta na folha, pelo código ML impresso nela: {pagina: ["celula:codigo", ...]}
 async function ecomMlCelulas(pdf){
   var G=ECOM_ML_GRADE, out={};
@@ -3072,7 +3073,7 @@ var _ecomFullPdfCache={};
 async function ecomFullPdfLib(){ if(window.PDFLib) return window.PDFLib; await new Promise(function(ok,err){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; s.onload=ok; s.onerror=err; document.head.appendChild(s); }); return window.PDFLib; }
 async function ecomFullImprimirPaginas(path,paginas,formato){
   // v1.0.1065: desenha cada página como imagem e imprime com @page no tamanho EXATO da etiqueta.
-  //   unidade (padrão): 60x40 mm, paisagem, como vem no PDF da Shopee.
+  //   unidade (padrão): v1.0.1156 → bobina 60x30 (ECOM_UNID_MM), Shopee e Mercado Livre.
   //   'master': bobina de 100x150 mm (a mesma das etiquetas de envio) — gira 90° e amplia para preencher a etiqueta.
   // Antes mandava o PDF e o leitor do navegador escolhia a orientação (saía em pé, com a etiqueta no topo).
   if(!path||!paginas||!paginas.length){ showToast('Etiquetas n\u00e3o encontradas para imprimir.','red'); return false; }
@@ -3085,7 +3086,7 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
     _ecomFullPdfCache[path]=buf;
   }
   await ecomLoadPdfjs();
-  var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, imgs=[], wmm=60, hmm=40;
+  var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, imgs=[], wmm=60, hmm=40, _temCel=false;
   var _cvCache={};   // v1.0.1126: página renderizada uma vez só quando várias etiquetas saem da mesma folha
   for(var k=0;k<paginas.length;k++){
     var _cel=(paginas[k]&&typeof paginas[k]==='object'&&paginas[k].cel!=null)?paginas[k]:null;
@@ -3099,7 +3100,7 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
       var r3=rc3.getContext('2d'); r3.fillStyle='#fff'; r3.fillRect(0,0,W3,H3);
       var _pad=Math.round((_U.margem||1)/25.4*300);   // respiro em volta: a impressora não imprime até a borda
       var e3=Math.min((W3-2*_pad)/sw,(H3-2*_pad)/sh)*(_U.escala||1); r3.drawImage(cvp,sx,sy,sw,sh,(W3-sw*e3)/2,(H3-sh*e3)/2,sw*e3,sh*e3);
-      imgs.push(rc3.toDataURL('image/png')); wmm=_U.w; hmm=_U.h; continue;
+      imgs.push(rc3.toDataURL('image/png')); wmm=_U.w; hmm=_U.h; _temCel=true; continue;
     }
     var _corte=(paginas[k]&&typeof paginas[k]==='object')?paginas[k]:null;   // v1.0.1118: {p,slot,de} = uma etiqueta de uma folha com várias
     var pg=await pdf.getPage(_corte?_corte.p:paginas[k]), v1=pg.getViewport({scale:1});
@@ -3125,11 +3126,28 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
       var esc=Math.min(H/cv.width, W/cv.height), dw=cv.width*esc, dh=cv.height*esc;
       rx.translate(W,0); rx.rotate(Math.PI/2); rx.drawImage(cv,(H-dw)/2,(W-dh)/2,dw,dh);
       imgs.push(rc.toDataURL('image/png')); wmm=100; hmm=150;
-    } else imgs.push(cv.toDataURL('image/png'));
+    } else {
+      // v1.0.1156: unidade da Shopee (página própria, 60×40 no PDF) impressa na bobina de unidade 60×30, sem distorcer
+      var _U2=ECOM_UNID_MM, W4=Math.round(_U2.w/25.4*300), H4=Math.round(_U2.h/25.4*300), rc4=document.createElement('canvas'); rc4.width=W4; rc4.height=H4;
+      var r4=rc4.getContext('2d'); r4.fillStyle='#fff'; r4.fillRect(0,0,W4,H4);
+      var _p4=Math.round((_U2.margem||1)/25.4*300), e4=Math.min((W4-2*_p4)/cv.width,(H4-2*_p4)/cv.height)*(_U2.escala||1);
+      r4.drawImage(cv,(W4-cv.width*e4)/2,(H4-cv.height*e4)/2,cv.width*e4,cv.height*e4);
+      imgs.push(rc4.toDataURL('image/png')); wmm=_U2.w; hmm=_U2.h; _temCel=true;
+    }
   }
   var html='<!doctype html><html><head><meta charset="utf-8"><style>@page{size:'+wmm+'mm '+hmm+'mm;margin:0}html,body{margin:0;padding:0}'
     +'img{display:block;width:'+wmm+'mm;height:'+hmm+'mm;page-break-after:always;break-after:page}img:last-child{page-break-after:auto;break-after:auto}</style></head><body>'
     +imgs.map(function(s){return '<img src="'+s+'">';}).join('')+'</body></html>';
+  if(_temCel){
+    // v1.0.1155: etiqueta pequena (60×30). Com a imagem do MESMO tamanho da página, qualquer margem da impressora
+    // fazia um pedaço transbordar para a página seguinte e as etiquetas iam escorregando (1ª certa, as outras
+    // deslocadas). Agora cada etiqueta é uma "caixa" 1 mm menor que a página, que corta o excesso e força a quebra.
+    var cw=wmm-1, ch=hmm-1;
+    html='<!doctype html><html><head><meta charset="utf-8"><style>@page{size:'+wmm+'mm '+hmm+'mm;margin:0}html,body{margin:0;padding:0}'
+      +'.et{width:'+cw+'mm;height:'+ch+'mm;overflow:hidden;page-break-after:always;break-after:page;page-break-inside:avoid;break-inside:avoid}'
+      +'.et:last-child{page-break-after:auto;break-after:auto}.et img{display:block;width:100%;height:100%;object-fit:contain}</style></head><body>'
+      +imgs.map(function(s){return '<div class="et"><img src="'+s+'"></div>';}).join('')+'</body></html>';
+  }
   var old=ge('ecom-full-print'); if(old) old.remove();
   var fr=document.createElement('iframe'); fr.id='ecom-full-print'; fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
   document.body.appendChild(fr);
@@ -3172,7 +3190,7 @@ function ecomFullEtiqUnidades(pid){
       +(n?'<button class="btn btn-sm" onclick="ecomFullImprimirPaginas(\''+meta.unidades_pdf+'\','+JSON.stringify(pg[sk]).replace(/"/g,'')+')">\ud83d\udda8 Imprimir</button>':'')+'</div>'; }).join('');
   var todas=[]; Object.keys(pg).forEach(function(k){ todas=todas.concat(pg[k]); }); todas.sort(function(a,b){return a-b;});
   document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-full-etq" style="z-index:300;display:flex"><div class="modal" style="width:620px;max-width:95vw;padding:16px">'
-    +'<div style="font-size:15px;font-weight:700">Etiquetas de unidade \u00b7 Full '+ecomEsc(p.numero_pedido||'')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Bobina 60 \u00d7 40 mm na Zebra. Uma etiqueta por unidade, colada antes do checkout.</div>'
+    +'<div style="font-size:15px;font-weight:700">Etiquetas de unidade \u00b7 Full '+ecomEsc(p.numero_pedido||'')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Bobina '+ECOM_UNID_MM.w+' \u00d7 '+ECOM_UNID_MM.h+' mm na Zebra. Uma etiqueta por unidade, colada antes do checkout.</div>'
     +linhas+'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'ecom-full-etq\').remove()">Fechar</button>'
     +(todas.length?'<button class="btn btn-p" onclick="ecomFullImprimirPaginas(\''+meta.unidades_pdf+'\',['+todas.join(',')+'])">\ud83d\udda8 Imprimir todas ('+todas.length+')</button>':'')+'</div></div></div>');
 }
