@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1166 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1167 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1166';
+const APP_VERSION='v1.0.1167';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2929,18 +2929,40 @@ var ECOM_ML_UNID_MM={w:60,h:30,margem:1.5,escala:1,dpi:203};   // v1.0.1157: dpi
 var ECOM_UNID_MM=ECOM_ML_UNID_MM;   // v1.0.1156: layout único da etiqueta de UNIDADE do Full (Mercado Livre e Shopee): 60×30   // v1.0.1153: bobina 60×30 (antes 60×40) · v1.0.1154: margem de 3 mm e conteúdo a 85% (cabe na área útil da impressora)
 var ECOM_ML_GRADE={cols:4,rows:10,x0:35.15,y0:10.91,pw:128.61,ph:82.97,w:113.95,h:71.01,W:595.28,H:841.89};   // v1.0.1155: remedida no PDF de out/2026 (envio 78858724)
 // posição de cada etiqueta na folha, pelo código ML impresso nela: {pagina: ["celula:codigo", ...]}
-async function ecomMlCelulas(pdf){
-  var G=ECOM_ML_GRADE, out={};
+// v1.0.1167: o Mercado Livre mudou o layout da folha (de 4×10 etiquetas pequenas para 2×4 maiores). A grade fixa
+// recortava só o canto da etiqueta nova (zoom com a borda de cima/esquerda e o código cortado). Agora a leitura é
+// independente do layout: cada etiqueta é achada pelo código (ordem de leitura da folha) e, na impressão, a borda
+// dela é localizada na própria imagem da página. A grade antiga fica só como último recurso.
+async function ecomMlLer(pdf){
+  var cel={}, pos={};
   for(var pg=1;pg<=pdf.numPages;pg++){
-    var page=await pdf.getPage(pg), v=page.getViewport({scale:1}), k=v.width/G.W, tc=await page.getTextContent(), lst=[];
+    var page=await pdf.getPage(pg), v=page.getViewport({scale:1}), tc=await page.getTextContent(), lst=[];
     tc.items.forEach(function(it){ var t=String(it.str||'').trim(); if(!/^[A-Z]{4}\d{5}$/.test(t)) return;
-      var x=it.transform[4]/k, yTop=(v.height-it.transform[5])/k;
-      var col=Math.max(0,Math.min(G.cols-1,Math.floor((x-G.x0)/G.pw))), row=Math.max(0,Math.min(G.rows-1,Math.floor((yTop-G.y0)/G.ph)));
-      lst.push((row*G.cols+col)+':'+t); });
-    lst.sort(function(a,b){ return parseInt(a,10)-parseInt(b,10); });
-    out[pg]=lst.filter(function(x,i,a){ return a.indexOf(x)===i; });
+      lst.push({t:t, x:it.transform[4]+(it.width||0)/2, y:v.height-it.transform[5]}); });
+    lst.sort(function(a,b){ return Math.abs(a.y-b.y)>6?(a.y-b.y):(a.x-b.x); });
+    var u=[]; lst.forEach(function(o){ if(!u.some(function(q){ return q.t===o.t&&Math.abs(q.x-o.x)<2&&Math.abs(q.y-o.y)<2; })) u.push(o); });
+    cel[pg]=u.map(function(o,i){ return i+':'+o.t; });
+    pos[pg]=u.map(function(o){ return [Math.round(o.x*10)/10, Math.round(o.y*10)/10]; });
   }
-  return out;
+  return {cel:cel,pos:pos};
+}
+async function ecomMlCelulas(pdf){ return (await ecomMlLer(pdf)).cel; }
+// borda da etiqueta em volta de um ponto (px), procurando linhas contínuas na imagem da página
+function ecomMlCaixa(px,W,H,cx,cy,dpmm){
+  var esc=function(x,y){ if(x<0||y<0||x>=W||y>=H) return false; var o=(y*W+x)*4; return (px[o]+px[o+1]+px[o+2])<540; };
+  var vlin=function(x,yc,L){ var n=0,t=0; for(var y=yc-L;y<=yc+L;y++){ t++; if(esc(x,y)||esc(x-1,y)||esc(x+1,y)) n++; } return n>=t*0.92; };
+  var hlin=function(y,xc,L){ var n=0,t=0; for(var x=xc-L;x<=xc+L;x++){ t++; if(esc(x,y)||esc(x,y-1)||esc(x,y+1)) n++; } return n>=t*0.92; };
+  var Lv=Math.round(3*dpmm), Lh=Math.round(12*dpmm), lim=Math.round(120*dpmm), e=null, d=null, c=null, b=null, x, y;
+  for(x=cx;x>Math.max(0,cx-lim);x--) if(vlin(x,cy,Lv)){ e=x; break; }
+  for(x=cx;x<Math.min(W,cx+lim);x++) if(vlin(x,cy,Lv)){ d=x; break; }
+  if(e==null||d==null) return null;
+  var xm=Math.round((e+d)/2), Lh2=Math.min(Lh,Math.round((d-e)/2)-Math.round(2*dpmm));
+  for(y=cy;y>Math.max(0,cy-lim);y--) if(hlin(y,xm,Lh2)){ c=y; break; }
+  for(y=cy;y<Math.min(H,cy+lim);y++) if(hlin(y,xm,Lh2)){ b=y; break; }
+  if(c==null||b==null) return null;
+  var wmm=(d-e)/dpmm, hmm=(b-c)/dpmm;
+  if(wmm<20||wmm>150||hmm<10||hmm>120) return null;
+  return {x:e,y:c,w:d-e,h:b-c};
 }
 // itens de impressão (uma etiqueta por item) para um SKU, ou todos
 function ecomMlItensImpressao(meta,sku){
@@ -3013,7 +3035,7 @@ async function ecomFullEtiqImportar(file,det){
         ||(cands.length===1?cands[0]:null);
       if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Nenhum pedido Full ML aguardando etiqueta tem as mesmas quantidades destas etiquetas.','Importe e grave o PDF das etiquetas de produtos na importação antes.'],'red'); return; }
       meta=ecomFullMeta(ped); meta.unidades_paginas=lido.pagsSku; meta.mlcodes=Object.assign(meta.mlcodes||{},lido.mlcodes); meta.unid_por_folha=true;
-      try{ meta.unid_cells=await ecomMlCelulas(det.pdf); meta.unid_grade='ml-a4-4x10'; }catch(_e){}   // v1.0.1126: recorte etiqueta a etiqueta
+      try{ meta.unid_cells=await ecomMlCelulas(det.pdf); meta.unid_grade='auto'; }catch(_e){}   // v1.0.1167: layout automático   // v1.0.1126: recorte etiqueta a etiqueta
       var _uu=ecomFullUnid(ped), div=Object.keys(_uu).filter(function(k){ return (lido.porSku[k]||0)!==ecomN(_uu[k]); });
       var _divTxt=div.length?('<span style="color:var(--amber-text,#b45309)">●</span> '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(k){return ecomEsc(k)+' ('+(lido.porSku[k]||0)+'/'+ecomN(_uu[k])+')';}).join(', ')):'';
     }
@@ -3091,6 +3113,8 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
   await ecomLoadPdfjs();
   var pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, imgs=[], wmm=60, hmm=40, _temCel=false;
   var _cvCache={};   // v1.0.1126: página renderizada uma vez só quando várias etiquetas saem da mesma folha
+  var _mlPos=null, _pxCache={};   // v1.0.1167: posições dos códigos e pixels da página (borda da etiqueta)
+  if(paginas.some(function(x){ return x&&typeof x==='object'&&x.cel!=null; })){ try{ _mlPos=(await ecomMlLer(pdf)).pos; }catch(_ml){ _mlPos=null; } }
   for(var k=0;k<paginas.length;k++){
     var _cel=(paginas[k]&&typeof paginas[k]==='object'&&paginas[k].cel!=null)?paginas[k]:null;
     if(_cel){   // v1.0.1126: etiqueta unitária do ML recortada da folha A4 · v1.0.1153: impressa no 60×30
@@ -3099,6 +3123,14 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
         var cxx=cvp.getContext('2d'); cxx.fillStyle='#fff'; cxx.fillRect(0,0,cvp.width,cvp.height); await pgx.render({canvasContext:cxx,viewport:vpx}).promise; _cvCache={}; _cvCache[_cel.p]=cvp; }
       var sF=cvp.width/G.W, col=_cel.cel%G.cols, row=Math.floor(_cel.cel/G.cols);
       var _m=2.5, sx=(G.x0+col*G.pw-_m)*sF, sy=(G.y0+row*G.ph-_m)*sF, sw=(G.w+2*_m)*sF, sh=(G.h+2*_m)*sF;   // folga para não cortar a borda
+      // v1.0.1167: borda real da etiqueta, achada em volta do código (vale para qualquer layout da folha)
+      var _ps=_mlPos&&_mlPos[_cel.p]&&_mlPos[_cel.p][_cel.cel];
+      if(_ps){
+        var _sc=cvp.width/(await pdf.getPage(_cel.p)).getViewport({scale:1}).width, _dpmm=_sc*72/25.4;
+        if(!_pxCache[_cel.p]){ _pxCache={}; _pxCache[_cel.p]=cvp.getContext('2d').getImageData(0,0,cvp.width,cvp.height).data; }
+        var _bx=ecomMlCaixa(_pxCache[_cel.p],cvp.width,cvp.height,Math.round(_ps[0]*_sc),Math.round((_ps[1]-1.5)*_sc),_dpmm);
+        if(_bx){ var _mm=Math.round(0.8*_dpmm); sx=_bx.x-_mm; sy=_bx.y-_mm; sw=_bx.w+2*_mm; sh=_bx.h+2*_mm; }
+      }
       var _U=ECOM_ML_UNID_MM, W3=Math.round(_U.w/25.4*300), H3=Math.round(_U.h/25.4*300), rc3=document.createElement('canvas'); rc3.width=W3; rc3.height=H3;   // v1.0.1153: 60×30
       var r3=rc3.getContext('2d'); r3.fillStyle='#fff'; r3.fillRect(0,0,W3,H3);
       var _pad=Math.round((_U.margem||1)/25.4*300);   // respiro em volta: a impressora não imprime até a borda
@@ -3189,8 +3221,16 @@ function ecomFullImprimirCaixaN(pid,n){ var p=(ecomPedidos||[]).find(function(x)
 function ecomFullImprimirCaixasTodas(pid){ var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p);
   var it=(meta.caixas||[]).filter(function(c){return c.pagina;}).map(function(c){ return ecomFullItemCaixa(meta,c); });
   if(!it.length){ showToast('Sem etiquetas de caixa.','red'); return; } return ecomFullImprimirPaginas(meta.master_pdf,it,'master'); }
-function ecomFullImprimirUnidML(pid,sku){   // v1.0.1126
+async function ecomFullImprimirUnidML(pid,sku){   // v1.0.1126
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p);
+  if(meta.unid_grade!=='auto' && meta.unidades_pdf){   // v1.0.1167: refaz o mapa pela leitura automática (layout novo do ML)
+    try{
+      var _r=await window.supabase.storage.from('ecom-etiquetas').download(meta.unidades_pdf);
+      if(_r&&_r.data){ var _b=await _r.data.arrayBuffer(); _ecomFullPdfCache[meta.unidades_pdf]=_b; await ecomLoadPdfjs();
+        var _pdf=await window.pdfjsLib.getDocument({data:_b.slice(0)}).promise; meta.unid_cells=await ecomMlCelulas(_pdf); meta.unid_grade='auto';
+        p.full_meta=meta; dbUpdate('ecom_pedidos',pid,{full_meta:meta}).catch(function(){}); }
+    }catch(_e){ console.warn('[ml] remapear',_e); }
+  }
   var it=ecomMlItensImpressao(meta,sku||null); if(!it.length){ showToast('Etiquetas não mapeadas: importe de novo o PDF de produtos no passo das etiquetas.','amber'); return; }
   showToast('Preparando '+it.length+' etiqueta(s)…','blue'); return ecomFullImprimirPaginas(meta.unidades_pdf,it);
 }
