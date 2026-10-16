@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1150 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1151 | Gerado: 2026-10-15 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1150';
+const APP_VERSION='v1.0.1151';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -33251,6 +33251,18 @@ const CAPA_CARGA=['Paletizada','Batida','Paletizada/Batida'];
 function capaPodeEditar(){return['admin','adm','financeiro','gestor'].includes(profile?.role||'')||canDo('fat-capas','pode_criar');}
 
 // ── NUMERAÇÃO AUTOMÁTICA ──
+// v1.0.1151: o número era calculado no navegador (maior número da lista em memória + 1). Duas pessoas com a tela
+// aberta — ou a capa automática do romaneio criada num navegador com a lista desatualizada — geravam o MESMO número
+// (ex.: REC0157/26 para Culligan e Unilever UBV). Agora o banco reserva o número de forma atômica
+// (proximo_capa_numero); sem a função (SQL não rodado), cai no cálculo antigo.
+async function capaReservarNumero(tipo){
+  try{
+    var n=await dbRpc('proximo_capa_numero',{p_company:company.id,p_tipo:tipo});
+    if(Array.isArray(n)) n=n[0]&&(n[0].proximo_capa_numero||Object.values(n[0])[0]);
+    if(n&&typeof n==='string') return n;
+  }catch(e){ console.warn('[capa] numeração pelo banco indisponível, usando a local:',e&&e.message); }
+  return capaProximoNumero(tipo);
+}
 function capaProximoNumero(tipo){
   const ano=String(new Date().getFullYear()).slice(-2);
   const prefixo=tipo==='expedicao'?'EXP':'REC';
@@ -33266,7 +33278,7 @@ async function wmsCapaAutoCriar(opts){
     const cid=company?.id;
     if(!opts||!opts.romaneioId)return;
     if((capasProcesso||[]).some(c=>c.romaneio_id===opts.romaneioId))return;
-    const dados={company_id:cid,numero:capaProximoNumero(opts.tipo),tipo:opts.tipo,
+    const dados={company_id:cid,numero:await capaReservarNumero(opts.tipo),tipo:opts.tipo,
       romaneio_id:opts.romaneioId,documentos:opts.documentos||[],
       cliente_id:opts.clienteId||null,cliente_nome:opts.clienteNome||null,
       data_operacao:opts.data||hojeLocalISO(),
@@ -50587,7 +50599,7 @@ async function capaSalvarNova(){
   const responsavelId=opSel?.value||null;
   const tipoOperacao=opSel?.selectedOptions?.[0]?.getAttribute('data-tipo')||null;
 
-  const numero=capaProximoNumero(tipo);
+  const numero=await capaReservarNumero(tipo);   // v1.0.1151
   const dados={company_id:company?.id,numero,tipo,cliente_id:clienteId,cliente_nome:cli?.nome||null,
     cliente_cnpj:cli?.cpf_cnpj||null,tipo_operacao:tipoOperacao,responsavel_id:responsavelId,
     tabela_id:tabela?.id||null,data_operacao:dataOp,status:'aberta',
