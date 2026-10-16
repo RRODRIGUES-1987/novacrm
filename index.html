@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1158 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1159 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1158';
+const APP_VERSION='v1.0.1159';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -56652,6 +56652,7 @@ async function ecomQzPickPrinter(img,opts){
   document.body.insertAdjacentHTML('beforeend',html);
   try{
     var list=await ecomQzListPrinters();
+    if(opts&&opts.semVirtuais) list=list.filter(function(n){ return !ECOM_QZ_VIRTUAL.test(n); });   // v1.0.1159
     var el=ge('ecom-qz-pick-list'); if(!el)return;
     if(!list.length){ el.innerHTML='<div style="padding:14px;text-align:center;color:var(--text3)">Nenhuma impressora encontrada. O QZ Tray est&aacute; aberto?</div>'; return; }
     el.innerHTML=list.map(function(n){
@@ -56741,15 +56742,22 @@ async function ecomFullImprimirZpl(imgs,wmm,hmm){
     }catch(e){ showToast('Falha ao enviar para '+nome+': '+(e.message||e)+' — usando a impressão do navegador.','red'); return false; }
   };
   var lista=[]; try{ lista=await ecomQzListPrinters(); }catch(_l){}
+  // v1.0.1159: impressora virtual (XPS, PDF, OneNote, Fax) nunca serve para etiqueta — grava arquivo em vez de imprimir
+  var reais=lista.filter(function(n){ return !ECOM_QZ_VIRTUAL.test(n); });
   var pr=ecomQzUnidGet();
-  if(pr && lista.indexOf(pr)>=0) return await enviar(pr);
+  if(pr && ECOM_QZ_VIRTUAL.test(pr)){ ecomQzUnidSet(''); pr=''; }
+  if(pr && reais.indexOf(pr)>=0) return await enviar(pr);
+  // sem escolha ainda: usa a impressora do checkout (a mesma Xprinter na maioria dos postos)
+  var ck=ecomQzPrinterSaved()||_qzPrinter;
+  if(!pr && ck && reais.indexOf(ck)>=0){ ecomQzUnidSet(ck); return await enviar(ck); }
   return await new Promise(function(resolve){
-    ecomQzPickPrinter(null,{titulo:'Impressora da etiqueta de unidade ('+wmm+'×'+hmm+')',atual:pr||'(nenhuma)',
+    ecomQzPickPrinter(null,{titulo:'Impressora da etiqueta de unidade ('+wmm+'×'+hmm+')',atual:pr||'(nenhuma)',semVirtuais:true,
       onUse:async function(n){ ecomQzUnidSet(n); resolve(await enviar(n)); },
       onCancel:function(){ resolve(false); }});
   });
 }
-function ecomQzUnidTrocar(){ ecomQzPickPrinter(null,{titulo:'Impressora da etiqueta de unidade',atual:ecomQzUnidGet()||'(nenhuma)',onUse:function(n){ ecomQzUnidSet(n); showToast('Impressora de unidade: '+n,'green'); var e=document.querySelectorAll('.qz-unid-nome'); e.forEach(function(x){ x.textContent=n; }); }}); }
+var ECOM_QZ_VIRTUAL=/xps|pdf|onenote|fax|\bfile\b|arquivo|send to|enviar para|anydesk|snagit/i;   // v1.0.1159
+function ecomQzUnidTrocar(){ ecomQzPickPrinter(null,{titulo:'Impressora da etiqueta de unidade',atual:ecomQzUnidGet()||'(nenhuma)',semVirtuais:true,onUse:function(n){ ecomQzUnidSet(n); showToast('Impressora de unidade: '+n,'green'); var e=document.querySelectorAll('.qz-unid-nome'); e.forEach(function(x){ x.textContent=n; }); }}); }
 async function ecomQzPrintZpl(printer, zpl){
   var cfg=qz.configs.create(printer);
   await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data:zpl }]);
