@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1152 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1153 | Gerado: 2026-10-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1152';
+const APP_VERSION='v1.0.1153';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2925,6 +2925,7 @@ function ecomMlLerProdutos(paginas){
   return {porCod:porCod, porSku:porSku, total:total, mlcodes:mlcodes, pagsSku:pagsSku};
 }
 // v1.0.1126: folha A4 do ML = 4 colunas × 10 linhas de etiquetas 40×25 mm (medida no PDF real do envio 78858724)
+var ECOM_ML_UNID_MM={w:60,h:30};   // v1.0.1153: bobina da etiqueta unitária do Full ML (antes 60×40)
 var ECOM_ML_GRADE={cols:4,rows:10,x0:34.6,y0:10.1,pw:128.3,ph:83.4,w:113.8,h:70.6,W:595.28,H:841.89};
 // posição de cada etiqueta na folha, pelo código ML impresso nela: {pagina: ["celula:codigo", ...]}
 async function ecomMlCelulas(pdf){
@@ -3088,16 +3089,17 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
   var _cvCache={};   // v1.0.1126: página renderizada uma vez só quando várias etiquetas saem da mesma folha
   for(var k=0;k<paginas.length;k++){
     var _cel=(paginas[k]&&typeof paginas[k]==='object'&&paginas[k].cel!=null)?paginas[k]:null;
-    if(_cel){   // v1.0.1126: etiqueta unitária do ML recortada da folha A4 e impressa no 60×40
+    if(_cel){   // v1.0.1126: etiqueta unitária do ML recortada da folha A4 · v1.0.1153: impressa no 60×30
       var G=ECOM_ML_GRADE, cvp=_cvCache[_cel.p];
       if(!cvp){ var pgx=await pdf.getPage(_cel.p), vpx=pgx.getViewport({scale:300/72}); cvp=document.createElement('canvas'); cvp.width=Math.round(vpx.width); cvp.height=Math.round(vpx.height);
         var cxx=cvp.getContext('2d'); cxx.fillStyle='#fff'; cxx.fillRect(0,0,cvp.width,cvp.height); await pgx.render({canvasContext:cxx,viewport:vpx}).promise; _cvCache={}; _cvCache[_cel.p]=cvp; }
       var sF=cvp.width/G.W, col=_cel.cel%G.cols, row=Math.floor(_cel.cel/G.cols);
       var _m=2.5, sx=(G.x0+col*G.pw-_m)*sF, sy=(G.y0+row*G.ph-_m)*sF, sw=(G.w+2*_m)*sF, sh=(G.h+2*_m)*sF;   // folga para não cortar a borda
-      var W3=709, H3=472, rc3=document.createElement('canvas'); rc3.width=W3; rc3.height=H3;
+      var _U=ECOM_ML_UNID_MM, W3=Math.round(_U.w/25.4*300), H3=Math.round(_U.h/25.4*300), rc3=document.createElement('canvas'); rc3.width=W3; rc3.height=H3;   // v1.0.1153: 60×30
       var r3=rc3.getContext('2d'); r3.fillStyle='#fff'; r3.fillRect(0,0,W3,H3);
-      var e3=Math.min((W3-24)/sw,(H3-24)/sh); r3.drawImage(cvp,sx,sy,sw,sh,(W3-sw*e3)/2,(H3-sh*e3)/2,sw*e3,sh*e3);
-      imgs.push(rc3.toDataURL('image/png')); wmm=60; hmm=40; continue;
+      var _pad=Math.round(1/25.4*300);   // 1 mm de respiro em volta (a etiqueta do ML ocupa a altura toda)
+      var e3=Math.min((W3-2*_pad)/sw,(H3-2*_pad)/sh); r3.drawImage(cvp,sx,sy,sw,sh,(W3-sw*e3)/2,(H3-sh*e3)/2,sw*e3,sh*e3);
+      imgs.push(rc3.toDataURL('image/png')); wmm=_U.w; hmm=_U.h; continue;
     }
     var _corte=(paginas[k]&&typeof paginas[k]==='object')?paginas[k]:null;   // v1.0.1118: {p,slot,de} = uma etiqueta de uma folha com várias
     var pg=await pdf.getPage(_corte?_corte.p:paginas[k]), v1=pg.getViewport({scale:1});
@@ -3158,7 +3160,7 @@ function ecomFullEtiqUnidades(pid){
         +(n?'<button class="btn btn-sm" onclick="ecomFullImprimirUnidML(\''+pid+'\',\''+sk+'\')">\ud83d\udda8 Imprimir</button>':'')+'</div>'; }).join('');
     var tot=ecomMlItensImpressao(meta,null).length;
     document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-full-etq" style="z-index:300;display:flex"><div class="modal" style="width:620px;max-width:95vw;padding:16px">'
-      +'<div style="font-size:15px;font-weight:700">Etiquetas de unidade · Full ML '+ecomEsc(p.numero_pedido||'')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Bobina 60×40 · uma etiqueta por unidade, recortada da folha do Mercado Livre</div>'
+      +'<div style="font-size:15px;font-weight:700">Etiquetas de unidade · Full ML '+ecomEsc(p.numero_pedido||'')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Bobina '+ECOM_ML_UNID_MM.w+'×'+ECOM_ML_UNID_MM.h+' · uma etiqueta por unidade, recortada da folha do Mercado Livre</div>'
       +lin+'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'ecom-full-etq\').remove()">Fechar</button>'
       +(tot?'<button class="btn btn-p" onclick="ecomFullImprimirUnidML(\''+pid+'\',null)">\ud83d\udda8 Imprimir todas ('+tot+')</button>':'')+'</div></div></div>');
     return;
