@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1171 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1172 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1171';
+const APP_VERSION='v1.0.1172';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -41145,19 +41145,49 @@ function wmsContraOrdensHtml(){
   const blocos=Object.keys(porPed).map(pid=>{ const l=porPed[pid], c0=l[0];
     return `<div style="margin-top:8px"><div style="font-size:12px;color:var(--text2)"><b>${ecomEsc(c0.pedido_ref||'')}</b> · excluído por ${ecomEsc(c0.criada_por_nome||'?')} em ${new Date(c0.created_at).toLocaleString('pt-BR')} · "${ecomEsc(c0.motivo||'')}"</div>`
       +l.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 12px;font-size:13px;border-bottom:1px dashed var(--border)"><span style="font-family:monospace;font-weight:700;min-width:90px">${ecomEsc(c.sku||'')}</span><span>${Number(c.quantidade||0).toLocaleString('pt-BR')} ${ecomEsc(c.tipo_volume||'')}</span><span>→ <b>${ecomEsc(c.endereco_destino||'(sem endereço)')}</b>${c.rg?' · RG '+ecomEsc(c.rg):''}</span>`
-        +(podeDev?`<button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdemDevolvido('${c.id}')">✓ Devolvido</button>`:'')+`</div>`).join('')+`</div>`; }).join('');
+        +(podeDev?(String(c.tipo_volume||'')==='pallet'&&c.pallet_id
+            ? `<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="wmsContraOrdemDevolvido('${c.id}','no_endereco')">✓ Está no endereço</button><button class="btn btn-sm" onclick="wmsContraOrdemReenderecar('${c.id}')">↪ Estava no stage · re-endereçar</button></span>`
+            : `<button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdemDevolvido('${c.id}','pallet_origem')">✓ Devolvido ao pallet de origem</button>`):'')+`</div>`).join('')+`</div>`; }).join('');   // v1.0.1172
   return `<div style="border:2px solid var(--amber-text);background:var(--amber-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px">
     <div style="display:flex;align-items:center;gap:8px"><div style="font-weight:700;font-size:14px;color:var(--amber-text)">CONTRA-ORDENS · devolver ao endereço (${cos.length} pendente${cos.length>1?'s':''})</div>
     <button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdensImprimir()">🖨 Imprimir</button></div>${blocos}</div>`;
 }
-async function wmsContraOrdemDevolvido(id){
+async function wmsContraOrdemDevolvido(id,acao){
   const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c) return;
   try{
-    const upd={status:'devolvida',devolvido_em:new Date().toISOString(),devolvido_por:cu?.id||null,devolvido_por_nome:(profile&&profile.full_name)||(cu&&cu.email)||''};
+    const upd={status:'devolvida',acao:acao||'pallet_origem',devolvido_em:new Date().toISOString(),devolvido_por:cu?.id||null,devolvido_por_nome:(profile&&profile.full_name)||(cu&&cu.email)||''};
     await dbUpdate('wms_contra_ordens',id,upd); Object.assign(c,upd);
     wmsContraOrdens=wmsContraOrdens.filter(x=>x.status==='pendente');
     showToast(c.sku+' devolvido ao endereço '+(c.endereco_destino||''),'green'); render();
   }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+
+// v1.0.1172: pallet fechado que estava no STAGE quando o pedido foi excluído → volta para o endereçamento (tela existente)
+async function wmsContraOrdemReenderecar(id){
+  const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c) return;
+  let stages=[]; try{ stages=await dbSelect('wms_enderecos','company_id=eq.'+company?.id+'&tipo_estrutura=eq.stage&ativo=eq.true&order=galpao.asc,codigo.asc')||[]; }catch(e){ stages=[]; }
+  if(!stages.length){ showToast('Nenhum endereço do tipo Stage cadastrado — cadastre em Endereços antes de re-endereçar.','amber'); return; }
+  portModal('Re-endereçar · '+ecomEsc(c.sku||'')+(c.rg?' · RG '+ecomEsc(c.rg):''),
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:10px">O pallet volta a ficar <b>pendente de endereçamento</b> e aparece em <b>WMS → Endereçamento</b>, onde recebe o endereço pelas regras de sempre (pode voltar ao de origem, <b>'+ecomEsc(c.endereco_destino||'—')+'</b>, ou ir para outro).</div>'
+    +'<label class="fl">Em qual stage o pallet está? *</label><select class="fi" id="wms-co-stage">'
+    +stages.map(e=>'<option value="'+e.id+'" data-cod="'+ecomEsc(e.codigo||'')+'">'+ecomEsc((e.galpao?e.galpao+' · ':'')+(e.codigo||''))+'</option>').join('')+'</select>',
+    `wmsContraOrdemReenderecarSalvar('${c.id}')`,{width:'480px',saveLabel:'Enviar para o endereçamento'});
+}
+async function wmsContraOrdemReenderecarSalvar(id){
+  const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c) return;
+  const sel=ge('wms-co-stage'); const stId=sel&&sel.value; if(!stId){ portErr('Escolha o stage.'); return; }
+  const stCod=sel.selectedOptions&&sel.selectedOptions[0]?sel.selectedOptions[0].getAttribute('data-cod'):'';
+  portSaving();
+  try{
+    if(c.pallet_id){
+      await dbUpdate('wms_pallets',c.pallet_id,{endereco_id:stId,endereco_codigo:stCod||null});
+      const pl=(wmsPallets||[]).find(x=>x.id===c.pallet_id); if(pl){ pl.endereco_id=stId; pl.endereco_codigo=stCod||null; }
+    }
+    const upd={status:'reenderecada',acao:'reenderecar',stage_codigo:stCod||null,devolvido_em:new Date().toISOString(),devolvido_por:cu?.id||null,devolvido_por_nome:(profile&&profile.full_name)||(cu&&cu.email)||''};
+    await dbUpdate('wms_contra_ordens',id,upd); Object.assign(c,upd);
+    wmsContraOrdens=wmsContraOrdens.filter(x=>x.status==='pendente');
+    portClose(); showToast('RG '+(c.rg||'')+' no stage '+(stCod||'')+' — pendente em WMS → Endereçamento','green'); render();
+  }catch(e){ portErr('Erro: '+(e.message||e)); }
 }
 function wmsContraOrdensImprimir(){
   const cos=(wmsContraOrdens||[]).filter(c=>c.company_id===company?.id&&c.status==='pendente'); if(!cos.length) return;
