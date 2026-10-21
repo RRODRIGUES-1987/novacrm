@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1170 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1171 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1185,6 +1185,7 @@ let wmsTransportadoras=[];
 let wmsMotoristas=[];
 let wmsEventos=[];
 let wmsPedidos=[];
+let wmsPedidosExcluidos=[], wmsPedMostrarExcluidos=false, wmsContraOrdens=[];   // v1.0.1171: exclusão lógica + contra-ordens
 let wmsRomaneios=[];
 let wmsEntradas=[], wmsEntradaItens=[], wmsProdutoDepara=[];
 let wmsAtributos=[], wmsProdutoAtributos=[];
@@ -1377,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1170';
+const APP_VERSION='v1.0.1171';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -33487,6 +33488,15 @@ async function loadWmsData(cid){
     dbSelectAll('wms_lista_pedidos',`company_id=eq.${cid}`).catch(()=>[]),
     dbSelectAll('wms_tarefas_separacao',`company_id=eq.${cid}`).catch(()=>[]),
   ]);
+  // v1.0.1171: pedidos excluídos ficam fora das telas (só no filtro "Excluídos"), com as tarefas e vínculos de lista
+  wmsPedidosExcluidos=(wmsPedidos||[]).filter(p=>p.status==='excluido');
+  if(wmsPedidosExcluidos.length){
+    const _exc=new Set(wmsPedidosExcluidos.map(p=>p.id));
+    wmsPedidos=wmsPedidos.filter(p=>!_exc.has(p.id));
+    wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(t=>!_exc.has(t.pedido_id));
+    wmsListaPedidos=(wmsListaPedidos||[]).filter(lp=>!_exc.has(lp.pedido_id));
+  }
+  try{ wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${cid}&status=eq.pendente&order=created_at.asc`); }catch(e){ wmsContraOrdens=[]; }
   wmsRomaneios=await dbSelectAll('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
   wmsEntradas=await dbSelectAll('wms_entradas',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]);
   wmsEntradaItens=await dbSelectAll('wms_entrada_itens',`company_id=eq.${cid}`).catch(()=>[]);
@@ -34113,7 +34123,7 @@ function wmsSelBarUpd_i(sc){
   const txt=ge('wms-'+sc+'-seltxt');if(txt)txt.innerHTML=wmsSelTotais(sc,ids);
 }
 
-function rWmsSeparacao(){return wmsAbaBar()+rWmsSeparacao_i();}
+function rWmsSeparacao(){return wmsAbaBar()+wmsContraOrdensHtml()+rWmsSeparacao_i();}
 function rWmsSeparacao_i(){
   const cid=company?.id;
   const _fs=_wmsTelaFiltro.sep;
@@ -36343,6 +36353,7 @@ const WMS_PED_STATUS={
 let wmsPedFiltroStatus='', wmsPedFiltroCliente='', wmsPedFiltroDe='', wmsPedFiltroAte='';
 
 function wmsPedBadge(st){
+  if(st==='excluido') return '<span class="bdg" style="background:var(--red-bg);color:var(--red-text)">Excluído</span>';   // v1.0.1171
   const s=WMS_PED_STATUS[st]||{l:st,c:'#888',bg:'rgba(136,136,136,.12)'};
   return `<span style="background:${s.bg};color:${s.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${s.l}</span>`;
 }
@@ -40826,6 +40837,7 @@ function rWmsPedidos_i(){
       <input id="wms-ped-busca" placeholder="Buscar nº do pedido..." oninput="filterWmsPedidos(this.value)">
     </div>
     <button class="btn btn-sm" onclick="wmsPedMarcarTodos()" title="Marca todos os pedidos visíveis no filtro (sem filtro de status: só os pendentes de lista)">☑ Marcar todos</button>
+    <button class="btn btn-sm" style="${wmsPedMostrarExcluidos?'background:var(--text);color:#fff':''}" onclick="wmsPedMostrarExcluidos=!wmsPedMostrarExcluidos;wmsPedSelecionados.clear();render()" title="Pedidos excluídos (consulta, sem ações)">🗑 Excluídos (${(wmsPedidosExcluidos||[]).filter(x=>x.company_id===company?.id).length})</button>
   </div>
   <div id="wms-ped-selbar" style="display:none;align-items:center;justify-content:space-between;background:var(--accent-bg);border-radius:8px;padding:8px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">
     <span id="wms-ped-selcount" style="font-size:12px;font-weight:600;color:var(--accent-text)"></span>
@@ -40935,8 +40947,8 @@ function wmsPedLinha(p){
 function wmsPedVisiveis(q){
   const cid=company?.id;
   const dataPed=p=>(p.data_pedido||p.data||(p.created_at||'').slice(0,10)||'');
-  let lista=wmsPedidos.filter(p=>p.company_id===cid);
-  if(wmsPedFiltroStatus)lista=lista.filter(p=>p.status===wmsPedFiltroStatus);
+  let lista=(wmsPedMostrarExcluidos?wmsPedidosExcluidos:wmsPedidos).filter(p=>p.company_id===cid);   // v1.0.1171
+  if(wmsPedFiltroStatus&&!wmsPedMostrarExcluidos)lista=lista.filter(p=>p.status===wmsPedFiltroStatus);
   if(wmsPedFiltroCliente)lista=lista.filter(p=>p.cliente_id===wmsPedFiltroCliente);
   if(wmsPedFiltroDe)lista=lista.filter(p=>dataPed(p)>=wmsPedFiltroDe);
   if(wmsPedFiltroAte)lista=lista.filter(p=>dataPed(p)<=wmsPedFiltroAte);
@@ -41053,8 +41065,113 @@ async function wmsPedLiberarEmpenho(pedidoId){
   catch(e){ showToast('Erro ao liberar: '+(e.message||e),'red'); }
   wmsPedEmpenhoCarregar(pedidoId);
 }
+
+// ═══ v1.0.1171 · EXCLUSÃO LÓGICA DO PEDIDO WMS + CONTRA-ORDEM DE DEVOLUÇÃO AO ENDEREÇO ═══
+const WMS_PED_SEM_EXCLUSAO=['carregado','expedido','embarcado','faturado','faturada','finalizado','concluido','concluida'];
+function wmsPedPodeExcluirPerfil(){ return podeFazer('wms-pedidos','pode_excluir',['admin','gestor']); }
+function wmsPedBloqueioExclusao(p){
+  if(!p) return 'pedido não encontrado';
+  if(p.status==='excluido') return 'já excluído';
+  if(WMS_PED_SEM_EXCLUSAO.includes(String(p.status||''))) return 'já carregado/expedido — trate como devolução de mercadoria';
+  if(p.romaneio_id){ const r=(wmsRomaneios||[]).find(x=>x.id===p.romaneio_id); return 'está no romaneio '+(r&&r.numero?r.numero:'')+' — retire do romaneio antes'; }
+  return '';
+}
+function wmsPedItensSeparados(pedidoId){
+  return (wmsTarefasSeparacao||[]).filter(t=>t.pedido_id===pedidoId&&t.status==='concluida'&&Number(t.qtd_separada||t.quantidade||0)>0)
+    .map(t=>{ const pl=(wmsPallets||[]).find(x=>x.id===t.pallet_id); return {t, qtd:Number(t.qtd_separada||t.quantidade||0), rg:pl?String(pl.rg||''):'', end:t.endereco_origem||(pl&&pl.endereco_codigo)||''}; });
+}
+function wmsPedBtnExcluir(p){
+  if(!p||p.status==='excluido'||!wmsPedPodeExcluirPerfil()) return '';
+  const b=wmsPedBloqueioExclusao(p);
+  return b?`<button class="btn btn-sm" disabled title="${ecomEsc('Não pode excluir: '+b)}">🗑 Excluir pedido</button>`
+          :`<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsPedExcluirModal('${p.id}')">🗑 Excluir pedido</button>`;
+}
+function wmsPedExcluirModal(id){
+  const p=wmsPedidos.find(x=>x.id===id); if(!p) return;
+  const b=wmsPedBloqueioExclusao(p); if(b){ showToast('Não pode excluir: '+b,'amber'); return; }
+  const sep=wmsPedItensSeparados(id);
+  const aviso=sep.length
+    ? `<div style="background:var(--amber-bg);color:var(--amber-text);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px">⚠ <b>${sep.length}</b> item(ns) já foram separados. Será gerada uma <b>CONTRA-ORDEM</b> para devolver ao endereço de origem:<div style="margin-top:6px;font-family:monospace">`
+      +sep.map(x=>'· '+ecomEsc(x.t.sku)+' · '+x.qtd.toLocaleString('pt-BR')+' '+ecomEsc(x.t.tipo_volume||'')+' → '+ecomEsc(x.end||'(sem endereço)')+(x.rg?' (RG '+ecomEsc(x.rg)+')':'')).join('<br>')+'</div></div>'
+    : `<div style="font-size:12px;color:var(--text2);margin-bottom:12px">Nada foi separado. O pedido sai das telas do WMS e o empenho é liberado; ele fica guardado como excluído, com o seu nome, a data e o motivo.</div>`;
+  portModal('Excluir pedido '+ecomEsc(p.numero_pedido||'')+(p.numero_curto?' · OS '+ecomEsc(p.numero_curto):''),
+    aviso+'<label class="fl">Motivo *</label><input class="fi" id="wms-exc-motivo" placeholder="ex.: importado em duplicidade pelo cliente">',
+    `wmsPedExcluirSalvar('${p.id}')`,{width:'520px',saveLabel:sep.length?'Excluir e gerar contra-ordem':'Excluir pedido'});
+}
+async function wmsPedExcluirSalvar(id){
+  const p=wmsPedidos.find(x=>x.id===id); if(!p) return;
+  const motivo=String((ge('wms-exc-motivo')||{}).value||'').trim();
+  if(!motivo){ portErr('Informe o motivo.'); return; }
+  const b=wmsPedBloqueioExclusao(p); if(b){ portErr('Não pode excluir: '+b); return; }
+  const sep=wmsPedItensSeparados(id), quem=(profile&&profile.full_name)||(cu&&cu.email)||'', agora=new Date().toISOString();
+  const ref=(p.numero_curto?'OS '+p.numero_curto+' · ':'')+(p.numero_pedido||'');
+  portSaving();
+  try{
+    // 1) contra-ordem primeiro: se a tabela não existir, nada é alterado
+    for(const x of sep){
+      await dbInsert('wms_contra_ordens',{company_id:company?.id,pedido_id:p.id,pedido_ref:ref,tarefa_id:x.t.id,sku:x.t.sku||null,descricao:x.t.descricao||null,
+        quantidade:x.qtd,tipo_volume:x.t.tipo_volume||null,endereco_destino:x.end||null,pallet_id:x.t.pallet_id||null,rg:x.rg||null,
+        status:'pendente',motivo,criada_por_nome:quem});
+    }
+    // 2) empenho reservado volta a ficar disponível
+    try{ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); }catch(_e){ /* cliente sem saldo controlado no VERUS: sem empenho */ }
+    // 3) tarefas canceladas e vínculos de lista removidos
+    for(const t of (wmsTarefasSeparacao||[]).filter(t=>t.pedido_id===p.id)) await dbUpdate('wms_tarefas_separacao',t.id,{status:'cancelada'});
+    for(const lp of (wmsListaPedidos||[]).filter(lp=>lp.pedido_id===p.id)) await dbDelete('wms_lista_pedidos',lp.id);
+    // 4) marca o pedido
+    const marca={status:'excluido',excluido_em:agora,excluido_por:cu?.id||null,excluido_por_nome:quem,motivo_exclusao:motivo};
+    await dbUpdate('wms_pedidos',p.id,marca);
+    await wmsPedidoHist(p.id,'excluido','Excluído por '+quem+' · motivo: '+motivo+(sep.length?' · contra-ordem com '+sep.length+' item(ns)':''));
+    // estado local
+    Object.assign(p,marca);
+    wmsPedidos=wmsPedidos.filter(x=>x.id!==p.id); wmsPedidosExcluidos=[p,...(wmsPedidosExcluidos||[])];
+    wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(t=>t.pedido_id!==p.id);
+    wmsListaPedidos=(wmsListaPedidos||[]).filter(lp=>lp.pedido_id!==p.id);
+    wmsPedSelecionados.delete(p.id);
+    if(sep.length){ try{ wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${company?.id}&status=eq.pendente&order=created_at.asc`); }catch(_e){} }
+    portClose();
+    showToast('Pedido '+(p.numero_pedido||'')+' excluído'+(sep.length?' · contra-ordem gerada (WMS → Separação)':''),'green');
+    render();
+  }catch(e){
+    const m=String(e&&e.message||e);
+    portErr(/wms_contra_ordens|excluido_|schema cache|column/i.test(m)?'Rode o SQL da v1.0.1171 antes de excluir (tabela de contra-ordens / colunas de exclusão).':'Erro: '+m);
+  }
+}
+function wmsContraOrdensHtml(){
+  const cos=(wmsContraOrdens||[]).filter(c=>c.company_id===company?.id&&c.status==='pendente');
+  if(!cos.length) return '';
+  const porPed={}; cos.forEach(c=>{ (porPed[c.pedido_id]=porPed[c.pedido_id]||[]).push(c); });
+  const podeDev=wmsSepPodeConcluir();
+  const blocos=Object.keys(porPed).map(pid=>{ const l=porPed[pid], c0=l[0];
+    return `<div style="margin-top:8px"><div style="font-size:12px;color:var(--text2)"><b>${ecomEsc(c0.pedido_ref||'')}</b> · excluído por ${ecomEsc(c0.criada_por_nome||'?')} em ${new Date(c0.created_at).toLocaleString('pt-BR')} · "${ecomEsc(c0.motivo||'')}"</div>`
+      +l.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 12px;font-size:13px;border-bottom:1px dashed var(--border)"><span style="font-family:monospace;font-weight:700;min-width:90px">${ecomEsc(c.sku||'')}</span><span>${Number(c.quantidade||0).toLocaleString('pt-BR')} ${ecomEsc(c.tipo_volume||'')}</span><span>→ <b>${ecomEsc(c.endereco_destino||'(sem endereço)')}</b>${c.rg?' · RG '+ecomEsc(c.rg):''}</span>`
+        +(podeDev?`<button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdemDevolvido('${c.id}')">✓ Devolvido</button>`:'')+`</div>`).join('')+`</div>`; }).join('');
+  return `<div style="border:2px solid var(--amber-text);background:var(--amber-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px"><div style="font-weight:700;font-size:14px;color:var(--amber-text)">CONTRA-ORDENS · devolver ao endereço (${cos.length} pendente${cos.length>1?'s':''})</div>
+    <button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdensImprimir()">🖨 Imprimir</button></div>${blocos}</div>`;
+}
+async function wmsContraOrdemDevolvido(id){
+  const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c) return;
+  try{
+    const upd={status:'devolvida',devolvido_em:new Date().toISOString(),devolvido_por:cu?.id||null,devolvido_por_nome:(profile&&profile.full_name)||(cu&&cu.email)||''};
+    await dbUpdate('wms_contra_ordens',id,upd); Object.assign(c,upd);
+    wmsContraOrdens=wmsContraOrdens.filter(x=>x.status==='pendente');
+    showToast(c.sku+' devolvido ao endereço '+(c.endereco_destino||''),'green'); render();
+  }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+function wmsContraOrdensImprimir(){
+  const cos=(wmsContraOrdens||[]).filter(c=>c.company_id===company?.id&&c.status==='pendente'); if(!cos.length) return;
+  const linhas=cos.map(c=>`<tr><td>${ecomEsc(c.pedido_ref||'')}</td><td style="font-family:monospace;font-weight:700">${ecomEsc(c.sku||'')}</td><td>${ecomEsc(c.descricao||'')}</td><td style="text-align:right">${Number(c.quantidade||0).toLocaleString('pt-BR')} ${ecomEsc(c.tipo_volume||'')}</td><td style="font-weight:700">${ecomEsc(c.endereco_destino||'')}</td><td>${ecomEsc(c.rg||'')}</td><td style="width:110px"></td></tr>`).join('');
+  const html=`<html><head><title>Contra-ordens</title><style>body{font-family:Arial,sans-serif;font-size:12px;margin:18px}h2{margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #999;padding:6px 8px;text-align:left}th{background:#eee}</style></head><body>
+    <h2>CONTRA-ORDENS · devolver ao endereço</h2><div>Impresso em ${new Date().toLocaleString('pt-BR')} · ${cos.length} item(ns)</div>
+    <table><thead><tr><th>Pedido</th><th>SKU</th><th>Descrição</th><th>Qtd</th><th>Endereço destino</th><th>RG</th><th>Devolvido por</th></tr></thead><tbody>${linhas}</tbody></table></body></html>`;
+  let fr=ge('wms-co-print'); if(fr) fr.remove();
+  fr=document.createElement('iframe'); fr.id='wms-co-print'; fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(fr); const d=fr.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(()=>{ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} },300);
+}
 function wmsPedidoDetalhe(id){
-  const p=wmsPedidos.find(x=>x.id===id);if(!p)return;
+  const p=wmsPedidos.find(x=>x.id===id)||(wmsPedidosExcluidos||[]).find(x=>x.id===id);if(!p)return;   // v1.0.1171
   const cli=clientes.find(c=>c.id===p.cliente_id);
   const itens=wmsPedidoItens.filter(it=>it.pedido_id===id);
   const totQtd=itens.reduce((s,it)=>s+(+it.quantidade||0),0);
@@ -41072,7 +41189,11 @@ function wmsPedidoDetalhe(id){
         <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades</div></div>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
+        ${wmsPedBtnExcluir(p)}
         ${wmsPedBadge(p.status)}
+      </div>
+    </div>${p.status==='excluido'?`<div style="background:var(--red-bg);color:var(--red-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px">Excluído por <b>${ecomEsc(p.excluido_por_nome||'?')}</b> em ${p.excluido_em?new Date(p.excluido_em).toLocaleString('pt-BR'):'?'} · motivo: ${ecomEsc(p.motivo_exclusao||'—')}</div>`:''}<div style="display:none">
+      <div>
       </div>
     </div>
     <div style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px">
