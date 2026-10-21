@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1169 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1170 | Gerado: 2026-10-21 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1377,7 +1377,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1169';
+const APP_VERSION='v1.0.1170';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3983,7 +3983,7 @@ function capaDigTela(c){
   var d=capaDig, tot=d.perg.length;
   var topo='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaDig=null;capaViewId=null;render()">← Voltar</button>'
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+(c.data_operacao?' · '+new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+'</div>'
-    +'<button class="btn btn-sm" style="margin-left:auto" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></div>';
+    +'<span style="margin-left:auto;display:flex;gap:6px">'+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></span></div>';
   if(d.i>=tot){
     // v1.0.1069: regras de consistência do cliente (se o disjuntor estiver ligado)
     var _res=capaAvaliarRegras(c,d.resp,d.servs); d.regras=_res;
@@ -4063,7 +4063,7 @@ function capaVerTela(c){
   if(c.status!=='faturada'&&c.status!=='inutilizada'&&!c.fatura_id&&capaPodeEditar()) acoes+='<button class="btn" style="color:var(--red-text)" onclick="capaInutilizar(\''+c.id+'\')">⊘ Inutilizar capa</button>';
   return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>'
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+'</div>'
-    +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span><span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 Capa em branco</button>'
+    +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span><span style="margin-left:auto;display:flex;gap:6px">'+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 Capa em branco</button>'
     +(c.status!=='aberta'&&c.status!=='inutilizada'?'<button class="btn btn-sm btn-p" onclick="capaGerarPdf(\''+c.id+'\',true)">📄 Capa digital (preenchida)</button>':'')+'</span></div>'
     +capaCabecalhoHtml(c)
     +(c.status==='inutilizada'?'<div style="border:1px solid var(--border);background:var(--bg2);color:var(--text2);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">⊘ Capa inutilizada: <b>'+ecomEsc(c.motivo_inutilizacao||'')+'</b></div>':'')
@@ -4092,6 +4092,58 @@ async function capaReenviar(id){
   try{ await dbUpdate('processo_capas',id,up); Object.assign(c,up); showToast('Capa '+c.numero+' reenviada para digitação.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 // ══════════════ CAPAS · ESTORNO E INUTILIZAÇÃO (v1.0.1067) ══════════════
+// v1.0.1169: editar os dados de registro da capa (data, DOC, NF, motorista, placas…) até a capa entrar numa fatura
+function capaPodeEditarDados(c){ return !!c && capaPodeEditar() && !c.fatura_id && c.status!=='faturada' && c.status!=='inutilizada'; }
+function capaBtnEditarDados(c){
+  if(!c||!capaPodeEditar()) return '';
+  var ok=capaPodeEditarDados(c);
+  return '<button class="btn btn-sm"'+(ok?' onclick="capaEditarDados(\''+c.id+'\')"':' disabled title="Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados"')+'>✏ Editar dados</button>';
+}
+var CAPA_CAMPOS_REG=[['data_operacao','Data da operação'],['doc','DOC'],['nf_numero','NF'],['motorista','Motorista'],['transportadora','Transportadora'],
+  ['placa_cavalo','Placa cavalo'],['placa_carreta','Placa carreta'],['origem','Origem'],['rg','RG'],['lacre','Lacre'],['tipo_veiculo','Tipo de veículo']];
+function capaEditarDados(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeEditarDados(c)){ showToast('Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados.','amber'); return; }
+  var v=function(k){ return ecomEsc(c[k]==null?'':String(c[k])); };
+  var exp=c.tipo==='expedicao';
+  portModal('Editar dados da capa · '+ecomEsc(c.numero),
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div><label class="fl">Data da operação *</label><input class="fi" id="capa-e-data_operacao" type="date" value="'+v('data_operacao')+'"></div>'
+    +'<div><label class="fl">DOC</label><input class="fi" id="capa-e-doc" value="'+v('doc')+'"></div>'
+    +'<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="capa-e-nf_numero" value="'+v('nf_numero')+'"></div>'
+    +'<div><label class="fl">Motorista</label><input class="fi" id="capa-e-motorista" value="'+v('motorista')+'"></div>'
+    +'<div><label class="fl">Transportadora</label><input class="fi" id="capa-e-transportadora" value="'+v('transportadora')+'"></div>'
+    +'<div><label class="fl">Origem</label><input class="fi" id="capa-e-origem" value="'+v('origem')+'"></div>'
+    +'<div><label class="fl">Placa cavalo</label><input class="fi" id="capa-e-placa_cavalo" value="'+v('placa_cavalo')+'"></div>'
+    +'<div><label class="fl">Placa carreta</label><input class="fi" id="capa-e-placa_carreta" value="'+v('placa_carreta')+'"></div>'
+    +'<div><label class="fl">RG</label><input class="fi" id="capa-e-rg" value="'+v('rg')+'"></div>'
+    +'<div><label class="fl">Lacre</label><input class="fi" id="capa-e-lacre" value="'+v('lacre')+'"></div>'
+    +'<div><label class="fl">Tipo de veículo</label><select class="fi" id="capa-e-tipo_veiculo"><option value="">—</option>'
+      +CAPA_VEICULOS.map(function(t){ return '<option value="'+ecomEsc(t)+'"'+(t===c.tipo_veiculo?' selected':'')+'>'+ecomEsc(t)+'</option>'; }).join('')
+      +(c.tipo_veiculo&&CAPA_VEICULOS.indexOf(c.tipo_veiculo)<0?'<option selected value="'+v('tipo_veiculo')+'">'+v('tipo_veiculo')+'</option>':'')+'</select></div>'
+    +'</div><div class="lsub" style="color:var(--text3);margin-top:10px">Cada alteração fica registrada nas observações da capa. A data vale para o extrato e a armazenagem.</div>',
+    'capaSalvarDados(\''+c.id+'\')',{saveLabel:'Salvar'});
+}
+async function capaSalvarDados(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeEditarDados(c)){ portErr('Capa já faturada ou inutilizada.'); return; }
+  var novo={}, mud=[];
+  CAPA_CAMPOS_REG.forEach(function(par){
+    var el=ge('capa-e-'+par[0]); if(!el) return;
+    var nv=String(el.value||'').trim(), av=c[par[0]]==null?'':String(c[par[0]]);
+    if(nv!==av){ novo[par[0]]=nv||null; mud.push(par[1]+' de '+(av||'(vazio)')+' para '+(nv||'(vazio)')); }
+  });
+  if(!novo.hasOwnProperty('data_operacao')&&!c.data_operacao){ portErr('Informe a data da operação.'); return; }
+  if(novo.hasOwnProperty('data_operacao')&&!novo.data_operacao){ portErr('A data da operação é obrigatória.'); return; }
+  if(!mud.length){ portClose(); return; }
+  novo.observacoes=capaRegObs(c,'Dados alterados: '+mud.join('; '));
+  portSaving();
+  try{
+    await dbUpdate('processo_capas',c.id,novo);
+    Object.assign(c,novo);
+    portClose(); showToast('Dados da capa '+c.numero+' atualizados','green'); render();
+  }catch(e){ portErr('Erro: '+(e.message||e)); }
+}
 function capaRegObs(c,txt){ return ((c.observacoes?c.observacoes+'\n':'')+new Date().toLocaleString('pt-BR')+' · '+txt+' · '+((profile&&profile.full_name)||(cu&&cu.email)||'')).slice(0,4000); }
 async function capaEstornarConferencia(id){
   var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
