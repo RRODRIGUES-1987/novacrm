@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1177 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1178 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1177';
+const APP_VERSION='v1.0.1178';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -9558,12 +9558,30 @@ async function ttNegociar(tid){
     alert(/tabela_origem_id|proposta_origem|tipo_negociacao|schema cache|column/i.test(m)?'Rode o SQL da v1.0.1173 antes de negociar (colunas novas em propostas e tabelas).':'Erro ao abrir a negociação: '+m);
   }
 }
-async function propNegSalvar(aceitou){
+async function propNegSalvar(aceitou,pedirAprov){
   try{
     await salvarProposta('negociacao');
+    // v1.0.1178: mudou depois de aprovada para envio → precisa de nova aprovação (o PDF volta a sair com marca d'água)
+    if(propEditando&&propEditando.id&&!aceitou){
+      const _u={aprovado_por:null,aprovado_em:null}; if(pedirAprov) _u.aprov_envio_pedida_em=new Date().toISOString();
+      try{ await dbUpdate('propostas',propEditando.id,_u); }catch(_e){ delete _u.aprov_envio_pedida_em; await dbUpdate('propostas',propEditando.id,_u); }
+      propostas=propostas.map(x=>x.id===propEditando.id?{...x,..._u}:x);
+      if(pedirAprov){ showToast('Negociação salva e enviada para aprovação','green'); closePropEditor(); render(); return; }
+    }
     if(!aceitou){ showToast('Negociação salva','green'); closePropEditor(); render(); return; }
     const p=propEditando; closePropEditor(); render();
     if(p) propAceiteModal(p.id);
+  }catch(e){ alert('Erro: '+(e.message||e)); }
+}
+async function propNegAprovar(){
+  try{
+    await salvarProposta('negociacao');
+    const id=propEditando&&propEditando.id; if(!id) return;
+    const u={aprovado_por:cu?.id||null,aprovado_em:new Date().toISOString()};
+    await dbUpdate('propostas',id,u);
+    propostas=propostas.map(x=>x.id===id?{...x,...u}:x);
+    showToast('Proposta aprovada para envio — o PDF já sai com assinatura. Continua em negociação até o cliente aceitar.','green');
+    closePropEditor(); render();
   }catch(e){ alert('Erro: '+(e.message||e)); }
 }
 function propAceiteModal(pid){
@@ -15249,8 +15267,8 @@ function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
         ${(sc.status==='negociacao')?`<button onclick="propNegSalvar()" style="padding:8px 14px;border:1px solid #e5e5e0;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar negociação</button>
         <button onclick="propNegSalvar(true)" style="padding:8px 14px;border:none;border-radius:8px;background:#15803d;color:#fff;cursor:pointer;font-size:13px;font-weight:600">✓ Cliente aceitou</button>`:`<button onclick="salvarRascunho()" style="padding:8px 14px;border:1px solid #e5e5e0;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>`}
         ${role==='admin'||role==='adm'
-          ?(sc.status==='negociacao'?'':`<button onclick="salvarEAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar e aprovar</button>`)
-          :(sc.status==='negociacao'?'':`<button onclick="enviarParaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`)
+          ?(sc.status==='negociacao'?`<button onclick="propNegAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600" title="Aprova a proposta para enviar ao cliente (sai com assinatura, sem marca d'água). Continua em negociação até o cliente aceitar.">${sc.aprovado_em?'✓ Aprovada p/ envio · salvar e reaprovar':'Salvar e aprovar p/ envio'}</button>`:`<button onclick="salvarEAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Salvar e aprovar</button>`)
+          :(sc.status==='negociacao'?`<button onclick="propNegSalvar(false,true)" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Pedir aprovação p/ envio</button>`:`<button onclick="enviarParaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:#1a1a1a;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`)
         }
       </div>
     </div>
@@ -16002,7 +16020,7 @@ async function rejeitarProposta(id){
 
 function gerarPDF(id){
   const p=propostas.find(x=>x.id===id);if(!p)return;
-  const aprovada=p.status==='aprovada';
+  const aprovada=p.status==='aprovada'||(p.status==='negociacao'&&!!p.aprovado_em);   // v1.0.1178: negociação aprovada p/ envio
   let tarifas=[];try{tarifas=JSON.parse(p.tarifas||'[]');}catch(e){}
 
   // Remove iframe anterior
