@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1173 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1174 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1173';
+const APP_VERSION='v1.0.1174';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3033,6 +3033,7 @@ async function ecomFullEtiqImportar(file,det){
       ped=cands.find(function(p){ return String(p.numero_pedido||'')==='ML-'+vol.envio || ecomFullMeta(p).envio===vol.envio; });
       if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Etiquetas dos volumes do envio <b>'+ecomEsc(vol.envio)+'</b>, mas não há pedido Full ML com esse envio aguardando etiqueta.','Importe e grave o PDF das etiquetas de produtos antes.'],'red'); return; }
       meta=ecomFullMeta(ped);
+      var _prevCx=(meta.caixas||[]).slice(), _prevPath=meta.master_pdf||'';   // v1.0.1174: volumes em mais de um arquivo
       // v1.0.1128: se o checkout já começou, preserva o progresso de cada caixa (itens, quantidade, fechamento)
       var _ant={}; (meta.caixas||[]).forEach(function(c){ _ant[c.n]=c; });
       meta.caixas=vol.caixas.map(function(c){ var a=_ant[c.n]; return a?Object.assign({},a,{spx:c.spx,pagina:c.pagina,slot:c.slot,de:c.de}):c; });
@@ -3053,6 +3054,8 @@ async function ecomFullEtiqImportar(file,det){
     ped=cands.find(function(p){ return String(p.numero_pedido||'').toUpperCase()===asn; });
     if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Etiquetas de caixa da ASN <b>'+ecomEsc(asn)+'</b>, mas n\u00e3o h\u00e1 pedido Full com essa ASN aguardando etiqueta.','Importe e grave a lista de separa\u00e7\u00e3o antes.'],'red'); return; }
     meta=ecomFullMeta(ped);
+    var _prevCx=(meta.caixas||[]).slice(), _prevPath=meta.master_pdf||'';   // v1.0.1174: volumes em mais de um arquivo
+    var _antS={}; (meta.caixas||[]).forEach(function(c){ _antS[c.n]=c; });
     meta.caixas=pags.map(function(t,i){
       var n=(t.match(/Total de\s+Caixas\s+[\s\S]*?\s(\d{1,3})\s+(\d{1,3})\s+Pickup/i)||[]);
       var spx=(t.match(/SPXBR\d{8,}/)||[])[0]||'';
@@ -3060,19 +3063,37 @@ async function ecomFullEtiqImportar(file,det){
       if(dc) meta.data_coleta=dc;
       var lj=(t.match(/(\d{8,12})\s+(.+?)\s+Nome da Loja/)||[]); if(lj[2]) meta.loja_nome=lj[2].trim();
       var wh=(t.match(/INBR[A-Z]{2,4}\d{8,14}\s+(BR[A-Z]{2,3}\d)\s/)||[])[1]; if(wh) meta.armazem=wh;
-      return {n:parseInt(n[1],10)||(i+1), spx:spx, pagina:i+1, itens:{}, qtd:0, fechada_em:null};
+      var _nn=parseInt(n[1],10)||(i+1), _a=_antS[_nn];   // v1.0.1174: preserva o progresso do checkout da caixa
+      return _a?Object.assign({},_a,{spx:spx||_a.spx, pagina:i+1}):{n:_nn, spx:spx, pagina:i+1, itens:{}, qtd:0, fechada_em:null};
     }).sort(function(a,b){return a.n-b.n;});
     meta.caixas_total=meta.caixas.length;
   } else {
-    var porSku={}, skuids={};
-    pags.forEach(function(t,i){
-      var sk=((t.match(/seller sku\s*:\s*([A-Z0-9._-]+)/i)||[])[1]||'').toUpperCase();
-      var id=(t.match(/whs skuid\s*:\s*([0-9_]+)/i)||t.match(/barcode\s*:\s*([0-9_]+)/i)||[])[1]||'';
-      if(!sk) return; (porSku[sk]=porSku[sk]||[]).push(i+1); if(id) skuids[sk]=id;
+    // v1.0.1174: SKU lido de forma robusta — se o "seller sku" não vier legível (quebrado em pedaços, outro rótulo),
+    // a página é atribuída pelo SKU do pedido que aparece no texto dela (antes a etiqueta sumia, ex.: PE040)
+    var _pInfo=pags.map(function(t,i){
+      return {i:i, sk:((t.match(/seller\s*sku\s*[:：]?\s*([A-Z0-9._-]+)/i)||[])[1]||'').toUpperCase(),
+        id:(t.match(/whs\s*skuid\s*[:：]?\s*([0-9_]+)/i)||t.match(/barcode\s*[:：]?\s*([0-9_]+)/i)||[])[1]||'',
+        up:String(t).toUpperCase(), comp:String(t).replace(/\s+/g,'').toUpperCase()};
     });
+    var _montar=function(skusPed){
+      var lst=(skusPed||[]).map(function(x){return String(x).toUpperCase();}).sort(function(a,b){return b.length-a.length;});
+      var set={}; lst.forEach(function(x){ set[x]=1; });
+      var por={}, ids={};
+      _pInfo.forEach(function(pi){
+        var k=pi.sk;
+        if(!k||(lst.length&&!set[k])){
+          var ach=lst.find(function(x){ return pi.comp.indexOf('SELLERSKU:'+x.replace(/\s+/g,''))>=0||pi.comp.indexOf('SELLERSKU'+x.replace(/\s+/g,''))>=0; })
+            ||lst.find(function(x){ return new RegExp('(^|[^A-Z0-9])'+x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^A-Z0-9]|$)').test(pi.up); });
+          if(ach) k=ach;
+        }
+        if(!k) return; (por[k]=por[k]||[]).push(pi.i+1); if(pi.id) ids[k]=pi.id;
+      });
+      return {por:por, ids:ids};
+    };
     // pedido Full cujas quantidades por SKU batem com as etiquetas
-    ped=cands.find(function(p){ var u=ecomFullUnid(p), ks=Object.keys(u); return ks.length&&ks.every(function(k){ return (porSku[k]||[]).length===ecomN(u[k]); }); })
+    ped=cands.find(function(p){ var u=ecomFullUnid(p), ks=Object.keys(u), m=_montar(ks); return ks.length&&ks.every(function(k){ return (m.por[k]||[]).length===ecomN(u[k]); }); })
       ||(cands.length===1?cands[0]:null);
+    var _mm=_montar(ped?Object.keys(ecomFullUnid(ped)):[]), porSku=_mm.por, skuids=_mm.ids;
     if(!ped){ ecomProgResultado('Pedido Full n\u00e3o encontrado',null,['Nenhum pedido Full aguardando etiqueta tem as mesmas quantidades por SKU destas etiquetas.','Confira se a lista de separa\u00e7\u00e3o foi gravada e se a NF n\u00e3o mudou as quantidades.'],'red'); return; }
     meta=ecomFullMeta(ped);
     meta.unidades_paginas=porSku; meta.skuids=Object.assign(meta.skuids||{},skuids);
@@ -3080,7 +3101,30 @@ async function ecomFullEtiqImportar(file,det){
     var _divTxt=div.length?('<span style="color:var(--amber-text,#b45309)">\u25cf</span> '+div.length+' SKU(s) com quantidade de etiquetas diferente do pedido: '+div.map(function(d){return ecomEsc(d.sku)+' ('+(porSku[String(d.sku||'').toUpperCase()]||[]).length+'/'+ecomN(d.qtd)+')';}).join(', ')):'';
   }
   var path=cid+'/full/'+String(ped.numero_pedido||ped.id).replace(/[^A-Za-z0-9_-]/g,'_')+'/'+det.tipo+'.pdf';
-  var up=await window.supabase.storage.from('ecom-etiquetas').upload(path,new Blob([det.buf],{type:'application/pdf'}),{contentType:'application/pdf',upsert:true});
+  var _bufUp=det.buf, _somou=0;
+  // v1.0.1174: etiquetas de volume vindas em MAIS DE UM ARQUIVO — o segundo não substitui o primeiro: as caixas novas
+  // são somadas e o PDF novo é juntado ao anterior (as páginas do novo vêm depois)
+  if(det.tipo==='master'&&typeof _prevPath!=='undefined'&&_prevPath&&_prevCx&&_prevCx.length){
+    var _velhas={}; _prevCx.forEach(function(c){ _velhas[+c.n]=1; });
+    var _novas=(meta.caixas||[]).filter(function(c){ return !_velhas[+c.n]; });
+    if(_novas.length){
+      try{
+        var _oldBuf=_ecomFullPdfCache[_prevPath];
+        if(!_oldBuf){ var _r=await window.supabase.storage.from('ecom-etiquetas').download(_prevPath); if(_r&&_r.data) _oldBuf=await _r.data.arrayBuffer(); }
+        if(!_oldBuf) throw new Error('não consegui baixar o arquivo anterior');
+        var _PL=await ecomFullPdfLib(), _out=await _PL.PDFDocument.create();
+        var _dOld=await _PL.PDFDocument.load(_oldBuf.slice(0)), _dNew=await _PL.PDFDocument.load(det.buf.slice(0));
+        (await _out.copyPages(_dOld,_dOld.getPageIndices())).forEach(function(pg){ _out.addPage(pg); });
+        var _off=_dOld.getPageCount();
+        (await _out.copyPages(_dNew,_dNew.getPageIndices())).forEach(function(pg){ _out.addPage(pg); });
+        _bufUp=await _out.save();
+        meta.caixas=_prevCx.concat(_novas.map(function(c){ return Object.assign({},c,{pagina:(+c.pagina||1)+_off}); })).sort(function(a,b){return a.n-b.n;});
+        meta.caixas_total=meta.caixas.length; meta.master_arquivos=(meta.master_arquivos||1)+1; _somou=_novas.length;
+        delete _ecomFullPdfCache[path];
+      }catch(_me){ ecomProgResultado('Erro ao juntar as etiquetas de volume',null,['O arquivo anterior não foi alterado.',ecomEsc(String(_me&&_me.message||_me))],'red'); return; }
+    }
+  }
+  var up=await window.supabase.storage.from('ecom-etiquetas').upload(path,new Blob([_bufUp],{type:'application/pdf'}),{contentType:'application/pdf',upsert:true});
   if(up&&up.error){ ecomProgResultado('Erro ao guardar o PDF',null,[ecomEsc(up.error.message),'Confira as permiss\u00f5es da pasta ecom-etiquetas (SQL parte 1 da v1.0.1033).'],'red'); return; }
   if(det.tipo==='master') meta.master_pdf=path; else meta.unidades_pdf=path;
   var upd={full_meta:meta};
@@ -3093,6 +3137,7 @@ async function ecomFullEtiqImportar(file,det){
     if(ped.status==='aguardando_etiqueta') upd.status='importado';
   }
   await dbUpdate('ecom_pedidos',ped.id,upd); Object.assign(ped,upd);
+  if(_somou) showToast(_somou+' caixa(s) nova(s) somada(s) às etiquetas de volume já importadas ('+meta.caixas_total+' no total)','green');   // v1.0.1174
   var _lin=[(det.tipo==='master'?'<b>'+meta.caixas_total+'</b> etiqueta(s) de caixa \u00b7 coleta '+ecomEsc(meta.data_coleta||'?'):'<b>'+pags.length+'</b> etiqueta(s) de unidade')+' ligada(s) ao Full <b>'+ecomEsc(ped.numero_pedido||'')+'</b>'];
   if(typeof _divTxt!=='undefined'&&_divTxt) _lin.push(_divTxt);
   _lin.push(upd.status==='importado'?'<span style="color:var(--green-text,#059669)">\u2714</span> Liberado para a separa\u00e7\u00e3o.':('Falta: '+[!meta.unidades_pdf?'etiquetas de unidade':'',!meta.master_pdf?'etiquetas de caixa':''].filter(Boolean).join(' e ')+(ecomTemNf(ped.id)?'':' \u00b7 NF (XML)')));
