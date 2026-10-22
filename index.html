@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1175 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1177 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1175';
+const APP_VERSION='v1.0.1177';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2887,8 +2887,12 @@ function ecomParseFullAsn(text){
   var itens=[], total=0;
   ini.forEach(function(r,k){
     var seg=t.slice(r.fim, k+1<ini.length?ini[k+1].i:t.length).replace(/\sT\s*o\s*t\s*a\s*l\s[\s\S]*$/,'').trim();   // o PDF quebra "Total" em "Tota l"
+    // v1.0.1177: o último item de uma folha arrastava o rodapé/cabeçalho da folha seguinte (endereço, "Cadastre-se…",
+    // títulos da tabela) e a quantidade lida virava 0 — o item sumia da lista (ex.: PE040 na INBRFRC12610190435)
+    seg=seg.replace(/\s(Condom[ií]nio|Endere[cç]o do Armaz|Observa[cç][oõ]es|ID da Requisi|M[eé]todo de Entrega|Cadastre-se|No\.\s*SKU|Informa[cç][oõ]es de SKU)[\s\S]*$/i,'').trim();
     var toks=seg.split(' ');
-    var qtd=parseInt(toks[toks.length-1],10)||0;
+    var _mq=seg.match(/(\d{9,12})\s+(\d{1,4})\s+(\d{1,6})\s*$/);   // "SKU do Armazém" (quebrado em 2) + quantidade
+    var qtd=(_mq?parseInt(_mq[3],10):parseInt(toks[toks.length-1],10))||0;
     var nome=seg.replace(/\s+Item without GTIN\s+\d+$/i,'').replace(/(\s+\d+)+$/,'').trim();
     if(qtd>0){ itens.push({sku:r.sku,ean:'',descricao:nome||r.sku,qtd:qtd,full_skuid:r.skuid}); total+=qtd; }
   });
@@ -3544,7 +3548,15 @@ async function ecomInserirItem(obj){
 }
 // Full: a "unidade" é a da Shopee (etiqueta) — o kit conta como 1, mesmo com os componentes abertos nos itens
 function ecomFullUnid(p){
-  var meta=ecomFullMeta(p); if(meta.unidades&&Object.keys(meta.unidades).length) return meta.unidades;
+  var meta=ecomFullMeta(p);
+  if(meta.unidades&&Object.keys(meta.unidades).length){
+    // v1.0.1176: item avulso (fora de kit) que está no pedido mas ficou fora da lista de unidades do Full entra também
+    // (ex.: PE040 no INBRFRC12610190435 — 192 nos itens e nas etiquetas, 0 na lista, e a etiqueta "sumia" da tela)
+    var uu=Object.assign({},meta.unidades), _k=Object.keys(uu).map(function(x){return String(x).toUpperCase();});
+    ecomItensDo(p.id).forEach(function(i){ if(i.kit_sku) return; var k=String(i.sku||'').toUpperCase(); if(!k||_k.indexOf(k)>=0) return;
+      uu[k]=(uu[k]||0)+ecomN(i.qtd); });
+    return uu;
+  }
   var u={}, its=ecomItensDo(p.id);
   its.forEach(function(i){
     if(i.kit_sku){ var cp=(ecomKitComp(i.kit_sku)||[]).find(function(c){return String(c.sku||'').toUpperCase()===String(i.sku||'').toUpperCase();});
