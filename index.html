@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1184 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1185 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1184';
+const APP_VERSION='v1.0.1185';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3240,6 +3240,11 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
   var html='<!doctype html><html><head><meta charset="utf-8"><style>@page{size:'+wmm+'mm '+hmm+'mm;margin:0}html,body{margin:0;padding:0}'
     +'img{display:block;width:'+wmm+'mm;height:'+hmm+'mm;page-break-after:always;break-after:page}img:last-child{page-break-after:auto;break-after:auto}</style></head><body>'
     +imgs.map(function(s){return '<img src="'+s+'">';}).join('')+'</body></html>';
+  if(formato==='master'&&window._ecomMasterViaQz){   // v1.0.1185: etiqueta da caixa direto na impressora 100x150 (QZ Tray), sem diálogo
+    window._ecomMasterViaQz=false;
+    try{ await ecomQzConnect(true); var _prq=await ecomQzResolvePrinter(); if(_prq){ for(var _qi=0;_qi<imgs.length;_qi++) await ecomQzPrintImg(_prq,imgs[_qi]); return 'qz'; } }catch(_qe){ console.warn('[caixa] QZ',_qe); }
+    return 'semqz';
+  }
   if(_temCel){ try{ if(await ecomFullImprimirZpl(imgs,wmm,hmm)) return true; }catch(_z){} }   // v1.0.1157: direto em ZPL
   if(_temCel && ecomQzUnidRot()){   // v1.0.1165: "girar" vale também na caixa de diálogo
     for(var _gi=0;_gi<imgs.length;_gi++) imgs[_gi]=await ecomImgGirada(imgs[_gi]);
@@ -3394,6 +3399,123 @@ async function arLiberar(ctx){
     ge('ar-sup').remove(); showToast('Bipe liberado por '+(pj[0].full_name||em),'green');
   }catch(e){ if(er) er.textContent='Erro: '+(e.message||e); }
 }
+
+// ═══ v1.0.1185 · CHECKOUT DO FULL POR PRODUTO ═══
+// Folha da OS → bipa o EAN do produto → o VERUS imprime as 48 etiquetas de unidade daquele SKU e, em seguida, a etiqueta
+// da próxima caixa livre (QZ Tray na impressora 100x150; sem QZ, botão para imprimir) → bipa o QR da caixa colada
+// ("Bipagem do Motorista/CD") para confirmar: a caixa fica SKU × 48, fechada, e libera o próximo produto.
+function ecomFullUpc48(meta){ return Number(meta.upc)>0?Number(meta.upc):48; }
+function ecomFullSpxDe(code){ var m=ecomFullNormQr(code).match(/SPXBR\d{6,}/); return m?m[0]:''; }
+function ecomFullCaixaDoCodigo(meta,code){
+  var spx=ecomFullSpxDe(code), q=ecomFullNormQr(code);
+  return (meta.caixas||[]).find(function(c){ var cs=ecomFullNormQr(c.spx||''); if(!cs) return false; var cm=(cs.match(/SPXBR\d{6,}/)||[])[0]||cs; return (spx&&cm===spx)||cs===q; })||null;
+}
+function ecomFullSkuDoCodigo(meta,code,un){
+  var qr=ecomFullNormQr(code), sk='';
+  if(meta.mlcodes&&meta.mlcodes[qr]) sk=String(meta.mlcodes[qr]).toUpperCase();
+  if(!sk) Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
+  if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
+  if(!sk&&un&&(String(code).toUpperCase() in un)) sk=String(code).toUpperCase();
+  return sk;
+}
+function ecomFullPaginasUnid(meta,sk,ini,qtd){
+  if(meta.ml&&meta.unid_cells){ var it=ecomMlItensImpressao(meta,sk)||[]; return it.slice(ini,ini+qtd); }
+  return ((meta.unidades_paginas||{})[sk]||[]).slice(ini,ini+qtd);
+}
+async function ecomFullProdBip(p,its,meta,code){
+  var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), pend=meta.cx_pend||null;
+  var salvar=async function(){ p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); };
+  // ── aguardando a confirmação da caixa ──
+  if(pend){
+    var cxl=ecomFullCaixaDoCodigo(meta,code);
+    if(!cxl){
+      if(ecomFullSpxDe(code)){ ecomBeep(); ecomCxFlash('Etiqueta de caixa não é deste Full','red'); }
+      else { ecomBeep(); ecomCxFlash('Antes do próximo produto, bipe o QR da caixa '+pend.n+' ("Bipagem do Motorista/CD") já colada','red'); }
+      ecomCxRender(); return;
+    }
+    if(+cxl.n!==+pend.n){ ecomBeep(); ecomCxFlash('CAIXA ERRADA: esta é a caixa '+cxl.n+'. Cole e bipe a etiqueta da caixa '+pend.n,'red'); ecomCxRender(); return; }
+    // confere de uma vez as unidades da caixa
+    var sk=pend.sku, falta=pend.qtd;
+    var kitIts=its.filter(function(i){return String(i.kit_sku||'').toUpperCase()===sk;});
+    if(kitIts.length){
+      var comp={}; (ecomKitComp(sk)||[]).forEach(function(c){ comp[String(c.sku||'').toUpperCase()]=ecomN(c.qtd)||1; });
+      for(var k=0;k<kitIts.length;k++){ var it=kitIts[k], inc=(comp[String(it.sku||'').toUpperCase()]||1)*falta, nv=Math.min(ecomN(it.qtd),ecomN(it.qtd_conferida)+inc); await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nv}); it.qtd_conferida=nv; }
+    } else {
+      var lst=its.filter(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===sk; });
+      for(var j=0;j<lst.length&&falta>0;j++){ var it2=lst[j], cab=ecomN(it2.qtd)-ecomN(it2.qtd_conferida); if(cab<=0) continue; var u=Math.min(cab,falta);
+        var nv2=ecomN(it2.qtd_conferida)+u; await dbUpdate('ecom_pedido_itens',it2.id,{qtd_conferida:nv2}); it2.qtd_conferida=nv2; falta-=u; }
+    }
+    try{ await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,etapa:'conferencia',codigo_lido:'CAIXA '+pend.n+' · '+sk+' x'+pend.qtd+' · '+String(code).slice(0,60),operador:ecomOper()}); }catch(_b){}
+    var agora=new Date().toISOString();
+    cxl.itens={}; cxl.itens[sk]=pend.qtd; cxl.qtd=pend.qtd; cxl.fechada_em=agora; cxl.impressa_em=cxl.impressa_em||agora; cxl.confirmada_em=agora; cxl.sku=sk; delete cxl.reservada;
+    meta.cx_pend=null;
+    if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
+    var completo=Object.keys(un).every(function(kk){ return ecomFullConf(p,kk)>=ecomN(un[kk]); });
+    await salvar();
+    if(completo){
+      var _upd={status:'conferido',data_conferencia:agora}; if(!p.data_separacao){ _upd.data_separacao=agora; p.data_separacao=agora; }
+      await dbUpdate('ecom_pedidos',p.id,_upd); p.status='conferido'; ecomCxAutoConcluiOS(p.id); ecomCx.pendingLabel=null;
+      ecomCxFlash('Full '+(p.numero_pedido||'')+' CONFERIDO · '+(meta.caixas||[]).filter(function(c){return c.fechada_em;}).length+' caixa(s) fechada(s)','green');
+    } else ecomCxFlash('Caixa '+cxl.n+' confirmada · '+sk+' × '+pend.qtd+' · bipe o EAN do próximo produto','green');
+    ecomCxRender(); return;
+  }
+  // ── escolhendo o produto ──
+  if(ecomFullSpxDe(code)){ ecomBeep(); ecomCxFlash('Bipe primeiro o EAN do produto; a etiqueta da caixa sai depois das 48 unidades','red'); ecomCxRender(); return; }
+  var sku=ecomFullSkuDoCodigo(meta,code,un);
+  if(!sku||!(sku in un)){ ecomBeep(); ecomCxFlash(sku?('SKU '+sku+' não está neste Full'):('Código não reconhecido: '+code),'red'); ecomCxRender(); return; }
+  var conf=ecomFullConf(p,sku), resta=ecomN(un[sku])-conf;
+  if(resta<=0){ ecomBeep(); ecomCxFlash('SKU '+sku+' já completo ('+ecomN(un[sku])+')','red'); ecomCxRender(); return; }
+  var qtd=Math.min(upc,resta);
+  var livre=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0];
+  if(!livre){ ecomBeep(); ecomCxFlash('Não há etiqueta de caixa livre neste Full. Importe as etiquetas de volume.','red'); ecomCxRender(); return; }
+  var pags=ecomFullPaginasUnid(meta,sku,conf,qtd);
+  if(pags.length<qtd){ ecomBeep(); ecomCxFlash('Faltam etiquetas de unidade de '+sku+' no PDF ('+pags.length+' de '+qtd+'). Importe o PDF de unidades.','red'); ecomCxRender(); return; }
+  livre.reservada=sku; meta.cx_pend={n:livre.n,sku:sku,qtd:qtd,ini:conf,em:new Date().toISOString(),cx_impressa:false};
+  await salvar();
+  ecomCxFlash((qtd<upc?'CAIXA PARCIAL: ':'')+'Caixa '+livre.n+' · '+sku+' × '+qtd+' · imprimindo as etiquetas de unidade…','green'); ecomCxRender();
+  await ecomFullImprimirPaginas(meta.unidades_pdf,pags);
+  await ecomFullProdImprimirCaixa(p.id,true);
+}
+async function ecomFullProdImprimirCaixa(pid,auto){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
+  var c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;}); if(!c||!c.pagina){ showToast('Caixa '+pend.n+' sem etiqueta no PDF.','red'); return; }
+  var r;
+  if(auto){ window._ecomMasterViaQz=true; r=await ecomFullImprimirPaginas(meta.master_pdf,[ecomFullItemCaixa(meta,c)],'master'); window._ecomMasterViaQz=false; }
+  else r=await ecomFullImprimirPaginas(meta.master_pdf,[ecomFullItemCaixa(meta,c)],'master');
+  if(r==='semqz'){ ecomCxFlash('Etiquetas de unidade enviadas. Clique em "Imprimir etiqueta da caixa '+pend.n+'" (impressora 100x150).','amber'); ecomCxRender(); return; }
+  if(r){ pend.cx_impressa=true; c.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(_e){}
+    ecomCxFlash('Caixa '+pend.n+' · '+pend.sku+' × '+pend.qtd+' · cole as etiquetas, feche a caixa e BIPE O QR DA CAIXA','green'); ecomCxRender(); }
+}
+function ecomFullProdReimpUnid(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
+  return ecomFullImprimirPaginas(meta.unidades_pdf,ecomFullPaginasUnid(meta,pend.sku,pend.ini,pend.qtd));
+}
+async function ecomFullProdCancelar(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
+  if(!confirm('Cancelar a caixa '+pend.n+' ('+pend.sku+' × '+pend.qtd+')? As etiquetas impressas devem ser descartadas.')) return;
+  var c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;}); if(c){ delete c.reservada; c.impressa_em=null; }
+  meta.cx_pend=null; p.full_meta=meta; await dbUpdate('ecom_pedidos',pid,{full_meta:meta});
+  ecomCxFlash('Caixa '+pend.n+' cancelada. Bipe o EAN do produto para recomeçar.','amber'); ecomCxRender();
+}
+function ecomFullProdPainel(p){
+  var meta=ecomFullMeta(p), upc=ecomFullUpc48(meta), un=ecomFullUnid(p), ks=Object.keys(un), pend=meta.cx_pend;
+  var cxs=meta.caixas||[], fech=cxs.filter(function(c){return c.fechada_em;}).length, tot=cxs.length||meta.caixas_total||0;
+  var topo=pend
+    ? '<div style="border:2px solid #f59e0b;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:12px;margin:10px 0">'
+      +'<div style="font-size:11px;color:var(--amber-text,#92400e);letter-spacing:.4px">AGUARDANDO A CAIXA</div>'
+      +'<div style="font-size:22px;font-weight:800">Bipe o QR da caixa '+pend.n+'</div>'
+      +'<div style="font-size:13px;margin-top:2px">'+ecomEsc(pend.sku)+' × '+pend.qtd+(pend.qtd<upc?' <b>(caixa parcial)</b>':'')+' · etiqueta "Bipagem do Motorista/CD"</div>'
+      +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'
+      +(pend.cx_impressa?'':'<button class="btn btn-p" onclick="ecomFullProdImprimirCaixa(\''+p.id+'\',false)">\ud83d\udda8 Imprimir etiqueta da caixa '+pend.n+'</button>')
+      +'<button class="btn btn-sm" onclick="ecomFullProdReimpUnid(\''+p.id+'\')">Reimprimir unidades</button>'
+      +(pend.cx_impressa?'<button class="btn btn-sm" onclick="ecomFullProdImprimirCaixa(\''+p.id+'\',false)">Reimprimir caixa</button>':'')
+      +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomFullProdCancelar(\''+p.id+'\')">Cancelar caixa</button></div></div>'
+    : '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">FULL '+ecomEsc(p.numero_pedido||'')+' · CHECKOUT POR PRODUTO</div>'
+      +'<div style="font-size:20px;font-weight:800">Bipe o EAN do próximo produto</div><div style="font-size:12.5px;color:var(--text3)">Caixas '+fech+' de '+tot+' · '+upc+' unidades por caixa</div></div>';
+  var lin=ks.map(function(k){ var t=ecomN(un[k]), c=ecomFullConf(p,k), ct=Math.ceil(t/upc), cf=Math.floor(Math.min(c,t)/upc)+((Math.min(c,t)%upc&&c>=t)?1:0), ok=c>=t;
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+' <small style="color:var(--text3)">'+ecomEsc(ecomFullDesc(p,k)||'')+'</small></span><span>'+cf+'/'+ct+' cx · '+c+'/'+t+' un</span></div>'; }).join('');
+  return topo+'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">PRODUTOS · CAIXAS / UNIDADES</div>'+lin+'</div>';
+}
 async function ecomFullBip(p,its,code){
   if(!antiRajada('full:'+p.id,code)) return;   // v1.0.1179
   // v1.0.1129: lê o full_meta ATUAL do banco a cada bipe. A tela do checkout podia ter o pedido carregado ANTES das
@@ -3401,6 +3523,7 @@ async function ecomFullBip(p,its,code){
   // e, pior, ao gravar o progresso, regravava o full_meta antigo por cima do que estava no banco.
   try{ var _fm=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=full_meta,status'); if(_fm&&_fm[0]&&_fm[0].full_meta){ p.full_meta=_fm[0].full_meta; if(_fm[0].status) p.status=_fm[0].status; } }catch(_e){}
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
+  if(meta.modo_produto!==false&&!meta.ml){ await ecomFullProdBip(p,its,meta,code); return; }   // v1.0.1185: checkout por produto (caixas de 48) — Full Shopee
   if(meta.mlcodes&&meta.mlcodes[qr]) sk=String(meta.mlcodes[qr]).toUpperCase();   // v1.0.1118: código ML da unidade
   if(!sk) Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
   if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
@@ -3458,6 +3581,7 @@ async function ecomFullImprimirCaixa(pid,n){
   if(ok){ cx.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(e){} ecomCxRender(); }
 }
 function ecomFullPainelCheckout(p){
+  if(ecomFullMeta(p).modo_produto!==false&&!ecomFullMeta(p).ml) return ecomFullProdPainel(p);   // v1.0.1185 (Full Shopee)
   var meta=ecomFullMeta(p), upc=ecomFullUpc(p,meta), _un=ecomFullUnid(p), _ks=Object.keys(_un);
   var tot=_ks.reduce(function(s,k){return s+ecomN(_un[k]);},0), feito=_ks.reduce(function(s,k){return s+Math.min(ecomN(_un[k]),ecomFullConf(p,k));},0);
   var n=meta.cx_atual||1, cx=(meta.caixas||[]).find(function(c){return c.n===n;})||{qtd:0}, fech=(meta.caixas||[]).filter(function(c){return c.fechada_em;});
@@ -53754,6 +53878,8 @@ function ecomPanelSep(){
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border-top:1px solid var(--border)">'
       +'<span style="font-family:monospace;font-weight:600">OS-'+String(o.numero||0).padStart(4,'0')+'</span>'
       +'<span style="font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bg3)">'+(o.tipo==='sku'?'Consolidado SKU':'Por pedido')+'</span>'
+      +(o.marketplace?(function(){ var _mk=String(o.marketplace), _b=/tiktok/i.test(_mk)?['#111','#fff']:(/shopee/i.test(_mk)?['#ee4d2d','#fff']:(/mercado/i.test(_mk)?['#ffe600','#333']:(/amazon/i.test(_mk)?['#232f3e','#fff']:['var(--bg3)','var(--text2)'])));
+          return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:'+_b[0]+';color:'+_b[1]+'">'+ecomEsc(_mk)+'</span>'; })():'')   // v1.0.1185
       +(sep?'<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--green-bg,#dcfce7);color:var(--green-text,#059669)">separada</span>':'')
       +alerta
       +'<span style="flex:1;font-size:12px;color:var(--text3)">'+(o.qtd_pedidos||0)+' pedido(s) · '+ecomN(o.qtd_itens)+' un'+(quando?' \u00b7 gerada '+quando:'')+(o.operador?' \u00b7 '+ecomEsc(o.operador):'')+'</span>'
@@ -53837,27 +53963,33 @@ async function ecomGerarOS(){
       ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody(); return;
     }
     var somaUn=function(ids){ var q=0; ids.forEach(function(id){ ecomItensDo(id).forEach(function(it){ q+=ecomN(it.qtd); }); }); return q; };
-    var os=await dbInsert('ecom_ordens_sep',{company_id:cid,tipo:tipoOS,status:'separando',operador:ecomOper(),qtd_pedidos:pids.length,qtd_itens:somaUn(pids)});
-    // 2) reserva atômica: só muda (e entra na OS) quem ainda está "importado"
-    var ganhos=[];
-    for(var ch2 of chunks(pids)){
-      var rr=await sbFetch('PATCH','/rest/v1/ecom_pedidos?id=in.('+ch2.join(',')+')&status=eq.importado',{status:'separando',os_id:os.id},tok);
-      if(!rr.ok) throw new Error('pedidos: '+((rr.data&&rr.data.message)||rr.status));
-      (rr.data||[]).forEach(function(x){ ganhos.push(x.id); });
+    // v1.0.1185: uma OS por MARKETPLACE (evita colisão de separação com prioridades diferentes); Full não se mistura com o normal
+    var grupos={}, ordemG=[];
+    pids.forEach(function(id){ var pp=ecomPedidos.find(function(x){return x.id===id;}); var mk=(pp&&ecomMarketplace(pp)&&ecomMarketplace(pp).nome)||'Outros';
+      if(pp&&ecomEhFull(pp)) mk='Full '+mk.replace(/^Outros$/,'');
+      mk=mk.trim(); if(!grupos[mk]){ grupos[mk]=[]; ordemG.push(mk); } grupos[mk].push(id); });
+    var geradas=[], foraTot=jaEmOS.length;
+    for(var gi=0;gi<ordemG.length;gi++){
+      var mkt=ordemG[gi], gp=grupos[mkt];
+      var _osIns={company_id:cid,tipo:tipoOS,status:'separando',operador:ecomOper(),qtd_pedidos:gp.length,qtd_itens:somaUn(gp),marketplace:mkt};
+      var os=null; try{ os=await dbInsert('ecom_ordens_sep',_osIns); }catch(_mk){ delete _osIns.marketplace; os=await dbInsert('ecom_ordens_sep',_osIns); }   // sem a coluna (SQL não rodado) gera sem o rótulo
+      // reserva atômica: só muda (e entra na OS) quem ainda está "importado"
+      var ganhos=[];
+      for(var ch2 of chunks(gp)){
+        var rr=await sbFetch('PATCH','/rest/v1/ecom_pedidos?id=in.('+ch2.join(',')+')&status=eq.importado',{status:'separando',os_id:os.id},tok);
+        if(!rr.ok) throw new Error('pedidos: '+((rr.data&&rr.data.message)||rr.status));
+        (rr.data||[]).forEach(function(x){ ganhos.push(x.id); });
+      }
+      if(!ganhos.length){ await dbDelete('ecom_ordens_sep',os.id); foraTot+=gp.length; continue; }
+      var ins=await sbFetch('POST','/rest/v1/ecom_os_pedidos',ganhos.map(function(id){return {company_id:cid,os_id:os.id,pedido_id:id};}),tok);
+      if(!ins.ok) throw new Error('v\u00ednculos da OS: '+((ins.data&&ins.data.message)||ins.status));
+      var perdeu=gp.length-ganhos.length; foraTot+=perdeu;
+      if(perdeu) await dbUpdate('ecom_ordens_sep',os.id,{qtd_pedidos:ganhos.length,qtd_itens:somaUn(ganhos)});
+      geradas.push('OS-'+String(os.numero||0).padStart(4,'0')+' \u00b7 '+mkt+' ('+ganhos.length+')');
     }
-    if(!ganhos.length){
-      await dbDelete('ecom_ordens_sep',os.id);
-      showToast('Outra OS pegou esses pedidos segundos antes. Nada foi gerado.','amber');
-      ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody(); return;
-    }
-    // 3) vínculos da OS numa gravação só
-    var ins=await sbFetch('POST','/rest/v1/ecom_os_pedidos',ganhos.map(function(id){return {company_id:cid,os_id:os.id,pedido_id:id};}),tok);
-    if(!ins.ok) throw new Error('v\u00ednculos da OS: '+((ins.data&&ins.data.message)||ins.status));
-    var perdeu=pids.length-ganhos.length;
-    if(perdeu) await dbUpdate('ecom_ordens_sep',os.id,{qtd_pedidos:ganhos.length,qtd_itens:somaUn(ganhos)});
     ecomSepSel={}; _ecomLoaded=false; await ecomLoadAll(); ecomRenderBody();
-    var fora=jaEmOS.length+perdeu;
-    showToast('OS-'+String(os.numero||0).padStart(4,'0')+' gerada com '+ganhos.length+' pedido(s)'+(fora?' \u00b7 '+fora+' j\u00e1 estavam em outra OS e ficaram de fora':''),fora?'amber':'green');
+    if(!geradas.length){ showToast('Outra OS pegou esses pedidos segundos antes. Nada foi gerado.','amber'); return; }
+    showToast((geradas.length>1?geradas.length+' OSs geradas: ':'')+geradas.join(' \u00b7 ')+(foraTot?' \u00b7 '+foraTot+' j\u00e1 estavam em outra OS e ficaram de fora':''),foraTot?'amber':'green');
   }catch(e){ showToast('Erro ao gerar OS: '+(e.message||e),'red'); }
   finally{ _ecomGerandoOS=false; var b2=ge('ecom-btn-gerar-os'); if(b2){ b2.disabled=false; b2.textContent='Gerar ordem de separa\u00e7\u00e3o'; } }
 }
