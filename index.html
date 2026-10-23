@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1179 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1180 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1179';
+const APP_VERSION='v1.0.1180';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -56250,11 +56250,50 @@ async function ecomEtiqImgDoArquivo(path){
   await ecomLoadPdfjs();
   var pdf=await window.pdfjsLib.getDocument({data:await blob.arrayBuffer()}).promise;
   var page=await pdf.getPage(1);
-  var v1=page.getViewport({scale:1}), vp=page.getViewport({scale:800/v1.width});   // 100 mm a 203 dpi ≈ 800 px
-  var cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
-  var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-  await page.render({canvasContext:ctx,viewport:vp}).promise;
+  // v1.0.1180: renderiza em alta resolução (3x); se a etiqueta for pequena na página, é remontada a partir dela (nítida);
+  // senão, reduz para os 800 px de sempre (100 mm a 203 dpi)
+  var v1=page.getViewport({scale:1}), vp=page.getViewport({scale:2400/v1.width});
+  var big=document.createElement('canvas'); big.width=Math.round(vp.width); big.height=Math.round(vp.height);
+  var bctx=big.getContext('2d'); bctx.fillStyle='#fff'; bctx.fillRect(0,0,big.width,big.height);
+  await page.render({canvasContext:bctx,viewport:vp}).promise;
+  var cv=null; try{ cv=ecomEtiqRecompor(big); }catch(_e){ cv=null; }
+  if(!cv){ cv=document.createElement('canvas'); cv.width=800; cv.height=Math.round(big.height*800/big.width);
+    var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.imageSmoothingEnabled=true; ctx.drawImage(big,0,0,cv.width,cv.height); }
   var url=cv.toDataURL('image/png'); _etqCacheImg[path]=url; return url;
+}
+// v1.0.1180: o PDF do Mercado Livre (via Olist) traz a etiqueta pequena no alto da página, um vazio grande e a faixa da
+// DANFE simplificada no rodapé. Aqui o VERUS acha os blocos impressos, descarta o branco e remonta em 10x15:
+// o bloco principal (etiqueta) ampliado e as faixas menores (DANFE) logo abaixo. Página que já vem cheia não muda.
+function ecomEtiqRecompor(cv){
+  var W=cv.width, H=cv.height, ctx=cv.getContext('2d'), d=ctx.getImageData(0,0,W,H).data;
+  var escuro=function(x,y){ var i=(y*W+x)*4; return (d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11)<200; };
+  // linhas com tinta
+  var lin=new Array(H); for(var y=0;y<H;y++){ var n=0; for(var x=0;x<W;x+=3){ if(escuro(x,y)) n++; } lin[y]=n>1; }
+  var gapMin=Math.max(12,Math.round(H*0.025)), blocos=[], ini=-1, branco=0;
+  for(var y2=0;y2<H;y2++){
+    if(lin[y2]){ if(ini<0) ini=y2; branco=0; }
+    else if(ini>=0){ branco++; if(branco>=gapMin){ blocos.push([ini,y2-branco]); ini=-1; branco=0; } }
+  }
+  if(ini>=0) blocos.push([ini,H-1-branco]);
+  blocos=blocos.map(function(b){ var x0=W, x1=-1; for(var yy=b[0];yy<=b[1];yy+=2){ for(var xx=0;xx<W;xx+=2){ if(escuro(xx,yy)){ if(xx<x0) x0=xx; if(xx>x1) x1=xx; } } }
+    return {x0:x0,x1:x1,y0:b[0],y1:b[1],w:x1-x0+1,h:b[1]-b[0]+1}; }).filter(function(b){ return b.x1>=0&&b.h>6; });
+  if(!blocos.length) return null;
+  var area=0; blocos.forEach(function(b){ area+=b.w*b.h; });
+  var bx0=Math.min.apply(null,blocos.map(function(b){return b.x0;})), bx1=Math.max.apply(null,blocos.map(function(b){return b.x1;}));
+  var by0=blocos[0].y0, by1=blocos[blocos.length-1].y1;
+  var vazio=1-area/(W*H), largUsada=(bx1-bx0+1)/W;
+  if(vazio<0.45&&largUsada>0.8) return null;   // página já ocupada: deixa como está (TikTok, Shopee…)
+  var OW=800, OH=1200, M=16, out=document.createElement('canvas'); out.width=OW; out.height=OH;
+  var o=out.getContext('2d'); o.fillStyle='#fff'; o.fillRect(0,0,OW,OH); o.imageSmoothingEnabled=true;
+  // bloco principal = maior área; os demais (faixas) vão abaixo, na ordem da página
+  var iP=0; blocos.forEach(function(b,i){ if(b.w*b.h>blocos[iP].w*blocos[iP].h) iP=i; });
+  var princ=blocos[iP], faixas=blocos.filter(function(_,i){return i!==iP;});
+  var hFaixas=faixas.reduce(function(s,b){ return s+Math.min(OH*0.22,b.h*(OW-2*M)/b.w)+M; },0);
+  var disp=OH-2*M-hFaixas, esc=Math.min((OW-2*M)/princ.w, disp/princ.h);
+  var pw=princ.w*esc, ph=princ.h*esc, y=M;
+  o.drawImage(cv,princ.x0,princ.y0,princ.w,princ.h,(OW-pw)/2,y,pw,ph); y+=ph+M;
+  faixas.forEach(function(b){ var e2=Math.min((OW-2*M)/b.w,(OH*0.22)/b.h), fw=b.w*e2, fh=b.h*e2; o.drawImage(cv,b.x0,b.y0,b.w,b.h,(OW-fw)/2,y,fw,fh); y+=fh+M; });
+  return out;
 }
 // ══════════════ v1.0.1033: ETIQUETAS IMPORTADAS À MÃO VÃO PARA O ARMAZENAMENTO ══════════════
 // A imagem da etiqueta deixa de ficar no banco (coluna img: ~300 MB). Vai para o Storage privado
