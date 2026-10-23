@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1183 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1184 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1183';
+const APP_VERSION='v1.0.1184';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -56718,6 +56718,60 @@ async function ecomEmbCarregar(romId){
     if(ecomEmb && ecomEmb.romId===romId){ ecomEmb.ok=Object.assign(o, ecomEmb.ok||{}); ecomEmb.carregado=true; ecomEmbRender(); }
   }catch(e){ if(ecomEmb&&ecomEmb.romId===romId){ ecomEmb.carregado=false; ecomEmbRender(); } console.warn('[embarque] nao recuperou o ja bipado:',e); }
 }
+
+// ═══ v1.0.1184 · CONTEÚDO DO ROMANEIO: OS → pedidos, com CHECKOUT e CONFERÊNCIA DE SAÍDA ═══
+// A expedição "olha para trás": cada OS/pedido mostra quantos volumes passaram pelo checkout e quantos já foram bipados
+// na saída deste romaneio. Vermelho = volume sem checkout (não deveria estar no caminhão); laranja = falta bipar.
+var _romAb={};
+function ecomCkPedidoOk(p){ return !!p.data_conferencia||['conferido','expedido','carregado','coletado','embarcado'].indexOf(String(p.status||''))>=0; }
+function ecomRomPedNums(p,romId,carregado){
+  if(ecomEhFull(p)){
+    var m=ecomFullMeta(p), cx=m.caixas||[], tot=cx.length||Number(m.caixas_total||0)||1;
+    var ck=cx.filter(function(c){return !!c.fechada_em;}).length;
+    var sd=carregado?tot:Object.keys(((ecomEmb&&ecomEmb.romId===romId&&ecomEmb.fullCx)||{})[p.id]||{}).length;
+    return {tot:tot, ck:ck, sd:Math.min(sd,tot), full:true};
+  }
+  return {tot:1, ck:ecomCkPedidoOk(p)?1:0, sd:(carregado||(ecomEmb&&ecomEmb.romId===romId&&ecomEmb.ok[p.id]))?1:0, full:false};
+}
+function ecomRomCel(a,b,tipo){
+  var ok=a>=b, cor=ok?'background:#dcfce7;color:#059669':(tipo==='ck'?'background:#fee2e2;color:#b91c1c':'background:#fef3c7;color:#b45309');
+  return '<span style="display:inline-block;min-width:58px;text-align:center;font-size:12px;padding:2px 6px;border-radius:7px;'+cor+'">'+a+'/'+b+'</span>';
+}
+function ecomRomConteudo(romId){
+  var r=ecomRomaneios.find(function(x){return x.id===romId;}); if(!r) return '';
+  var carregado=(r.status==='coletado');
+  var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===romId;});
+  var grupos={}, ordem=[];
+  peds.forEach(function(p){ var oid=ecomRelOsDoPedido(p)||'_sem'; if(!grupos[oid]){ grupos[oid]=[]; ordem.push(oid); } grupos[oid].push(p); });
+  var nomeOs=function(oid){ if(oid==='_sem') return 'Sem OS'; var o=(ecomOrdensSep||[]).find(function(x){return x.id===oid;}); return o?('OS-'+String(o.numero||0).padStart(6,'0')):'OS'; };
+  ordem.sort(function(a,b){ return a==='_sem'?1:(b==='_sem'?-1:nomeOs(a).localeCompare(nomeOs(b))); });
+  var T={tot:0,ck:0,sd:0,un:0};
+  var corpo=ordem.map(function(oid){
+    var G={tot:0,ck:0,sd:0,un:0,full:false};
+    var linhas=grupos[oid].map(function(p){
+      var n=ecomRomPedNums(p,romId,carregado), un=ecomItensDo(p.id).reduce(function(a,b){return a+ecomN(b.qtd);},0);
+      G.tot+=n.tot; G.ck+=n.ck; G.sd+=n.sd; G.un+=un; if(n.full) G.full=true;
+      return '<div onclick="ecomPedAbrir(\''+p.id+'\')" style="display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:6px;align-items:center;padding:6px 8px 6px 26px;border-top:1px solid var(--border);cursor:pointer;font-size:12px">'
+        +'<div><b>E-'+String(p.numero_interno||0).padStart(6,'0')+'</b> <span style="color:var(--text3)">'+ecomEsc(p.numero_pedido||'')+'</span><div style="color:var(--text3)">'+ecomEsc(p.destinatario_nome||'')+' · '+(n.full?n.tot+' caixas · ':'')+un.toLocaleString('pt-BR')+' un.</div></div>'
+        +'<div style="text-align:center">'+ecomRomCel(n.ck,n.tot,'ck')+'</div><div style="text-align:center">'+ecomRomCel(n.sd,n.tot,'sd')+'</div></div>';
+    }).join('');
+    T.tot+=G.tot; T.ck+=G.ck; T.sd+=G.sd; T.un+=G.un;
+    var aberto=!!_romAb[romId+':'+oid];
+    return '<div style="border-top:1px solid var(--border)">'
+      +'<div onclick="_romAb[\''+romId+':'+oid+'\']=!_romAb[\''+romId+':'+oid+'\'];var e=ge(\'ecom-rom-cont\');if(e)e.innerHTML=ecomRomConteudo(\''+romId+'\')" style="display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:6px;align-items:center;padding:8px;cursor:pointer;background:var(--bg2)">'
+      +'<div style="font-size:13px"><span style="display:inline-block;width:14px">'+(aberto?'\u25be':'\u25b8')+'</span><b>'+nomeOs(oid)+'</b>'+(G.full?' <span style="font-size:11px;color:var(--text3)">Full</span>':'')
+      +'<div style="font-size:11px;color:var(--text3);margin-left:14px">'+grupos[oid].length+' pedido(s) · '+G.tot+' vol. · '+G.un.toLocaleString('pt-BR')+' un.</div></div>'
+      +'<div style="text-align:center">'+ecomRomCel(G.ck,G.tot,'ck')+'</div><div style="text-align:center">'+ecomRomCel(G.sd,G.tot,'sd')+'</div></div>'
+      +(aberto?linhas:'')+'</div>';
+  }).join('');
+  var cab='<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:8px">'
+    +'<div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:16px;font-weight:600">'+T.ck+' de '+T.tot+'</div><div style="font-size:11px;color:var(--text3)">checkout feito</div></div>'
+    +'<div style="background:var(--bg2);border-radius:8px;padding:8px 10px"><div style="font-size:16px;font-weight:600">'+T.sd+' de '+T.tot+'</div><div style="font-size:11px;color:var(--text3)">conferência de saída</div></div></div>';
+  return cab+'<div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:340px">'
+    +'<div style="display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:6px;padding:6px 8px;font-size:11px;color:var(--text3)"><span>OS · pedidos ('+peds.length+' · '+T.un.toLocaleString('pt-BR')+' un.)</span><span style="text-align:center">Checkout</span><span style="text-align:center">Saída</span></div>'
+    +(corpo||'<div style="padding:10px;color:var(--text3);font-size:12px">Nenhum pedido neste romaneio.</div>')+'</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Verde = completo · laranja = falta bipar na saída · vermelho = volume sem checkout</div>';
+}
 function ecomRomAbrir(romId){
   var r=ecomRomaneios.find(function(x){return x.id===romId;}); if(!r)return;
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===romId;});
@@ -56730,7 +56784,7 @@ function ecomRomAbrir(romId){
     +(carregado?'<span style="margin-left:8px;font-size:12px;padding:2px 8px;border-radius:99px;background:#dcfce7;color:#059669">&#10003; carregado</span>':'')
     +'<button class="btn btn-sm" style="margin-left:auto" onclick="ecomCloseRomAbrir()">Fechar</button></div>'
     +'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">'+(r.qtd_pedidos||0)+' pedido(s) &middot; '+(r.qtd_volumes||0)+' volumes</div>'
-    +'<div style="border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:300px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:var(--bg2);text-align:left"><th style="padding:6px 8px">Pedido</th><th style="padding:6px 8px">Destinat&aacute;rio</th><th style="padding:6px 8px">Cidade/UF</th><th style="padding:6px 8px;text-align:center">Unid.</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div id="ecom-rom-cont">'+ecomRomConteudo(romId)+'</div>'   // v1.0.1184: OS → pedidos, com checkout e conferência de saída
     +(carregado?'':('<div id="ecom-emb-box" style="margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg2)">'
       +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><b style="font-size:14px">Confer&ecirc;ncia de embarque</b>'
       +'<span style="font-size:11px;color:var(--text3)">bipe a etiqueta de cada caixa</span></div>'
@@ -56774,6 +56828,7 @@ function ecomEmbFocus(ms){
   }, (typeof ms==='number'?ms:30));
 }
 function ecomEmbRender(){
+  var _rc=ge('ecom-rom-cont'); if(_rc&&ecomEmb) _rc.innerHTML=ecomRomConteudo(ecomEmb.romId);   // v1.0.1184
   var el=ge('ecom-emb-res'); if(!el||!ecomEmb)return;
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===ecomEmb.romId;});
   var total=peds.length, feitos=Object.keys(ecomEmb.ok).length;
