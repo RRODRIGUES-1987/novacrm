@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1178 | Gerado: 2026-10-22 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1179 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1178';
+const APP_VERSION='v1.0.1179';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3340,7 +3340,61 @@ function ecomFullSetUpc(pid,v){
   if(cx&&Math.ceil(tot/n)!==cx) showToast('Com '+n+' por caixa ficam '+Math.ceil(tot/n)+' caixa(s), mas o marketplace mandou '+cx+' etiquetas de caixa.','amber');
   ecomCxRender();
 }
+
+// ═══ v1.0.1179 · ANTI-RAJADA NOS BIPES (e-commerce e WMS) ═══
+// Contorno visto no Full: bipar a MESMA etiqueta várias vezes para "completar" a quantidade. A etiqueta unitária do
+// marketplace é igual para todas as unidades do SKU, então o código não diferencia; o ritmo, sim.
+// Regra: o mesmo código lido de novo em menos de AR_MIN_MS é recusado; AR_MAX recusas em 60 s travam o bipe daquela tela
+// até um supervisor (admin/gestor) liberar com e-mail e senha. Tudo fica registrado em bipe_alertas.
+const AR_MIN_MS=800, AR_MAX=3;
+var _ar={};
+function antiRajada(ctx,code){
+  var st=_ar[ctx]||(_ar[ctx]={ult:'',t:0,rec:[],bloq:false});
+  if(st.bloq){ arPedirSupervisor(ctx); return false; }
+  var agora=Date.now(), c=String(code==null?'':code).trim().toUpperCase();
+  if(c && c===st.ult && agora-st.t<AR_MIN_MS){
+    st.rec=st.rec.filter(function(x){ return agora-x<60000; }); st.rec.push(agora); st.t=agora;
+    arRegistrar(ctx,c,'recusado');
+    if(st.rec.length>=AR_MAX){ st.bloq=true; arRegistrar(ctx,c,'bloqueado'); arPedirSupervisor(ctx); }
+    else arAviso('Bipe rápido demais para a mesma etiqueta. Etiquete e bipe cada unidade, uma por vez.');
+    return false;
+  }
+  st.ult=c; st.t=agora; return true;
+}
+function arAviso(msg){ try{ if(typeof ecomBeep==='function') ecomBeep(); }catch(_e){} showToast(msg,'red'); }
+function arRegistrar(ctx,codigo,evento,supervisor){
+  try{ dbInsert('bipe_alertas',{company_id:company?.id||null,contexto:ctx,codigo:codigo||null,evento:evento,
+    operador:(profile&&profile.full_name)||(cu&&cu.email)||null,supervisor:supervisor||null}).catch(function(){}); }catch(_e){}
+}
+function arPedirSupervisor(ctx){
+  if(ge('ar-sup')) return;
+  var d=document.createElement('div'); d.id='ar-sup'; d.className='modal-overlay';
+  d.innerHTML='<div class="modal" style="max-width:420px"><div class="modal-hdr"><h3 style="color:var(--red-text)">⛔ Bipe travado</h3></div>'
+    +'<div style="padding:4px 2px 2px;font-size:13px;color:var(--text2)">A mesma etiqueta foi bipada várias vezes em sequência rápida. Cada unidade precisa estar etiquetada e ser bipada uma vez.<br><br>Para continuar, um <b>supervisor</b> (admin ou gestor) precisa liberar.</div>'
+    +'<label class="fl" style="margin-top:10px">E-mail do supervisor</label><input class="fi" id="ar-sup-email" autocomplete="off">'
+    +'<label class="fl">Senha</label><input class="fi" id="ar-sup-senha" type="password" autocomplete="new-password" onkeydown="if(event.key===\'Enter\')arLiberar(\''+ctx+'\')">'
+    +'<div id="ar-sup-err" style="color:var(--red-text);font-size:12px;margin-top:6px"></div>'
+    +'<div class="modal-ftr" style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="ge(\'ar-sup\').remove()">Fechar</button><button class="btn btn-p" onclick="arLiberar(\''+ctx+'\')">Liberar</button></div></div>';
+  document.body.appendChild(d); setTimeout(function(){ var e=ge('ar-sup-email'); if(e) e.focus(); },50);
+}
+async function arLiberar(ctx){
+  var em=String((ge('ar-sup-email')||{}).value||'').trim(), pw=String((ge('ar-sup-senha')||{}).value||''), er=ge('ar-sup-err');
+  if(!em||!pw){ if(er) er.textContent='Informe e-mail e senha.'; return; }
+  try{
+    // confere as credenciais SEM trocar a sessão de quem está logado no coletor
+    var r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify({email:em,password:pw})});
+    var j=await r.json().catch(function(){return {};});
+    if(!r.ok||!j.access_token){ if(er) er.textContent='E-mail ou senha inválidos.'; return; }
+    var pr=await fetch(SB_URL+'/rest/v1/profiles?id=eq.'+encodeURIComponent(j.user&&j.user.id)+'&select=role,full_name',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+j.access_token}});
+    var pj=await pr.json().catch(function(){return [];}); var role=pj&&pj[0]&&pj[0].role;
+    if(['admin','gestor','adm'].indexOf(role)<0){ if(er) er.textContent='Este usuário não é supervisor (admin/gestor).'; return; }
+    var st=_ar[ctx]; if(st){ st.bloq=false; st.rec=[]; st.ult=''; }
+    arRegistrar(ctx,null,'liberado',(pj[0].full_name||em));
+    ge('ar-sup').remove(); showToast('Bipe liberado por '+(pj[0].full_name||em),'green');
+  }catch(e){ if(er) er.textContent='Erro: '+(e.message||e); }
+}
 async function ecomFullBip(p,its,code){
+  if(!antiRajada('full:'+p.id,code)) return;   // v1.0.1179
   // v1.0.1129: lê o full_meta ATUAL do banco a cada bipe. A tela do checkout podia ter o pedido carregado ANTES das
   // etiquetas serem ligadas (sem os códigos ML nem os PDFs): o bipe dava "Etiqueta não é deste Full"/"não localizada",
   // e, pior, ao gravar o progresso, regravava o full_meta antigo por cima do que estava no banco.
@@ -35721,6 +35775,7 @@ function coletorSepAbrir(listaId){
 }
 async function coletorSepBipe(listaId,code){
   const raw=wmsLeituraLimpa(code);const cod=wmsNorm(raw);if(!cod)return;
+  if(!antiRajada('wmssep:'+listaId,cod)) return;   // v1.0.1179
   const l=wmsListasSeparacao.find(function(x){return x.id===listaId;});
   const cli=l?clientes.find(function(c){return c.id===l.cliente_id;}):null;
   const usaEtiq=!!(cli&&cli.wms_usa_etiqueta_cliente===true);
@@ -36105,6 +36160,7 @@ function sepDlgArea(listaId){
 function sepDlgRender(listaId){ var a=ge('col-rg-area'); if(a) a.innerHTML=sepDlgArea(listaId); var i=ge('col-scan'); if(i){i.value='';i.focus();} }
 async function sepDlgBipe(listaId,code){
   var raw=wmsLeituraLimpa(code); if(!raw) return;
+  if(!antiRajada('wmsdlg:'+listaId,raw)) return;   // v1.0.1179
   try{ await sepDlgLer(listaId,raw); }catch(e){ sepDlgAviso('erro','Erro: '+(e.message||e)); }
   if(_sepDlg.falta) _sepDlg.falta=false;
   sepDlgRender(listaId);
@@ -55426,6 +55482,7 @@ function ecomSepAbrir(osId){
 }
 async function ecomSepBipe(osId,code){
   code=String(code||'').trim(); if(!code)return;
+  if(!antiRajada('ecomsep:'+osId,code)) return;   // v1.0.1179
   var d=ecomOsItens(osId);
   var alvo=null;
   for(var k=0;k<d.linhas.length;k++){ var L=d.linhas[k];
@@ -56018,6 +56075,7 @@ function ecomCxCurrentPid(){
 }
 var _ecomCxBusy=false, _ecomCxLast={code:'',ts:0};
 async function ecomCxBip(code){
+  if(!antiRajada('ecomcx',code)) return;   // v1.0.1179
   if(!ecomCx || !ecomCx.fila.length){ ecomCxFlash('Bipe a folha para comecar','amber'); ecomCxRender(); return; }
   // leitor em rajada: duas execuções simultâneas liam qtd_conferida antes da
   // gravação, concluíam o mesmo pedido e imprimiam duas etiquetas — e, no
