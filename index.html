@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1185 | Gerado: 2026-10-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1186 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1185';
+const APP_VERSION='v1.0.1186';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51848,14 +51848,14 @@ function helpdeskInit(){
   b.innerHTML='💬'; b.onclick=helpdeskFabToggle;
   document.body.appendChild(b);
   var menu=document.createElement('div'); menu.id='helpdesk-fab-menu';
-  menu.innerHTML='<button type="button" onclick="helpdeskFabClose();abrirChamadoModal()">💬 Abrir chamado</button><button type="button" onclick="helpdeskFabClose();meusChamadosModal()">📋 Meus chamados</button>';
+  menu.innerHTML='<button type="button" onclick="helpdeskFabClose();helpdeskChatAbrir()">🤖 Suporte · pergunte aqui</button><button type="button" onclick="helpdeskFabClose();abrirChamadoModal()">💬 Abrir chamado</button><button type="button" onclick="helpdeskFabClose();meusChamadosModal()">📋 Meus chamados</button>';
   document.body.appendChild(menu);
   document.addEventListener('click',function(ev){ var mm=document.getElementById('helpdesk-fab-menu'); var ff=document.getElementById('helpdesk-fab'); if(!mm||!mm.classList.contains('open'))return; if((mm&&mm.contains(ev.target))||(ff&&ff.contains(ev.target)))return; mm.classList.remove('open'); });
   helpdeskFabSync();
 }
-function abrirChamadoModal(){
+function abrirChamadoModal(pre){   // v1.0.1186: pre = {titulo, categoria, descricao, arquivos[]} vindo do chat
   var old=document.getElementById('hd-modal'); if(old)old.remove();
-  _hdFiles=[];
+  _hdFiles=(pre&&pre.arquivos)?pre.arquivos.slice(0,8):[];
   var ctxTxt='Módulo: '+helpdeskModuloLabel(typeof curPage!=='undefined'?curPage:'')+'  ·  Versão '+(typeof APP_VERSION!=='undefined'?APP_VERSION:'')+'  ·  Você: '+((typeof profile!=='undefined'&&profile&&profile.full_name)||(typeof cu!=='undefined'&&cu&&cu.email)||'—');
   var html='<div class="modal-overlay" id="hd-modal">'+
     '<div class="modal" style="max-width:520px;width:95%">'+
@@ -51877,7 +51877,103 @@ function abrirChamadoModal(){
       '</div>'+
     '</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
+  if(pre){ var _t=document.getElementById('hd-titulo'), _c=document.getElementById('hd-categoria'), _d=document.getElementById('hd-descricao');
+    if(_t&&pre.titulo) _t.value=pre.titulo; if(_c&&pre.categoria) _c.value=pre.categoria; if(_d&&pre.descricao) _d.value=pre.descricao; helpdeskRenderThumbs(); }
   var t=document.getElementById('hd-titulo'); if(t)setTimeout(function(){t.focus();},60);
+}
+
+// ===== v1.0.1186 · HELPDESK EM CHAT (classifica erro/dúvida/melhoria, lê o print, verifica e responde) =====
+var _hdChat={msgs:[],grupo:null,conversaId:null,pendImg:null,ultimo:null,pb:null,busy:false};
+function helpdeskChatAbrir(){
+  var old=document.getElementById('hd-chat'); if(old)old.remove();
+  _hdChat={msgs:[],grupo:null,conversaId:null,pendImg:null,ultimo:null,pb:null,busy:false};
+  var ctx='Módulo: '+helpdeskModuloLabel(typeof curPage!=='undefined'?curPage:'')+' · Versão '+(typeof APP_VERSION!=='undefined'?APP_VERSION:'')+' · '+((typeof profile!=='undefined'&&profile&&profile.full_name)||(typeof cu!=='undefined'&&cu&&cu.email)||'');
+  var html='<div class="modal-overlay" id="hd-chat"><div class="modal" style="max-width:560px;width:95%;padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:88vh">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)"><div style="font-size:15px;font-weight:800">🤖 Suporte VERUS</div><button onclick="helpdeskChatFechar()" style="background:none;border:none;font-size:22px;color:var(--text3);cursor:pointer;line-height:1">×</button></div>'
+    +'<div style="font-size:11px;color:var(--text3);background:var(--bg2);padding:6px 16px">'+helpdeskEsc(ctx)+'</div>'
+    +'<div id="hd-chat-msgs" style="flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-height:220px"></div>'
+    +'<div id="hd-chat-pend" style="padding:0 16px;font-size:12px;color:var(--text3)"></div>'
+    +'<div style="display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end">'
+    +'<textarea class="fi" id="hd-chat-in" rows="2" placeholder="Escreva o que aconteceu, cole o print (Ctrl+V) ou bipe um código…" style="flex:1;resize:none" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();helpdeskChatEnviar();}" onpaste="helpdeskChatPaste(event)"></textarea>'
+    +'<button class="btn" title="Capturar a tela" onclick="helpdeskChatCapturar()">📷</button>'
+    +'<label class="btn" title="Anexar foto" style="cursor:pointer">🖼<input type="file" accept="image/*" style="display:none" onchange="helpdeskChatFoto(this)"></label>'
+    +'<button class="btn btn-p" id="hd-chat-send" onclick="helpdeskChatEnviar()">Enviar</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+  helpdeskChatBot('Oi! Isso é algo que <b>parou de funcionar</b>, uma <b>dúvida</b> de como fazer ou uma <b>sugestão</b>? Pode também escrever direto.',
+    [['Erro','helpdeskChatGrupo(\'erro\')'],['Dúvida','helpdeskChatGrupo(\'duvida\')'],['Melhoria','helpdeskChatGrupo(\'melhoria\')']]);
+  setTimeout(function(){ var i=document.getElementById('hd-chat-in'); if(i) i.focus(); },80);
+}
+function helpdeskChatFechar(){ var m=document.getElementById('hd-chat'); if(m) m.remove(); }
+function helpdeskChatBot(html,chips){
+  var box=document.getElementById('hd-chat-msgs'); if(!box) return;
+  var d=document.createElement('div'); d.style.cssText='align-self:flex-start;background:var(--blue-bg,#e6f1fb);color:var(--text);border-radius:12px 12px 12px 2px;padding:9px 12px;font-size:13px;max-width:92%;line-height:1.45';
+  d.innerHTML=html+((chips&&chips.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+chips.map(function(c){ return '<button class="btn btn-sm" onclick="'+c[1]+'">'+c[0]+'</button>'; }).join('')+'</div>':'');
+  box.appendChild(d); box.scrollTop=box.scrollHeight; return d;
+}
+function helpdeskChatUser(txt,img){
+  var box=document.getElementById('hd-chat-msgs'); if(!box) return;
+  var d=document.createElement('div'); d.style.cssText='align-self:flex-end;background:var(--bg2);border-radius:12px 12px 2px 12px;padding:8px 12px;font-size:13px;max-width:85%;white-space:pre-wrap';
+  d.textContent=txt||''; if(img){ var im=document.createElement('img'); im.src=URL.createObjectURL(img); im.style.cssText='display:block;max-width:220px;max-height:140px;border-radius:8px;margin-top:6px;border:1px solid var(--border)'; d.appendChild(im); }
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+function helpdeskChatGrupo(g){ _hdChat.grupo=g; var t={erro:'Certo. Me conte o que aconteceu e, se puder, <b>capture a tela</b> (📷) ou cole o print. Se tiver um número de pedido, título ou RG, bipe ou escreva.',duvida:'Pode perguntar. Vou te guiar passo a passo.',melhoria:'Boa. Me diga <b>o que você quer que mude</b>, <b>em qual tela</b> e <b>por quê</b>, que eu já abro o chamado organizado.'}[g]; helpdeskChatBot(t); var i=document.getElementById('hd-chat-in'); if(i) i.focus(); }
+function helpdeskChatPaste(ev){ var it=(ev.clipboardData||{}).items||[]; for(var i=0;i<it.length;i++){ if(it[i].type&&it[i].type.indexOf('image/')===0){ var f=it[i].getAsFile(); if(f){ helpdeskChatSetImg(f); ev.preventDefault(); return; } } } }
+function helpdeskChatFoto(inp){ var f=inp.files&&inp.files[0]; inp.value=''; if(f) helpdeskChatSetImg(f); }
+async function helpdeskChatCapturar(){
+  try{ var h2c=await helpdeskLoadH2C(); var canvas=await h2c(document.body,{backgroundColor:'#ffffff',scale:1,logging:false,useCORS:true,ignoreElements:function(el){return el&&(el.id==='hd-chat'||el.id==='helpdesk-fab'||el.id==='verus-toast');}});
+    var blob=await new Promise(function(r){canvas.toBlob(r,'image/jpeg',0.85);}); if(blob) helpdeskChatSetImg(new File([blob],'captura-tela.jpg',{type:'image/jpeg'}));
+  }catch(e){ showToast('Não consegui capturar a tela — cole o print com Ctrl+V.','amber'); }
+}
+function helpdeskChatSetImg(f){ _hdChat.pendImg=f; var el=document.getElementById('hd-chat-pend'); if(el) el.innerHTML='📎 '+helpdeskEsc(f.name||'imagem')+' anexada à próxima mensagem <button class="btn btn-sm" onclick="_hdChat.pendImg=null;document.getElementById(\'hd-chat-pend\').innerHTML=\'\'">remover</button>'; }
+function helpdeskChatB64(file){
+  return new Promise(function(res){ var img=new Image(); img.onload=function(){ var MAX=1400, w=img.width, h=img.height, k=Math.min(1,MAX/Math.max(w,h)); var c=document.createElement('canvas'); c.width=Math.round(w*k); c.height=Math.round(h*k); c.getContext('2d').drawImage(img,0,0,c.width,c.height); res({media_type:'image/jpeg',data_base64:c.toDataURL('image/jpeg',0.82).split(',')[1]}); }; img.onerror=function(){ res(null); }; img.src=URL.createObjectURL(file); });
+}
+async function helpdeskChatEnviar(){
+  if(_hdChat.busy) return;
+  var inp=document.getElementById('hd-chat-in'); var txt=(inp?inp.value:'').trim(); var img=_hdChat.pendImg;
+  if(!txt&&!img) return;
+  helpdeskChatUser(txt,img); if(inp) inp.value=''; _hdChat.pendImg=null; var pe=document.getElementById('hd-chat-pend'); if(pe) pe.innerHTML='';
+  var m={role:'user',texto:txt||'(print anexado)',arquivo:img||null,imagem:null};
+  if(img) m.imagem=await helpdeskChatB64(img);
+  _hdChat.msgs.push(m);
+  _hdChat.busy=true; var btn=document.getElementById('hd-chat-send'); if(btn){ btn.disabled=true; btn.textContent='…'; }
+  var pensando=helpdeskChatBot('<span style="color:var(--text3)">Verificando…</span>');
+  try{
+    var usuario={id:(typeof cu!=='undefined'&&cu)?cu.id:null,nome:(typeof profile!=='undefined'&&profile&&profile.full_name)||(cu&&cu.email)||'',email:(cu&&cu.email)||'',role:(typeof profile!=='undefined'&&profile&&profile.role)||''};
+    var ctx={pagina:(typeof curPage!=='undefined'?curPage:''),modulo:helpdeskModuloLabel(typeof curPage!=='undefined'?curPage:''),versao:(typeof APP_VERSION!=='undefined'?APP_VERSION:'')};
+    var r=await fetch(SB_URL+'/functions/v1/helpdesk-chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({company_id:company?.id,usuario:usuario,contexto:ctx,grupo:_hdChat.grupo,conversa_id:_hdChat.conversaId,mensagens:_hdChat.msgs.map(function(x){ return {role:x.role,texto:x.texto,imagem:x.imagem||undefined}; })})});
+    var j=await r.json().catch(function(){return {};});
+    if(pensando) pensando.remove();
+    if(!r.ok||j.error){ helpdeskChatBot('Não consegui consultar o assistente agora ('+helpdeskEsc(j.error||('HTTP '+r.status))+'). Quer abrir o chamado direto?',[['Abrir chamado','helpdeskChatChamado()']]); return; }
+    _hdChat.conversaId=j.conversa_id||_hdChat.conversaId; _hdChat.grupo=j.grupo&&j.grupo!=='indefinido'?j.grupo:_hdChat.grupo; _hdChat.ultimo=j;
+    _hdChat.msgs.push({role:'assistant',texto:j.texto});
+    var html=helpdeskEsc(j.texto).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+    if(j.playbook&&j.playbook.passos){ helpdeskChatBot(html); _hdChat.pb=j.playbook; helpdeskPbPasso(1); }
+    else helpdeskChatBot(html,[['✔ Resolveu','helpdeskChatResolveu()'],['Abrir chamado','helpdeskChatChamado()']]);
+  }catch(e){ if(pensando) pensando.remove(); helpdeskChatBot('Erro ao falar com o assistente: '+helpdeskEsc(e.message||e),[['Abrir chamado','helpdeskChatChamado()']]); }
+  finally{ _hdChat.busy=false; if(btn){ btn.disabled=false; btn.textContent='Enviar'; } }
+}
+function helpdeskPbPasso(n){
+  var pb=_hdChat.pb; if(!pb) return;
+  if(n==='fim'){ helpdeskChatBot('Então resolvido? 🙂',[['✔ Resolveu','helpdeskChatResolveu()'],['Ainda não → abrir chamado','helpdeskChatChamado()']]); return; }
+  if(n==='chamado'){ helpdeskChatBot('Esse caso precisa da TI. Vou abrir o chamado já com o que foi verificado.',[['Abrir chamado','helpdeskChatChamado()']]); return; }
+  var p=(pb.passos||[]).find(function(x){return +x.n===+n;}); if(!p){ helpdeskPbPasso('fim'); return; }
+  helpdeskChatBot('<div style="font-size:11px;color:var(--text3)">'+helpdeskEsc(pb.titulo)+' · passo '+p.n+'</div>'+helpdeskEsc(p.texto),
+    [['Sim','helpdeskPbResp(\''+String(p.sim).replace(/[^a-z0-9]/gi,'')+'\',\'sim\','+p.n+')'],['Não','helpdeskPbResp(\''+String(p.nao).replace(/[^a-z0-9]/gi,'')+'\',\'nao\','+p.n+')']]);
+}
+function helpdeskPbResp(prox,resp,n){ document.querySelectorAll('#hd-chat-msgs button').forEach(function(b){ b.disabled=true; b.style.opacity='.5'; }); helpdeskChatUser(resp==='sim'?'Sim':'Não'); _hdChat.msgs.push({role:'user',texto:'(playbook passo '+n+': '+resp+')'}); helpdeskPbPasso(/^\d+$/.test(prox)?+prox:prox); }
+async function helpdeskChatResolveu(){
+  if(_hdChat.conversaId){ try{ await dbUpdate('helpdesk_conversas',_hdChat.conversaId,{resolvido:true}); }catch(_e){} }
+  helpdeskChatFechar(); showToast('Que bom que resolveu! Registrado.','green');
+}
+function helpdeskChatChamado(){
+  var u=_hdChat.ultimo||{}, pre=u.chamado_pre||{};
+  var hist=_hdChat.msgs.map(function(m){ return (m.role==='user'?'Usuário: ':'Assistente: ')+(m.texto||''); }).join('\n');
+  var desc=(pre.descricao?pre.descricao+'\n\n':'')+'— Conversa com o assistente —\n'+hist;
+  var arquivos=_hdChat.msgs.filter(function(m){return m.arquivo;}).map(function(m){return m.arquivo;});
+  helpdeskChatFechar();
+  abrirChamadoModal({titulo:pre.titulo||(_hdChat.msgs[0]&&_hdChat.msgs[0].texto||'').slice(0,120),categoria:_hdChat.grupo||'erro',descricao:desc,arquivos:arquivos});
 }
 function helpdeskFecharModal(){var m=document.getElementById('hd-modal');if(m)m.remove();_hdFiles=[];}
 function helpdeskAddFiles(input){
@@ -51914,6 +52010,7 @@ async function helpdeskEnviarChamado(){
     var contexto={app_version:(typeof APP_VERSION!=='undefined'?APP_VERSION:''),pagina:(typeof curPage!=='undefined'?curPage:''),modulo:helpdeskModuloLabel(typeof curPage!=='undefined'?curPage:''),url:location.href,user_agent:navigator.userAgent,quando:new Date().toISOString()};
     var row=await dbInsert('helpdesk_chamados',{company_id:cid,numero:numero,titulo:titulo,categoria:categoria,modulo:contexto.modulo,descricao:descricao,prioridade:null,status:'aberto',anexos:[],contexto:contexto,respostas:[],solicitante_id:solId,solicitante_nome:solNome,solicitante_email:solEmail});
     var chId=row&&row.id; var anexos=[];
+    if(chId&&window._hdChat&&_hdChat.conversaId){ try{ await dbUpdate('helpdesk_conversas',_hdChat.conversaId,{chamado_id:chId,resolvido:false}); }catch(_e){} }   // v1.0.1186
     if(chId&&_hdFiles.length&&window.supabase&&window.supabase.storage){
       for(var i=0;i<_hdFiles.length;i++){
         var f=_hdFiles[i];
