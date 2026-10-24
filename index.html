@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1186 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1187 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -220,7 +220,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .umnm{font-size:13px;font-weight:600}.umem{font-size:11px;color:var(--text2);margin-top:1px}.umrole{margin-top:4px}
 .umitem{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius);font-size:13px;cursor:pointer}.umitem:hover{background:var(--bg2)}.umitem.danger{color:var(--red-text)}
 /* IDLE */
-.idlewarn{position:fixed;bottom:calc(76px + var(--safe-bottom));left:50%;transform:translateX(-50%) translateY(12px);background:var(--amber-bg);border:1px solid #f0c070;border-radius:12px;padding:12px 14px;z-index:150;min-width:280px;max-width:360px;width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.12);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+.idlewarn{position:fixed;z-index:1200;bottom:calc(76px + var(--safe-bottom));left:50%;transform:translateX(-50%) translateY(12px);background:var(--amber-bg);border:1px solid #f0c070;border-radius:12px;padding:12px 14px;z-index:150;min-width:280px;max-width:360px;width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.12);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
 .idlewarn.show{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
 @media(min-width:768px){.idlewarn{bottom:20px;left:calc(105px + 50%)}}
 .idleinner{display:flex;align-items:center;gap:10px}.idletxt{flex:1;font-size:12px;color:var(--amber-text);display:flex;flex-direction:column;gap:2px}.idletxt strong{font-size:13px}
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1186';
+const APP_VERSION='v1.0.1187';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1491,11 +1491,15 @@ function bootFinalizar(){
 }
 
 // ── REST ──
-async function sbFetch(method,path,body,tk,extra_headers={}){
+async function sbFetch(method,path,body,tk,extra_headers={},_retry){
   const h={'Content-Type':'application/json','apikey':SB_KEY,'Prefer':'return=representation',...extra_headers};
   if(tk||tok)h['Authorization']='Bearer '+(tk||tok);
   const r=await fetch(SB_URL+path,{method,headers:h,body:body?JSON.stringify(body):undefined});
   const txt=await r.text();let data=null;try{data=txt?JSON.parse(txt):null;}catch(e){}
+  // v1.0.1187: token vencido no meio da operação → renova com o refresh e repete a chamada uma vez (sem derrubar a tela)
+  if(r.status===401&&!_retry&&!tk&&tok&&/jwt|expired|token/i.test(txt||'')){
+    try{ if(await hbRenovar()) return sbFetch(method,path,body,null,extra_headers,true); }catch(_e){}
+  }
   return{ok:r.ok,data,status:r.status};
 }
 async function sbAuth(path,body){
@@ -5056,14 +5060,29 @@ function resetIdle(){
   ge('idlewarn').classList.remove('show');
   wtimer=setTimeout(()=>{
     if(!cu)return;
+    if(emOperacao()) return;   // v1.0.1187
     const w=ge('idlewarn'),cd=ge('idlecd');if(w)w.classList.add('show');
     let s=60;if(cd)cd.textContent=s;
     clearInterval(cdiv);cdiv=setInterval(()=>{s--;if(cd)cd.textContent=s;if(s<=0)clearInterval(cdiv);},1000);
   },IDLE-WARN);
-  itimer=setTimeout(()=>{ge('idlewarn').classList.remove('show');clearInterval(cdiv);doIdleLogout();},IDLE);
+  itimer=setTimeout(()=>{ge('idlewarn').classList.remove('show');clearInterval(cdiv);
+    // v1.0.1187: em operação (checkout, embarque, separação, Full ou qualquer modal aberto) a sessão NÃO cai por inatividade —
+    // o operador fica minutos sem tocar na tela enquanto cola etiquetas. Só renova o token e recomeça a contagem.
+    if(emOperacao()){ hbRenovar(); resetIdle(); return; }
+    doIdleLogout();},IDLE);
+}
+function emOperacao(){
+  try{
+    if(document.querySelector('.modal-overlay')) return true;
+    if(typeof ecomCx!=='undefined'&&ecomCx&&((ecomCx.fila&&ecomCx.fila.length)||ecomCx.sku||ecomCx.pid)) return true;
+    if(typeof ecomEmb!=='undefined'&&ecomEmb&&ecomEmb.romId) return true;
+    var pg=(typeof curPage!=='undefined'?String(curPage):'');
+    return /checkout|embarque|separacao|coletor|conferencia|romaneio|expedicao|portaria/i.test(pg);
+  }catch(_e){ return false; }
 }
 function stayOn(){resetIdle();}
 async function doIdleLogout(){
+  document.querySelectorAll('.modal-overlay,#hd-chat,#hd-modal').forEach(function(m){ try{ m.remove(); }catch(_e){} });   // v1.0.1187
   safeSession.clear();tok=null;cu=null;profile=null;company=null;
   ge('app').classList.remove('on');ge('auth-wrap').style.display='flex';sv('vlogin');closeMenu();const _ld=ge('app-loading');if(_ld)_ld.style.display='none';
   setTimeout(()=>showErr('lerr','Sessão encerrada por inatividade.'),50);
