@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1187 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1188 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1187';
+const APP_VERSION='v1.0.1188';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3362,7 +3362,8 @@ function antiRajada(ctx,code){
   var st=_ar[ctx]||(_ar[ctx]={ult:'',t:0,rec:[],bloq:false});
   if(st.bloq){ arPedirSupervisor(ctx); return false; }
   var agora=Date.now(), c=String(code==null?'':code).trim().toUpperCase();
-  if(c && c===st.ult && agora-st.t<AR_MIN_MS){
+  var _min=(ctx==='ecomcx')?1200:AR_MIN_MS;   // v1.0.1188: checkout normal 1,2 s (Full e WMS seguem 0,8 s)
+  if(c && c===st.ult && agora-st.t<_min){
     st.rec=st.rec.filter(function(x){ return agora-x<60000; }); st.rec.push(agora); st.t=agora;
     arRegistrar(ctx,c,'recusado');
     if(st.rec.length>=AR_MAX){ st.bloq=true; arRegistrar(ctx,c,'bloqueado'); arPedirSupervisor(ctx); }
@@ -56324,6 +56325,31 @@ function ecomCxCurrentPid(){
   return null;
 }
 var _ecomCxBusy=false, _ecomCxLast={code:'',ts:0};
+
+// v1.0.1188: pedido tem mais de uma unidade do mesmo código? (só então a contagem às cegas entra)
+function ecomCxTemRepetido(its){
+  var porSku={}; (its||[]).forEach(function(i){ var k=String(i.sku||i.descricao||'').toUpperCase(); porSku[k]=(porSku[k]||0)+ecomN(i.qtd); });
+  return Object.keys(porSku).some(function(k){ return porSku[k]>1; });
+}
+// contagem às cegas: não mostra o número esperado; devolve o número digitado
+function ecomCxContagemCega(p,esperado){
+  return new Promise(function(res){
+    var old=ge('ecom-cont-cega'); if(old) old.remove();
+    var d=document.createElement('div'); d.id='ecom-cont-cega'; d.className='modal-overlay'; d.style.zIndex='1100'; d.style.alignItems='center';
+    d.innerHTML='<div class="modal" style="max-width:420px;text-align:center">'
+      +'<div style="font-size:12px;color:var(--text3);letter-spacing:.4px">PEDIDO E-'+String(p.numero_interno||0).padStart(6,'0')+' · UNIDADES REPETIDAS</div>'
+      +'<div style="font-size:20px;font-weight:800;margin:8px 0 4px">Quantas UNIDADES há na embalagem?</div>'
+      +'<div style="font-size:12.5px;color:var(--text2);margin-bottom:12px">Conte o que está dentro da caixa antes de fechar.</div>'
+      +'<input id="ecom-cont-in" type="number" inputmode="numeric" min="0" style="font-size:32px;font-weight:800;text-align:center;width:140px;padding:8px;border:2px solid var(--border);border-radius:10px">'
+      +'<div style="margin-top:14px"><button class="btn btn-p" id="ecom-cont-ok">Confirmar (Enter)</button></div></div>';
+    document.body.appendChild(d);
+    var inp=ge('ecom-cont-in');
+    var fim=function(){ var v=parseInt(inp.value,10); if(isNaN(v)){ inp.focus(); return; } d.remove(); res(v); };
+    ge('ecom-cont-ok').onclick=fim;
+    inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); fim(); } });
+    setTimeout(function(){ inp.focus(); },60);
+  });
+}
 async function ecomCxBip(code){
   if(!antiRajada('ecomcx',code)) return;   // v1.0.1179
   if(!ecomCx || !ecomCx.fila.length){ ecomCxFlash('Bipe a folha para comecar','amber'); ecomCxRender(); return; }
@@ -56353,6 +56379,18 @@ async function ecomCxBip(code){
     if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',pid,{status:'conferindo'}); p.status='conferindo'; }
     await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:pid,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
     var completo=its.every(function(i){ return ecomN(i.qtd_conferida)>=ecomN(i.qtd); });
+    // v1.0.1188: QUEBRA-MOLAS — pedido com mais de uma unidade do mesmo código: contagem às cegas antes de fechar.
+    // Errou a contagem → zera a conferência do pedido e pede para retirar tudo da caixa e bipar de novo.
+    if(completo&&ecomCxTemRepetido(its)){
+      var _esp=its.reduce(function(a,b){return a+ecomN(b.qtd);},0);
+      var _cont=await ecomCxContagemCega(p,_esp);
+      if(_cont!==_esp){
+        for(var _z=0;_z<its.length;_z++){ if(ecomN(its[_z].qtd_conferida)){ await dbUpdate('ecom_pedido_itens',its[_z].id,{qtd_conferida:0}); its[_z].qtd_conferida=0; } }
+        try{ await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:pid,etapa:'contagem_divergente',codigo_lido:'CONTOU '+_cont+' · BIPADO '+_esp,operador:ecomOper()}); }catch(_b){}
+        ecomBeep(); ecomCxFlash('CONTAGEM NÃO BATE ('+_cont+' contada(s) × '+_esp+' bipada(s)). RETIRE TODOS OS PRODUTOS DA CAIXA E BIPE TODOS DE NOVO.','red');
+        ecomCxRender(); return;
+      }
+    }
     if(completo){
       var _upd={status:'conferido',data_conferencia:new Date().toISOString()};
       if(!p.data_separacao){ _upd.data_separacao=_upd.data_conferencia; p.data_separacao=_upd.data_separacao; }
