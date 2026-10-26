@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1193 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1194 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1193';
+const APP_VERSION='v1.0.1194';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2717,6 +2717,7 @@ function fcdPeriodoPadrao(){
 }
 function rFatCapasDigitar(){
   if(capaViewId) return rCapaDigitacaoTela(capaViewId);
+  capaOcrContarPend();   // v1.0.1194
   fcdPeriodoPadrao();
   if(!_fcdLoaded){ setTimeout(async function(){ await fcdCarregar(); if(curPage==='fat-capas-digitar') render(); },0); return '<div style="padding:30px;text-align:center;color:var(--text3)">Carregando capas\u2026</div>'; }
   var hoje=new Date(); hoje.setHours(0,0,0,0);
@@ -2757,7 +2758,9 @@ function rFatCapasDigitar(){
     +'<input id="fcd-scan" placeholder="Bipe o c\u00f3digo da capa para digitar\u2026" onkeydown="if(event.key===\'Enter\'){event.preventDefault();fcdAbrirPorCodigo(this.value);this.value=\'\';}" style="border:none;outline:none;background:none;flex:1;padding:11px 0;font-size:14px"></div>'
     +'<label style="font-size:12px;color:var(--text3)">de <input class="fi" type="date" value="'+fcdDe+'" onchange="fcdDe=this.value;render()" style="width:auto;height:34px"></label>'
     +'<label style="font-size:12px;color:var(--text3)">at\u00e9 <input class="fi" type="date" value="'+fcdAte+'" onchange="fcdAte=this.value;render()" style="width:auto;height:34px"></label>'
-    +'<button class="btn btn-sm" onclick="fcdCarregar(true).then(render)">\u21bb Atualizar</button></div>'
+    +'<button class="btn btn-sm" onclick="fcdCarregar(true).then(render)">\u21bb Atualizar</button>'
+    +'<button class="btn btn-sm" style="border-color:var(--blue-text);color:var(--blue-text)" onclick="capaOcrLote()">📷 Ler capas em lote</button>'
+    +'<button class="btn btn-sm" onclick="capaOcrFila()">Fila de revisão'+(capaOcrPend?' <span class="bdg" style="background:var(--amber-bg);color:var(--amber-text)">'+capaOcrPend+'</span>':'')+'</button></div>'
     +'<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px"><b style="color:var(--text)">'+noPer.length+'</b> capa(s) no per\u00edodo \u00b7 <b style="color:'+(totPend?'var(--amber-text)':'var(--green-text)')+'">'+totPend+'</b> impressa(s) aguardando digita\u00e7\u00e3o</div>'
     +'<div style="overflow:auto;border:1px solid var(--border);border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:13px">'
     +'<thead><tr style="text-align:left;background:var(--bg2);color:var(--text2);font-size:11.5px"><th style="padding:8px">Cliente</th><th style="padding:8px">A digitar / devolvidas</th><th style="padding:8px">A conferir</th><th style="padding:8px">Conferidas / faturadas</th><th style="padding:8px">Mais antiga pendente</th></tr></thead><tbody>'+linhas+'</tbody></table></div>'
@@ -4156,6 +4159,158 @@ function hmComIntentLeitura(txt){
   if(m) return {tool:'comercial_cliente',args:{nome:m[1].replace(/[?.!]+$/,'').trim()}};
   return null;
 }
+
+// ═══ v1.0.1194 · CAPAS POR FOTO: a IA lê a capa preenchida à mão, o VERUS preenche a digitação e a pessoa confere ═══
+var capaOcrPend=0, _capaOcrPendT=0;
+async function capaOcrContarPend(){
+  if(Date.now()-_capaOcrPendT<60000) return; _capaOcrPendT=Date.now();
+  try{ var r=await fetch(SB_URL+'/rest/v1/capa_leituras?select=id&company_id=eq.'+company.id+'&status=eq.pendente',{headers:{apikey:SB_KEY,Authorization:'Bearer '+tok,Prefer:'count=exact',Range:'0-0'}});
+    var n=parseInt(String(r.headers.get('content-range')||'').split('/')[1]||'0',10)||0; if(n!==capaOcrPend){ capaOcrPend=n; if(curPage==='fat-capas-digitar'&&!capaViewId) render(); } }catch(_e){}
+}
+function capaOcrB64(file){
+  return new Promise(function(res){ var img=new Image(); img.onload=function(){ var MAX=1800, w=img.width, h=img.height, k=Math.min(1,MAX/Math.max(w,h)); var c=document.createElement('canvas'); c.width=Math.round(w*k); c.height=Math.round(h*k); c.getContext('2d').drawImage(img,0,0,c.width,c.height); c.toBlob(function(b){ var fr=new FileReader(); fr.onload=function(){ res({blob:b,b64:String(fr.result).split(',')[1]}); }; fr.readAsDataURL(b); },'image/jpeg',0.85); }; img.onerror=function(){ res(null); }; img.src=URL.createObjectURL(file); });
+}
+async function capaOcrUpload(blob,capaId){
+  var path=company.id+'/'+(capaId||'sem-capa')+'/'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.jpg';
+  try{ var r=await fetch(SB_URL+'/storage/v1/object/capas-fotos/'+path,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+tok,'Content-Type':'image/jpeg','x-upsert':'true'},body:blob}); return r.ok?path:null; }catch(_e){ return null; }
+}
+async function capaOcrUrlAssinada(path){
+  try{ var r=await fetch(SB_URL+'/storage/v1/object/sign/capas-fotos/'+path,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify({expiresIn:7200})}); var j=await r.json(); return j&&j.signedURL?SB_URL+'/storage/v1'+j.signedURL:null; }catch(_e){ return null; }
+}
+async function capaOcrChamar(b64,servNomes){
+  var r=await fetch(SB_URL+'/functions/v1/capa-ocr',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok,apikey:SB_KEY},body:JSON.stringify({company_id:company.id,imagem:{media_type:'image/jpeg',data_base64:b64},servicos_capa:servNomes||[]})});
+  var j=await r.json().catch(function(){return {};}); if(!r.ok||!j.leitura) throw new Error(j.error||('HTTP '+r.status)); return j.leitura;
+}
+// câmera do computador (webcam) ou arquivo/celular
+function capaOcrCapturar(multi){
+  return new Promise(function(res){
+    var old=ge('capa-ocr-cam'); if(old) old.remove();
+    var d=document.createElement('div'); d.id='capa-ocr-cam'; d.className='modal-overlay'; d.style.zIndex='5400'; d.style.alignItems='center';
+    d.innerHTML='<div class="modal" style="max-width:640px;width:95%">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b style="font-size:15px">'+(multi?'Ler capas em lote':'Ler a capa da foto')+'</b><button class="btn btn-sm" id="capa-ocr-x">×</button></div>'
+      +(multi?'':'<video id="capa-ocr-v" autoplay playsinline style="width:100%;border-radius:10px;background:#000;max-height:60vh;display:none"></video>')
+      +'<div id="capa-ocr-msg" style="font-size:12.5px;color:var(--text3);margin:8px 0">'+(multi?'Selecione as fotos das capas (pode escolher várias de uma vez).':'Aponte a câmera para a capa inteira, reta e bem iluminada.')+'</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'+(multi?'':'<button class="btn btn-p" id="capa-ocr-cap" style="display:none">📸 Capturar</button>')
+      +'<label class="btn" style="cursor:pointer">🖼 Escolher '+(multi?'fotos':'arquivo / celular')+'<input id="capa-ocr-f" type="file" accept="image/*" '+(multi?'multiple':'capture="environment"')+' style="display:none"></label></div></div>';
+    document.body.appendChild(d);
+    var stream=null, fim=function(v){ if(stream) stream.getTracks().forEach(function(t){t.stop();}); d.remove(); res(v); };
+    ge('capa-ocr-x').onclick=function(){ fim(null); };
+    ge('capa-ocr-f').onchange=function(){ var fs=Array.prototype.slice.call(this.files||[]); if(fs.length) fim(multi?fs:fs[0]); };
+    if(!multi&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
+      navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080},facingMode:'environment'}}).then(function(s){
+        stream=s; var v=ge('capa-ocr-v'); if(!v){ s.getTracks().forEach(function(t){t.stop();}); return; } v.srcObject=s; v.style.display='block'; ge('capa-ocr-cap').style.display='inline-flex';
+        ge('capa-ocr-cap').onclick=function(){ var c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight; c.getContext('2d').drawImage(v,0,0); c.toBlob(function(b){ fim(new File([b],'capa-webcam.jpg',{type:'image/jpeg'})); },'image/jpeg',0.92); };
+      }).catch(function(){ var m=ge('capa-ocr-msg'); if(m) m.textContent='Câmera não disponível neste computador: escolha um arquivo ou use o celular.'; });
+    }
+  });
+}
+// converte a leitura nas respostas da digitação (chaves de capaDig.perg)
+function capaOcrMapear(L,servs,tipo){
+  var resp={}, duv={}, put=function(k,v){ if(v!==null&&v!==undefined&&v!=='') resp[k]=String(v); };
+  put('local_descarga',L.local); put('operador_resp',L.operador); put('nf_numero',L.nf_numero); put('valor_nf',L.valor_nf);
+  put('pallets_movimentados',L.pallets_1); put('pallets_pbr',L.pallets_2); put('qtd_pbr',L.pbr); put('qtd_chep',L.chep); put('qtd_outros',L.outros);
+  if(L.tipo_carga&&CAPA_CARGA.indexOf(L.tipo_carga)>=0) resp.tipo_carga=L.tipo_carga;
+  if(L.observacoes) resp.observacoes=String(L.observacoes);
+  var mapa={local:'local_descarga',operador:'operador_resp',nf_numero:'nf_numero',valor_nf:'valor_nf',pallets_1:'pallets_movimentados',pallets_2:'pallets_pbr',pbr:'qtd_pbr',chep:'qtd_chep',outros:'qtd_outros',tipo_carga:'tipo_carga',observacoes:'observacoes'};
+  var ls=(L.servicos||[]).slice(), usados={}, par={};
+  // 1º nomes idênticos; 2º um contém o outro (evita "Stretch" casar com "Stretch Superior"); 3º mesma posição do papel
+  (servs||[]).forEach(function(s,ix){ var n=fcdNorm(s.servico); ls.forEach(function(x,j){ if(par[ix]==null&&!usados[j]&&fcdNorm(x.nome)===n){ par[ix]=j; usados[j]=1; } }); });
+  (servs||[]).forEach(function(s,ix){ if(par[ix]!=null) return; var n=fcdNorm(s.servico); ls.forEach(function(x,j){ var m=fcdNorm(x.nome); if(par[ix]==null&&!usados[j]&&(m.indexOf(n)>=0||n.indexOf(m)>=0)){ par[ix]=j; usados[j]=1; } }); });
+  (servs||[]).forEach(function(s,ix){ if(par[ix]==null&&ls.length===(servs||[]).length&&!usados[ix]){ par[ix]=ix; usados[ix]=1; } });
+  (servs||[]).forEach(function(s,ix){
+    var achou=par[ix]!=null?par[ix]:-1;
+    var k='serv_'+ix; if(achou<0){ duv[k]='serviço não encontrado na foto'; return; }
+    var x=ls[achou];
+    if(x.sim===false){ resp[k]='0'; }
+    else if(x.sim===true){ if(x.quantidade!=null) resp[k]=String(x.quantidade); else duv[k]='marcado SIM sem quantidade'; }
+    else { if(x.quantidade!=null&&Number(x.quantidade)===0) resp[k]='0'; else duv[k]='SIM/NÃO não marcado ou ambíguo'; }
+  });
+  (L.duvidas||[]).forEach(function(dv){ var c=String(dv.campo||''); var k=mapa[c];
+    if(!k&&/^servico:/i.test(c)){ var nm=fcdNorm(c.slice(8)); (servs||[]).forEach(function(s,ix){ var sn=fcdNorm(s.servico); if(sn===nm||sn.indexOf(nm)>=0||nm.indexOf(sn)>=0) k='serv_'+ix; }); }
+    if(k) duv[k]=dv.motivo||'leitura incerta'; });
+  return {resp:resp,duvidas:duv};
+}
+function capaOcrAplicar(L,fotoUrl,leituraId){
+  var d=capaDig; if(!d) return;
+  var m=capaOcrMapear(L,d.servs);
+  Object.keys(m.resp).forEach(function(k){ d.resp[k]=m.resp[k]; });
+  d.duvidas=m.duvidas; d.foto=fotoUrl||d.foto; d.leituraId=leituraId||d.leituraId; d.ocrExtra=[L.anotacoes_extras].filter(Boolean).join(' ');
+  d.ocrNumero=L.numero||'';
+  // vai para a primeira pergunta obrigatória sem resposta ou com dúvida; se não houver, direto para a revisão
+  var alvo=d.perg.length;
+  for(var i=0;i<d.perg.length;i++){ var q=d.perg[i]; if(q.se&&!q.se(d.resp)) continue; var falta=(d.resp[q.k]==null||d.resp[q.k]==='')&&q.obrig; if(falta||d.duvidas[q.k]){ alvo=i; break; } }
+  d.i=alvo; render();
+}
+function capaOcrPainel(d){
+  if(!d||!d.foto) return '';
+  var nd=d.duvidas?Object.keys(d.duvidas).length:0;
+  var lst=nd?Object.keys(d.duvidas).map(function(k){ var q=d.perg.find(function(x){return x.k===k;}); return '<li><b>'+ecomEsc(q?q.t:k)+'</b>: '+ecomEsc(d.duvidas[k])+'</li>'; }).join(''):'';
+  return '<div style="display:grid;grid-template-columns:minmax(140px,220px) 1fr;gap:12px;align-items:start;border:1px solid var(--blue-text);background:var(--blue-bg);border-radius:10px;padding:10px;margin-bottom:12px">'
+    +'<a href="'+d.foto+'" target="_blank" rel="noopener" title="Abrir a foto em tamanho real"><img src="'+d.foto+'" style="width:100%;border-radius:8px;border:1px solid var(--border);display:block"></a>'
+    +'<div style="font-size:12.5px"><b>Lida da foto'+(d.ocrNumero?' · '+ecomEsc(d.ocrNumero):'')+'</b>'
+    +(nd?'<div style="color:var(--amber-text);margin-top:4px">⚠ '+nd+' campo(s) para conferir na foto:</div><ul style="margin:4px 0 0 16px;padding:0">'+lst+'</ul>':'<div style="color:var(--green-text);margin-top:4px">Nenhuma dúvida na leitura. Confira o resumo e confirme.</div>')
+    +(d.ocrExtra?'<div style="color:var(--text3);margin-top:6px">Anotação fora dos campos: '+ecomEsc(d.ocrExtra)+'</div>':'')
+    +'<div style="color:var(--text3);margin-top:6px">Clique na foto para ampliar.</div></div></div>';
+}
+async function capaOcrUmaUm(){
+  var d=capaDig; if(!d) return; var c=(capasProcesso||[]).find(function(x){return x.id===d.id;}); if(!c) return;
+  var f=await capaOcrCapturar(false); if(!f) return;
+  showToast('Lendo a capa da foto…','blue');
+  try{
+    var im=await capaOcrB64(f); if(!im) throw new Error('imagem inválida');
+    var path=await capaOcrUpload(im.blob,c.id);
+    var L=await capaOcrChamar(im.b64,(d.servs||[]).map(function(s){return s.servico;}));
+    var cod=L.numero?capaCodigoLeitura(L.numero):'';
+    if(cod&&cod!==capaCodigoLeitura(c.numero)&&cod!==capaCodigoLeitura(c.numero_anterior||'')) showToast('Atenção: a foto parece ser da capa '+L.numero+', e esta é a '+c.numero+'. Confira antes de salvar.','amber');
+    var reg=null; try{ reg=await dbInsert('capa_leituras',{company_id:company.id,capa_id:c.id,numero_lido:L.numero||null,dados:L,duvidas:(L.duvidas||[]).length,foto_path:path,status:'pendente',lido_por:(profile&&profile.full_name)||''}); }catch(_e){}
+    capaOcrAplicar(L,URL.createObjectURL(im.blob),reg&&reg.id);
+  }catch(e){ showToast('Não consegui ler a foto: '+(e.message||e),'red'); }
+}
+async function capaOcrLote(){
+  var fs=await capaOcrCapturar(true); if(!fs||!fs.length) return;
+  await fcdCarregar(true);
+  var ok=0, sem=0, erro=0, i=0, tot=fs.length;
+  var mod=document.createElement('div'); mod.className='modal-overlay'; mod.style.zIndex='5400'; mod.style.alignItems='center';
+  mod.innerHTML='<div class="modal" style="max-width:460px"><b style="font-size:15px">Lendo '+tot+' capa(s)…</b><div id="capa-lote-prog" style="margin-top:10px;font-size:13px;color:var(--text2)">0 de '+tot+'</div><div style="height:6px;background:var(--bg3);border-radius:99px;margin-top:8px;overflow:hidden"><div id="capa-lote-bar" style="width:0;height:6px;background:var(--blue-text)"></div></div></div>';
+  document.body.appendChild(mod);
+  var prox=async function(){
+    while(i<tot){ var f=fs[i++];
+      try{
+        var im=await capaOcrB64(f); if(!im) throw new Error('imagem');
+        var L=await capaOcrChamar(im.b64,[]);
+        var cod=L.numero?capaCodigoLeitura(L.numero):''; var c=cod?fcdEscolher(fcdCandidatos(cod)):null;
+        var path=await capaOcrUpload(im.blob,c&&c.id);
+        await dbInsert('capa_leituras',{company_id:company.id,capa_id:c?c.id:null,numero_lido:L.numero||null,dados:L,duvidas:(L.duvidas||[]).length,foto_path:path,status:c?'pendente':'sem_capa',lido_por:(profile&&profile.full_name)||''});
+        if(c) ok++; else sem++;
+      }catch(e){ erro++; }
+      var feito=ok+sem+erro, pr=ge('capa-lote-prog'), bar=ge('capa-lote-bar'); if(pr) pr.textContent=feito+' de '+tot+' · '+ok+' prontas para revisar'+(sem?' · '+sem+' sem capa encontrada':'')+(erro?' · '+erro+' com erro':''); if(bar) bar.style.width=Math.round(feito/tot*100)+'%';
+    }
+  };
+  await Promise.all([prox(),prox()]);
+  mod.remove(); _capaOcrPendT=0; await capaOcrContarPend();
+  showToast(ok+' capa(s) lidas e na fila de revisão'+(sem?' · '+sem+' sem capa encontrada (número não bate)':'')+(erro?' · '+erro+' com erro':''),erro||sem?'amber':'green');
+  capaOcrFila();
+}
+async function capaOcrFila(){
+  var rows=await dbSelect('capa_leituras','company_id=eq.'+company.id+'&status=in.(pendente,sem_capa)&order=duvidas.desc,created_at.asc&limit=300').catch(function(){return [];})||[];
+  var linha=function(r){ var c=(capasProcesso||[]).find(function(x){return x.id===r.capa_id;}); var D=r.dados||{};
+    return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 8px;font-family:monospace">'+ecomEsc(c?c.numero:(r.numero_lido||'?'))+'</td><td style="padding:7px 8px">'+ecomEsc(c?(c.cliente_nome||''):(D.cliente||'—'))+'</td>'
+      +'<td style="padding:7px 8px">'+(r.status==='sem_capa'?'<span class="bdg" style="background:var(--red-bg);color:var(--red-text)">capa não encontrada</span>':(r.duvidas?'<span class="bdg" style="background:var(--amber-bg);color:var(--amber-text)">'+r.duvidas+' dúvida(s)</span>':'<span class="bdg" style="background:var(--green-bg);color:var(--green-text)">sem dúvidas</span>'))+'</td>'
+      +'<td style="padding:7px 8px;text-align:right;white-space:nowrap">'+(c&&(c.status==='aberta'||c.status==='devolvida')?'<button class="btn btn-sm btn-p" onclick="capaOcrRevisar(\''+r.id+'\')">Revisar</button> ':(c?'<span style="font-size:11.5px;color:var(--text3)">capa '+ecomEsc((CAPA_STATUS[c.status]||{}).l||c.status)+'</span> ':''))
+      +'<button class="btn btn-sm" onclick="capaOcrDescartar(\''+r.id+'\')">Descartar</button></td></tr>'; };
+  portModal('Fila de revisão · capas lidas por foto',
+    '<div style="display:flex;justify-content:flex-end;margin-top:-6px"><button class="btn btn-sm" onclick="portClose()">Fechar</button></div>'+(rows.length?'<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">As com dúvida aparecem primeiro. "Revisar" abre a digitação já preenchida, com a foto ao lado.</div><div style="max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="text-align:left;background:var(--bg2);font-size:11.5px;color:var(--text2)"><th style="padding:7px 8px">Capa</th><th style="padding:7px 8px">Cliente</th><th style="padding:7px 8px">Leitura</th><th></th></tr></thead><tbody>'+rows.map(linha).join('')+'</tbody></table></div>'
+    :'<div style="padding:20px;text-align:center;color:var(--text3)">Nenhuma capa lida aguardando revisão.</div>'),null,{noFooter:true,width:'760px'});
+}
+async function capaOcrRevisar(id){
+  var r=(await dbSelect('capa_leituras','id=eq.'+id).catch(function(){return [];})||[])[0]; if(!r) return;
+  var c=(capasProcesso||[]).find(function(x){return x.id===r.capa_id;}); if(!c){ showToast('Capa não encontrada.','red'); return; }
+  try{ portClose(); }catch(_e){}
+  capaViewId=c.id; await capaDigIniciar(c.id,c.status==='devolvida'?'corrigir':'digitar');
+  var url=r.foto_path?await capaOcrUrlAssinada(r.foto_path):null;
+  capaOcrAplicar(r.dados||{},url,r.id);
+}
+async function capaOcrDescartar(id){ try{ await dbUpdate('capa_leituras',id,{status:'descartada'}); }catch(_e){} _capaOcrPendT=0; capaOcrContarPend(); capaOcrFila(); }
 // ══════════════ CAPAS · DIGITAÇÃO POR PERGUNTAS, CONFERÊNCIA E DEVOLUÇÃO (v1.0.1066) ══════════════
 // aberta → (digitação) → pendente_conferencia → (conferência) → conferida → faturada
 //                     ↘ devolvida (motivo) → a operação corrige no WMS e reenvia → aberta
@@ -4230,7 +4385,8 @@ function capaDigTela(c){
   var d=capaDig, tot=d.perg.length;
   var topo='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaDig=null;capaViewId=null;render()">← Voltar</button>'
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+(c.data_operacao?' · '+new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+'</div>'
-    +'<span style="margin-left:auto;display:flex;gap:6px">'+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></span></div>';
+    +'<span style="margin-left:auto;display:flex;gap:6px">'+(d.modo!=='consulta'?'<button class="btn btn-sm" style="border-color:var(--blue-text);color:var(--blue-text)" onclick="capaOcrUmaUm()">📷 Ler da foto</button>':'')+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 PDF</button></span></div>';
+  var _ocr=capaOcrPainel(d);   // v1.0.1194
   if(d.i>=tot){
     // v1.0.1069: regras de consistência do cliente (se o disjuntor estiver ligado)
     var _res=capaAvaliarRegras(c,d.resp,d.servs); d.regras=_res;
@@ -4251,7 +4407,7 @@ function capaDigTela(c){
         +'<button class="btn" onclick="capaDig.i=0;render()">← Voltar e corrigir</button></div>';
     }
     return topo+capaCabecalhoHtml(c)+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px">'
-      +'<div style="font-size:15px;font-weight:700;margin-bottom:10px">Revisão da digitação</div>'+capaResumoHtml(c,d.resp,d.servs)
+      +'<div style="font-size:15px;font-weight:700;margin-bottom:10px">Revisão da digitação</div>'+_ocr+capaResumoHtml(c,d.resp,d.servs)
       +(_res?'<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-top:14px">CONSISTÊNCIAS DO CLIENTE</div>'+capaRegrasTabelaHtml(_res):'')
       +_bts+'</div>';
   }
@@ -4262,12 +4418,14 @@ function capaDigTela(c){
     +'<div style="height:6px;background:var(--bg3);border-radius:99px;margin:8px 0 16px;overflow:hidden"><div style="width:'+pc+'%;height:6px;background:var(--blue-text)"></div></div>'
     +'<div style="font-size:21px;font-weight:700;margin-bottom:10px">'+ecomEsc(q.t)+(q.u?' <span style="font-size:14px;color:var(--text3);font-weight:400">('+ecomEsc(q.u)+')</span>':'')+'</div>'
     +(q.tipo==='opc'?'<div style="font-size:13px;color:var(--text2);margin-bottom:8px">'+q.opc.map(function(o,ix){return '<b>'+(ix+1)+'</b> · '+ecomEsc(o);}).join(' &nbsp; ')+'</div>':'')
+    +((d.duvidas&&d.duvidas[q.k])?'<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:7px 10px;margin-bottom:8px;font-size:12.5px">⚠ Lido da foto com dúvida: '+ecomEsc(d.duvidas[q.k])+'. Confira na foto.</div>':'')
     +'<input id="capa-q" class="fi" autocomplete="off" '+(q.tipo==='num'?'inputmode="decimal"':'')+' value="'+ecomEsc(val)+'" onkeydown="capaDigTecla(event)" style="font-size:24px;height:56px;padding:0 14px">'
     +'<div id="capa-q-err" style="color:var(--red-text);font-size:12.5px;min-height:18px;margin-top:6px"></div>'
-    +'<div style="font-size:12px;color:var(--text3)">Enter para a próxima · ↑ volta na anterior'+(q.serv!=null?' · sem ocorrência = 0 (em branco não passa)':(q.tipo==='txt'?' · pode deixar em branco':''))+'</div></div>';
+    +'<div style="font-size:12px;color:var(--text3)">Enter para a próxima · ↑ volta na anterior'+(q.serv!=null?' · sem ocorrência = 0 (em branco não passa)':(q.tipo==='txt'?' · pode deixar em branco':''))+'</div></div>'+(d.foto?'<div style="max-width:720px;margin-top:12px">'+_ocr+'</div>':'');
 }
 async function capaDigFinalizar(acao){
   var d=capaDig; if(!d) return; var c=(capasProcesso||[]).find(function(x){return x.id===d.id;}); if(!c) return;
+  if(d.leituraId&&(acao==='ok'||acao==='forcar'||acao==='devolver_regras')){ try{ await dbUpdate('capa_leituras',d.leituraId,{status:'aplicada',aplicada_em:new Date().toISOString()}); }catch(_e){} }   // v1.0.1194
   var motivo=null, forcarMot=null;
   if(acao==='devolver'){ motivo=prompt('Motivo da devolução à operação (aparece para eles no WMS):',''); if(motivo==null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo da devolução.'); return; } }
   if(acao==='devolver_regras'){ motivo='Inconsistências: '+capaRegrasMotivo(d.regras); acao='devolver'; }   // v1.0.1069
