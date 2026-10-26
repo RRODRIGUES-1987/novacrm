@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1195 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1196 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1195';
+const APP_VERSION='v1.0.1196';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4511,8 +4511,16 @@ function capaEditarDados(id){
   if(!capaPodeEditarDados(c)){ showToast('Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados.','amber'); return; }
   var v=function(k){ return ecomEsc(c[k]==null?'':String(c[k])); };
   var exp=c.tipo==='expedicao';
+  // v1.0.1196: troca do tipo (Recebimento ⇄ Expedição) — só em capa aberta ou devolvida
+  var podeTipo=c.status==='aberta'||c.status==='devolvida';
+  var tipoHtml='<div style="grid-column:1/-1;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg2)">'
+    +'<label class="fl">Tipo da capa</label><div style="display:flex;gap:18px;padding:4px 0">'
+    +['recebimento','expedicao'].map(function(t){ return '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:'+(podeTipo?'pointer':'not-allowed')+'"><input type="radio" name="capa-e-tipo" value="'+t+'"'+(c.tipo===t?' checked':'')+(podeTipo?'':' disabled')+' onchange="ge(\'capa-e-tipo-av\').style.display=(this.value!==\''+c.tipo+'\')?\'block\':\'none\'"> '+(t==='expedicao'?'Expedição':'Recebimento')+'</label>'; }).join('')+'</div>'
+    +(podeTipo?'<div id="capa-e-tipo-av" style="display:none;font-size:12px;color:var(--amber-text);margin-top:4px">⚠ Trocar o tipo gera um <b>número novo</b> na sequência do tipo certo; o número atual fica como "número anterior" (o papel continua bipando). Os <b>serviços passam a ser os do novo tipo</b>, conforme a tabela do cliente, e as quantidades já digitadas dos serviços são zeradas. Depois, reimprima a capa.</div>'
+      :'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">O tipo só pode ser trocado em capa aberta ou devolvida (sem digitação conferida).</div>')
+    +'</div>';
   portModal('Editar dados da capa · '+ecomEsc(c.numero),
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+tipoHtml
     +'<div><label class="fl">Data da operação *</label><input class="fi" id="capa-e-data_operacao" type="date" value="'+v('data_operacao')+'"></div>'
     +'<div><label class="fl">DOC</label><input class="fi" id="capa-e-doc" value="'+v('doc')+'"></div>'
     +'<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="capa-e-nf_numero" value="'+v('nf_numero')+'"></div>'
@@ -4540,13 +4548,38 @@ async function capaSalvarDados(id){
   });
   if(!novo.hasOwnProperty('data_operacao')&&!c.data_operacao){ portErr('Informe a data da operação.'); return; }
   if(novo.hasOwnProperty('data_operacao')&&!novo.data_operacao){ portErr('A data da operação é obrigatória.'); return; }
-  if(!mud.length){ portClose(); return; }
-  novo.observacoes=capaRegObs(c,'Dados alterados: '+mud.join('; '));
+  // v1.0.1196: troca do tipo da capa
+  var _tipoEl=document.querySelector('input[name="capa-e-tipo"]:checked'), novoTipo=_tipoEl?_tipoEl.value:c.tipo, trocaTipo=novoTipo!==c.tipo;
+  if(trocaTipo&&!(c.status==='aberta'||c.status==='devolvida')){ portErr('O tipo só pode ser trocado em capa aberta ou devolvida.'); return; }
+  if(!mud.length&&!trocaTipo){ portClose(); return; }
   portSaving();
   try{
+    var numAntigo=c.numero, servNovos=null;
+    if(trocaTipo){
+      var numNovo=await capaReservarNumero(novoTipo);
+      // serviços do novo tipo, a partir da tabela tarifária da capa
+      servNovos=[];
+      if(c.tabela_id){
+        var quadros=await dbSelect('tabelas_quadros','tabela_id=eq.'+c.tabela_id+'&order=ordem.asc')||[], ordem=0, campoCap=novoTipo==='expedicao'?'cap_expedicao':'cap_recebimento';
+        for(var qi=0;qi<quadros.length;qi++){ var itens=await dbSelect('tabelas_itens','quadro_id=eq.'+quadros[qi].id+'&order=ordem.asc')||[];
+          itens.forEach(function(it){ if(it[campoCap]) servNovos.push({capa_id:c.id,servico:it.servico||'',unidade_cobranca:it.unidade_cobranca||null,realizado:false,quantidade:null,ordem:ordem++}); }); }
+      }
+      novo.tipo=novoTipo; novo.numero=numNovo; novo.numero_anterior=numAntigo;
+      mud.unshift('Tipo de '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+' para '+(novoTipo==='expedicao'?'Expedição':'Recebimento')+' · número de '+numAntigo+' para '+numNovo+' · serviços trocados pelos do novo tipo ('+servNovos.length+')');
+    }
+    novo.observacoes=capaRegObs(c,'Dados alterados: '+mud.join('; '));
     await dbUpdate('processo_capas',c.id,novo);
+    if(trocaTipo){
+      var velhos=await dbSelect('processo_capa_servicos','capa_id=eq.'+c.id+'&select=id')||[];
+      for(var vi=0;vi<velhos.length;vi++){ await dbDelete('processo_capa_servicos',velhos[vi].id); }
+      for(var si=0;si<servNovos.length;si++){ await dbInsert('processo_capa_servicos',servNovos[si]); }
+      if(typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;   // a digitação recomeça com os serviços novos
+    }
     Object.assign(c,novo);
-    portClose(); showToast('Dados da capa '+c.numero+' atualizados','green'); render();
+    portClose();
+    if(trocaTipo) showToast('Capa agora é '+(novoTipo==='expedicao'?'Expedição':'Recebimento')+': '+c.numero+' (antes '+numAntigo+'). Reimprima a capa (📄 PDF).','green');
+    else showToast('Dados da capa '+c.numero+' atualizados','green');
+    render();
   }catch(e){ portErr('Erro: '+(e.message||e)); }
 }
 function capaRegObs(c,txt){ return ((c.observacoes?c.observacoes+'\n':'')+new Date().toLocaleString('pt-BR')+' · '+txt+' · '+((profile&&profile.full_name)||(cu&&cu.email)||'')).slice(0,4000); }
@@ -52273,6 +52306,7 @@ function helpdeskChatAcao(i){
   if(a.tipo==='abrir_pedido_ecom'&&a.id){ pg('ecom-pedidos'); setTimeout(function(){ try{ ecomPedAbrir(a.id); }catch(_e){} },400); }
   else if(a.tipo==='abrir_titulo_cp'&&a.id){ pg('contas-pagar'); setTimeout(function(){ try{ novoTituloCP(a.id); }catch(_e){ showToast('Abra o título pelo filtro do contas a pagar.','amber'); } },700); }
   else if(a.tipo==='abrir_integracao'){ pg('ecom-integracoes'); }
+  else if(a.tipo==='abrir_capa'&&a.id){ pg('fat-capas-digitar'); setTimeout(function(){ capaViewId=a.id; render(); },400); }   // v1.0.1196
   else if(a.tipo==='abrir_pagina'&&a.id&&/^[a-z0-9-]{3,40}$/.test(a.id)){ pg(a.id); }
 }
 async function helpdeskChatPedirAcesso(){
