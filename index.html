@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1188 | Gerado: 2026-10-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1189 | Gerado: 2026-10-25 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1188';
+const APP_VERSION='v1.0.1189';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1494,7 +1494,10 @@ function bootFinalizar(){
 async function sbFetch(method,path,body,tk,extra_headers={},_retry){
   const h={'Content-Type':'application/json','apikey':SB_KEY,'Prefer':'return=representation',...extra_headers};
   if(tk||tok)h['Authorization']='Bearer '+(tk||tok);
-  const r=await fetch(SB_URL+path,{method,headers:h,body:body?JSON.stringify(body):undefined});
+  const _t0=performance.now(); let r;
+  try{ r=await fetch(SB_URL+path,{method,headers:h,body:body?JSON.stringify(body):undefined}); }
+  catch(_ne){ telReg(performance.now()-_t0,'rede',path); throw _ne; }   // v1.0.1189: sem conexão (não chegou ao servidor)
+  telReg(performance.now()-_t0,r.status>=500?'srv':'ok',path);
   const txt=await r.text();let data=null;try{data=txt?JSON.parse(txt):null;}catch(e){}
   // v1.0.1187: token vencido no meio da operação → renova com o refresh e repete a chamada uma vez (sem derrubar a tela)
   if(r.status===401&&!_retry&&!tk&&tok&&/jwt|expired|token/i.test(txt||'')){
@@ -5044,6 +5047,39 @@ async function loadData(){
     profiles=[profile,...profiles];
   }
 }
+
+
+// ═══ v1.0.1189 · TELEMETRIA PARA O SENTINELA (tempo das chamadas, erros e erros de JavaScript) ═══
+var _tel={ms:[],srv:0,rede:0,n:0}, _telErros=[], _telDisp=null;
+function telDisp(){ if(_telDisp) return _telDisp; try{ _telDisp=localStorage.getItem('verus_disp'); if(!_telDisp){ _telDisp='d'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4); localStorage.setItem('verus_disp',_telDisp); } }catch(_e){ _telDisp='d-sem-storage'; } return _telDisp; }
+function telReg(ms,tipo,path){
+  if(!_tel) return;
+  if(/app_telemetria|app_erros/.test(String(path||''))) return;   // não mede a própria telemetria
+  _tel.n++; if(tipo==='rede') _tel.rede++; else { if(tipo==='srv') _tel.srv++; _tel.ms.push(Math.round(ms)); if(_tel.ms.length>2000) _tel.ms.shift(); }
+}
+function telUnidade(){ try{ var u=(userUnits||[]).find(function(x){return x.id===activeUnit;}); return u?u.name:(activeUnit?'?':'Consolidado'); }catch(_e){ return '?'; } }
+function telPerc(a,p){ if(!a.length) return 0; var s=a.slice().sort(function(x,y){return x-y;}); return s[Math.min(s.length-1,Math.floor(p/100*s.length))]; }
+async function telEnviar(){
+  try{
+    if(!cu||!company||!tok) return;
+    var lote=_tel; _tel={ms:[],srv:0,rede:0,n:0};
+    var ref=null; try{ var _r0=performance.now(); await fetch(location.origin+location.pathname+'?ping='+Date.now(),{method:'HEAD',cache:'no-store'}); ref=Math.round(performance.now()-_r0); }catch(_e){ ref=-1; }
+    var base={company_id:company.id,dispositivo:telDisp(),usuario:(profile&&profile.full_name)||cu.email||'',unidade:telUnidade(),versao:APP_VERSION,pagina:(typeof curPage!=='undefined'?String(curPage):'')};
+    if(lote.n) await fetch(SB_URL+'/rest/v1/app_telemetria',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+tok,'Prefer':'return=minimal'},
+      body:JSON.stringify(Object.assign({},base,{chamadas:lote.n,erros_srv:lote.srv,erros_rede:lote.rede,ms_p50:telPerc(lote.ms,50),ms_p95:telPerc(lote.ms,95),ms_max:lote.ms.length?Math.max.apply(null,lote.ms):0,ref_ms:ref,online:navigator.onLine!==false}))});
+    if(_telErros.length){ var er=_telErros.splice(0,_telErros.length);
+      await fetch(SB_URL+'/rest/v1/app_erros',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+tok,'Prefer':'return=minimal'},body:JSON.stringify(er.map(function(e){ return Object.assign({},base,e); }))}); }
+  }catch(_e){ /* telemetria nunca atrapalha a operação */ }
+}
+function telErro(msg,origem,pilha){
+  var m=String(msg||'').slice(0,400); if(!m||/ResizeObserver|Script error\.?$/i.test(m)) return;
+  var ja=_telErros.find(function(e){return e.mensagem===m;}); if(ja){ ja.vezes++; return; }
+  if(_telErros.length<30) _telErros.push({mensagem:m,origem:String(origem||'').slice(0,200),pilha:String(pilha||'').slice(0,1500),vezes:1});
+}
+window.addEventListener('error',function(e){ telErro(e.message,(e.filename||'')+':'+(e.lineno||'')+':'+(e.colno||''),e.error&&e.error.stack); });
+window.addEventListener('unhandledrejection',function(e){ var r=e.reason; telErro('Promise: '+(r&&r.message||r),'',r&&r.stack); });
+setInterval(telEnviar,120000);
+window.addEventListener('pagehide',function(){ telEnviar(); });
 
 // ── IDLE ──
 const IDLE=15*60*1000,WARN=60*1000;
