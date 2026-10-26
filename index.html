@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1192 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1193 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1192';
+const APP_VERSION='v1.0.1193';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -52099,10 +52099,35 @@ async function helpdeskChatEnviar(){
     _hdChat.conversaId=j.conversa_id||_hdChat.conversaId; _hdChat.grupo=j.grupo&&j.grupo!=='indefinido'?j.grupo:_hdChat.grupo; _hdChat.ultimo=j;
     _hdChat.msgs.push({role:'assistant',texto:j.texto});
     var html=helpdeskEsc(j.texto).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
-    if(j.playbook&&j.playbook.passos){ helpdeskChatBot(html); _hdChat.pb=j.playbook; helpdeskPbPasso(1); }
-    else helpdeskChatBot(html,[['✔ Resolveu','helpdeskChatResolveu()'],['Abrir chamado','helpdeskChatChamado()']]);
+    // v1.0.1193 (etapa 2): botões que levam ao lugar da correção e pedido de acesso ao admin
+    var _chips=[];
+    (j.acoes_tela||[]).forEach(function(a,i){ _hdChat['acao'+i]=a; _chips.push(['➜ '+helpdeskEsc(a.rotulo||'Abrir'),'helpdeskChatAcao('+i+')']); });
+    if(j.solicitar_acesso&&j.solicitar_acesso.tela){ _hdChat.acesso=j.solicitar_acesso; _chips.push(['🔑 Pedir liberação ao admin','helpdeskChatPedirAcesso()']); }
+    if(j.playbook&&j.playbook.passos){ helpdeskChatBot(html,_chips); _hdChat.pb=j.playbook; helpdeskPbPasso(1); }
+    else helpdeskChatBot(html,_chips.concat([['✔ Resolveu','helpdeskChatResolveu()'],['Abrir chamado','helpdeskChatChamado()']]));
   }catch(e){ if(pensando) pensando.remove(); helpdeskChatBot('Erro ao falar com o assistente: '+helpdeskEsc(e.message||e),[['Abrir chamado','helpdeskChatChamado()']]); }
   finally{ _hdChat.busy=false; if(btn){ btn.disabled=false; btn.textContent='Enviar'; } }
+}
+function helpdeskChatAcao(i){
+  var a=_hdChat['acao'+i]; if(!a) return;
+  try{ if(_hdChat.conversaId) dbUpdate('helpdesk_conversas',_hdChat.conversaId,{resolvido:true}).catch(function(){}); }catch(_e){}
+  helpdeskChatFechar();
+  if(a.tipo==='abrir_pedido_ecom'&&a.id){ pg('ecom-pedidos'); setTimeout(function(){ try{ ecomPedAbrir(a.id); }catch(_e){} },400); }
+  else if(a.tipo==='abrir_titulo_cp'&&a.id){ pg('contas-pagar'); setTimeout(function(){ try{ novoTituloCP(a.id); }catch(_e){ showToast('Abra o título pelo filtro do contas a pagar.','amber'); } },700); }
+  else if(a.tipo==='abrir_integracao'){ pg('ecom-integracoes'); }
+  else if(a.tipo==='abrir_pagina'&&a.id&&/^[a-z0-9-]{3,40}$/.test(a.id)){ pg(a.id); }
+}
+async function helpdeskChatPedirAcesso(){
+  var ac=_hdChat.acesso; if(!ac) return;
+  try{
+    var r=await fetch(SB_URL+'/functions/v1/helpdesk-chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({acao:'pedir_acesso',company_id:company?.id,conversa_id:_hdChat.conversaId,tela:ac.tela,aprovacao:!!ac.aprovacao,motivo:ac.motivo||'',
+        usuario:{id:cu&&cu.id,nome:(profile&&profile.full_name)||'',email:(cu&&cu.email)||''}})});
+    var j=await r.json().catch(function(){return {};});
+    if(!r.ok||j.error){ helpdeskChatBot('Não consegui enviar o pedido ('+helpdeskEsc(j.error||('HTTP '+r.status))+'). Quer abrir um chamado?',[['Abrir chamado','helpdeskChatChamado()']]); return; }
+    helpdeskChatBot(j.repetido?'Você já tem um pedido igual aguardando o administrador. Assim que ele aprovar, saia e entre de novo no VERUS.':'✅ Pedido enviado ao administrador. Assim que ele aprovar, <b>saia e entre de novo no VERUS</b> para o acesso aparecer.');
+    if(_hdChat.conversaId){ try{ await dbUpdate('helpdesk_conversas',_hdChat.conversaId,{resolvido:true}); }catch(_e){} }
+  }catch(e){ helpdeskChatBot('Erro ao enviar o pedido: '+helpdeskEsc(e.message||e)); }
 }
 function helpdeskPbPasso(n){
   var pb=_hdChat.pb; if(!pb) return;
