@@ -799,13 +799,21 @@
         <label>Janela de doca</label>
         <div id="agdSlots" class="slots"><div class="hint">Escolha uma data para ver as janelas disponíveis.</div></div>
       </div>
-      <div class="row fgroup">
+      <div class="fgroup" id="agdPorBox">
+        <label>Dados do motorista</label>
+        <div class="seg"><button id="agdPorCli" class="on" onclick="agdPor('cliente')">Eu informo agora</button><button id="agdPorTr" onclick="agdPor('transportadora')">A transportadora informa</button></div>
+      </div>
+      <div class="row fgroup hide" id="agdTrBox">
+        <div><label for="agdTrNome">Transportadora</label><input id="agdTrNome" placeholder="Nome da transportadora"></div>
+        <div><label for="agdTrCt">WhatsApp ou e-mail da transportadora</label><input id="agdTrCt" placeholder="(11) 90000-0000 ou email@transp.com.br"></div>
+      </div>
+      <div class="row fgroup agd-mot">
         <div><label for="agdVeic">Tipo de veículo</label>
           <select id="agdVeic"><option value="">Selecione…</option><option>Fiorino / utilitário</option><option>Van</option><option>VUC</option><option>Truck</option><option>Carreta</option></select>
         </div>
         <div><label for="agdPlaca">Placa</label><input id="agdPlaca" placeholder="ABC1D23" style="text-transform:uppercase"></div>
       </div>
-      <div class="row fgroup">
+      <div class="row fgroup agd-mot">
         <div><label for="agdMot">Motorista</label><input id="agdMot" placeholder="Nome completo"></div>
         <div><label for="agdDoc">Documento do motorista</label><input id="agdDoc" placeholder="CPF ou CNH"></div>
       </div>
@@ -3151,7 +3159,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.7';   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.8';   // v1.6.8: a transportadora informa motorista e placa por link; cartão de saída só com os dados completos   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4047,8 +4055,21 @@ function pedChips(){
 
 
 /* ============================ v1.3 · CARTÃO DE EMBARQUE DO MOTORISTA ============================ */
-function cartaoCodigo(a){ return 'EMB-'+String(a.protocolo||a.id).replace(/\D/g,'').slice(-6).padStart(6,'0'); }
-function cartaoPode(a){ return a.status==='confirmado' && estagioDe(a)!=='liberado'; }
+function cartaoCodigo(a){ return 'EMB-'+String(a.protocolo||a.id).replace(/\D/g,'').slice(-6).padStart(6,'0')+((a.cartao_versao||1)>1?'-'+a.cartao_versao:''); }   // v1.6.8: versão do cartão quando motorista/placa forem substituídos
+function cartaoPode(a){ return a.status==='confirmado' && estagioDe(a)!=='liberado' && agdDadosOk(a); }
+function agdDadosOk(a){ return DEMO || a.tipo!=='saida' || !!(a.motorista_nome && a.placa && a.motorista_doc); }   // v1.6.8
+function agdLinkTransp(a){ return a.transp_token ? location.origin+location.pathname+'?t='+a.transp_token : ''; }
+function agdLinkPainel(a){
+  const url=agdLinkTransp(a); if(!url) return '';
+  const txt=`MKLOG · ${state.depositante||''}\nAgendamento ${a.protocolo} · ${a.tipo==='entrada'?'Entrada':'Saída'} · ${cdNome(a.cd)} · ${fmtDataLonga(a.data)} ${fmtHora(a.hora_inicio)}\nInforme o motorista e a placa neste link: ${url}`;
+  const ct=String(a.transp_contato||''), fone=ct.replace(/\D/g,''), mail=/@/.test(ct)?ct:'';
+  return `<div style="background:#fffbeb;color:#92400e;border-radius:10px;padding:12px 14px;margin:10px 0;font-size:13px">
+    <b>${agdDadosOk(a)?'Link da transportadora':'Aguardando os dados do motorista'}</b><br>${agdDadosOk(a)?'Pelo mesmo link a transportadora pode substituir motorista ou placa (o cartão anterior deixa de valer).':'O cartão do motorista fica disponível quando a transportadora informar motorista, documento e placa.'}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <a class="btn" style="background:#25D366;color:#fff;width:auto" target="_blank" rel="noopener" href="https://wa.me/${fone.length>=10?(fone.length<=11?'55'+fone:fone):''}?text=${encodeURIComponent(txt)}">Enviar por WhatsApp</a>
+      <a class="btn btn-ghost" style="width:auto" href="mailto:${mail}?subject=${encodeURIComponent('Dados do motorista · '+a.protocolo)}&body=${encodeURIComponent(txt)}">E-mail</a>
+      <button class="btn btn-ghost" style="width:auto" onclick="navigator.clipboard&&navigator.clipboard.writeText('${url}');this.textContent='✓ Link copiado'">Copiar link</button></div></div>`;
+}
 function cartaoQrSvg(txt,px){ try{ const q=qrcode(0,'M'); q.addData(txt); q.make(); const n=q.getModuleCount(), c=px/(n+8);
     let r=''; for(let y=0;y<n;y++) for(let x=0;x<n;x++) if(q.isDark(y,x)) r+=`<rect x="${(x+4)*c}" y="${(y+4)*c}" width="${c+0.15}" height="${c+0.15}"/>`;
     return `<svg width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" role="img" aria-label="QR ${txt}"><rect width="${px}" height="${px}" fill="#fff"/><g fill="#1A1A1A">${r}</g></svg>`;
@@ -4067,6 +4088,7 @@ function cartaoHtml(a, imprimir){
 }
 function openCartao(id){
   const a=state.agendamentos.find(x=>x.id===id); if(!a) return;
+  if(!agdDadosOk(a)){ $('detTitle').textContent='Cartão do motorista · '+a.protocolo; $('detBody').innerHTML=agdLinkPainel(a); openModal('mDet'); return; }   // v1.6.8
   if(!cartaoPode(a)){ alert('O cartão do motorista fica disponível quando a MKLOG confirmar o agendamento.'); return; }
   const cod=cartaoCodigo(a);
   const txt=`Cartão de embarque MKLOG ${cod}\n${a.tipo==='entrada'?'Entrada':'Saída'} · ${cdNome(a.cd)} · ${fmtDataLonga(a.data)} ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)}\nPlaca ${a.placa||'—'} · Motorista ${a.motorista_nome||'—'}\nApresente o código ${cod} na portaria.`;
@@ -4308,7 +4330,7 @@ function openAgd(){
   const sel=$('agdPedido'); sel.innerHTML='<option value="">Sem vínculo — informar depois</option>';
   state.pedidos.filter(p=>['enviado','em_analise','aprovado'].includes(p.status))
     .forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=`${p.protocolo} · ${p.tipo==='entrada'?'Entrada':'Saída'}${p.nf_numero?' · NF '+p.nf_numero:''}`; sel.appendChild(o); });
-  agd.op=null; agdOpsMontar(); renderDias(); renderSlots();
+  agd.op=null; agd.por='cliente'; ['agdTrNome','agdTrCt'].forEach(i=>{ if($(i)) $(i).value=''; }); agdPor('cliente'); agdOpsMontar(); renderDias(); renderSlots();
   restoreFoot('agd'); openModal('mAgd');
 }
 function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); }
@@ -4371,14 +4393,20 @@ function renderSlots(){
     S.appendChild(b);
   });
 }
+// v1.6.8: quem informa o motorista
+function agdPor(v){ agd.por=v; $('agdPorCli').classList.toggle('on',v==='cliente'); $('agdPorTr').classList.toggle('on',v==='transportadora');
+  $('agdTrBox').classList.toggle('hide',v!=='transportadora'); document.querySelectorAll('#mAgd .agd-mot').forEach(e=>e.classList.toggle('hide',v==='transportadora')); }
 function saveAgd(){
   if(!agd.data || !agd.janela){ $('agdErr').textContent='Escolha data e janela de doca.'; return; }
-  if(!$('agdVeic').value || !$('agdPlaca').value.trim() || !$('agdMot').value.trim()){
-    $('agdErr').textContent='Informe tipo de veículo, placa e motorista.'; return; }
+  if(agd.por==='transportadora'){
+    if(!$('agdTrCt').value.trim()){ $('agdErr').textContent='Informe o WhatsApp ou e-mail da transportadora, para enviarmos o link.'; return; }
+  } else if(!$('agdVeic').value || !$('agdPlaca').value.trim() || !$('agdMot').value.trim()){
+    $('agdErr').textContent='Informe tipo de veículo, placa e motorista, ou escolha "a transportadora informa".'; return; }
   const novo = { tipo:agd.tipo, cd:agd.cd, data:agd.data, janela_id:agd.janela.id,
     tipo_veiculo:$('agdVeic').value, placa:$('agdPlaca').value.trim().toUpperCase(),
     motorista_nome:$('agdMot').value.trim(), motorista_doc:$('agdDoc').value.trim()||null,
-    transportadora:$('agdTransp').value.trim()||null,
+    transportadora:(agd.por==='transportadora'?$('agdTrNome').value.trim():$('agdTransp').value.trim())||null,
+    motorista_por:agd.por||'cliente', transp_contato:agd.por==='transportadora'?$('agdTrCt').value.trim():null,
     volumes:$('agdVol').value?parseInt($('agdVol').value):null,
     pedido_id:$('agdPedido').value||null };
   if(DEMO){
@@ -4727,12 +4755,46 @@ function showDone(kind, protocolo, msg){
     $('whoUpd').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+' · estoque conferido agora';
   };
 
+  /* ---------------- PÁGINA DA TRANSPORTADORA (link ?t=) · v1.6.8 ---------------- */
+  (function(){
+    const tk=new URLSearchParams(location.search).get('t'); if(!tk || !SUPABASE_URL) return;
+    const box=document.createElement('div'); box.id='transpPg'; box.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg,#f6f6f4);overflow:auto;padding:24px 16px';
+    document.body.appendChild(box);
+    const anon=supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth:{ persistSession:false } });
+    const card=(h)=>`<div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;padding:22px;box-shadow:0 4px 24px rgba(0,0,0,.08)"><div style="font-size:12px;color:#888;margin-bottom:4px">MK Logística · dados do motorista</div>${h}</div>`;
+    const campo=(id,l,v,ph,extra)=>`<label style="display:block;font-size:12px;color:#666;margin:12px 0 4px" for="${id}">${l}</label><input id="${id}" value="${esc(v||'')}" placeholder="${ph||''}" ${extra||''} style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:15px">`;
+    async function carregar(msg){
+      const { data, error } = await anon.rpc('portal_transp_ver', { p_token: tk });
+      if(error || !data){ box.innerHTML=card('<h3 style="margin:6px 0">Link inválido</h3><p style="color:#666">Peça um novo link ao seu cliente.</p>'); return; }
+      const d=data, cdN=d.cd==='itu'?'Itu-SP':'Salto-SP', dt=new Date(d.data+'T12:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'});
+      let h=`<h3 style="margin:6px 0 2px">${esc(d.cliente||'')} · ${d.tipo==='entrada'?'Entrada':'Saída'}</h3><div style="color:#555;font-size:14px">${dt} · ${d.hora_inicio} · ${cdN}${d.operacao?' · '+esc(d.operacao):''}</div><div style="color:#888;font-size:12px;margin-top:2px">Protocolo ${esc(d.protocolo)}</div>`;
+      if(msg) h+=`<div style="background:#ecfdf5;color:#065f46;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:13px">${msg}</div>`;
+      if(!d.editavel){ h+=`<p style="color:#666;margin-top:14px">Este agendamento não aceita mais alterações.</p>`; box.innerHTML=card(h); return; }
+      h+=campo('tpMot','Motorista *',d.motorista_nome,'Nome completo')+campo('tpDoc','CPF ou CNH *',d.motorista_doc,'Documento do motorista')
+        +`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div>${campo('tpPlaca','Placa *',d.placa,'ABC1D23','style="text-transform:uppercase"')}</div><div><label style="display:block;font-size:12px;color:#666;margin:12px 0 4px" for="tpVeic">Tipo de veículo *</label><select id="tpVeic" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:15px">${['','Fiorino / utilitário','Van','VUC','Truck','Carreta'].map(o=>`<option${o===(d.tipo_veiculo||'')?' selected':''}>${o}</option>`).join('')}</select></div></div>`
+        +campo('tpTr','Transportadora',d.transportadora,'Nome da transportadora')
+        +`<div id="tpErr" style="color:#b91c1c;font-size:13px;margin-top:10px"></div>`
+        +`<button id="tpOk" style="width:100%;margin-top:14px;padding:12px;border:none;border-radius:10px;background:#111;color:#fff;font-size:15px;font-weight:600;cursor:pointer">${d.motorista_nome?'Salvar alterações':'Salvar e liberar o cartão'}</button>`
+        +(d.motorista_nome?`<p style="color:#888;font-size:12px;margin-top:10px">Trocar motorista ou placa gera um cartão novo; o anterior deixa de valer na portaria.</p>`:'');
+      box.innerHTML=card(h);
+      $('tpOk').onclick=async function(){
+        const p={ motorista_nome:$('tpMot').value, motorista_doc:$('tpDoc').value, placa:$('tpPlaca').value, tipo_veiculo:$('tpVeic').value, transportadora:$('tpTr').value };
+        this.disabled=true; this.textContent='Salvando…';
+        const { error } = await anon.rpc('portal_transp_salvar', { p_token: tk, p });
+        if(error){ $('tpErr').textContent=error.message; this.disabled=false; this.textContent='Tentar de novo'; return; }
+        carregar('Dados salvos. O cliente já pode emitir o cartão do motorista; ele também fica disponível com a MKLOG.');
+      };
+    }
+    carregar().catch(()=>{ box.innerHTML=card('<p>Não foi possível abrir o agendamento agora. Tente de novo em instantes.</p>'); });
+  })();
+
   /* ---------------- AGENDAMENTO (real) · v1.6.5 ---------------- */
   window.salvarAgdReal = async function(novo){
     try{
       const { data:a, error } = await sb.rpc('portal_agendar', { p: novo });
       if(error) throw error;
       await loadDados();
+      if(a.motorista_por==='transportadora'){ showDone('agd', a.protocolo, (a.status==='confirmado'?'Agendamento CONFIRMADO':'Solicitação registrada')+` para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)} em ${cdNome(a.cd)}. Envie o link abaixo à transportadora para ela informar o motorista e a placa.`); const b=$('agdBody'); if(b){ const d=document.createElement('div'); d.innerHTML=agdLinkPainel(a); b.querySelector('.done') && b.querySelector('.done').appendChild(d); } return; }
       showDone('agd', a.protocolo, a.status==='confirmado'
         ? `Agendamento CONFIRMADO para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)} em ${cdNome(a.cd)}. Apresente o cartão na portaria.`
         : `Solicitação registrada para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)} em ${cdNome(a.cd)}. A MKLOG vai confirmar sua janela.`);
