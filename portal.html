@@ -3146,7 +3146,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.3';   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.4';   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -3386,6 +3386,7 @@ function enterApp(){
   document.querySelectorAll('.so-demo').forEach(el=>el.classList.toggle('hide', !DEMO));   // v1.6.2: painel/totem só na demonstração (ainda não gravam no banco)
   // v1.6.3: menu só com o que este acesso pode ver
   document.querySelectorAll('#topnav button[data-scr]').forEach(b=>{ const k=b.dataset.scr; if(k!=='home' && k!=='mot' && !podeVer(k)) b.classList.add('hide'); });
+  aplicarPermsHome();
   $('whoNome').textContent = state.user.nome.split(' ')[0];
   $('whoDep').textContent = state.depositante;
   const hr = new Date().getHours(); $('whoSaud').textContent = hr<12?'Bom dia':hr<18?'Boa tarde':'Boa noite';
@@ -3426,7 +3427,15 @@ async function loadDados(){
 
 /* ============================ NAVEGAÇÃO ============================ */
 // v1.6.3: permissões do acesso (agd, est, ped, rel, fin, nc); sem permissões gravadas = acesso completo; demonstração vê tudo
-function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='op'||k==='mot') return true; return state.perms.indexOf(k)>=0; }
+function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; return state.perms.indexOf(k)>=0; }
+// v1.6.4: home, atalhos e atendimento só com o que o acesso pode ver
+function aplicarPermsHome(){
+  const card = id => { const e=$(id); return e ? e.closest('.sum-card') : null; };
+  [['sumPed','ped'],['sumPallets','est'],['sumHoje','agd'],['sumPatio','agd']].forEach(([id,k])=>{ const c=card(id); if(c) c.classList.toggle('hide', !podeVer(k)); });
+  document.querySelectorAll('.home-tiles .tile').forEach(t=>{ const m=String(t.getAttribute('onclick')||'').match(/showScreen\('([a-z]+)'\)/); if(m){ const w=t.closest('.tile-wrap')||t; w.classList.toggle('hide', !podeVer(m[1])); } });
+  const fab=$('fabChat'); if(fab) fab.classList.toggle('hide', !podeVer('chat'));
+  if(!podeVer('chat')){ const cp=$('chatPanel'); if(cp) cp.classList.add('hide'); }
+}
 function showScreen(s){
   if(!podeVer(s)){ s='home'; }
   const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
@@ -4109,12 +4118,18 @@ function renderHomeDash(abertosP, futurosA, b, ncAbertas){
   if(ncMk) at += `<button class="drow" onclick="showScreen('nc')"><span>${ncMk} não conformidade(s) em tratamento pela MKLOG</span>${tagH('t-gr','acompanhar')}</button>`;
   const venc = state.pedidos.filter(p=>{const x=pedIndic(p); return x && !x.fechado && !x.onTime;});
   venc.forEach(p=>{ at += `<button class="drow" onclick="openDetalhe('ped','${p.id}')"><span>${p.protocolo} com prazo vencido</span>${tagH('t-er','ver')}</button>`; });
+  // v1.6.4: "precisa da sua atenção" só com o que o acesso pode ver
+  at = '';
+  if(podeVer('fin')) (state.faturas||[]).forEach(f=>{ if(f.status==='pendente_aprovacao') at += `<button class="drow" onclick="openFat('${f.id}')"><span>Medição de ${String(f.competencia||'').replace(' (prévia)','')} aguardando sua aprovação</span>${tagH('t-wa','aprovar')}</button>`;
+                                   if(f.status==='atrasada') at += `<button class="drow" onclick="openFat('${f.id}')"><span>Fatura ${f.numero} em atraso</span>${tagH('t-er',fmtBRL(f.valor))}</button>`; });
+  if(podeVer('nc')){ (state.ncs||[]).filter(n=>n.status==='pendente_cliente').forEach(n=>{ at += `<button class="drow" onclick="openNc('${n.id}')"><span>${n.protocolo} aguarda sua resposta<div class="sub">${n.titulo}</div></span>${tagH('t-er','responder')}</button>`; });
+    const ncMk2 = (state.ncs||[]).filter(n=>n.status==='pendente_mklog').length; if(ncMk2) at += `<button class="drow" onclick="showScreen('nc')"><span>${ncMk2} não conformidade(s) em tratamento pela MKLOG</span>${tagH('t-gr','acompanhar')}</button>`; }
+  if(podeVer('ped')) state.pedidos.filter(p=>{const x=pedIndic(p); return x && !x.fechado && !x.onTime;}).forEach(p=>{ at += `<button class="drow" onclick="openDetalhe('ped','${p.id}')"><span>${p.protocolo} com prazo vencido</span>${tagH('t-er','ver')}</button>`; });
   if(!at) at = '<div class="drow"><span class="sub">Nada pendente com você. 👍</span></div>';
-  el.innerHTML = `
-    <div class="dcard"><h4><span class="live-dot"></span> Operação agora <button class="lnk" onclick="showScreen('op')">ver tudo ›</button></h4>${op}</div>
-    <div class="dcard"><h4>Próximos agendamentos <button class="lnk" onclick="showScreen('agd')">ver todos ›</button></h4>${ag}</div>
-    <div class="dcard"><h4>Estoque · ocupação por CD <button class="lnk" onclick="showScreen('est')">abrir estoque ›</button></h4>${es}</div>
-    <div class="dcard"><h4>Precisa da sua atenção</h4>${at}</div>`;
+  el.innerHTML = (podeVer('agd') ? `<div class="dcard"><h4><span class="live-dot"></span> Operação agora <button class="lnk" onclick="showScreen('op')">ver tudo ›</button></h4>${op}</div>
+    <div class="dcard"><h4>Próximos agendamentos <button class="lnk" onclick="showScreen('agd')">ver todos ›</button></h4>${ag}</div>` : '')
+    + (podeVer('est') ? `<div class="dcard"><h4>Estoque · ocupação por CD <button class="lnk" onclick="showScreen('est')">abrir estoque ›</button></h4>${es}</div>` : '')
+    + `<div class="dcard"><h4>Precisa da sua atenção</h4>${at}</div>`;
 }
 function estFiltroMin(){ showScreen('est'); const c=$('estMin'); if(c){ c.checked=true; renderEstoque(); } }
 function estLinhas(){
@@ -4586,6 +4601,7 @@ function showDone(kind, protocolo, msg){
       if(e2 || !ctx){ await sb.auth.signOut(); throw new Error((e2&&e2.message)||'Usuário sem acesso ao portal. Fale com a MKLOG.'); }
       if(ctx.trocar_senha){ await portalDefinirSenha('Primeiro acesso: defina a sua senha', 'A senha temporária que você recebeu por e-mail serve só para este primeiro acesso.'); }
       DEMO = false;
+      try{ const { data:pm } = await sb.rpc('portal_permissoes'); state.perms = Array.isArray(pm) ? pm : null; }catch(_e){ state.perms = null; }   // v1.6.4
       state.user = { nome: ctx.usuario };
       state.depositanteId = ctx.depositante_id; state.depositante = ctx.depositante;
       await loadDados();
@@ -4672,7 +4688,8 @@ function showDone(kind, protocolo, msg){
   window.enterApp = function(){
     _orig.enterApp();
     if(DEMO) return;
-    document.querySelectorAll('#topnav button').forEach(b=>{ b.style.display = REAL_TELAS.includes(b.dataset.scr) ? '' : 'none'; });
+    document.querySelectorAll('#topnav button').forEach(b=>{ b.style.display = (REAL_TELAS.includes(b.dataset.scr) && podeVer(b.dataset.scr)) ? '' : 'none'; });   // v1.6.4: e só o que o acesso pode ver
+    aplicarPermsHome();
     $('whoUpd').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+' · estoque conferido agora';
   };
 
