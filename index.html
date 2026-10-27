@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1201 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1202 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1380,7 +1380,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1201';
+const APP_VERSION='v1.0.1202';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4677,6 +4677,8 @@ function crLoteAbrir(){
 async function crLoteConfirmar(){
   var data=(ge('cr-lote-data')||{}).value; if(!data){ alert('Informe a data de pagamento.'); return; }
   var sel=(contasReceber||[]).filter(function(cp){return crLisSel[cp.id]&&crLisBaixavel(cp);});
+  var _als=sel.map(function(c){ return crDataAlerta(c,data); }).filter(Boolean);   // v1.0.1202
+  if(_als.length&&!confirm(_als.length+' título(s) com data de pagamento fora do esperado, por exemplo:\n'+_als[0]+'\n\nConfirma a baixa com esta data?')) return;
   var bt=ge('cr-lote-ok'); if(bt){ bt.disabled=true; bt.textContent='Baixando…'; }
   var ok=0, falhas=[];
   for(var i=0;i<sel.length;i++){
@@ -25300,6 +25302,7 @@ function crLisRender(){
       var acao='';
       if(st==='aguardando') acao='<span onclick="novoTituloCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
       else if(st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCR(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span>';
+      else if(st==='pago'&&crPodeCorrigir()) acao='<span onclick="crCorrigirAbrir(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px" title="Corrigir a data ou o valor da baixa, ou estornar o recebimento">corrigir</span>';   // v1.0.1202
       h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
         +'<span>'+(crLisBaixavel(cp)?'<input type="checkbox" '+(crLisSel[cp.id]?'checked':'')+' onchange="crLisToggle(\''+cp.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer">':'')+'</span>'
         +'<span style="font-size:12px;color:var(--text2)">'+venc+_vaj+'</span>'
@@ -25743,6 +25746,7 @@ function abrirCRPeriodo(clienteId, datas){
             <span style="font-size:10px;padding:2px 7px;border-radius:99px;background:${st.bg};color:${st.color}">${st.label}</span>
           </div>
         </div>
+        ${(['pago','pago_atraso'].includes(cr.status)&&crPodeCorrigir())?`<button onclick="ge('modal-cr-dia').remove();crCorrigirAbrir('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">✏ Corrigir baixa</button>`:''}
         ${!['pago','pago_atraso'].includes(cr.status)?`<button onclick="abrirBaixaCR('${cr.id}')" style="margin-top:8px;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Registrar baixa</button>`:''}
       </div>`;
     }).join('')}
@@ -25782,6 +25786,90 @@ function baixarContaReceber(){
   document.body.appendChild(modal);
 }
 
+
+// ═══ v1.0.1202 · CONTAS A RECEBER: corrigir a baixa (data/valor) ou estornar o recebimento, com registro ═══
+function crPodeCorrigir(){ var r=String(profile?.role||''); return r==='admin'||r==='adm'||(typeof podeFazer==='function'&&podeFazer('contas-receber','pode_editar',['admin','adm'])); }
+function crDataAlerta(cr,data){
+  if(!data||!cr) return '';
+  var d=new Date(data+'T00:00'), fat=cr.fatura_id?(faturamento||[]).find(function(f){return f.id===cr.fatura_id;}):null;
+  var emi=(fat&&(fat.data_emissao||fat.nfse_em))||cr.nfse_em||null;
+  if(emi&&d<new Date(String(emi).slice(0,10)+'T00:00')) return 'A data do pagamento ('+d.toLocaleDateString('pt-BR')+') é ANTERIOR à emissão da fatura ('+new Date(String(emi).slice(0,10)+'T00:00').toLocaleDateString('pt-BR')+').';
+  if(cr.vencimento){ var dif=Math.round((d-new Date(cr.vencimento+'T00:00'))/86400000); if(Math.abs(dif)>30) return 'A data do pagamento está '+Math.abs(dif)+' dias '+(dif<0?'antes':'depois')+' do vencimento ('+new Date(cr.vencimento+'T00:00').toLocaleDateString('pt-BR')+').'; }
+  if(d>new Date()) return 'A data do pagamento está no futuro.';
+  return '';
+}
+function crCorrigirAbrir(id){
+  var cr=(contasReceber||[]).find(function(x){return x.id===id;}); if(!cr) return;
+  var old=ge('modal-cr-corr'); if(old) old.remove();
+  var fat=cr.fatura_id?(faturamento||[]).find(function(f){return f.id===cr.fatura_id;}):null;
+  var dp=cr.data_pagamento?new Date(cr.data_pagamento+'T00:00').toLocaleDateString('pt-BR'):'—';
+  var al=crDataAlerta(cr,cr.data_pagamento);
+  var m=document.createElement('div'); m.id='modal-cr-corr';
+  m.style.cssText='position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4)';
+  m.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:20px;width:440px;max-width:94vw">'
+    +'<div style="font-size:15px;font-weight:700">Corrigir baixa · '+ecomEsc((cr.documento_tipo==='nd'?'ND ':'NF ')+(cr.documento_numero||''))+'</div>'
+    +'<div style="font-size:12px;color:var(--text3)">'+ecomEsc(cr.cliente_nome||'')+(fat&&fat.numero_fatura?' · '+ecomEsc(fat.numero_fatura):'')+(cr.vencimento?' · vencimento '+new Date(cr.vencimento+'T00:00').toLocaleDateString('pt-BR'):'')+'</div>'
+    +'<div style="background:var(--bg2);border-radius:8px;padding:9px 11px;margin:12px 0;font-size:12.5px">Baixa atual: pagamento em <b>'+dp+'</b> · <b>'+fmtV(Number(cr.valor_pago||cr.valor||0))+'</b> · '+(cr.status==='pago_atraso'?'pago com atraso':'pago')+'</div>'
+    +'<div id="cr-corr-form"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div class="fg"><label class="fl">Data correta do pagamento *</label><input class="fi" id="cr-corr-data" type="date" value="'+(cr.data_pagamento||'')+'" oninput="crCorrigirAviso(\''+id+'\')"></div>'
+      +'<div class="fg"><label class="fl">Valor recebido *</label><input class="fi" id="cr-corr-valor" type="number" step="0.01" value="'+Number(cr.valor_pago||cr.valor||0)+'"></div></div>'
+      +'<div id="cr-corr-aviso" style="'+(al?'':'display:none;')+'background:var(--amber-bg);color:var(--amber-text);border-radius:8px;padding:7px 10px;font-size:12px;margin-bottom:10px">'+(al?'Data atual: '+ecomEsc(al):'')+'</div>'
+      +'<div class="fg"><label class="fl">Motivo da correção *</label><textarea class="fi" id="cr-corr-motivo" rows="2" placeholder="Ex.: data digitada errada; recebido em 21/09 conforme extrato"></textarea></div>'
+      +'<div style="font-size:11.5px;color:var(--text3)">Fica registrado: quem corrigiu, quando, a data e o valor anteriores e o motivo.</div>'
+      +'<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" style="flex:1" onclick="ge(\'modal-cr-corr\').remove()">Cancelar</button><button class="btn btn-p" id="cr-corr-ok" style="flex:1" onclick="crCorrigirSalvar(\''+id+'\')">Salvar correção</button></div>'
+      +'<button onclick="crEstornoForm(\''+id+'\')" style="margin-top:12px;background:none;border:none;color:var(--red-text);font-size:12px;cursor:pointer;padding:0">Estornar o recebimento (o título volta para em aberto)</button></div>'
+    +'</div>';
+  document.body.appendChild(m);
+}
+function crCorrigirAviso(id){
+  var cr=(contasReceber||[]).find(function(x){return x.id===id;}), el=ge('cr-corr-aviso'); if(!cr||!el) return;
+  var a=crDataAlerta(cr,(ge('cr-corr-data')||{}).value); el.style.display=a?'block':'none'; el.textContent=a;
+}
+function crHist(cr,ent){ var h=Array.isArray(cr.baixa_historico)?cr.baixa_historico.slice():[]; h.push(Object.assign({em:new Date().toISOString(),por:(profile&&profile.id)||null,por_nome:(profile&&profile.full_name)||cu?.email||''},ent)); return h; }
+async function crGravarCorr(cr,patch){
+  try{ await dbUpdate('contas_receber',cr.id,patch); }
+  catch(e){ if(/baixa_historico|column|schema cache/i.test(String(e&&e.message))){ var p2=Object.assign({},patch); delete p2.baixa_historico; await dbUpdate('contas_receber',cr.id,p2); showToast('Corrigido, mas sem o registro: rode o SQL da v1.0.1202.','amber'); patch=p2; } else throw e; }
+  contasReceber=contasReceber.map(function(x){ return x.id===cr.id?Object.assign({},x,patch):x; });
+  // a fatura acompanha: todos pagos → pago (data = último recebimento); alguns → pago parcial; nenhum → autorizado
+  if(cr.fatura_id){
+    var irm=[]; try{ irm=await dbSelect('contas_receber','fatura_id=eq.'+cr.fatura_id+'&select=id,status,data_pagamento')||[]; }catch(_e){ irm=[]; }
+    irm=irm.map(function(x){ return x.id===cr.id?Object.assign({},x,patch):x; });
+    var pg=irm.filter(function(x){ return x.status==='pago'||x.status==='pago_atraso'; });
+    var updF=!irm.length?null:(pg.length===irm.length?{status:'pago',data_pagamento:pg.map(function(x){return x.data_pagamento;}).sort().pop(),pago_com_atraso:pg.some(function(x){return x.status==='pago_atraso';})}:(pg.length?{status:'pago_parcial'}:{status:'autorizado',data_pagamento:null}));
+    if(updF){ try{ await dbUpdate('faturamento',cr.fatura_id,updF); faturamento=faturamento.map(function(f){ return f.id===cr.fatura_id?Object.assign({},f,updF):f; }); }catch(_e){} }
+  }
+}
+async function crCorrigirSalvar(id){
+  var cr=(contasReceber||[]).find(function(x){return x.id===id;}); if(!cr) return;
+  var data=(ge('cr-corr-data')||{}).value, valor=parseFloat((ge('cr-corr-valor')||{}).value), motivo=((ge('cr-corr-motivo')||{}).value||'').trim();
+  if(!data){ alert('Informe a data correta do pagamento.'); return; }
+  if(!(valor>0)){ alert('Informe o valor recebido.'); return; }
+  if(!motivo){ alert('Informe o motivo da correção.'); return; }
+  if(data===cr.data_pagamento&&Math.abs(valor-Number(cr.valor_pago||cr.valor||0))<0.005){ alert('Nada mudou na baixa.'); return; }
+  var al=crDataAlerta(cr,data); if(al&&!confirm(al+'\n\nConfirma a correção com esta data?')) return;
+  var b=ge('cr-corr-ok'); if(b){ b.disabled=true; b.textContent='Salvando…'; }
+  var status=cr.vencimento&&new Date(data+'T00:00')>new Date(cr.vencimento+'T00:00')?'pago_atraso':'pago';
+  var patch={data_pagamento:data,valor_pago:Math.round(valor*100)/100,status:status,
+    baixa_historico:crHist(cr,{tipo:'correcao',data_anterior:cr.data_pagamento||null,valor_anterior:Number(cr.valor_pago||0)||null,data_nova:data,valor_novo:Math.round(valor*100)/100,motivo:motivo})};
+  try{ await crGravarCorr(cr,patch); var m=ge('modal-cr-corr'); if(m) m.remove(); showToast('Baixa corrigida: pagamento em '+new Date(data+'T00:00').toLocaleDateString('pt-BR')+'.','green'); if(curPage==='contas-receber'){ var c=ge('content'); if(c){ c.innerHTML=rContasReceber(); initContasReceber(); } } }
+  catch(e){ if(b){ b.disabled=false; b.textContent='Salvar correção'; } alert('Erro ao corrigir: '+(e.message||e)); }
+}
+function crEstornoForm(id){
+  var f=ge('cr-corr-form'); if(!f) return;
+  f.innerHTML='<div style="background:var(--red-bg);color:var(--red-text);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-bottom:10px">O título volta para <b>em aberto</b>, sem data e sem valor recebido. Use quando a baixa não deveria ter existido.</div>'
+    +'<div class="fg"><label class="fl">Motivo do estorno *</label><textarea class="fi" id="cr-est-motivo" rows="3" placeholder="Ex.: baixado por engano; o pagamento não entrou"></textarea></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1" onclick="crCorrigirAbrir(\''+id+'\')">Voltar</button><button class="btn" id="cr-est-ok" style="flex:1;background:#991b1b;color:#fff;border:none" onclick="crEstornoConfirmar(\''+id+'\')">Estornar recebimento</button></div>';
+  setTimeout(function(){ var t=ge('cr-est-motivo'); if(t) t.focus(); },50);
+}
+async function crEstornoConfirmar(id){
+  var cr=(contasReceber||[]).find(function(x){return x.id===id;}); if(!cr) return;
+  var motivo=((ge('cr-est-motivo')||{}).value||'').trim(); if(!motivo){ alert('Informe o motivo do estorno.'); return; }
+  var b=ge('cr-est-ok'); if(b){ b.disabled=true; b.textContent='Estornando…'; }
+  var patch={status:'a_vencer',data_pagamento:null,valor_pago:null,
+    baixa_historico:crHist(cr,{tipo:'estorno',data_anterior:cr.data_pagamento||null,valor_anterior:Number(cr.valor_pago||0)||null,motivo:motivo})};
+  try{ await crGravarCorr(cr,patch); var m=ge('modal-cr-corr'); if(m) m.remove(); showToast('Recebimento estornado: o título voltou para em aberto.','green'); if(curPage==='contas-receber'){ var c=ge('content'); if(c){ c.innerHTML=rContasReceber(); initContasReceber(); } } }
+  catch(e){ if(b){ b.disabled=false; b.textContent='Estornar recebimento'; } alert('Erro ao estornar: '+(e.message||e)); }
+}
 function abrirBaixaCR(crId){
   const cr=contasReceber.find(x=>x.id===crId);if(!cr)return;
   const old=ge('modal-baixa-cr');if(old)old.remove();
@@ -25819,6 +25907,7 @@ function abrirBaixaCR(crId){
 async function confirmarBaixaCR(crId){
   const cr=contasReceber.find(x=>x.id===crId);if(!cr)return;
   const dataPgto=ge('baixa-data')?.value;
+  { const _al=crDataAlerta(cr,dataPgto); if(_al&&!confirm(_al+'\n\nConfirma a baixa com esta data?')) return; }   // v1.0.1202
   const valorPago=parseFloat(ge('baixa-valor')?.value||cr.valor);
   if(!dataPgto){alert('Informe a data de pagamento.');return;}
 
