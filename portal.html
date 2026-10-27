@@ -3151,7 +3151,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.6';   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.7';   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4328,13 +4328,16 @@ function agdOpSel(v){ agd.op=v; agd.janela=null; agdOpsMontar(); renderDias(); r
 function agdCd(c){ agd.cd=c; agd.janela=null; $('agdSalto').classList.toggle('on',c==='salto'); $('agdItu').classList.toggle('on',c==='itu'); agdOpsMontar(); renderDias(); renderSlots(); }
 function renderDias(){
   const D=$('agdDias'); D.innerHTML='';
-  for(let i=1;i<=14;i++){
-    const dt=new Date(Date.now()+i*864e5); const iso=dt.toISOString().slice(0,10); const dw=dt.getDay();
+  for(let i=(DEMO?1:0);i<=14;i++){   // v1.6.7: hoje entra como encaixe (só no modo real)
+    const dt=new Date(Date.now()+i*864e5); const iso=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); const dw=dt.getDay();
     const temJanela = DEMO ? janelasGrade.some(j=>j.cd===agd.cd && j.dia_semana===dw)
                            : (state.janelasView||[]).some(j=>j.cd===agd.cd && j.data===iso && j.tipo_operacao===agd.tipo && (!agd.op || j.op_id===agd.op));
     const b=document.createElement('button'); b.className='day'+(temJanela?'':' off')+(agd.data===iso?' on':'');
-    b.innerHTML=`<div class="dw">${dt.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')}</div>
+    b.innerHTML= i===0
+      ? `<div class="dw" style="color:#b45309;font-weight:700">Hoje</div><div class="dn">${dt.getDate()}</div><div class="dm" style="color:#b45309">encaixe</div>`
+      : `<div class="dw">${dt.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')}</div>
                  <div class="dn">${dt.getDate()}</div><div class="dm">${dt.toLocaleDateString('pt-BR',{month:'short'}).replace('.','')}</div>`;
+    if(i===0 && temJanela){ b.style.border='2px solid #f59e0b'; b.style.background='#fffbeb'; }
     b.onclick=()=>{ agd.data=iso; agd.janela=null; renderDias(); renderSlots(); };
     D.appendChild(b);
   }
@@ -4356,10 +4359,14 @@ function renderSlots(){
                                    .map(j=>({id:j.janela_id, hora_inicio:j.hora_inicio, hora_fim:j.hora_fim, vagas:j.vagas}));
   }
   if(!slots.length){ S.innerHTML='<div class="hint">Sem janelas disponíveis nesta data. Tente outro dia.</div>'; return; }
+  // v1.6.7: encaixe para hoje
+  const _hj=new Date(), _hoje=_hj.getFullYear()+'-'+String(_hj.getMonth()+1).padStart(2,'0')+'-'+String(_hj.getDate()).padStart(2,'0'), _enc=!DEMO && agd.data===_hoje;
+  if(_enc){ const av=document.createElement('div'); av.className='hint'; av.style.cssText='grid-column:1/-1;background:#fffbeb;color:#92400e;border-radius:8px;padding:8px 10px;margin-bottom:4px';
+    av.innerHTML = agd.tipo==='saida' ? '<b>Encaixe para hoje.</b> Saídas de hoje passam pela aprovação da MKLOG; você recebe a confirmação no portal.' : '<b>Encaixe para hoje</b>, conforme a disponibilidade da operação.'; S.appendChild(av); }
   slots.forEach(j=>{
     const b=document.createElement('button'); b.className='slot'+(agd.janela&&agd.janela.id===j.id?' on':'');
     b.innerHTML=`<div class="h">${fmtHora(j.hora_inicio)} – ${fmtHora(j.hora_fim)}</div>
-                 <div class="v${j.vagas<=1?' low':''}">${j.vagas} vaga${j.vagas>1?'s':''}</div>`;
+                 <div class="v${j.vagas<=1?' low':''}">${_enc?'encaixe · ':''}${j.vagas} vaga${j.vagas>1?'s':''}</div>`;
     b.onclick=()=>{ agd.janela=j; renderSlots(); };
     S.appendChild(b);
   });
