@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1196 | Gerado: 2026-10-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1197 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1378,7 +1378,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1196';
+const APP_VERSION='v1.0.1197';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54743,6 +54743,18 @@ function flPlatAuto(r,integ){
   return plats.some(function(pl){ var t=mapa[pl]||[new RegExp(pl.toLowerCase())]; return t.some(function(rx){ return rx.test(canal)||rx.test(num); }); });
 }
 function flDur(ms){ if(ms==null||ms<0) return ''; var m=Math.floor(ms/60000), h=Math.floor(m/60); return h?(h+'h'+String(m%60).padStart(2,'0')):(m+' min'); }
+// v1.0.1197: alertas da integração em português (pendências do cliente vs. problemas do VERUS)
+function flAlertaTxt(a){
+  return ({
+    nf_nao_enviada_marketplace:'CLIENTE · nota emitida e NÃO enviada ao marketplace (enviar a nota ao e-commerce pelo Olist)',
+    ml_invoice_pending:'CLIENTE · Mercado Livre aguardando a nota (invoice_pending): reenviar a nota ao Mercado Livre pelo Olist',
+    sem_forma_envio:'CLIENTE · pedido sem forma de envio no Olist (definir a forma de envio)',
+    cancelado_na_plataforma:'cancelado no marketplace',
+    pode_faturar_revertido:'CLIENTE · "pode faturar" desfeito várias vezes na conta do cliente',
+    nf_ja_expedida:'nota já expedida em outro agrupamento',
+    devolucao:'devolução'
+  })[a]||String(a).replace(/_/g,' ');
+}
 function flProxMin(passo,resto){ var d=new Date(); d.setSeconds(0,0); do{ d=new Date(d.getTime()+60000); }while(d.getMinutes()%passo!==resto); return d; }
 function flVerus(ep){ return ep?('E-'+String(ep.numero_interno||'').padStart(6,'0')):'—'; }
 async function flCarregar(){
@@ -54778,7 +54790,7 @@ async function flCarregar(){
       else if(ep && String(ep.status||'')==='separando') disp.sep++;
       if(noVerusAndou || (ep&&etq[ep.id]) || r.etiqueta_url || r.etiqueta_arquivo) return;   // já com etiqueta ou em operação
       var base={r:r,ep:ep};
-      if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?String(r.alerta).replace(/_/g,' '):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
+      if(r.status_importacao==='erro' || r.alerta){ trav.push({...base,motivo:r.alerta?flAlertaTxt(r.alerta):('erro na importação: '+(r.erro_msg||'')),desde:r.updated_at}); return; }
       if(r.status_importacao!=='importado' || !ep){
         // v1.0.1113: só conta como "próximo disparo" o que a integração importa SOZINHA (plataformas automáticas, ex.: TikTok);
         // MELI/Shopee entram pela planilha e não são atraso do VERUS; pedido já com E- (importado à mão) também sai daqui
@@ -54799,10 +54811,8 @@ async function flCarregar(){
         var exige=!!(cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_exige_nf_enviada);
         if(exige && (sit==='aprovado'||sit==='preparando_envio')){
           var relida=r.acomp_lido_em||null, minRel=relida?Math.round((agora-new Date(relida).getTime())/60000):null;
-          if(relida===null || minRel<=30){
-            cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:'Nota '+r.nf_numero+' autorizada, NÃO transmitida ao TikTok',lida:relida||r.updated_at}); return;
-          }
-          prox.push({...base,reg:'NF '+r.nf_numero+' autorizada · situação no Olist relida há '+flDur(minRel*60000),regra:'releitura da situação (acompanhamento)',prev:proxSync,desde:relida,prazo:30}); return;
+          // v1.0.1197: é sempre espera do CLIENTE (enviar a nota ao marketplace), mesmo que a releitura esteja atrasada
+          cli.push({...base,pf:r.pode_faturar_em||(String(r.situacao_enviada)==='4'?r.situacao_enviada_em:null),conf:r.situacao_confirmada_em,sit:'Nota '+r.nf_numero+' autorizada, NÃO enviada ao marketplace'+(minRel!=null&&minRel>30?' · situação relida há '+flDur(minRel*60000):''),lida:relida||r.updated_at}); return;
         }
         var car=Number((cfg[r.integracao_id]&&cfg[r.integracao_id].config&&cfg[r.integracao_id].config.agrupar_carencia_min)!=null?cfg[r.integracao_id].config.agrupar_carencia_min:20);
         var libera=r.nf_autorizada_em?new Date(new Date(r.nf_autorizada_em).getTime()+car*60000):null;
