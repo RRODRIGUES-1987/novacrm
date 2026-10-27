@@ -786,6 +786,11 @@
           </div>
         </div>
       </div>
+      <div class="fgroup hide" id="agdOpBox">
+        <label for="agdOp">Tipo de operação</label>
+        <select id="agdOp" onchange="agdOpSel(this.value)"></select>
+        <div class="hint" id="agdOpHint" style="margin-top:4px"></div>
+      </div>
       <div class="fgroup">
         <label>Data</label>
         <div id="agdDias" class="days"></div>
@@ -3146,7 +3151,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.5';   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.6';   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4303,17 +4308,30 @@ function openAgd(){
   const sel=$('agdPedido'); sel.innerHTML='<option value="">Sem vínculo — informar depois</option>';
   state.pedidos.filter(p=>['enviado','em_analise','aprovado'].includes(p.status))
     .forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=`${p.protocolo} · ${p.tipo==='entrada'?'Entrada':'Saída'}${p.nf_numero?' · NF '+p.nf_numero:''}`; sel.appendChild(o); });
-  renderDias(); renderSlots();
+  agd.op=null; agdOpsMontar(); renderDias(); renderSlots();
   restoreFoot('agd'); openModal('mAgd');
 }
-function agdTipo(t){ agd.tipo=t; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); renderSlots(); }
-function agdCd(c){ agd.cd=c; agd.janela=null; $('agdSalto').classList.toggle('on',c==='salto'); $('agdItu').classList.toggle('on',c==='itu'); renderDias(); renderSlots(); }
+function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); }
+// v1.6.6: tipos de operação do cliente (vêm com os horários calculados pelo VERUS)
+function agdOpsMontar(){
+  const box=$('agdOpBox'); if(!box) return;
+  if(DEMO){ box.classList.add('hide'); agd.op=null; return; }
+  const vistos={}, ops=[];
+  (state.janelasView||[]).filter(j=>j.cd===agd.cd && j.tipo_operacao===agd.tipo).forEach(j=>{ if(!vistos[j.op_id]){ vistos[j.op_id]=1; ops.push({id:j.op_id, nome:j.op_nome, dur:j.duracao_min}); } });
+  box.classList.toggle('hide', ops.length<=1);
+  if(!ops.find(o=>o.id===agd.op)) agd.op = ops.length ? ops[0].id : null;
+  const fmt=m=>m>=60?((m/60)%1?(Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')):(m/60)+' h'):m+' min';
+  $('agdOp').innerHTML = ops.map(o=>`<option value="${o.id}"${o.id===agd.op?' selected':''}>${o.nome} · ${fmt(o.dur||60)}</option>`).join('');
+  const o=ops.find(x=>x.id===agd.op); $('agdOpHint').textContent = o ? `Cada horário reserva ${fmt(o.dur||60)} de operação.` : '';
+}
+function agdOpSel(v){ agd.op=v; agd.janela=null; agdOpsMontar(); renderDias(); renderSlots(); }
+function agdCd(c){ agd.cd=c; agd.janela=null; $('agdSalto').classList.toggle('on',c==='salto'); $('agdItu').classList.toggle('on',c==='itu'); agdOpsMontar(); renderDias(); renderSlots(); }
 function renderDias(){
   const D=$('agdDias'); D.innerHTML='';
   for(let i=1;i<=14;i++){
     const dt=new Date(Date.now()+i*864e5); const iso=dt.toISOString().slice(0,10); const dw=dt.getDay();
     const temJanela = DEMO ? janelasGrade.some(j=>j.cd===agd.cd && j.dia_semana===dw)
-                           : (state.janelasView||[]).some(j=>j.cd===agd.cd && j.data===iso);
+                           : (state.janelasView||[]).some(j=>j.cd===agd.cd && j.data===iso && j.tipo_operacao===agd.tipo && (!agd.op || j.op_id===agd.op));
     const b=document.createElement('button'); b.className='day'+(temJanela?'':' off')+(agd.data===iso?' on':'');
     b.innerHTML=`<div class="dw">${dt.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')}</div>
                  <div class="dn">${dt.getDate()}</div><div class="dm">${dt.toLocaleDateString('pt-BR',{month:'short'}).replace('.','')}</div>`;
@@ -4334,7 +4352,7 @@ function renderSlots(){
     slots = janelasGrade.filter(j=>j.cd===agd.cd && j.dia_semana===dw && (j.tipo_operacao==='ambas'||j.tipo_operacao===agd.tipo))
                         .map(j=>({...j, vagas:vagasDemo(j, agd.data)})).filter(j=>j.vagas>0);
   } else {
-    slots = (state.janelasView||[]).filter(j=>j.cd===agd.cd && j.data===agd.data && (j.tipo_operacao==='ambas'||j.tipo_operacao===agd.tipo))
+    slots = (state.janelasView||[]).filter(j=>j.cd===agd.cd && j.data===agd.data && (j.tipo_operacao==='ambas'||j.tipo_operacao===agd.tipo) && (!agd.op || !j.op_id || j.op_id===agd.op))
                                    .map(j=>({id:j.janela_id, hora_inicio:j.hora_inicio, hora_fim:j.hora_fim, vagas:j.vagas}));
   }
   if(!slots.length){ S.innerHTML='<div class="hint">Sem janelas disponíveis nesta data. Tente outro dia.</div>'; return; }
