@@ -3146,7 +3146,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.4';   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.5';   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4584,7 +4584,7 @@ function showDone(kind, protocolo, msg){
   const _orig = { doLogin, loadDados, enterApp, renderEstoque, exportEstoque, openPedido, savePedido, addItem, onSku, calcTotais, openDetalhe };
   const nBR = v => Number(v||0).toLocaleString('pt-BR');
   const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  const REAL_TELAS = ['home','ped','est'];   // fase 1: agendamento entra na próxima entrega
+  const REAL_TELAS = ['home','ped','est','agd'];   // v1.6.5: agendamento real
 
   window.doLogin = async function(){
     $('loginErr').textContent = '';
@@ -4666,7 +4666,12 @@ function showDone(kind, protocolo, msg){
 
   window.loadDados = async function(){
     if(DEMO) return _orig.loadDados();
-    const [est, ped] = await Promise.all([ sb.rpc('portal_estoque'), sb.rpc('portal_meus_pedidos') ]);
+    const vazio = Promise.resolve({ data:[], error:null });
+    const [est, ped, ags, jan] = await Promise.all([
+      (podeVer('est')||podeVer('ped')) ? sb.rpc('portal_estoque') : vazio,
+      podeVer('ped') ? sb.rpc('portal_meus_pedidos') : vazio,
+      podeVer('agd') ? sb.rpc('portal_meus_agendamentos') : vazio,
+      podeVer('agd') ? sb.rpc('portal_janelas_disponiveis') : vazio ]);
     if(est.error) throw new Error('Estoque: '+est.error.message);
     if(ped.error) throw new Error('Pedidos: '+ped.error.message);
     state.estoqueReal = (est.data||[]).map(r=>({...r, saco:+r.saco||1, fisico:+r.fisico||0, empenhado:+r.empenhado||0, em_pedidos:+r.em_pedidos||0, disponivel:+r.disponivel||0, caixas_fechadas:+r.caixas_fechadas||0, sacos_avulsos:+r.sacos_avulsos||0, caixa_padrao:r.caixa_padrao==null?null:+r.caixa_padrao}));
@@ -4681,7 +4686,11 @@ function showDone(kind, protocolo, msg){
       if(p.importado_em) state.eventos.push({pedido_id:p.id, evento:'Importado no WMS da MKLOG'+(p.wms_os?' · OS '+p.wms_os:''), autor_tipo:'mklog', criado_em:p.importado_em});
       if(p.status==='recusado') state.eventos.push({pedido_id:p.id, evento:'Recusado pela MKLOG'+(p.motivo_recusa?': '+p.motivo_recusa:''), autor_tipo:'mklog', criado_em:p.importado_em||p.criado_em});
     });
-    state.agendamentos = []; state.janelasView = []; state.ncs = []; state.faturas = [];
+    // v1.6.5: agendamentos e janelas reais
+    state.agendamentos = (ags && !ags.error ? (ags.data||[]) : []).map(a=>({ ...a, criado_em:a.created_at, anexos:[], cartao:a.protocolo }));
+    state.janelasView = (jan && !jan.error ? (jan.data||[]) : []);
+    if(ags && ags.error) console.warn('agendamentos:', ags.error.message);
+    state.ncs = []; state.faturas = [];
     const dl = $('skuList'); if(dl) dl.innerHTML = state.catalogo.map(c=>`<option value="${esc(c.sku)}">${esc(c.descricao||'')}</option>`).join('');
   };
 
@@ -4691,6 +4700,18 @@ function showDone(kind, protocolo, msg){
     document.querySelectorAll('#topnav button').forEach(b=>{ b.style.display = (REAL_TELAS.includes(b.dataset.scr) && podeVer(b.dataset.scr)) ? '' : 'none'; });   // v1.6.4: e só o que o acesso pode ver
     aplicarPermsHome();
     $('whoUpd').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+' · estoque conferido agora';
+  };
+
+  /* ---------------- AGENDAMENTO (real) · v1.6.5 ---------------- */
+  window.salvarAgdReal = async function(novo){
+    try{
+      const { data:a, error } = await sb.rpc('portal_agendar', { p: novo });
+      if(error) throw error;
+      await loadDados();
+      showDone('agd', a.protocolo, a.status==='confirmado'
+        ? `Agendamento CONFIRMADO para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)} em ${cdNome(a.cd)}. Apresente o cartão na portaria.`
+        : `Solicitação registrada para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)} em ${cdNome(a.cd)}. A MKLOG vai confirmar sua janela.`);
+    }catch(err){ $('agdErr').textContent = (err && err.message) || 'Não foi possível agendar.'; try{ await loadDados(); renderSlots(); }catch(_e){} }
   };
 
   /* ---------------- ESTOQUE (real) ---------------- */
