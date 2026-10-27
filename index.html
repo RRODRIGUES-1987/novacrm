@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1208 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1209 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1385,7 +1385,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1208';
+const APP_VERSION='v1.0.1209';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4636,7 +4636,7 @@ function ecomFullReimpEscolher(pid){
 }
 // ══════════════ CR · BAIXA INTEGRAL EM LOTE (v1.0.1068) ══════════════
 var crLisSel={};
-function crLisBaixavel(cp){ var st=crLisStatusDe(cp); return st==='apagar'||st==='vencido'; }
+function crLisBaixavel(cp){ var st=crLisStatusDe(cp); return st==='areceber'||st==='apagar'||st==='vencido'; }   // v1.0.1209: "areceber" é o status em aberto
 function crLisToggle(id,on){ if(on) crLisSel[id]=1; else delete crLisSel[id]; crLisRender(); }
 function crLisToggleTodos(on){ crLisFiltrados().forEach(function(cp){ if(crLisBaixavel(cp)){ if(on) crLisSel[cp.id]=1; else delete crLisSel[cp.id]; } }); crLisRender(); }
 function crValorIntegral(cr){   // mesma regra da baixa de um título: cliente que retém imposto baixa pelo líquido (NF; ND não tem imposto)
@@ -25190,11 +25190,26 @@ function crLisMesRef(){
   return crLisMes;
 }
 function crLisSetBusca(v){crLisBusca=(v||'').toLowerCase();crLisRender();}
-function crLisSetStatus(v){crLisStatus=v;crLisRender();}
+function crLisSetStatus(v){crLisStatus=v;if(crCardFiltro){crCardFiltro=null;var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}return;}crLisRender();}   // v1.0.1209: mexeu no filtro, sai do filtro do card
 function crLisSetDoc(v){crLisDoc=v;crLisRender();}
-function crLisSetMes(v){crLisMes=v;crLisRender();}
+function crLisSetMes(v){crLisMes=v;if(crCardFiltro){crCardFiltro=null;var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}return;}crLisRender();}
 function crLisSetOrd(v){crLisOrd=(crLisOrd===v)?(v+'_desc'):v;crLisRender();}
 
+
+// v1.0.1209: data real do pagamento na lista e cards do dashboard que abrem a lista filtrada
+var crCardFiltro=null;
+function crLisPgto(cp){
+  if(!cp.data_pagamento) return '<span style="color:var(--text3)">—</span>';
+  var d=new Date(cp.data_pagamento+'T00:00'), s=d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  if(cp.vencimento){ var at=Math.round((d-new Date(cp.vencimento+'T00:00'))/86400000); if(at>0) s+=' <span style="color:var(--red-text);font-size:10.5px">+'+at+'d</span>'; }
+  return s;
+}
+function crCardIr(f){
+  if(f===null||crCardFiltro===f&&crTab==='lista'){ crCardFiltro=null; crLisStatus='todos'; crLisMes=null; }
+  else { crCardFiltro=f; crLisStatus=(f==='todos'?'todos':f); crLisMes='todos'; }
+  crTab='lista';
+  var c=ge('content'); if(c){ c.innerHTML=rContasReceber(); initContasReceber(); }
+}
 function crLisStatusDe(cp){
   if(['pago','pago_atraso'].includes(cp.status))return 'pago';
   var hoje=new Date();hoje.setHours(0,0,0,0);
@@ -25217,7 +25232,8 @@ function crLisFiltrados(){
       if(ds.slice(0,7)!==mes)return false;
     }
     var st=crLisStatusDe(cp);
-    if(crLisStatus!=='todos'&&st!==crLisStatus)return false;
+    if(crLisStatus==='aberto'){ if(st==='pago') return false; }   // v1.0.1209: card "Total a receber"
+    else if(crLisStatus!=='todos'&&st!==crLisStatus)return false;
     if(crLisDoc!=='todos'&&String(cp.documento_tipo||'nf')!==crLisDoc)return false;
     if(crLisBusca){
       var alvo=[(cp.cliente_nome||''),((contasReceberFatNum&&contasReceberFatNum[cp.fatura_id])||''),(cp.documento_numero||'')].join(' ').toLowerCase();
@@ -25229,6 +25245,7 @@ function crLisFiltrados(){
     var va,vb;
     if(d==='valor'){va=Number(a.valor||0);vb=Number(b.valor||0);}
     else if(d==='benef'){va=(a.cliente_nome||'').toLowerCase();vb=(b.cliente_nome||'').toLowerCase();}
+    else if(d==='pgto'){va=a.data_pagamento||'9999';vb=b.data_pagamento||'9999';}   // v1.0.1209: em aberto vão para o fim
     else {va=a.vencimento||'';vb=b.vencimento||'';}
     var r=va<vb?-1:(va>vb?1:0);
     return crLisOrd.indexOf('_desc')>=0?-r:r;
@@ -25245,7 +25262,7 @@ function rCRLista(){
     var lbl=d.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
     meses+='<option value="'+v+'"'+(v===mes?' selected':'')+'>'+lbl+'</option>';
   }
-  var sts=[['todos','Todos os status'],['areceber','A receber'],['vencido','Vencido'],['pago','Recebido']]
+  var sts=[['todos','Todos os status'],['aberto','Em aberto (a receber + vencido)'],['areceber','A receber'],['vencido','Vencido'],['pago','Recebido']]
     .map(function(s){return '<option value="'+s[0]+'"'+(crLisStatus===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('');
   var h='';
   h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
@@ -25256,6 +25273,7 @@ function rCRLista(){
     +[['todos','NF e ND'],['nf','Só NF'],['nd','Só ND']].map(function(o){return '<option value="'+o[0]+'"'+(crLisDoc===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')
     +'</select>';
   h+='</div>';
+  if(crCardFiltro) h+='<div style="font-size:12px;color:var(--text2);margin:-4px 0 8px">Filtro do card: <b style="color:var(--blue-text)">'+({todos:'todos os títulos',aberto:'a receber (todos os meses)',vencido:'em atraso (todos os meses)'})[crCardFiltro]+'</b> · <span onclick="crCardIr(null)" style="cursor:pointer;color:var(--accent)">limpar</span></div>';   // v1.0.1209
   h+='<div id="cp-lis-box"></div>';
   return h;
 }
@@ -25274,7 +25292,7 @@ function crLisRender(){
   var h='<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">'
     +chip('vencido','#991b1b','#fee2e2')+chip('areceber','#1e40af','#dbeafe')+chip('pago','#166534','#dcfce7')+'</div>';
 
-  var COLS='26px 84px 1.4fr 1.1fr 110px 96px 66px';   // v1.0.1068: coluna de seleção
+  var COLS='26px 70px 82px 1.4fr 1.1fr 110px 96px 66px';   // v1.0.1068: coluna de seleção · v1.0.1209: data do pagamento
   var seta=function(k){return crLisOrd.indexOf(k)===0?(crLisOrd.indexOf('_desc')>=0?' ▾':' ▴'):'';};
   var _nsel=Object.keys(crLisSel).filter(function(id){ var x=(contasReceber||[]).find(function(c){return c.id===id;}); return x&&crLisBaixavel(x); });
   if(_nsel.length){ var _tsel=_nsel.reduce(function(s,id){ var x=(contasReceber||[]).find(function(c){return c.id===id;}); return s+crValorIntegral(x).valor; },0);
@@ -25285,6 +25303,7 @@ function crLisRender(){
   h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">'
     +'<span>'+(_baix.length?'<input type="checkbox" '+(_todosMarc?'checked':'')+' onchange="crLisToggleTodos(this.checked)" title="Marcar todos os títulos a receber do filtro" style="width:15px;height:15px;cursor:pointer">':'')+'</span>'
     +'<span onclick="crLisSetOrd(\'venc\')" style="cursor:pointer">Vencto'+seta('venc')+'</span>'
+    +'<span onclick="crLisSetOrd(\'pgto\')" style="cursor:pointer">Pagto'+seta('pgto')+'</span>'
     +'<span onclick="crLisSetOrd(\'benef\')" style="cursor:pointer">Cliente'+seta('benef')+'</span>'
     +'<span>Fatura / competência</span>'
     +'<span onclick="crLisSetOrd(\'valor\')" style="cursor:pointer;text-align:right">Valor'+seta('valor')+'</span>'
@@ -25307,11 +25326,12 @@ function crLisRender(){
       var parc='';
       var acao='';
       if(st==='aguardando') acao='<span onclick="novoTituloCP(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">editar</span>';
-      else if(st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCR(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span>';
+      else if(st==='areceber'||st==='apagar'||st==='vencido') acao='<span onclick="abrirBaixaCR(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px">baixar</span>';
       else if(st==='pago'&&crPodeCorrigir()) acao='<span onclick="crCorrigirAbrir(\''+cp.id+'\')" style="cursor:pointer;color:var(--accent);font-size:11px" title="Corrigir a data ou o valor da baixa, ou estornar o recebimento">corrigir</span>';   // v1.0.1202
       h+='<div style="display:grid;grid-template-columns:'+COLS+';gap:8px;padding:9px 12px;align-items:center;border-bottom:1px solid var(--border2)'+(i%2?';background:var(--bg2)':'')+'">'
         +'<span>'+(crLisBaixavel(cp)?'<input type="checkbox" '+(crLisSel[cp.id]?'checked':'')+' onchange="crLisToggle(\''+cp.id+'\',this.checked)" style="width:15px;height:15px;cursor:pointer">':'')+'</span>'
         +'<span style="font-size:12px;color:var(--text2)">'+venc+_vaj+'</span>'
+        +'<span style="font-size:12px;color:var(--text2);white-space:nowrap">'+crLisPgto(cp)+'</span>'
         +'<span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(cp.descricao||'').replace(/"/g,'&quot;')+'">'+(cp.cliente_nome||'—')+parc+'</span>'
         +'<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_bdg+(cls||'—')+'</span>'
         +'<span style="font-size:13px;text-align:right;white-space:nowrap">'+fmtV(cp.valor)+'</span>'
@@ -25361,17 +25381,20 @@ function rCRDashboard(){
   const nomeMes=new Date(crPeriodo.ano,crPeriodo.mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
   return`
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
-    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border);cursor:pointer;position:relative" onclick="crCardIr('todos')" title="Ver todos os títulos na lista">
+      <span style="position:absolute;right:12px;top:12px;font-size:11px;color:var(--blue-text)">ver lista ›</span>
       <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Total contas a receber</div>
       <div style="font-size:22px;font-weight:700;color:#0A2540">${fmtV(totalCR)}</div>
       <div style="font-size:11px;color:var(--text2);margin-top:4px">${contasReceber.length} título(s)</div>
     </div>
-    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border)">
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border);cursor:pointer;position:relative" onclick="crCardIr('aberto')" title="Ver os títulos a receber na lista">
+      <span style="position:absolute;right:12px;top:12px;font-size:11px;color:var(--blue-text)">ver lista ›</span>
       <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Total a receber</div>
       <div style="font-size:22px;font-weight:700;color:#1e5f82">${fmtV(totalReceber)}</div>
       <div style="font-size:11px;color:var(--text2);margin-top:4px">${contasReceber.filter(cr=>!['pago','pago_atraso'].includes(cr.status)).length} título(s)</div>
     </div>
-    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border);cursor:pointer" onclick="abrirFaturasAtraso()">
+    <div style="background:var(--bg);border-radius:10px;padding:14px 16px;border:1px solid var(--border);cursor:pointer;position:relative" onclick="crCardIr('vencido')" title="Ver os títulos em atraso na lista">
+      <span style="position:absolute;right:12px;top:12px;font-size:11px;color:var(--blue-text)">ver lista ›</span>
       <div style="font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Total em atraso</div>
       <div style="font-size:22px;font-weight:700;color:${totalAtraso>0?'#991b1b':'var(--text)'}">${fmtV(totalAtraso)}</div>
       <div style="font-size:11px;color:${totalAtraso>0?'#991b1b':'var(--text2)'};margin-top:4px">${contasReceber.filter(cr=>{if(['pago','pago_atraso'].includes(cr.status))return false;const v=cr.vencimento?new Date(cr.vencimento+'T00:00'):null;return v&&v<hoje;}).length} título(s) ${totalAtraso>0?'· clique para ver':''}</div>
