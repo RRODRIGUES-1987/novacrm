@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1213 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1214 | Gerado: 2026-10-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1385,7 +1385,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1213';
+const APP_VERSION='v1.0.1214';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -10820,7 +10820,7 @@ function fatRowHTML(f,i){
           ${f.status==='autorizado'?`<button class="bicon btn-sm" title="Emitir documentos (NF / ND)" style="color:var(--accent)" onclick="event.stopPropagation();fatEmitirAbrir('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           </button>`:''}
-          ${f.status==='rascunho'?`<button class="bicon btn-sm" title="Excluir" style="color:var(--red-text)" onclick="event.stopPropagation();delFaturamento('${f.id}')">
+          ${fatPodeExcluir(f)?`<button class="bicon btn-sm" title="Excluir fatura (ainda não enviada ao cliente)" style="color:var(--red-text)" onclick="event.stopPropagation();delFaturamento('${f.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>`:''}
           <button class="bicon btn-sm" title="Imprimir" onclick="event.stopPropagation();gerarFaturaPDF('${f.id}')">
@@ -11111,6 +11111,7 @@ async function openFaturaEditor(id=null){
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button onclick="closeFaturaEditor()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px">✕ Fechar</button>
+        ${(f&&fatPodeExcluir(f))?`<button onclick="delFaturamento('${f.id}',true)" style="padding:8px 14px;border:1px solid var(--red-text);border-radius:8px;background:var(--bg);color:var(--red-text);cursor:pointer;font-size:13px">🗑 Excluir fatura</button>`:''}
         <button onclick="salvarFaturaRascunho()" style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:13px;font-weight:600">Salvar rascunho</button>
         ${(wfRotinaAtiva('fatura')?(faturaEditando&&faturaEditando.id?wfPodeAprovar('fatura',faturaEditando.id):wfSouGestor('faturamento')):(role==='admin'||role==='adm'||role==='gestor'))?`<button onclick="salvarFaturaAprovar()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Aprovar</button>`:`<button onclick="enviarFaturaAprovacao()" style="padding:8px 14px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:13px;font-weight:600">Enviar para aprovação</button>`}
       </div>
@@ -11231,6 +11232,7 @@ async function openFaturaEditor(id=null){
             <span style="font-size:12px;color:var(--text2)">${f?.nd_valor?('Valor: '+fmtV(f.nd_valor)):''}</span>
             <button type="button" class="btn btn-sm" onclick="gerarPdfNotaDebito('${f?.id||''}')" ${f?.nd_numero?'':'disabled'} style="${f?.nd_numero?'':'opacity:.5;cursor:not-allowed'}">📄 PDF Nota de Débito</button>
           </div>
+          <div id="fat-nd-doc" style="margin-top:8px">${fatNdDocHtml(f)}</div>
         </div>
       </div>
     </div>
@@ -12868,12 +12870,58 @@ function updatePeriodo(tipo){
   if(elI)elI.value=fmtISO(ini);if(elF)elF.value=fmtISO(fim);
 }
 
-async function delFaturamento(id){
-  if(!confirm('Remover esta fatura?'))return;
-  try{ await capasDesligarFatura(id); }catch(_cd){}   // v1.0.1047
-  await dbDelete('faturamento',id);
-  faturamento=faturamento.filter(f=>f.id!==id);
-  render();
+// v1.0.1214: fatura pode ser excluída enquanto não foi enviada ao cliente (rascunho, aguardando aprovação ou aprovada a enviar)
+function fatPodeExcluir(f){
+  if(!f) return false;
+  if(['rascunho','aguardando','aprovado'].indexOf(f.status||'rascunho')<0) return false;
+  if(f.enviado_em||f.nfse_numero||fatNfsDe(f).some(function(x){return x.nfse_numero||x.pdf_url;})) return false;
+  if(f.status==='rascunho') return true;
+  var r=String(profile?.role||''); return r==='admin'||r==='adm'||r==='gestor';
+}
+async function delFaturamento(id,doEditor){
+  var f=(faturamento||[]).find(function(x){return x.id===id;}); if(!f) return;
+  if(!fatPodeExcluir(f)){ alert('Esta fatura já foi enviada ao cliente (ou tem nota emitida) e não pode ser excluída. Use o cancelamento.'); return; }
+  var msg='Excluir a fatura '+(f.numero_fatura||'')+' de '+(f.cliente_nome||'cliente')+(f.total?' ('+fmtV(f.total)+')':'')+'?\n\nEla ainda não foi enviada ao cliente. As capas vinculadas voltam a ficar livres para outra fatura.';
+  if(f.nd_numero) msg+='\n\nAtenção: a Nota de Débito '+f.nd_numero+' já foi numerada; o número fica sem uso na sequência.';
+  if(!confirm(msg)) return;
+  try{
+    var crs=[]; try{ crs=await dbSelect('contas_receber','fatura_id=eq.'+id+'&select=id,status')||[]; }catch(_e){}
+    if(crs.some(function(c){return c.status==='pago'||c.status==='pago_atraso';})){ alert('Há título recebido ligado a esta fatura. Estorne o recebimento antes de excluir.'); return; }
+    for(var i=0;i<crs.length;i++){ try{ await dbDelete('contas_receber',crs[i].id); }catch(_e){} }
+    if(crs.length) contasReceber=(contasReceber||[]).filter(function(c){return c.fatura_id!==id;});
+    try{ await capasDesligarFatura(id); }catch(_cd){}   // v1.0.1047
+    await dbDelete('faturamento',id);
+    faturamento=faturamento.filter(function(x){return x.id!==id;});
+    if(doEditor&&typeof closeFaturaEditor==='function') closeFaturaEditor();
+    showToast('Fatura '+(f.numero_fatura||'')+' excluída.','green');
+    render();
+  }catch(e){ alert('Não consegui excluir: '+(e.message||e)); }
+}
+// v1.0.1214: documento da Nota de Débito anexado na fatura (PDF assinado/enviado, ou a ND emitida fora do VERUS)
+function fatNdDocHtml(f){
+  if(!f||!f.id) return '<span style="font-size:11.5px;color:var(--text3)">Salve a fatura para anexar o documento da Nota de Débito.</span>';
+  if(f.nd_pdf_url) return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--green-text);background:var(--green-bg);border-radius:8px;font-size:12.5px">'
+    +'<span style="color:var(--green-text);font-weight:600">✓ Documento da Nota de Débito anexado</span><span style="color:var(--text2);font-size:11.5px">'+fatPdfNome(f.nd_pdf_url)+'</span>'
+    +'<span style="margin-left:auto;display:flex;gap:6px"><a class="btn btn-sm" href="'+f.nd_pdf_url+'" target="_blank" style="text-decoration:none">Ver</a>'
+    +'<label class="btn btn-sm" style="cursor:pointer">Substituir<input type="file" accept="application/pdf,image/*" style="display:none" onchange="fatNdAnexar(this)"></label>'
+    +'<button type="button" class="btn btn-sm" style="color:var(--red-text)" onclick="fatNdRemover()">Remover</button></span></div>';
+  return '<label class="btn btn-sm" style="cursor:pointer">📎 Anexar documento da Nota de Débito (PDF)<input type="file" accept="application/pdf,image/*" style="display:none" onchange="fatNdAnexar(this)"></label>';
+}
+async function fatNdAnexar(input){
+  var arq=input.files&&input.files[0]; if(!arq) return;
+  var f=faturaEditando; if(!f||!f.id){ alert('Salve a fatura antes.'); return; }
+  try{
+    var url=await fatUploadDoc(arq,f.id,'nd');
+    await dbUpdate('faturamento',f.id,{nd_pdf_url:url});
+    faturaEditando.nd_pdf_url=url; faturamento=faturamento.map(function(x){return x.id===f.id?Object.assign({},x,{nd_pdf_url:url}):x;});
+    var el=ge('fat-nd-doc'); if(el) el.innerHTML=fatNdDocHtml(faturaEditando);
+    showToast('Documento da Nota de Débito anexado.','green');
+  }catch(e){ showToast('Erro ao anexar: '+(e.message||e)+(/nd_pdf_url|column/i.test(String(e.message))?' (rode o SQL da v1.0.1214)':''),'red'); }
+}
+async function fatNdRemover(){
+  var f=faturaEditando; if(!f||!f.id||!confirm('Remover o documento anexado da Nota de Débito?')) return;
+  try{ await dbUpdate('faturamento',f.id,{nd_pdf_url:null}); faturaEditando.nd_pdf_url=null; faturamento=faturamento.map(function(x){return x.id===f.id?Object.assign({},x,{nd_pdf_url:null}):x;}); var el=ge('fat-nd-doc'); if(el) el.innerHTML=fatNdDocHtml(faturaEditando); }
+  catch(e){ alert('Erro: '+(e.message||e)); }
 }
 
 function openFaturamento(id=null){openFaturaEditor(id);}
