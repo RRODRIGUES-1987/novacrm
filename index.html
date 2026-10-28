@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1219 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1220 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1219';
+const APP_VERSION='v1.0.1220';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3548,6 +3548,7 @@ async function ecomFullBip(p,its,code){
   try{ var _fm=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=full_meta,status'); if(_fm&&_fm[0]&&_fm[0].full_meta){ p.full_meta=_fm[0].full_meta; if(_fm[0].status) p.status=_fm[0].status; } }catch(_e){}
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
   if(meta.modo_produto!==false&&!meta.ml){ await ecomFullProdBip(p,its,meta,code); return; }   // v1.0.1185: checkout por produto (caixas de 48) — Full Shopee
+  if(meta.ml&&ecomFullMlPorProduto(meta)){ await ecomFullProdBipML(p,its,meta,code); return; }   // v1.0.1220: Full ML por produto (EAN → etiquetas → bipa cada uma → etiqueta da caixa)
   if(meta.mlcodes&&meta.mlcodes[qr]) sk=String(meta.mlcodes[qr]).toUpperCase();   // v1.0.1118: código ML da unidade
   if(!sk) Object.keys(meta.skuids||{}).forEach(function(k){ if(ecomFullNormQr(meta.skuids[k])===qr) sk=k; });
   if(!sk){ var pr=ecomProdByCode(code); if(pr) sk=String(pr.sku||'').toUpperCase(); }
@@ -3604,8 +3605,113 @@ async function ecomFullImprimirCaixa(pid,n){
   var ok=false; try{ ok=await ecomFullImprimirPaginas(meta.master_pdf,[(meta.ml&&cx&&cx.slot!=null)?{p:pg,slot:cx.slot,de:cx.de||3}:pg],'master'); }catch(e){ showToast('Erro ao imprimir: '+(e.message||e),'red'); }
   if(ok){ cx.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(e){} ecomCxRender(); }
 }
+
+// ═══ v1.0.1220 · FULL MERCADO LIVRE · CHECKOUT POR PRODUTO ═══
+// Bipa o EAN → imprime as etiquetas de unidade do produto (até 48) → bipa cada etiqueta colada → na última,
+// a caixa fecha e a etiqueta da caixa (master) sai sozinha. Full ML que já começou no modo antigo (por caixa) continua nele.
+function ecomFullMlPorProduto(meta){
+  if(meta.modo_produto===false) return false;
+  return !(meta.caixas||[]).some(function(c){ return Number(c.qtd||0)>0 && !c.sku; });   // já começou no modo antigo
+}
+function ecomFullMlEhEtiqueta(meta,code){ var q=ecomFullNormQr(code); return !!(meta.mlcodes&&meta.mlcodes[q]); }
+async function ecomFullMlConfereUm(p,its,sk,code){
+  var alvo=its.filter(function(i){return String(i.kit_sku||'').toUpperCase()===sk;}), porKit={};
+  if(alvo.length){ (ecomKitComp(sk)||[]).forEach(function(c){ porKit[String(c.sku||'').toUpperCase()]=ecomN(c.qtd)||1; }); }
+  else { var it1=its.find(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===sk&&ecomN(i.qtd_conferida)<ecomN(i.qtd); }); if(it1){ alvo=[it1]; porKit[sk]=1; } }
+  if(!alvo.length) return false;
+  for(var a=0;a<alvo.length;a++){
+    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, nova=ecomN(it.qtd_conferida)+inc;
+    await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+    await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
+  }
+  return true;
+}
+async function ecomFullProdBipML(p,its,meta,code){
+  var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), pend=meta.cx_pend||null;
+  var salvar=async function(){ p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); };
+  var sk=ecomFullSkuDoCodigo(meta,code,un);
+  // ── caixa aberta: bipando as etiquetas de unidade, uma a uma ──
+  if(pend){
+    if(!sk){ ecomBeep(); ecomCxFlash('Código não reconhecido: '+code,'red'); ecomCxRender(); return; }
+    if(sk!==pend.sku){ ecomBeep(); ecomCxFlash('Este é o '+sk+'. A caixa '+pend.n+' é do '+pend.sku+' ('+(pend.bip||0)+'/'+pend.qtd+'): termine as etiquetas dele','red'); ecomCxRender(); return; }
+    if(meta.mlcodes&&Object.keys(meta.mlcodes).length&&!ecomFullMlEhEtiqueta(meta,code)){ ecomBeep(); ecomCxFlash('Bipe a ETIQUETA do Mercado Livre colada no produto (não o EAN)','red'); ecomCxRender(); return; }
+    if((pend.bip||0)>=pend.qtd){ ecomBeep(); ecomCxFlash('A caixa '+pend.n+' já tem as '+pend.qtd+' unidades','red'); ecomCxRender(); return; }
+    var ok=await ecomFullMlConfereUm(p,its,sk,code);
+    if(!ok){ ecomBeep(); ecomCxFlash('SKU '+sk+' sem item a conferir neste Full','red'); ecomCxRender(); return; }
+    pend.bip=(pend.bip||0)+1;
+    if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
+    if(pend.bip<pend.qtd){ await salvar(); ecomCxFlash(sk+' · '+pend.bip+'/'+pend.qtd+' na caixa '+pend.n,'green'); ecomCxRender(); return; }
+    // última etiqueta: fecha a caixa e imprime a etiqueta da caixa
+    var agora=new Date().toISOString(), c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;});
+    if(c){ c.itens={}; c.itens[sk]=pend.qtd; c.qtd=pend.qtd; c.fechada_em=agora; c.sku=sk; delete c.reservada; }
+    meta.cx_pend=null; meta.cx_atual=(pend.n||0)+1;
+    var completo=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+    await salvar();
+    var imp=false; if(c&&c.pagina){ try{ imp=await ecomFullImprimirPaginas(meta.master_pdf,[ecomFullItemCaixa(meta,c)],'master'); }catch(_e){} }
+    if(imp&&imp!=='semqz'&&c){ c.impressa_em=new Date().toISOString(); await salvar(); }
+    if(completo){
+      var _upd={status:'conferido',data_conferencia:agora}; if(!p.data_separacao){ _upd.data_separacao=agora; p.data_separacao=agora; }
+      await dbUpdate('ecom_pedidos',p.id,_upd); p.status='conferido'; ecomCxAutoConcluiOS(p.id); ecomCx.pendingLabel=null;
+      ecomCxFlash('Caixa '+pend.n+' fechada · Full '+(p.numero_pedido||'')+' CONFERIDO · '+(meta.caixas||[]).filter(function(x){return x.fechada_em;}).length+' caixa(s)','green');
+    } else ecomCxFlash('Caixa '+pend.n+' fechada · '+sk+' × '+pend.qtd+(imp&&imp!=='semqz'?' · etiqueta da caixa impressa':' · clique em "Imprimir etiqueta da caixa '+pend.n+'"')+' · bipe o EAN do próximo produto','green');
+    ecomCxRender(); return;
+  }
+  // ── escolhendo o produto pelo EAN ──
+  if(!sk||!(sk in un)){ ecomBeep(); ecomCxFlash(sk?('SKU '+sk+' não está neste Full'):('Código não reconhecido: '+code),'red'); ecomCxRender(); return; }
+  var conf=ecomFullConf(p,sk), resta=ecomN(un[sk])-conf;
+  if(resta<=0){ ecomBeep(); ecomCxFlash('SKU '+sk+' já completo ('+ecomN(un[sk])+')','red'); ecomCxRender(); return; }
+  var qtd=Math.min(upc,resta);
+  var livre=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0];
+  if(!livre){ ecomBeep(); ecomCxFlash('Não há etiqueta de caixa livre neste Full. Importe as etiquetas de volume.','red'); ecomCxRender(); return; }
+  var pags=ecomFullPaginasUnid(meta,sk,conf,qtd);
+  if(pags.length<qtd){ ecomBeep(); ecomCxFlash('Faltam etiquetas de unidade de '+sk+' no PDF ('+pags.length+' de '+qtd+'). Importe o PDF de produtos.','red'); ecomCxRender(); return; }
+  livre.reservada=sk; meta.cx_pend={n:livre.n,sku:sk,qtd:qtd,ini:conf,bip:0,em:new Date().toISOString()};
+  await salvar();
+  ecomCxFlash((qtd<upc?'CAIXA PARCIAL: ':'')+'Caixa '+livre.n+' · '+sk+' × '+qtd+' · imprimindo as etiquetas de unidade: cole e bipe uma a uma','green'); ecomCxRender();
+  await ecomFullImprimirPaginas(meta.unidades_pdf,pags);
+}
+async function ecomFullProdCancelarML(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
+  if(!confirm('Cancelar a caixa '+pend.n+' ('+pend.sku+', '+(pend.bip||0)+' de '+pend.qtd+' bipadas)? As unidades já bipadas voltam a pendentes e as etiquetas impressas devem ser descartadas.')) return;
+  var falta=pend.bip||0, its=ecomItensDo(p.id).filter(function(i){ return String(i.kit_sku||i.sku||'').toUpperCase()===pend.sku; });
+  if(falta>0){
+    var kitIts=its.filter(function(i){return String(i.kit_sku||'').toUpperCase()===pend.sku;});
+    if(kitIts.length){ var comp={}; (ecomKitComp(pend.sku)||[]).forEach(function(c){ comp[String(c.sku||'').toUpperCase()]=ecomN(c.qtd)||1; });
+      for(var k=0;k<kitIts.length;k++){ var it=kitIts[k], nv=Math.max(0,ecomN(it.qtd_conferida)-(comp[String(it.sku||'').toUpperCase()]||1)*falta); await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nv}); it.qtd_conferida=nv; } }
+    else for(var j=its.length-1;j>=0&&falta>0;j--){ var it2=its[j], tira=Math.min(ecomN(it2.qtd_conferida),falta); if(tira<=0) continue; var nv2=ecomN(it2.qtd_conferida)-tira; await dbUpdate('ecom_pedido_itens',it2.id,{qtd_conferida:nv2}); it2.qtd_conferida=nv2; falta-=tira; }
+  }
+  var c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;}); if(c){ delete c.reservada; }
+  meta.cx_pend=null; p.full_meta=meta; await dbUpdate('ecom_pedidos',pid,{full_meta:meta});
+  ecomCxFlash('Caixa '+pend.n+' cancelada. Bipe o EAN do produto para recomeçar.','amber'); ecomCxRender();
+}
+function ecomFullProdPainelML(p){
+  var meta=ecomFullMeta(p), upc=ecomFullUpc48(meta), un=ecomFullUnid(p), ks=Object.keys(un), pend=meta.cx_pend;
+  var cxs=meta.caixas||[], fechadas=cxs.filter(function(c){return c.fechada_em;}), tot=cxs.length||meta.caixas_total||0;
+  var semMaster=fechadas.filter(function(c){return !c.impressa_em;});
+  var pc=pend?Math.round((pend.bip||0)*100/pend.qtd):0;
+  var topo=pend
+    ? '<div style="border:2px solid #3b82f6;background:var(--blue-bg);border-radius:10px;padding:12px;margin:10px 0">'
+      +'<div style="font-size:11px;color:var(--blue-text);letter-spacing:.4px">CAIXA '+pend.n+' · BIPE AS ETIQUETAS DE UNIDADE</div>'
+      +'<div style="font-size:24px;font-weight:800">'+ecomEsc(pend.sku)+' · '+(pend.bip||0)+' de '+pend.qtd+(pend.qtd<upc?' <span style="font-size:13px">(caixa parcial)</span>':'')+'</div>'
+      +'<div style="font-size:12.5px;color:var(--text2)">'+ecomEsc(ecomFullDesc(p,pend.sku)||'')+'</div>'
+      +'<div style="height:8px;background:var(--bg3);border-radius:99px;margin:8px 0;overflow:hidden"><div style="width:'+pc+'%;height:8px;background:var(--blue-text)"></div></div>'
+      +'<div style="font-size:12px;color:var(--text2)">Na última etiqueta, a caixa fecha e a etiqueta da caixa sai sozinha.</div>'
+      +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomFullProdReimpUnid(\''+p.id+'\')">Reimprimir etiquetas de unidade</button>'
+      +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomFullProdCancelarML(\''+p.id+'\')">Cancelar caixa</button></div></div>'
+    : '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">FULL MERCADO LIVRE '+ecomEsc(p.numero_pedido||'')+' · CHECKOUT POR PRODUTO</div>'
+      +'<div style="font-size:20px;font-weight:800">Bipe o EAN do próximo produto</div>'
+      +'<div style="font-size:12.5px;color:var(--text3)">Caixas '+fechadas.length+' de '+tot+' · unidades por caixa <input type="number" min="1" value="'+upc+'" onchange="ecomFullSetUpc(\''+p.id+'\',this.value)" style="width:56px"></div></div>';
+  var alerta=semMaster.length?'<div style="border:2px solid #f59e0b;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:10px 12px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--amber-text,#92400e);margin-bottom:6px">🖨 '+semMaster.length+' caixa(s) fechada(s) sem a etiqueta da caixa impressa</div>'
+      +semMaster.map(function(c){ return '<button class="btn btn-p" style="margin:3px 6px 3px 0" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')">🖨 Imprimir etiqueta da caixa '+c.n+'</button>'; }).join('')+'</div>':'';
+  var lin=ks.map(function(k){ var t=ecomN(un[k]), c=ecomFullConf(p,k), ok=c>=t;
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+' <small style="color:var(--text3)">'+ecomEsc(ecomFullDesc(p,k)||'')+'</small></span><span>'+c+'/'+t+' un</span></div>'; }).join('');
+  var ult=fechadas.slice(-3).reverse().map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>Caixa '+c.n+' · '+ecomEsc(c.sku||'')+' × '+(c.qtd||0)+'</span><button class="btn btn-sm" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')">Reimprimir caixa</button></div>'; }).join('');
+  return topo+alerta+'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">PRODUTOS · UNIDADES CONFERIDAS</div>'+lin
+    +(ult?'<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin:10px 0 4px">ÚLTIMAS CAIXAS FECHADAS</div>'+ult:'')+'</div>';
+}
 function ecomFullPainelCheckout(p){
   if(ecomFullMeta(p).modo_produto!==false&&!ecomFullMeta(p).ml) return ecomFullProdPainel(p);   // v1.0.1185 (Full Shopee)
+  if(ecomFullMeta(p).ml&&ecomFullMlPorProduto(ecomFullMeta(p))) return ecomFullProdPainelML(p);   // v1.0.1220 (Full ML por produto)
   var meta=ecomFullMeta(p), upc=ecomFullUpc(p,meta), _un=ecomFullUnid(p), _ks=Object.keys(_un);
   var tot=_ks.reduce(function(s,k){return s+ecomN(_un[k]);},0), feito=_ks.reduce(function(s,k){return s+Math.min(ecomN(_un[k]),ecomFullConf(p,k));},0);
   var n=meta.cx_atual||1, cx=(meta.caixas||[]).find(function(c){return c.n===n;})||{qtd:0}, fech=(meta.caixas||[]).filter(function(c){return c.fechada_em;});
