@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1230 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1231 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1230';
+const APP_VERSION='v1.0.1231';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4427,7 +4427,7 @@ async function capaOcrUmaUm(){
 async function capaOcrLote(){
   var fs=await capaOcrCapturar(true); if(!fs||!fs.length) return;
   await fcdCarregar(true);
-  var ok=0, sem=0, erro=0, i=0, tot=fs.length;
+  var ok=0, sem=0, erro=0, i=0, tot=fs.length, _errs=[];   // v1.0.1231 (CH-0044): motivo de cada foto com erro
   var mod=document.createElement('div'); mod.className='modal-overlay'; mod.style.zIndex='5400'; mod.style.alignItems='center';
   mod.innerHTML='<div class="modal" style="max-width:460px"><b style="font-size:15px">Lendo '+tot+' capa(s)…</b><div id="capa-lote-prog" style="margin-top:10px;font-size:13px;color:var(--text2)">0 de '+tot+'</div><div style="height:6px;background:var(--bg3);border-radius:99px;margin-top:8px;overflow:hidden"><div id="capa-lote-bar" style="width:0;height:6px;background:var(--blue-text)"></div></div></div>';
   document.body.appendChild(mod);
@@ -4440,14 +4440,20 @@ async function capaOcrLote(){
         var path=await capaOcrUpload(im.blob,c&&c.id);
         await dbInsert('capa_leituras',{company_id:company.id,capa_id:c?c.id:null,numero_lido:L.numero||null,dados:L,duvidas:(L.duvidas||[]).length,foto_path:path,status:c?'pendente':'sem_capa',lido_por:(profile&&profile.full_name)||''});
         if(c) ok++; else sem++;
-      }catch(e){ erro++; }
+      }catch(e){ erro++; var _msg=String((e&&e.message)||e||'erro').slice(0,300); _errs.push({arquivo:(f&&f.name)||('foto '+i),msg:_msg});
+        try{ await dbInsert('capa_leituras',{company_id:company.id,capa_id:null,numero_lido:null,dados:{erro:_msg,arquivo:(f&&f.name)||null},duvidas:0,foto_path:null,status:'erro',lido_por:(profile&&profile.full_name)||''}); }catch(_e2){} }
       var feito=ok+sem+erro, pr=ge('capa-lote-prog'), bar=ge('capa-lote-bar'); if(pr) pr.textContent=feito+' de '+tot+' · '+ok+' prontas para revisar'+(sem?' · '+sem+' sem capa encontrada':'')+(erro?' · '+erro+' com erro':''); if(bar) bar.style.width=Math.round(feito/tot*100)+'%';
     }
   };
   await Promise.all([prox(),prox()]);
   mod.remove(); _capaOcrPendT=0; await capaOcrContarPend();
   showToast(ok+' capa(s) lidas e na fila de revisão'+(sem?' · '+sem+' sem capa encontrada (número não bate)':'')+(erro?' · '+erro+' com erro':''),erro||sem?'amber':'green');
-  capaOcrFila();
+  if(_errs.length){   // v1.0.1231: mostra o motivo, em vez de só "N com erro"
+    var _dica=_errs.some(function(x){return /404|not found|Failed to fetch|function/i.test(x.msg);})?'A leitura por foto não respondeu (a função capa-ocr pode não estar publicada). Avise o suporte.'
+             :(_errs.some(function(x){return /imagem|image|heic|format/i.test(x.msg);})?'Formato de foto não suportado ou arquivo corrompido: tire a foto de novo (JPG ou PNG).':'Tente de novo com fotos mais nítidas e retas; se continuar, abra um chamado com este aviso.');
+    portModal('Capas com erro na leitura ('+_errs.length+')','<div style="font-size:12.5px;color:var(--text2)">'+_dica+'</div><div style="max-height:40vh;overflow:auto;font-size:12px;border:1px solid var(--border);border-radius:8px">'
+      +_errs.map(function(x){return '<div style="padding:6px 10px;border-bottom:1px solid var(--border2)"><b>'+ecomEsc(x.arquivo)+'</b><div style="color:var(--red-text)">'+ecomEsc(x.msg)+'</div></div>';}).join('')+'</div>','capaOcrFila()',{saveLabel:'Ver a fila de revisão'});
+  } else capaOcrFila();
 }
 async function capaOcrFila(){
   var rows=await dbSelect('capa_leituras','company_id=eq.'+company.id+'&status=in.(pendente,sem_capa)&order=duvidas.desc,created_at.asc&limit=300').catch(function(){return [];})||[];
@@ -20553,7 +20559,8 @@ function imprimirExperiencia(id){
   const av=(rhExperiencia||[]).find(x=>x.id===id);if(!av)return;
   const _isRH=(profile&&['admin','rh'].includes(profile.role));
   const _isGestor=(profile&&profile.role==='gestor');
-  if(!_isRH&&!_isGestor){alert('Apenas RH ou gestor podem imprimir esta avalia\u00e7\u00e3o.');return;}
+  var _podeExp=(typeof canDo==='function'&&canDo('rh-experiencia','pode_exportar'));   // v1.0.1231 (CH-0041): quem tem "exportar" na tela também imprime
+  if(!_isRH&&!_isGestor&&!_podeExp){alert('Imprimir a avalia\u00e7\u00e3o de experi\u00eancia \u00e9 permitido ao RH, ao gestor ou a quem tem "Exportar" na tela RH \u00b7 Experi\u00eancia (Admin \u2192 Permiss\u00f5es).');return;}
   const homologado=(av.status==='homologado');
   const CONCL={efetivar:['EFETIVAR','#166534','#dcfce7'],desligar:['N\u00c3O EFETIVAR','#991b1b','#fee2e2'],prorrogar:['PRORROGAR','#854d0e','#fef9c3']};
   const cc=CONCL[(av.conclusao||'').toLowerCase()]||[(av.conclusao||'\u2014').toUpperCase(),'#0A2540','#e6eef5'];
@@ -24509,7 +24516,7 @@ async function novoTituloCP(editId){
    +'<div class="fg"><label class="fl">Grupo</label><select class="fi" id="cp-grupo">'
    +['Despesas','Investimento','Acionista'].map(function(g){return '<option'+((ed&&ed.grupo===g)?' selected':'')+'>'+g+'</option>';}).join('')+'</select></div></div>'
    +'<div id="cp-box-pago" style="display:none;grid-template-columns:1fr;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">'
-   +'<div class="fg" style="margin:0"><label class="fl">Data do pagamento</label><input class="fi" id="cp-dtpag" type="date" value="'+hoje+'"></div></div>'
+   +'<div class="fg" style="margin:0"><label class="fl">Data REAL do pagamento *</label><input class="fi" id="cp-dtpag" type="date" value="" max="'+hoje+'" title="A data em que o pagamento saiu do banco (não a data de hoje)"></div></div>'   // v1.0.1231 (CH-0040)
    +(ed?'':'<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px">'
      +'<div style="display:flex;align-items:center;gap:8px">'
      +'<input type="checkbox" id="cp-parc" onchange="cpParcToggle(this.checked)" style="width:auto">'
@@ -24779,6 +24786,8 @@ async function salvarTituloCP(novo){
   if(dup.length&&!confirm('J\u00e1 existe t\u00edtulo id\u00eantico deste benefici\u00e1rio (mesmo valor e vencimento, mesma unidade).\n\nLan\u00e7ar mesmo assim?'))return;
   var jaPago=!!cpNovoSel.jaPago;
   var dtPag=jaPago?(ge('cp-dtpag')?ge('cp-dtpag').value:''):null;
+  if(jaPago&&!dtPag){ alert('Informe a data REAL do pagamento (a data em que saiu do banco).'); var _dp=ge('cp-dtpag'); if(_dp) _dp.focus(); return; }   // v1.0.1231 (CH-0040)
+  if(jaPago&&dtPag>hojeLocalISO()){ alert('A data do pagamento não pode ser no futuro.'); return; }
   var grupoId=(linhas.length>1&&window.crypto&&crypto.randomUUID)?crypto.randomUUID():null;
   var btns=Array.prototype.slice.call(document.querySelectorAll('#modal-novo-cp button'));
   btns.forEach(function(b){b.disabled=true;});
@@ -24794,7 +24803,12 @@ async function salvarTituloCP(novo){
         data_pagamento:(jaPago&&i===0)?dtPag:null,
         aprovacao_status:'pendente',criado_por:uid,origem:'manual'});
       if(grupoId){body.parcela_grupo=grupoId;body.parcela_num=i+1;body.parcela_total=linhas.length;}
-      var r=await dbInsert('contas_pagar',body);
+      var r;
+      try{ r=await dbInsert('contas_pagar',body); }
+      catch(eP){   // v1.0.1231 (CH-0042): desfaz as parcelas já gravadas, para não ficar lançamento pela metade nem duplicar ao tentar de novo
+        for(var k=0;k<criados.length;k++){ if(criados[k]&&criados[k].id){ try{ await dbDelete('contas_pagar',criados[k].id); }catch(_d){} } }
+        throw new Error('a parcela '+(i+1)+' de '+linhas.length+' (venc. '+L.venc+', '+cpBRL(L.valor)+') foi recusada: '+(eP&&eP.message||eP)+'. Nada foi gravado; corrija e salve de novo.');
+      }
       criados.push(r||body);
       if(r&&r.id) await cpItensGravar(r.id,_baseCorpo,L.valor);
     }
@@ -24812,7 +24826,7 @@ async function salvarTituloCP(novo){
       if(curPage==='contas-pagar'){var c2=ge('content');if(c2){c2.innerHTML=rContasPagar();initContasPagar();}}
       alert(msg);
     }
-  }catch(e){alert('Erro ao salvar: '+e.message);}
+  }catch(e){ btns.forEach(function(b){b.disabled=false;}); alert('Erro ao salvar: '+e.message); }   // v1.0.1231: libera os botões
   finally{btns.forEach(function(b){b.disabled=false;});}
 }
 
@@ -31287,7 +31301,7 @@ async function dfcSalvar(kind,id){
     }
     var mo=ge('modal-dfc');if(mo)mo.remove();
     await initPlanoContasDFC();
-  }catch(e){alert('Erro ao salvar: '+e.message);}
+  }catch(e){ btns.forEach(function(b){b.disabled=false;}); alert('Erro ao salvar: '+e.message); }   // v1.0.1231: libera os botões
 }
 
 async function dfcToggle(kind,id){
