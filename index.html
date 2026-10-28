@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1227 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1228 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1227';
+const APP_VERSION='v1.0.1228';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3748,9 +3748,25 @@ function ecomFullPainelCheckout(p){
           +'</div>'; })();
 }
 // ── 5) embarque: o Full embarca quando todas as caixas (QR SPXBR) forem bipadas ──
+
+// v1.0.1228: QR da caixa do Full Mercado Livre é um JSON {"id":…,"reference_id":"80697101:3",…}. Com o teclado em ABNT,
+// o leitor troca " por ^ e : por Ç (ex.: ^reference_id^Ç^80697101:3^) — o VERUS desfaz isso e acha envio + número da caixa.
+function ecomFullEmbCaixaML(code){
+  var t=String(code||'').replace(/\^/g,'"').replace(/[ÇçÖ]/g,':').replace(/[¨´`]/g,'"');
+  var m=t.match(/reference_id"?\s*:\s*"?(\d{5,})[:\/-](\d{1,3})/i)||t.match(/(?:^|\D)(\d{6,})[:\/-](\d{1,3})(?:\D|$)/);
+  if(!m) return null;
+  var envio=m[1], n=parseInt(m[2],10);
+  var ped=(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&ecomFullMeta(p).ml&&String(p.numero_pedido||'').replace(/\D/g,'')===envio; })
+       ||(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&String(p.numero_pedido||'').indexOf(envio)>=0; });
+  if(!ped) return null;
+  var cx=(ecomFullMeta(ped).caixas||[]).find(function(x){ return +x.n===n; });
+  if(!cx) return null;
+  return {ped:ped,cx:cx};
+}
 function ecomFullEmbCaixa(code,romId){
   // v1.0.1182: o QR da caixa pode vir com texto antes/depois (URL, separadores do leitor) — extrai o SPXBR de dentro
-  var c=ecomFullNormQr(code), _m=c.match(/SPXBR\d{6,}/); if(!_m) return null; c=_m[0];
+  var c=ecomFullNormQr(code), _m=c.match(/SPXBR\d{6,}/); if(!_m) return ecomFullEmbCaixaML(code);   // v1.0.1228: sem SPXBR → tenta o QR da caixa do Mercado Livre
+  c=_m[0];
   var ped=(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&(ecomFullMeta(p).caixas||[]).some(function(x){return ecomFullNormQr(x.spx)===c;}); });
   if(!ped) return null;
   var cx=(ecomFullMeta(ped).caixas||[]).find(function(x){return ecomFullNormQr(x.spx)===c;});
