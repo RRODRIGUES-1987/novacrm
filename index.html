@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1220 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1221 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1220';
+const APP_VERSION='v1.0.1221';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3541,7 +3541,7 @@ function ecomFullProdPainel(p){
   return topo+'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">PRODUTOS · CAIXAS / UNIDADES</div>'+lin+'</div>';
 }
 async function ecomFullBip(p,its,code){
-  if(!antiRajada('full:'+p.id,code)) return;   // v1.0.1179
+  var _m0=ecomFullMeta(p); if(!(_m0.ml&&_m0.cx_pend)&&!antiRajada('full:'+p.id,code)) return;   // v1.0.1179 · v1.0.1221: Full ML com caixa aberta aceita o mesmo código seguido
   // v1.0.1129: lê o full_meta ATUAL do banco a cada bipe. A tela do checkout podia ter o pedido carregado ANTES das
   // etiquetas serem ligadas (sem os códigos ML nem os PDFs): o bipe dava "Etiqueta não é deste Full"/"não localizada",
   // e, pior, ao gravar o progresso, regravava o full_meta antigo por cima do que estava no banco.
@@ -57727,15 +57727,22 @@ function ecomCxContagemCega(p,esperado){
     setTimeout(function(){ inp.focus(); },60);
   });
 }
+// v1.0.1221: no Full ML por produto, as etiquetas de unidade do mesmo SKU têm o MESMO código: bipe repetido é o normal
+function ecomCxFullMlCaixaAberta(){
+  try{ var pid=ecomCx&&ecomCx.fila&&ecomCx.fila.length?ecomCxCurrentPid():null; var p=pid&&(ecomPedidos||[]).find(function(x){return x.id===pid;});
+       if(!p||!ecomEhFull(p)) return false; var m=ecomFullMeta(p); return !!(m.ml&&m.cx_pend); }catch(e){ return false; }
+}
+var _ecomCxQ=[];
 async function ecomCxBip(code){
-  if(!antiRajada('ecomcx',code)) return;   // v1.0.1179
+  var _mlCx=ecomCxFullMlCaixaAberta();
+  if(!_mlCx&&!antiRajada('ecomcx',code)) return;   // v1.0.1179 · v1.0.1221: fora da caixa aberta do Full ML
   if(!ecomCx || !ecomCx.fila.length){ ecomCxFlash('Bipe a folha para comecar','amber'); ecomCxRender(); return; }
   // leitor em rajada: duas execuções simultâneas liam qtd_conferida antes da
   // gravação, concluíam o mesmo pedido e imprimiam duas etiquetas — e, no
   // consolidado, a segunda concluía o pedido seguinte sem bipe.
-  if(_ecomCxBusy) return;
+  if(_ecomCxBusy){ if(_mlCx) _ecomCxQ.push(code); return; }   // v1.0.1221: no Full ML, bipe rápido entra na fila (não se perde)
   var _now=Date.now();
-  if(_ecomCxLast.code===String(code) && (_now-_ecomCxLast.ts)<700) return;  // Enter duplicado
+  if(_ecomCxLast.code===String(code) && (_now-_ecomCxLast.ts)<(_mlCx?150:700)) return;  // Enter duplicado (Full ML: só leitura dupla do leitor)
   _ecomCxLast={code:String(code),ts:_now};
   _ecomCxBusy=true;
   try{
@@ -57790,7 +57797,7 @@ async function ecomCxBip(code){
     } else { ecomCxFlash('Item OK','green'); }
     ecomCxRender();
   }catch(e){ ecomBeep(); ecomCxFlash('Erro: '+(e.message||e),'red'); ecomCxRender(); }
-  }finally{ _ecomCxBusy=false; var _i=ge('col-scan'); if(_i)_i.focus(); }
+  }finally{ _ecomCxBusy=false; var _i=ge('col-scan'); if(_i)_i.focus(); if(_ecomCxQ.length){ var _nx=_ecomCxQ.shift(); setTimeout(function(){ ecomCxBip(_nx); },0); } }
 }
 function ecomCxSemEtiqHtml(){
   var ids=(ecomCx&&ecomCx.semEtiq)||[]; if(!ids.length) return '';
