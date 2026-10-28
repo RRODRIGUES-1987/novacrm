@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1228 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1230 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1228';
+const APP_VERSION='v1.0.1230';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3752,16 +3752,25 @@ function ecomFullPainelCheckout(p){
 // v1.0.1228: QR da caixa do Full Mercado Livre é um JSON {"id":…,"reference_id":"80697101:3",…}. Com o teclado em ABNT,
 // o leitor troca " por ^ e : por Ç (ex.: ^reference_id^Ç^80697101:3^) — o VERUS desfaz isso e acha envio + número da caixa.
 function ecomFullEmbCaixaML(code){
+  // v1.0.1229: no ML o "reference_id" (envio:N) se repete em todas as caixas do envio; o que muda é o "id" de cada caixa.
+  // Cada id novo é atribuído à próxima caixa ainda não embarcada; o mesmo id bipado de novo cai na mesma caixa (duplicado).
   var t=String(code||'').replace(/\^/g,'"').replace(/[ÇçÖ]/g,':').replace(/[¨´`]/g,'"');
-  var m=t.match(/reference_id"?\s*:\s*"?(\d{5,})[:\/-](\d{1,3})/i)||t.match(/(?:^|\D)(\d{6,})[:\/-](\d{1,3})(?:\D|$)/);
-  if(!m) return null;
-  var envio=m[1], n=parseInt(m[2],10);
+  var mr=t.match(/reference_id"?\s*:\s*"?(\d{5,})(?:[:\/-](\d{1,3}))?/i)||t.match(/(?:^|\D)(\d{6,})[:\/-](\d{1,3})(?:\D|$)/);
+  if(!mr) return null;
+  var envio=mr[1], mid=(t.match(/"id"\s*:\s*"?(\d{5,})/i)||[])[1]||null;
   var ped=(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&ecomFullMeta(p).ml&&String(p.numero_pedido||'').replace(/\D/g,'')===envio; })
        ||(ecomPedidos||[]).find(function(p){ return ecomEhFull(p)&&String(p.numero_pedido||'').indexOf(envio)>=0; });
   if(!ped) return null;
-  var cx=(ecomFullMeta(ped).caixas||[]).find(function(x){ return +x.n===n; });
-  if(!cx) return null;
-  return {ped:ped,cx:cx};
+  var meta=ecomFullMeta(ped), cxs=(meta.caixas||[]).slice().sort(function(a,b){return a.n-b.n;}), emb=meta.embarque||{};
+  var bip=(typeof ecomEmb!=='undefined'&&ecomEmb&&ecomEmb.fullCx&&ecomEmb.fullCx[ped.id])||{};
+  if(mid){
+    var ja=Object.keys(emb).find(function(n){ return String((emb[n]||{}).codigo||'').indexOf(mid)>=0; });
+    if(ja) return {ped:ped,cx:cxs.find(function(c){return String(c.n)===String(ja);})||{n:+ja}};
+    var livre=cxs.find(function(c){ return !emb[c.n]&&!bip[c.n]; });
+    return livre?{ped:ped,cx:livre}:{ped:ped,cx:cxs[cxs.length-1]};
+  }
+  var n=parseInt(mr[2]||'0',10), cx=cxs.find(function(c){ return +c.n===n; });
+  return cx?{ped:ped,cx:cx}:null;
 }
 function ecomFullEmbCaixa(code,romId){
   // v1.0.1182: o QR da caixa pode vir com texto antes/depois (URL, separadores do leitor) — extrai o SPXBR de dentro
@@ -28956,6 +28965,7 @@ async function cotAnexarProposta(input,i){
 }
 // aprovacao da compra: propostas lado a lado
 function abrirAprovacaoCompra(solId){
+  if(typeof compraAprovarAbas==='function') return compraAprovarAbas(solId);   // v1.0.1230: página única com abas
   const sol=comprasSolicitacoes.find(s=>s.id===solId);
   const cot=comprasCotacoes.find(c=>c.solicitacao_id===solId);
   if(!sol||!cot){ alert('Cotação não encontrada.'); return; }
@@ -29332,6 +29342,7 @@ function openSolicitacaoDetalhe(id){
         <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           ${sol.status==='em_cotacao'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openCotacaoEditor('${id}')">📋 Gerenciar Cotação</button>`:''}
           ${sol.status==='aguardando_homologacao'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openHomologacao('${id}')">✅ Homologar Fornecedor</button>`:''}
+          ${sol.status==='aguardando_homologacao'&&compraSouDiretor()?`<button class="btn" style="background:#166534;color:#fff;border-color:#166534" onclick="ge('modal-sol-detalhe').remove();compraAprovarAbas('${id}')">Abrir e aprovar</button>`:''}
           ${sol.status==='aprovado'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openRecebimento('${id}')">📦 Registrar Recebimento</button>`:''}
           ${sol.status==='recebido'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openConferencia('${id}')">🔍 Realizar Conferência</button>`:''}
           ${sol.status==='aguardando_informacao'&&sol.owner_id===cu?.id?`<button class="btn" style="background:var(--amber-bg);color:var(--amber-text)" onclick="ge('modal-sol-detalhe').remove();responderInfoSolicitacao('${id}')">Responder ao diretor</button>`:''}
@@ -30066,15 +30077,74 @@ async function confirmarHomologacao(solId,cotId){
 }
 
 // ── APROVAÇÕES ──
+
+// ═══ v1.0.1229 · APROVAÇÃO DE COMPRA EM PÁGINA ÚNICA: comparativo + uma aba por cotação (proposta aberta) + aprovar o escolhido ═══
+var _cpa={sol:null,idx:0};
+function compraAprovarAbas(solId){
+  var sol=comprasSolicitacoes.find(function(s){return s.id===solId;}), cot=comprasCotacoes.find(function(c){return c.solicitacao_id===solId;});
+  if(!sol||!cot){ alert('Cotação não encontrada para esta solicitação.'); return; }
+  var fns=(cot.fornecedores||[]).filter(function(f){return f&&f.nome;});
+  if(!fns.length){ alert('Esta solicitação ainda não tem fornecedores cotados.'); return; }
+  var vals=fns.map(function(f){return Number(f.valor_total)||0;}).filter(function(v){return v>0;}), menor=vals.length?Math.min.apply(null,vals):null;
+  var ini=(cot.fornecedor_escolhido_idx!=null&&fns[cot.fornecedor_escolhido_idx])?cot.fornecedor_escolhido_idx:fns.findIndex(function(f){return Number(f.valor_total)===menor;});
+  _cpa={sol:solId,idx:ini<0?0:ini,fns:fns,menor:menor,cot:cot};
+  var old=ge('modal-cpa'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="modal-cpa"><div class="modal" style="max-width:980px;width:96%;max-height:94vh;overflow-y:auto"><div id="cpa-body"></div></div></div>');
+  cpaRender();
+}
+function cpaRender(){
+  var b=ge('cpa-body'); if(!b) return;
+  var sol=comprasSolicitacoes.find(function(s){return s.id===_cpa.sol;}), cot=_cpa.cot, fns=_cpa.fns, i=_cpa.idx, f=fns[i]||{}, dir=compraSouDiretor();
+  var cards=fns.map(function(x,k){ var on=k===i, best=_cpa.menor!=null&&Number(x.valor_total)===_cpa.menor;
+    return '<div onclick="_cpa.idx='+k+';cpaRender()" style="cursor:pointer;border:'+(on?'2px solid var(--text)':'1px solid var(--border)')+';border-radius:11px;padding:10px 12px;background:var(--bg)">'
+      +'<div style="display:flex;justify-content:space-between;gap:6px;align-items:center"><b style="font-size:13px">'+tgEsc(x.nome)+'</b>'+(best?'<span class="bdg" style="background:var(--green-bg);color:var(--green-text)">menor valor</span>':'')+'</div>'
+      +'<div style="font-size:19px;font-weight:800;margin:4px 0">'+(Number(x.valor_total)>0?fmtV(Number(x.valor_total)):'<span style="font-size:13px;color:var(--text3)">sem valor</span>')+'</div>'
+      +'<div style="font-size:12px;color:var(--text3)">'+tgEsc(x.prazo||'prazo —')+' · '+tgEsc(x.condicao_pagamento||'pagamento —')+'</div></div>'; }).join('');
+  var tabs=fns.map(function(x,k){ var on=k===i; return '<button onclick="_cpa.idx='+k+';cpaRender()" style="background:none;border:none;border-bottom:2px solid '+(on?'var(--accent)':'transparent')+';padding:8px 12px;font-size:12.5px;font-weight:'+(on?'700':'500')+';color:'+(on?'var(--text)':'var(--text3)')+';cursor:pointer">'+(k+1)+' · '+tgEsc(x.nome)+'</button>'; }).join('');
+  var url=f.proposta_url||'', ehImg=/\.(png|jpe?g|webp|gif)(\?|$)/i.test(url);
+  var prev=url?(ehImg?'<img src="'+url+'" style="max-width:100%;max-height:60vh;border-radius:8px;display:block;margin:0 auto">':'<iframe src="'+url+'" style="width:100%;height:60vh;border:1px solid var(--border);border-radius:8px;background:#fff"></iframe>')
+    :'<div style="padding:30px;text-align:center;color:var(--amber-text);border:1px dashed var(--border);border-radius:8px">⚠ Proposta deste fornecedor não anexada</div>';
+  var just=cot.justificativa_escolha||((_cpa.menor!=null&&Number(f.valor_total)===_cpa.menor)?'Menor valor entre as cotações.':'');
+  b.innerHTML='<div class="modal-hdr"><span>Aprovar compra · '+tgEsc(sol.numero||'')+' · '+tgEsc(sol.titulo||'')+'</span><button class="modal-x" onclick="ge(\'modal-cpa\').remove()">×</button></div>'
+    +'<div style="padding:16px 20px">'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">Pedido por '+tgEsc(sol.solicitante_nome||'')+' · qtd '+(sol.quantidade||1)+(sol.data_necessaria?' · precisa até '+fmtDateSimples(sol.data_necessaria):'')+(sol.valor_estimado?' · estimado '+fmtV(sol.valor_estimado):'')+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">'+cards+'</div>'
+    +'<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-top:14px;flex-wrap:wrap">'+tabs+'</div>'
+    +'<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px;background:var(--bg)">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;margin-bottom:8px"><span><b>'+(Number(f.valor_total)>0?fmtV(Number(f.valor_total)):'sem valor')+'</b> · prazo '+tgEsc(f.prazo||'—')+' · pagamento '+tgEsc(f.condicao_pagamento||'—')+(f.cnpj?' · '+tgEsc(f.cnpj):'')+(f.obs?' · '+tgEsc(f.obs):'')+'</span>'+(url?'<a href="'+url+'" target="_blank" style="color:var(--accent)">abrir em nova aba</a>':'')+'</div>'+prev+'</div>'
+    +'<div class="fg" style="margin-top:12px"><label class="fl">Justificativa da escolha</label><textarea class="fi" id="cpa-just" rows="2">'+tgEsc(just)+'</textarea></div>'
+    +(cot.justificativa_menos3?'<div style="font-size:12.5px;margin-top:4px"><b>Menos de 3 fornecedores:</b> '+tgEsc(cot.justificativa_menos3)+'</div>':'')
+    +(dir?'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap">'
+      +'<button class="btn" style="color:#b91c1c;border-color:#f5c2c0;background:#fff5f5" onclick="ge(\'modal-cpa\').remove();reprovarCompra(\''+_cpa.sol+'\')">Reprovar</button>'
+      +'<button class="btn" onclick="ge(\'modal-cpa\').remove();pedirNovaCotacao(\''+_cpa.sol+'\')">Pedir nova cotação</button>'
+      +'<button class="btn" style="background:#166534;color:#fff;border-color:#166534" onclick="cpaAprovar()">Aprovar '+tgEsc(f.nome||'')+' · gerar pedido</button></div>'
+      :'<div style="font-size:12px;color:var(--text3);margin-top:14px">A aprovação é feita pelo diretor.</div>')
+    +'</div>';
+}
+async function cpaAprovar(){
+  if(!compraSouDiretor()){ alert('Somente o diretor aprova a compra.'); return; }
+  var solId=_cpa.sol, cot=_cpa.cot, i=_cpa.idx, f=_cpa.fns[i], just=((ge('cpa-just')||{}).value||'').trim()||'Aprovado pelo diretor.';
+  if(!confirm('Aprovar a compra com '+(f.nome||'')+(Number(f.valor_total)>0?' por '+fmtV(Number(f.valor_total)):'')+'?')) return;
+  try{
+    var quem=profile?.nome||profile?.full_name||cu?.email, agora=new Date().toISOString();
+    var idxReal=(cot.fornecedores||[]).indexOf(f);
+    await dbUpdate('compras_cotacoes',cot.id,{fornecedor_escolhido_idx:idxReal<0?i:idxReal,fornecedor_escolhido:f,justificativa_escolha:just,homologado_em:cot.homologado_em||agora,homologado_por:cot.homologado_por||quem});
+    comprasCotacoes=comprasCotacoes.map(function(c){return c.id===cot.id?Object.assign({},c,{fornecedor_escolhido:f,fornecedor_escolhido_idx:idxReal<0?i:idxReal,justificativa_escolha:just}):c;});
+    await dbUpdate('compras_solicitacoes',solId,{status:'aprovado',valor_total:Number(f.valor_total)||null,aprovado_compra_em:agora,aprovado_compra_por:quem});
+    comprasSolicitacoes=comprasSolicitacoes.map(function(s){return s.id===solId?Object.assign({},s,{status:'aprovado',valor_total:Number(f.valor_total)||null}):s;});
+    try{ if(typeof compraAvisarSolicitante==='function') compraAvisarSolicitante(solId,'A compra solicitada foi aprovada','<p>Fornecedor: '+tgEsc(f.nome||'')+(Number(f.valor_total)>0?' · '+fmtV(Number(f.valor_total)):'')+'</p>'); }catch(_e){}
+    var m=ge('modal-cpa'); if(m) m.remove(); showToast('Compra aprovada com '+(f.nome||'')+'.','green'); render();
+  }catch(e){ alert('Erro ao aprovar: '+(e.message||e)); }
+}
 function rComprasAprovacoes(){
   const role=profile?.role||'vendedor';
   const isAprovador=compraSouDiretor();   // so o diretor libera e aprova
-  const pendentes=comprasSolicitacoes.filter(s=>s.status==='aguardando_aprovacao_cotacao'||s.status==='aguardando_aprovacao_compra');
+  const pendentes=comprasSolicitacoes.filter(s=>s.status==='aguardando_aprovacao_cotacao'||s.status==='aguardando_aprovacao_compra'||s.status==='aguardando_homologacao');   // v1.0.1229: cotação pronta (homologação) também aparece
 
   const rows=pendentes.map(sol=>{
     const cot=comprasCotacoes.find(c=>c.solicitacao_id===sol.id);
     const st=COMPRAS_STATUS[sol.status];
-    const isCompra=sol.status==='aguardando_aprovacao_compra';
+    const isCompra=sol.status==='aguardando_aprovacao_compra'||sol.status==='aguardando_homologacao';
     return `<div class="li">
       <div class="av ${isCompra?'av0':'av1'}" style="font-size:10px;font-weight:700">${isCompra?'CMP':'COT'}</div>
       <div class="linfo">
@@ -30088,7 +30158,7 @@ function rComprasAprovacoes(){
       <div class="lright">
         ${sol.valor_estimado?`<div style="font-size:13px;font-weight:600">${fmtV(sol.valor_estimado)}</div>`:''}
         ${isAprovador?`<div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`abrirAprovacaoCompra('${sol.id}')`:`aprovarParaCotacao('${sol.id}')`}">✓ Aprovar</button>
+          <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`compraAprovarAbas('${sol.id}')`:`aprovarParaCotacao('${sol.id}')`}">✓ ${isCompra?'Abrir e aprovar':'Aprovar'}</button>
           <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:4px 10px;font-size:11px;border-radius:6px" onclick="${isCompra?`reprovarCompra('${sol.id}')`:`reprovarSolicitacao('${sol.id}')`}">✗ Reprovar</button>
         </div>`:'<div style="font-size:12px;color:var(--text3)">Sem permissão</div>'}
       </div>
