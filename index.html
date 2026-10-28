@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1222 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1223 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1222';
+const APP_VERSION='v1.0.1223';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3630,6 +3630,8 @@ async function ecomFullProdBipML(p,its,meta,code){
   var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), pend=meta.cx_pend||null;
   var salvar=async function(){ p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); };
   var sk=ecomFullSkuDoCodigo(meta,code,un);
+  var _cxl=!sk?ecomFullCaixaDoCodigo(meta,code):null;   // v1.0.1223: etiqueta de caixa bipada (confirmação), sem erro
+  if(_cxl){ ecomCxFlash('Etiqueta da caixa '+_cxl.n+' conferida'+(pend?' · continue bipando as etiquetas de '+pend.sku+' ('+(pend.bip||0)+'/'+pend.qtd+')':' · bipe o EAN do próximo produto'),'green'); ecomCxRender(); return; }
   // ── caixa aberta: bipando as etiquetas de unidade, uma a uma ──
   if(pend){
     if(!sk){ ecomBeep(); ecomCxFlash('Código não reconhecido: '+code,'red'); ecomCxRender(); return; }
@@ -3653,22 +3655,34 @@ async function ecomFullProdBipML(p,its,meta,code){
       var _upd={status:'conferido',data_conferencia:agora}; if(!p.data_separacao){ _upd.data_separacao=agora; p.data_separacao=agora; }
       await dbUpdate('ecom_pedidos',p.id,_upd); p.status='conferido'; ecomCxAutoConcluiOS(p.id); ecomCx.pendingLabel=null;
       ecomCxFlash('Caixa '+pend.n+' fechada · Full '+(p.numero_pedido||'')+' CONFERIDO · '+(meta.caixas||[]).filter(function(x){return x.fechada_em;}).length+' caixa(s)','green');
-    } else ecomCxFlash('Caixa '+pend.n+' fechada · '+sk+' × '+pend.qtd+(imp&&imp!=='semqz'?' · etiqueta da caixa impressa':' · clique em "Imprimir etiqueta da caixa '+pend.n+'"')+' · bipe o EAN do próximo produto','green');
+    } else {
+      var _fechou='Caixa '+pend.n+' fechada · '+sk+' × '+pend.qtd+(imp&&imp!=='semqz'?' · etiqueta da caixa impressa':' · clique em "Imprimir etiqueta da caixa '+pend.n+'"');
+      // v1.0.1223: o mesmo produto ainda tem unidades → abre a próxima caixa sem sair da tela (contagem recomeça em 0)
+      if(ecomN(un[sk])-ecomFullConf(p,sk)>0){ var _r=await ecomFullMlAbrirCaixa(p,meta,sk,_fechou+' · '); if(_r) return; }
+      ecomCxFlash(_fechou+' · bipe o EAN do próximo produto','green');
+    }
     ecomCxRender(); return;
   }
   // ── escolhendo o produto pelo EAN ──
   if(!sk||!(sk in un)){ ecomBeep(); ecomCxFlash(sk?('SKU '+sk+' não está neste Full'):('Código não reconhecido: '+code),'red'); ecomCxRender(); return; }
-  var conf=ecomFullConf(p,sk), resta=ecomN(un[sk])-conf;
-  if(resta<=0){ ecomBeep(); ecomCxFlash('SKU '+sk+' já completo ('+ecomN(un[sk])+')','red'); ecomCxRender(); return; }
+  if(ecomN(un[sk])-ecomFullConf(p,sk)<=0){ ecomBeep(); ecomCxFlash('SKU '+sk+' já completo ('+ecomN(un[sk])+')','red'); ecomCxRender(); return; }
+  await ecomFullMlAbrirCaixa(p,meta,sk,'');
+}
+// v1.0.1223: abre a próxima caixa livre para o SKU, imprime as etiquetas de unidade e espera os bipes
+async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
+  var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), conf=ecomFullConf(p,sk), resta=ecomN(un[sk])-conf;
+  if(resta<=0) return false;
   var qtd=Math.min(upc,resta);
   var livre=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0];
-  if(!livre){ ecomBeep(); ecomCxFlash('Não há etiqueta de caixa livre neste Full. Importe as etiquetas de volume.','red'); ecomCxRender(); return; }
+  if(!livre){ ecomBeep(); ecomCxFlash(prefixo+'Não há etiqueta de caixa livre neste Full. Importe as etiquetas de volume.','red'); ecomCxRender(); return true; }
   var pags=ecomFullPaginasUnid(meta,sk,conf,qtd);
-  if(pags.length<qtd){ ecomBeep(); ecomCxFlash('Faltam etiquetas de unidade de '+sk+' no PDF ('+pags.length+' de '+qtd+'). Importe o PDF de produtos.','red'); ecomCxRender(); return; }
+  if(pags.length<qtd){ ecomBeep(); ecomCxFlash(prefixo+'Faltam etiquetas de unidade de '+sk+' no PDF ('+pags.length+' de '+qtd+'). Importe o PDF de produtos.','red'); ecomCxRender(); return true; }
   livre.reservada=sk; meta.cx_pend={n:livre.n,sku:sk,qtd:qtd,ini:conf,bip:0,em:new Date().toISOString()};
-  await salvar();
-  ecomCxFlash((qtd<upc?'CAIXA PARCIAL: ':'')+'Caixa '+livre.n+' · '+sk+' × '+qtd+' · imprimindo as etiquetas de unidade: cole e bipe uma a uma','green'); ecomCxRender();
+  p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta});
+  _ecomCxMl={code:'',ts:0};   // a contagem recomeça
+  ecomCxFlash(prefixo+(qtd<upc?'CAIXA PARCIAL: ':'')+'Caixa '+livre.n+' · '+sk+' × '+qtd+' · imprimindo as etiquetas de unidade: cole e bipe uma a uma','green'); ecomCxRender();
   await ecomFullImprimirPaginas(meta.unidades_pdf,pags);
+  return true;
 }
 async function ecomFullProdCancelarML(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
@@ -25342,7 +25356,7 @@ function finRelPagImprimir(){
 // ============ FIM FINANCEIRO · RELATÓRIOS ============
 
 // ============ CR · ABA LISTA DE LANÇAMENTOS ============
-var crLisBusca='', crLisStatus='todos', crLisMes=null, crLisOrd='venc', crLisDoc='todos';
+var crLisBusca='', crLisStatus='todos', crLisMes=null, crLisOrd='venc', crLisDoc='todos', crLisDataPor='venc', crLisDe='', crLisAte='';   // v1.0.1223: data do filtro e período
 var contasReceberFatNum={};
 
 function crLisMesRef(){
@@ -25352,7 +25366,8 @@ function crLisMesRef(){
 function crLisSetBusca(v){crLisBusca=(v||'').toLowerCase();crLisRender();}
 function crLisSetStatus(v){crLisStatus=v;if(crCardFiltro){crCardFiltro=null;var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}return;}crLisRender();}   // v1.0.1209: mexeu no filtro, sai do filtro do card
 function crLisSetDoc(v){crLisDoc=v;crLisRender();}
-function crLisSetMes(v){crLisMes=v;if(crCardFiltro){crCardFiltro=null;var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}return;}crLisRender();}
+function crLisSetMes(v){var _antes=crLisMes;crLisMes=v;if(v==='periodo'||_antes==='periodo'){ crCardFiltro=null; var _c=ge('content'); if(_c){_c.innerHTML=rContasReceber();initContasReceber();} return; }   // v1.0.1223: mostra/esconde as datas do período
+  if(crCardFiltro){crCardFiltro=null;var c=ge('content');if(c){c.innerHTML=rContasReceber();initContasReceber();}return;}crLisRender();}
 function crLisSetOrd(v){crLisOrd=(crLisOrd===v)?(v+'_desc'):v;crLisRender();}
 
 
@@ -25388,8 +25403,9 @@ function crLisFiltrados(){
   return (contasReceber||[]).filter(function(cp){
     if(activeUnit&&cp.unit_id&&cp.unit_id!==activeUnit)return false;
     if(mes!=='todos'){
-      var ds=(cp.vencimento||cp.data_pagamento||'');
-      if(ds.slice(0,7)!==mes)return false;
+      var ds=crLisDataPor==='pgto'?(cp.data_pagamento||''):(cp.vencimento||cp.data_pagamento||'');   // v1.0.1223: por vencimento ou por pagamento
+      if(mes==='periodo'){ if(!ds) return false; if(crLisDe&&ds<crLisDe) return false; if(crLisAte&&ds>crLisAte) return false; }
+      else if(ds.slice(0,7)!==mes)return false;
     }
     var st=crLisStatusDe(cp);
     if(crLisStatus==='aberto'){ if(st==='pago') return false; }   // v1.0.1209: card "Total a receber"
@@ -25422,12 +25438,16 @@ function rCRLista(){
     var lbl=d.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
     meses+='<option value="'+v+'"'+(v===mes?' selected':'')+'>'+lbl+'</option>';
   }
+  meses+='<option value="periodo"'+(mes==='periodo'?' selected':'')+'>Período personalizado…</option>';   // v1.0.1223
   var sts=[['todos','Todos os status'],['aberto','Em aberto (a receber + vencido)'],['areceber','A receber'],['vencido','Vencido'],['pago','Recebido']]
     .map(function(s){return '<option value="'+s[0]+'"'+(crLisStatus===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('');
   var h='';
   h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
   h+='<input class="fi" id="cp-lis-busca" placeholder="Buscar cliente, fatura…" value="'+crLisBusca.replace(/"/g,'&quot;')+'" oninput="crLisSetBusca(this.value)" style="flex:1;min-width:220px">';
+  h+='<select class="fi" onchange="crLisDataPor=this.value;crLisRender()" style="width:auto" title="Qual data o filtro de período usa">'
+    +'<option value="venc"'+(crLisDataPor!=='pgto'?' selected':'')+'>Por vencimento</option><option value="pgto"'+(crLisDataPor==='pgto'?' selected':'')+'>Por pagamento</option></select>';   // v1.0.1223
   h+='<select class="fi" onchange="crLisSetMes(this.value)" style="width:auto">'+meses+'</select>';
+  if(mes==='periodo') h+='<span style="display:flex;gap:4px;align-items:center;font-size:12px;color:var(--text3)">de <input class="fi" type="date" value="'+crLisDe+'" onchange="crLisDe=this.value;crLisRender()" style="width:auto"> até <input class="fi" type="date" value="'+crLisAte+'" onchange="crLisAte=this.value;crLisRender()" style="width:auto"></span>';
   h+='<select class="fi" onchange="crLisSetStatus(this.value)" style="width:auto">'+sts+'</select>';
   h+='<select class="fi" onchange="crLisSetDoc(this.value)" style="width:auto">'
     +[['todos','NF e ND'],['nf','Só NF'],['nd','Só ND']].map(function(o){return '<option value="'+o[0]+'"'+(crLisDoc===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')
