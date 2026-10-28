@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1225 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1226 | Gerado: 2026-10-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1225';
+const APP_VERSION='v1.0.1226';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -15790,6 +15790,54 @@ const ESCOPO_DEFAULTS={local_operacao:'MKLOG ITU',volume:'650 pallets',dimensao_
 let propEditando=null;
 let propTarifas=[];
 
+
+// ═══ v1.0.1226 · REVERSA: a partir de uma proposta existente → contato + negócio + NOVA proposta (rascunho, nosso número) ═══
+function propReversa(pid){
+  var b=(propostas||[]).find(function(x){return x.id===pid;}); if(!b) return;
+  var e=function(x){return ecomEsc(x==null?'':x);};
+  var inner='<div style="font-size:12px;color:var(--text3);margin-top:-6px">Proposta '+e(b.numero_po||'')+' · '+e(b.cliente_nome||'')+' · v'+(b.versao||1)+'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><b style="font-size:13px">1. Contato</b>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px"><div class="fg"><label class="fl">Nome *</label><input class="fi" id="rv-cnome" value="'+e(b.cliente_contato||'')+'"></div>'
+    +'<div class="fg"><label class="fl">Empresa *</label><input class="fi" id="rv-cemp" value="'+e(b.cliente_nome||'')+'"></div>'
+    +'<div class="fg"><label class="fl">E-mail</label><input class="fi" id="rv-cmail" placeholder="opcional"></div><div class="fg"><label class="fl">Telefone</label><input class="fi" id="rv-ctel" placeholder="opcional"></div></div>'
+    +'<div style="font-size:11px;color:var(--text3)">Se já existir um contato com esse nome nessa empresa, ele é reaproveitado.</div></div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><b style="font-size:13px">2. Negócio</b>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px"><div class="fg" style="grid-column:1/-1"><label class="fl">Nome do negócio *</label><input class="fi" id="rv-dnome" value="'+e((b.cliente_nome||'')+(b.tipo_produto&&b.tipo_produto!=='a definir'?' · '+b.tipo_produto:''))+'"></div>'
+    +'<div class="fg"><label class="fl">Etapa</label><select class="fi" id="rv-detapa">'+STAGES.map(function(st){return '<option'+(st==='Negociação'?' selected':'')+'>'+st+'</option>';}).join('')+'</select></div>'
+    +'<div class="fg"><label class="fl">Valor mensal estimado (R$)</label><input class="fi" id="rv-dval" type="number" step="0.01" min="0" value="0"></div></div></div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:12.5px"><b style="font-size:13px">3. Proposta</b><div style="margin-top:4px">Uma <b>proposta nova</b> é criada como cópia desta, com o <b>próximo número de PO da MKLOG</b>, em <b>rascunho</b> e já ligada ao negócio.</div></div>';
+  portModal('Gerar no CRM a partir da proposta '+e(b.numero_po||''),inner,'propReversaSalvar(\''+pid+'\')',{width:'600px',saveLabel:'Gerar contato, negócio e proposta'});
+}
+async function propReversaSalvar(pid){
+  var b=(propostas||[]).find(function(x){return x.id===pid;}); if(!b) return;
+  var v=function(id){ return ((ge(id)||{}).value||'').trim(); };
+  var cnome=v('rv-cnome'), cemp=v('rv-cemp'), dnome=v('rv-dnome');
+  if(!cnome||!cemp){ portErr('Informe o nome do contato e a empresa.'); return; }
+  if(!dnome){ portErr('Informe o nome do negócio.'); return; }
+  portSaving();
+  try{
+    var cid=company&&company.id, nt=function(x){ return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); };
+    // 1) contato (reaproveita se já existir)
+    var ct=(contacts||[]).find(function(c){ return nt(c.name)===nt(cnome)&&nt(c.company)===nt(cemp); });
+    if(!ct){ var rc=await dbInsert('contacts',{owner_id:cu.id,company_id:cid,name:cnome,company:cemp,email:v('rv-cmail')||null,phone:v('rv-ctel')||null}); ct=Array.isArray(rc)?rc[0]:rc; if(ct&&contacts) contacts.unshift(ct); }
+    // 2) negócio
+    var rd=await dbInsert('deals',{owner_id:cu.id,company_id:cid,name:dnome,contact_name:cnome,empresa:cemp,value:Number(v('rv-dval'))||0,stage:v('rv-detapa')||'Negociação'});
+    var dl=Array.isArray(rd)?rd[0]:rd; if(!dl) throw new Error('negócio não criado'); if(deals) deals.unshift(dl);
+    // 3) proposta nova (rascunho, nosso número), ligada ao negócio
+    var nova=Object.assign({},b);
+    ['id','created_at','updated_at','aprovado_por','aprovado_em','deal_id','tabela_origem_id','tipo_negociacao'].forEach(function(k){ delete nova[k]; });
+    Object.assign(nova,{company_id:cid,owner_id:cu.id,numero_po:await proximoNumeroPO(),versao:1,status:'rascunho',deal_id:dl.id,
+      mes_ano:new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),cliente_nome:cemp,cliente_contato:cnome,proposta_origem:b.numero_po||null});
+    var rp;
+    try{ rp=await dbInsert('propostas',nova); }
+    catch(e1){ if(/proposta_origem|column|schema cache/i.test(String(e1&&e1.message))){ delete nova.proposta_origem; rp=await dbInsert('propostas',nova); } else throw e1; }
+    var np=Array.isArray(rp)?rp[0]:rp; if(!np) throw new Error('proposta não criada');
+    propostas=[np].concat(propostas||[]);
+    portClose();
+    showToast('Gerados: contato '+cnome+(ct&&ct.id?'':'')+' · negócio "'+dnome+'" · proposta '+np.numero_po+' (rascunho)','green');
+    openPropostaEditor(np.id);
+  }catch(e){ portErr('Erro: '+(e.message||e)); }
+}
 function rPropostas(){
   const role=profile?.role||'vendedor';
   const pendAprov=propostas.filter(p=>p.status==='aguardando_aprovacao').length;
@@ -15814,6 +15862,9 @@ function rPropostas(){
           </button>
           <button class="bicon btn-sm" title="Editar" onclick="openPropostaEditor('${p.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="bicon btn-sm" title="Gerar no CRM: nova proposta (rascunho), negócio e contato" onclick="propReversa('${p.id}')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
           </button>
           <button class="bicon btn-sm" title="Copiar para outro cliente" onclick="copiarProposta('${p.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
