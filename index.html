@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1236 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1237 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1236';
+const APP_VERSION='v1.0.1237';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2811,13 +2811,14 @@ async function fcdCapasParaFaturas(novas){
   var clis=Array.from(new Set(novas.map(function(x){return x.prog.cliente_id;}).filter(Boolean)));
   var ini=novas.reduce(function(m,x){return (!m||x.per.ini<m)?x.per.ini:m;},''), fim=novas.reduce(function(m,x){return (!m||x.per.fim>m)?x.per.fim:m;},'');
   if(!clis.length) return out;
-  var capas=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&cliente_id=in.('+clis.join(',')+')&data_operacao=gte.'+ini+'&data_operacao=lte.'+fim).catch(function(){return [];})||[];
+  var capas=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&or=(cliente_id.in.('+clis.join(',')+'),pagador_id.in.('+clis.join(',')+'))&data_operacao=gte.'+ini+'&data_operacao=lte.'+fim).catch(function(){return null;});   // v1.0.1237: inclui as capas pagas por este cliente
+  if(capas==null) capas=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&cliente_id=in.('+clis.join(',')+')&data_operacao=gte.'+ini+'&data_operacao=lte.'+fim).catch(function(){return [];})||[];
   out.pend=capas.filter(function(c){return ['aberta','digitada','pendente_conferencia','devolvida'].indexOf(c.status)>=0;});   // v1.0.1066: só conferida libera
   var dig=capas.filter(function(c){return c.status==='conferida'&&!c.fatura_id;});
   var servs=[];
   for(var i=0;i<dig.length;i+=100){ var ids=dig.slice(i,i+100).map(function(c){return c.id;}); var r=await dbSelectAll('processo_capa_servicos','capa_id=in.('+ids.join(',')+')').catch(function(){return [];}); servs=servs.concat(r||[]); }
   novas.forEach(function(x,ix){
-    var cs=dig.filter(function(c){ return c.cliente_id===x.prog.cliente_id&&c.data_operacao>=x.per.ini&&c.data_operacao<=x.per.fim&&(!x.tipoOp||!c.tipo_operacao||c.tipo_operacao===x.tipoOp); });
+    var cs=dig.filter(function(c){ return (c.pagador_id||c.cliente_id)===x.prog.cliente_id&&c.data_operacao>=x.per.ini&&c.data_operacao<=x.per.fim&&(!x.tipoOp||!c.tipo_operacao||c.tipo_operacao===x.tipoOp); });
     var soma={}, usadas={};
     cs.forEach(function(c){ servs.filter(function(s){return s.capa_id===c.id&&s.realizado&&Number(s.quantidade)>0;}).forEach(function(s){
       var k=fcdNorm(s.servico); soma[k]=(soma[k]||0)+Number(s.quantidade); (usadas[k]=usadas[k]||[]).push(c.numero); }); });
@@ -6854,10 +6855,13 @@ async function loadClienteContatos(clienteId){
             <div class="lname">${c.nome} ${c.cargo?`<span style="font-size:11px;color:var(--text2);font-weight:400">· ${c.cargo}</span>`:''}</div>
             <div class="lsub" style="display:flex;gap:6px;flex-wrap:wrap">
               ${c.tipo_operacao?`<span class="bdg bb" style="font-size:10px">${c.tipo_operacao}</span>`:''}
+              ${c.pagador_id&&c.pagador_id!==clienteId?`<span class="bdg" style="font-size:10px;background:var(--amber-bg);color:var(--amber-text)">pago por ${(clientes.find(x=>x.id===c.pagador_id)||{}).nome||'outro cliente'}</span>`:''}
+              ${c.tabela_id?`<span class="bdg" style="font-size:10px;background:var(--bg2);color:var(--text2)">tabela: ${(tabelasTarifarias.find(t=>t.id===c.tabela_id)||{}).nome||'—'}</span>`:''}
               ${c.telefone?`<span>${c.telefone}</span>`:''}
               ${c.email?`<span>· ${c.email}</span>`:''}
             </div>
           </div>
+          <button class="bicon btn-sm" title="Quem paga e qual tabela esta operação usa" onclick="ccPagadorEditar('${c.id}','${clienteId}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></button>
           <button class="bicon btn-sm" onclick="delClienteContato('${c.id}','${clienteId}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -6898,6 +6902,33 @@ function abrirFormClienteContato(clienteId){
   }
 }
 
+
+// v1.0.1237: cada operação (contato/tipo de operação) do cliente diz QUEM PAGA e QUAL TABELA usa
+async function ccPagadorEditar(contatoId,clienteId){
+  var c=((await dbSelect('clientes_contatos','id=eq.'+contatoId))||[])[0]; if(!c) return;
+  var e=function(x){return ecomEsc(x==null?'':x);};
+  var opsCli=(clientes||[]).filter(function(x){return x.ativo!==false;}).sort(function(a,b){return String(a.nome).localeCompare(String(b.nome));});
+  var tabs=(tabelasTarifarias||[]).filter(function(t){return t.status!=='pendente';}).sort(function(a,b){return String(a.nome||'').localeCompare(String(b.nome||''));});
+  var inner='<div style="font-size:12.5px;color:var(--text2)">Operação <b>'+e(c.tipo_operacao||'(sem tipo)')+'</b> · '+e(c.nome)+'</div>'
+    +'<div class="fg"><label class="fl">Pago por (cliente que recebe a fatura destas capas)</label><select class="fi" id="ccp-pag"><option value="">— o próprio cliente —</option>'
+    +opsCli.map(function(x){return '<option value="'+x.id+'"'+(c.pagador_id===x.id?' selected':'')+'>'+e(x.nome)+(x.cpf_cnpj?' · '+e(x.cpf_cnpj):'')+'</option>';}).join('')+'</select></div>'
+    +'<div class="fg"><label class="fl">Tabela tarifária desta operação</label><select class="fi" id="ccp-tab"><option value="">— a tabela do cliente pagador —</option>'
+    +tabs.map(function(t){return '<option value="'+t.id+'"'+(c.tabela_id===t.id?' selected':'')+'>'+e(t.nome||'')+(t.cliente_nome?' · '+e(t.cliente_nome):'')+'</option>';}).join('')+'</select></div>'
+    +'<div style="font-size:11.5px;color:var(--text3)">As capas desta operação continuam no depositante (extrato e movimentação), mas entram na fatura do pagador.</div>';
+  portModal('Quem paga esta operação',inner,'ccPagadorSalvar(\''+contatoId+'\',\''+clienteId+'\')');
+}
+async function ccPagadorSalvar(contatoId,clienteId){
+  var pag=(ge('ccp-pag')||{}).value||null, tab=(ge('ccp-tab')||{}).value||null;
+  portSaving();
+  try{ await dbUpdate('clientes_contatos',contatoId,{pagador_id:pag,tabela_id:tab}); portClose(); showToast('Operação atualizada.','green'); await loadClienteContatos(clienteId); }
+  catch(x){ portErr('Erro: '+(x.message||x)+(/pagador_id|tabela_id/.test(String(x.message))?' (rode o SQL da v1.0.1237)':'')); }
+}
+function capaPagadorInfo(){
+  var sel=ge('capa-operacao'), box=ge('capa-pagador-info'); if(!sel||!box) return;
+  var o=sel.selectedOptions&&sel.selectedOptions[0], pag=o?o.getAttribute('data-pagador'):'', cli=(ge('capa-cliente')||{}).value;
+  if(pag&&pag!==cli){ var pc=(clientes||[]).find(function(x){return x.id===pag;}); box.innerHTML='<span class="bdg" style="background:var(--amber-bg);color:var(--amber-text)">Pago por: '+ecomEsc(pc?pc.nome:'outro cliente')+'</span> <span style="font-size:11px;color:var(--text3)">a capa entra na fatura deste pagador</span>'; }
+  else box.innerHTML=o&&o.value?'<span style="font-size:11.5px;color:var(--text3)">Pago pelo próprio cliente.</span>':'';
+}
 async function salvarClienteContato(clienteId){
   const nome=ge('cc-nome')?.value.trim();
   if(!nome){alert('Nome é obrigatório.');return;}
@@ -52729,6 +52760,7 @@ function capaNovaModal(){
         <select class="fi" id="capa-cliente" onchange="capaCarregarContatos(this.value)"><option value="">Selecione...</option>${cliOpts}</select></div>
       <div style="grid-column:1/-1"><label class="fl">Operação / Contato</label>
         <select class="fi" id="capa-operacao"><option value="">Selecione o cliente primeiro...</option></select>
+        <div id="capa-pagador-info" style="margin-top:4px"></div>
         <div class="lsub" style="color:var(--text3);margin-top:4px">Define onde o lançamento será vinculado</div></div>
       <div><label class="fl">Data da operação *</label><input class="fi" id="capa-data" type="date" value="${hojeLocalISO()}"></div>
       <div><label class="fl">DOC</label><input class="fi" id="capa-doc"></div>
@@ -52753,7 +52785,8 @@ async function capaCarregarContatos(clienteId){
   try{
     const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=created_at.asc`);
     if(!contatos.length){sel.innerHTML='<option value="">Nenhum contato/operação cadastrado</option>';return;}
-    sel.innerHTML='<option value="">Selecione...</option>'+contatos.map(c=>`<option value="${c.id}" data-tipo="${c.tipo_operacao||''}">${c.tipo_operacao?c.tipo_operacao+' — ':''}${c.nome}${c.cargo?' ('+c.cargo+')':''}</option>`).join('');
+    sel.innerHTML='<option value="">Selecione...</option>'+contatos.map(c=>`<option value="${c.id}" data-tipo="${c.tipo_operacao||''}" data-pagador="${c.pagador_id||''}" data-tabela="${c.tabela_id||''}">${c.tipo_operacao?c.tipo_operacao+' — ':''}${c.nome}${c.cargo?' ('+c.cargo+')':''}${c.pagador_id&&c.pagador_id!==clienteId?' · pago por '+((clientes.find(x=>x.id===c.pagador_id)||{}).nome||'outro'):''}</option>`).join('');
+    sel.onchange=capaPagadorInfo; capaPagadorInfo();   // v1.0.1237
   }catch(e){sel.innerHTML='<option value="">Erro ao carregar contatos</option>';}
 }
 
@@ -52765,24 +52798,33 @@ async function capaSalvarNova(){
   portSaving();
   const cli=clientes.find(c=>c.id===clienteId);
   // Busca tabela tarifária do cliente
-  const tabela=tabelasTarifarias.find(t=>t.status!=='pendente'&&(t.cliente_id===clienteId||(cli&&t.cliente_nome&&t.cliente_nome.toLowerCase()===cli.nome?.toLowerCase())));
+  const tabelaCli=tabelasTarifarias.find(t=>t.status!=='pendente'&&(t.cliente_id===clienteId||(cli&&t.cliente_nome&&t.cliente_nome.toLowerCase()===cli.nome?.toLowerCase())));
+  const tabela=tabelaCli;
 
   // Operação/contato selecionado
   const opSel=ge('capa-operacao');
   const responsavelId=opSel?.value||null;
   const tipoOperacao=opSel?.selectedOptions?.[0]?.getAttribute('data-tipo')||null;
+  // v1.0.1237: quem paga e qual tabela vêm da operação (sem pagador = o próprio cliente)
+  const _pagId=opSel?.selectedOptions?.[0]?.getAttribute('data-pagador')||null, _tabOp=opSel?.selectedOptions?.[0]?.getAttribute('data-tabela')||null;
+  const _pag=_pagId&&_pagId!==clienteId?clientes.find(c=>c.id===_pagId):null;
+  const _tabPag=_pag?tabelasTarifarias.find(t=>t.status!=='pendente'&&(t.cliente_id===_pag.id||(t.cliente_nome&&t.cliente_nome.toLowerCase()===String(_pag.nome||'').toLowerCase()))):null;
 
   const numero=await capaReservarNumero(tipo);   // v1.0.1151
   const dados={company_id:company?.id,numero,tipo,cliente_id:clienteId,cliente_nome:cli?.nome||null,
     cliente_cnpj:cli?.cpf_cnpj||null,tipo_operacao:tipoOperacao,responsavel_id:responsavelId,
-    tabela_id:tabela?.id||null,data_operacao:dataOp,status:'aberta',
+    tabela_id:(_tabOp||(_tabPag&&_tabPag.id)||tabela?.id)||null,data_operacao:dataOp,status:'aberta',
+    pagador_id:_pag?_pag.id:null,pagador_nome:_pag?_pag.nome:null,
     motorista:ge('capa-motorista')?.value||null,transportadora:ge('capa-transp')?.value||null,
     placa_cavalo:ge('capa-cavalo')?.value||null,placa_carreta:ge('capa-carreta')?.value||null,
     origem:ge('capa-origem')?.value||null,rg:ge('capa-rg')?.value||null,
     lacre:ge('capa-lacre')?.value||null,doc:ge('capa-doc')?.value||null,nf_numero:ge('capa-nf')?.value||null,
     tipo_veiculo:ge('capa-veiculo')?.value||null,owner_id:cu?.id};
   try{
-    const salvo=await dbInsert('processo_capas',dados);
+    let salvo;
+    try{ salvo=await dbInsert('processo_capas',dados); }
+    catch(_e0){ if(/pagador_/.test(String(_e0&&_e0.message))){ delete dados.pagador_id; delete dados.pagador_nome; salvo=await dbInsert('processo_capas',dados); } else throw _e0; }   // v1.0.1237: base sem a coluna ainda
+    const tabela=(dados.tabela_id&&tabelasTarifarias.find(t=>t.id===dados.tabela_id))||tabelaCli;
     if(salvo){
       capasProcesso=[salvo,...capasProcesso];
       // Cria os serviços a partir da tabela tarifária
