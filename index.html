@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1234 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1236 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1234';
+const APP_VERSION='v1.0.1236';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37010,6 +37010,16 @@ async function colRgTrocar(listaId,raw){
   var reservas=[...new Set(ts.filter(function(t){return t.sku===cont.sku;}).map(function(t){return t.reserva_id;}))];
   var res=reservas.find(function(rid){ return !colRgTarefas(listaId).some(function(t){return t.reserva_id===rid&&t.status==='concluida';}); });
   if(!res) return {erro:'As caixas de '+cont.sku+' desta lista já foram começadas; termine a caixa atual.'};
+  // v1.0.1236: pedido do SAP (nota emitida pelo cliente com o lote reservado) só troca por caixa do MESMO lote
+  try{
+    var _rv=((await dbSelect('wms_reservas','id=eq.'+res+'&select=conteudo_id,pedido_id'))||[])[0]||{};
+    var _pd=(wmsPedidos||[]).find(function(x){return x.id===_rv.pedido_id;})||{};
+    if(_pd.origem==='sap_b1'){
+      var _ca=((await dbSelect('wms_pallet_conteudo','id=eq.'+_rv.conteudo_id+'&select=lote'))||[])[0]||{}, _cn=((await dbSelect('wms_pallet_conteudo','id=eq.'+cont.id+'&select=lote'))||[])[0]||{};
+      if(String(_ca.lote||'').trim().toUpperCase()!==String(_cn.lote||'').trim().toUpperCase())
+        return {erro:'Pedido '+(_pd.numero_pedido||'')+' veio do SAP e já foi liberado para faturamento com o lote '+(_ca.lote||'—')+'. A caixa '+raw+' é do lote '+(_cn.lote||'—')+': separe uma caixa do lote '+(_ca.lote||'—')+'.'};
+    }
+  }catch(_eL){}
   try{ await wmsRpc('wms_trocar_empenho',{p_reserva_id:res,p_novo_pallet_id:cont.pallet_id}); }catch(e){ return {erro:String(e.message||e)}; }
   var pal=(await dbSelect('wms_pallets','id=eq.'+cont.pallet_id+'&select=id,rg,endereco_codigo,codigo_externo,depositante_id').catch(function(){return [];}))||[];
   if(pal[0]) _colRg.pal[pal[0].id]=pal[0]; achou.forEach(function(c){_colRg.cont[c.id]=c;});
@@ -45070,7 +45080,7 @@ async function wiCarregar(){
       var fl=await dbSelect('intg_pedidos','integracao_id=in.('+ids.join(',')+')&select=id,integracao_id,numero,pedido_externo_id,pedido_verus_id,situacao_tiny,status_importacao,destinatario_nome,cidade,uf,transportadora,erro_msg,alerta,payload,created_at,updated_at&order=created_at.desc&limit=500')||[];
       _wi.fila=fl;
       var pids=fl.map(function(x){return x.pedido_verus_id;}).filter(Boolean), pm={};
-      for(var i=0;i<pids.length;i+=150){ ((await dbSelect('wms_pedidos','id=in.('+pids.slice(i,i+150).join(',')+')&select=id,status,numero_curto'))||[]).forEach(function(x){pm[x.id]=x;}); }
+      for(var i=0;i<pids.length;i+=150){ ((await dbSelect('wms_pedidos','id=in.('+pids.slice(i,i+150).join(',')+')&select=id,status,numero_curto,updated_at'))||[]).forEach(function(x){pm[x.id]=x;}); }   // v1.0.1235: updated_at = quando mudou de etapa no WMS
       _wi.peds=pm;
       _wi.logs=await dbSelect('intg_logs','integracao_id=in.('+ids.join(',')+')&order=created_at.desc&limit=40')||[];
     } else { _wi.fila=[]; _wi.logs=[]; }
@@ -45133,12 +45143,14 @@ function wiConfigurar(id){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="fg"><label class="fl">Base (CompanyDB)</label><input class="fi" id="wic-db" value="'+ecomEsc(c.sap_db||'')+'"></div><div class="fg"><label class="fl">Usuário</label><input class="fi" id="wic-user" value="'+ecomEsc(c.sap_usuario||'')+'"></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="fg"><label class="fl">Intervalo de sincronização (min)</label><input class="fi" id="wic-int" type="number" min="5" value="'+Number(g.sync_intervalo_min||5)+'"></div>'
     +'<div class="fg"><label class="fl">Importação automática</label><select class="fi" id="wic-auto"><option value="1"'+(c.importar_auto!==false?' selected':'')+'>Ligada</option><option value="0"'+(c.importar_auto===false?' selected':'')+'>Desligada (só lê a fila)</option></select></div></div>'
+    +'<div class="fg"><label class="fl">"Pode faturar" no SAP (lista de separação marcada como separada)</label><select class="fi" id="wic-fat"><option value="lista"'+((c.pode_faturar||'lista')==='lista'?' selected':'')+'>Ao gerar a lista no VERUS (estoque consistido, lotes reservados)</option><option value="separacao"'+(c.pode_faturar==='separacao'?' selected':'')+'>Depois de separar e conferir no VERUS</option></select>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:3px">Ao gerar a lista, a nota sai com o lote reservado; por isso, em pedido do SAP, a troca de caixa na separação só aceita o mesmo lote.</div></div>'
     +'<div style="font-size:11.5px;color:var(--text3)">A senha não fica no banco: está no secret <b>'+ecomEsc(c.sap_senha_env||'SAP_SENHA_BIOBALANCE')+'</b> da função sync-sap. O agendamento automático roda a cada 5 minutos.</div>';
   portModal('Configurar · SAP Business One',inner,'wiConfigSalvar(\''+id+'\')');
 }
 async function wiConfigSalvar(id){
   var g=(_wi.integ||[]).find(function(x){return x.id===id;}); if(!g) return;
-  var cfg=Object.assign({},g.config||{},{sap_url:(ge('wic-url').value||'').trim(),sap_db:(ge('wic-db').value||'').trim(),sap_usuario:(ge('wic-user').value||'').trim(),importar_auto:ge('wic-auto').value==='1'});
+  var cfg=Object.assign({},g.config||{},{sap_url:(ge('wic-url').value||'').trim(),sap_db:(ge('wic-db').value||'').trim(),sap_usuario:(ge('wic-user').value||'').trim(),importar_auto:ge('wic-auto').value==='1',pode_faturar:(ge('wic-fat')||{}).value||'lista'});
   if(!cfg.sap_url||!cfg.sap_db||!cfg.sap_usuario){ portErr('Preencha endereço, base e usuário.'); return; }
   portSaving();
   try{ await dbUpdate('integracoes',id,{config:cfg,sync_intervalo_min:Math.max(5,parseInt(ge('wic-int').value||'5',10)||5)}); portClose(); showToast('Configuração salva.','green'); _wi.integ=null; render(); }
@@ -45164,6 +45176,8 @@ function wfClassifica(r){
   if(/importação falhou|recusou/i.test(r.erro_msg||'')) return {grupo:'travado',motivo:r.erro_msg,desde:desde,min:min};
   if(e==='importado') return {grupo:'disponivel',desde:desde,min:min};
   if(e==='recebido') return {grupo:'disparo',reg:'recebido do SAP · ainda não importado',regra:'importação na sincronização',prazo:WF_PRAZO.recebido,desde:desde,min:min};
+  var _w=(_wi.peds||{})[r.pedido_verus_id]||{}, _dw=(pl.picklist_em&&e==='separado')?pl.picklist_em:(_w.updated_at||desde);   // v1.0.1235: espera conta da mudança de etapa no WMS (o registro da fila é atualizado a cada ciclo)
+  if(e==='separacao'||e==='separado'){ desde=_dw; min=Math.round((Date.now()-new Date(desde).getTime())/60000); }
   if(e==='separacao'&&!pl.picklist) return {grupo:'disparo',reg:'lista gerada no VERUS · picking ainda não criado no SAP',regra:'criação do picking',prazo:WF_PRAZO.separacao_sem_picking,desde:desde,min:min};
   if(e==='separado') return {grupo:'disparo',reg:'separado no WMS · picking não confirmado no SAP',regra:'confirmação do picking',prazo:WF_PRAZO.separado_sem_confirma,desde:desde,min:min};
   return {grupo:'outro'};
