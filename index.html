@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1241 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1242 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1241';
+const APP_VERSION='v1.0.1242';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1411,6 +1411,30 @@ function _verToNum(v){
   if(!m)return 0;
   return parseInt(m[1])*1000000+parseInt(m[2])*1000+parseInt(m[3]);
 }
+
+// v1.0.1242: trabalho em andamento = não recarregar sozinho
+function verusOcupado(){
+  try{
+    var col=document.getElementById('coletor'); if(col&&col.offsetParent!==null&&col.innerHTML.trim()) return true;          // coletor aberto (conferência, separação, embarque)
+    if(document.querySelector('.modal-overlay')) return true;                                                                  // janela aberta (formulário, conferência em modal)
+    if(typeof curPage!=='undefined'&&/checkout|coletor|conferencia|embarque|separacao/i.test(String(curPage))) return true;  // telas de bipagem
+    if(typeof ecomCx!=='undefined'&&ecomCx&&ecomCx.fila&&ecomCx.fila.length) return true;                                     // checkout do e-commerce com pedido aberto
+    var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&String(a.value||'').length) return true;  // digitando
+  }catch(e){}
+  return false;
+}
+function verRecarregarAgora(){ var u=new URL(location.href); u.searchParams.set('_v',Date.now()); location.replace(u.toString()); }
+var _verPendTimer=null;
+function verAtualizacaoPendente(publicada){
+  if(!document.getElementById('ver-pend')){
+    var d=document.createElement('div'); d.id='ver-pend';
+    d.style.cssText='position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9990;background:#0A2540;color:#fff;border-radius:99px;padding:8px 10px 8px 16px;font-size:12.5px;display:flex;gap:10px;align-items:center;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:92vw';
+    d.innerHTML='<span>Nova versão '+publicada+' disponível · atualiza quando você terminar</span><button style="border:none;border-radius:99px;padding:5px 12px;background:#fff;color:#0A2540;font-weight:700;cursor:pointer" onclick="verRecarregarAgora()">Atualizar agora</button>';
+    document.body.appendChild(d);
+  }
+  if(_verPendTimer) return;
+  _verPendTimer=setInterval(function(){ if(!verusOcupado()){ clearInterval(_verPendTimer); _verPendTimer=null; _verJaRecarregou=true; verRecarregarAgora(); } },20000);
+}
 async function wmsCheckVersao(){
   if(_verCheckEmAndamento||_verJaRecarregou)return;
   _verCheckEmAndamento=true;
@@ -1424,14 +1448,11 @@ async function wmsCheckVersao(){
     if(!m)return;
     const publicada='v'+m[1];
     if(_verToNum(publicada)>_verToNum(APP_VERSION)){
+      // v1.0.1242: nunca recarrega no meio de um trabalho (coletor, checkout, janela aberta, digitação) — espera a tela ficar livre
+      if(verusOcupado()){ verAtualizacaoPendente(publicada); return; }
       _verJaRecarregou=true;
       if(typeof showToast==='function')showToast('Nova versão ('+publicada+') disponível. Atualizando...','blue');
-      setTimeout(()=>{
-        // força bypass de cache adicionando query string e usando reload
-        const u=new URL(location.href);
-        u.searchParams.set('_v',Date.now());
-        location.replace(u.toString());
-      },1500);
+      setTimeout(verRecarregarAgora,1500);
     }
   }catch(e){/* silencioso: rede/offline não deve incomodar */}
   finally{_verCheckEmAndamento=false;}
