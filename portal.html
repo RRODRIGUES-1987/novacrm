@@ -580,6 +580,7 @@
         <h2>Meus pedidos</h2>
         <button class="btn btn-primary" onclick="openPedido()">＋ Novo</button>
       </div>
+      <div id="volFat" class="hide" style="margin:0 0 14px"></div>
       <div class="pchips" id="pedChips"></div>
       <div id="listaPed" class="list"></div>
     </section>
@@ -609,6 +610,7 @@
         <button class="btn btn-primary" onclick="openAgd()">＋ Agendar</button></span>
       </div>
       <div id="listaAgd" class="list"></div>
+      <div id="coletasBox" class="hide" style="margin-top:18px"></div>
     </section>
 
     <!-- ===== TELA: OPERAÇÃO AGORA ===== -->
@@ -3159,7 +3161,9 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.9';   // v1.6.9: acesso master troca de empresa do grupo; acesso restrito vê só os seus tipos de operação
+const PORTAL_VERSION = 'v1.7.1';   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
+// v1.7.0 →   // v1.7.0: volumes para faturamento (calculados na importação do pedido)
+// v1.6.9 →   // v1.6.9: acesso master troca de empresa do grupo; acesso restrito vê só os seus tipos de operação
 // v1.6.8 →   // v1.6.8: a transportadora informa motorista e placa por link; cartão de saída só com os dados completos   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
@@ -4334,6 +4338,58 @@ function openAgd(){
   agd.op=null; agd.por='cliente'; ['agdTrNome','agdTrCt'].forEach(i=>{ if($(i)) $(i).value=''; }); agdPor('cliente'); agdOpsMontar(); renderDias(); renderSlots();
   restoreFoot('agd'); openModal('mAgd');
 }
+
+// v1.7.0: volumes para faturamento — calculados pelo VERUS assim que o pedido é importado (antes da separação)
+
+// v1.7.1: coletas e recebimentos — quando o veículo chegou, entrou na doca, carregou e saiu (prova de coleta para o cliente)
+window.renderColetas = function(){
+  const box = $('coletasBox'); if(!box) return;
+  const L = state.coletas || []; if(!L.length){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const h = d => d ? new Date(d).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+  const dia = d => d ? new Date(d).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) : '—';
+  const dur = m => m==null ? '—' : (m>=60 ? Math.floor(m/60)+'h'+String(m%60).padStart(2,'0') : m+' min');
+  box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Coletas e recebimentos · últimos 30 dias <span class="hint" style="font-weight:400">horários registrados na portaria e na doca da MKLOG</span>
+      <button class="btn btn-ghost" style="width:auto;margin-left:auto;padding:4px 10px" onclick="coletasCsv()">Exportar CSV</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Dia</th><th>Placa</th><th>Tipo</th><th>Agendado</th><th>Chegou</th><th>Doca</th><th>Carregado</th><th>Saiu</th><th class="num">Espera</th><th class="num">Total</th><th></th></tr></thead><tbody>
+    ${L.map(r=>`<tr><td>${dia(r.chegada_em||r.agendado_em)}</td><td>${esc(r.placa||'—')}</td><td>${r.movimento==='descarga'?'Recebimento':'Coleta'}</td>
+      <td>${h(r.agendado_em)}</td><td>${h(r.chegada_em)}</td><td>${h(r.doca_em)}</td><td>${h(r.fim_carreg_em)}</td><td><b>${h(r.saida_em)}</b></td>
+      <td class="num">${dur(r.espera_min)}</td><td class="num">${dur(r.total_min)}</td>
+      <td style="white-space:nowrap">${r.foto_bau_url?`<a href="${r.foto_bau_url}" target="_blank" rel="noopener">foto do baú</a>`:''}${r.foto_bau_url&&r.termo_assinado_url?' · ':''}${r.termo_assinado_url?`<a href="${r.termo_assinado_url}" target="_blank" rel="noopener">termo</a>`:''}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+};
+window.coletasCsv = function(){
+  const L = state.coletas || [], f = d => d ? new Date(d).toLocaleString('pt-BR') : '';
+  const q = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const lin = [['Placa','Tipo','Romaneio','Agendado','Chegou','Doca','Fim do carregamento','Saiu','Espera (min)','Total (min)','Foto do baú','Termo assinado'].map(q).join(';')]
+    .concat(L.map(r=>[r.placa,r.movimento==='descarga'?'Recebimento':'Coleta',r.romaneio,f(r.agendado_em),f(r.chegada_em),f(r.doca_em),f(r.fim_carreg_em),f(r.saida_em),r.espera_min,r.total_min,r.foto_bau_url,r.termo_assinado_url].map(q).join(';')));
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['\ufeff'+lin.join('\n')],{type:'text/csv;charset=utf-8'})); a.download='coletas_'+(state.depositante||'').replace(/\W+/g,'_')+'.csv'; a.click();
+};
+window.renderVolFat = function(){
+  const box = $('volFat'); if(!box) return;
+  const L = state.volFat || []; if(!L.length){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const n = v => Number(v||0).toLocaleString('pt-BR');
+  box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Volumes para faturamento <span class="hint" style="font-weight:400">calculados pela MKLOG ao importar o pedido · caixas fechadas + 1 caixa por produto com sobra</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Importado</th><th class="num">Volumes</th><th class="num">Peso estimado</th><th></th></tr></thead><tbody>
+    ${L.map((r,i)=>`<tr><td>${esc(r.pedido||'')}</td><td>${esc(r.destinatario||'—')}</td><td>${new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">a calcular</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
+      <td>${r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+};
+window.volFatDet = function(i){
+  const r = (state.volFat||[])[i]; if(!r) return;
+  const d = Array.isArray(r.detalhe) ? r.detalhe : [], n = v => Number(v||0).toLocaleString('pt-BR');
+  const old = $('mVolFat'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="mVolFat" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:620px">
+    <div class="modal-h"><h3>Pedido ${esc(r.pedido||'')} · ${n(r.volumes)} volume(s)</h3></div>
+    <div class="modal-b"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Un./caixa</th><th class="num">Caixas fechadas</th><th class="num">Sobra</th><th class="num">Volumes</th></tr></thead><tbody>
+      ${d.map(x=>`<tr><td>${esc(x.sku)}</td><td class="num">${n(x.qtd)}</td><td class="num">${n(x.por_caixa)}</td><td class="num">${n(x.caixas)}</td><td class="num">${n(x.sobra)}</td><td class="num"><b>${n(x.volumes)}</b></td></tr>`).join('')}
+    </tbody></table></div><p class="hint" style="margin-top:10px">Cada produto com sobra vira 1 caixa de embarque (sem caixa mista). Se a separação resultar em quantidade diferente de volumes, a MKLOG avisa.</p></div>
+    <div class="modal-f"><button class="btn btn-primary" onclick="$('mVolFat').remove()">Fechar</button></div></div></div>`);
+};
 function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); }
 // v1.6.6: tipos de operação do cliente (vêm com os horários calculados pelo VERUS)
 function agdOpsMontar(){
@@ -4755,6 +4811,10 @@ function showDone(kind, protocolo, msg){
       podeVer('ped') ? sb.rpc('portal_meus_pedidos') : vazio,
       podeVer('agd') ? sb.rpc('portal_meus_agendamentos') : vazio,
       podeVer('agd') ? sb.rpc('portal_janelas_disponiveis') : vazio ]);
+    try{ const vf = podeVer('ped') ? await sb.rpc('portal_volumes_faturar') : {data:[]}; state.volFat = (vf && !vf.error && vf.data) || []; }catch(_e){ state.volFat = []; }   // v1.7.0
+    try{ const co = podeVer('agd') ? await sb.rpc('portal_coletas', { p_dias:30 }) : {data:[]}; state.coletas = (co && !co.error && co.data) || []; }catch(_e){ state.coletas = []; }   // v1.7.1
+    setTimeout(renderColetas, 0);
+    setTimeout(renderVolFat, 0);
     if(est.error) throw new Error('Estoque: '+est.error.message);
     if(ped.error) throw new Error('Pedidos: '+ped.error.message);
     state.estoqueReal = (est.data||[]).map(r=>({...r, saco:+r.saco||1, fisico:+r.fisico||0, empenhado:+r.empenhado||0, em_pedidos:+r.em_pedidos||0, disponivel:+r.disponivel||0, caixas_fechadas:+r.caixas_fechadas||0, sacos_avulsos:+r.sacos_avulsos||0, caixa_padrao:r.caixa_padrao==null?null:+r.caixa_padrao}));

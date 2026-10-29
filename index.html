@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1238 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1241 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1238';
+const APP_VERSION='v1.0.1241';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -42550,7 +42550,7 @@ function wmsPedidoDetalhe(id){
   portModal(`Pedido ${p.numero_pedido}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
-        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades</div></div>
+        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div></div>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
@@ -44713,6 +44713,9 @@ function wmsPortalHtml(c){
     +'<div><label class="fl">WhatsApp ou e-mail dela</label><input class="fi" id="wpt-trc" value="'+esc(c.portal_transp_contato||'')+'" placeholder="(11) 90000-0000 ou email"'+(pode?'':' disabled')+'></div>'
     +(pode?'<button class="btn btn-sm" onclick="wmsPortalTransp(\''+c.id+'\')">Salvar</button>':'<span></span>')
     +'<div style="grid-column:1/-1;font-size:11px;color:var(--text3)">Recebe o link dos agendamentos em que o cliente escolher "a transportadora informa" e os avisos da portaria (veículo sem cartão, motorista ou placa diferente).</div></div>';
+  // v1.0.1239: volumes para faturamento calculados na importação e devolvidos no portal
+  var _vf=!!(c.parametros&&c.parametros.volumes_faturamento);
+  h+='<label style="display:flex;gap:9px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);border-radius:9px;margin-bottom:10px;background:var(--bg2);font-size:12.5px;cursor:'+(pode?'pointer':'default')+'"><input type="checkbox"'+(_vf?' checked':'')+(pode?'':' disabled')+' onchange="wmsVolFatParam(\''+c.id+'\',this.checked)"> <span><b>Calcular volumes para faturamento ao importar o pedido</b><span style="display:block;color:var(--text3);font-size:11.5px">Pelos múltiplos do cadastro do produto: caixas fechadas + 1 caixa por produto com sobra (sem caixa mista). O portal mostra os volumes logo após a importação, para o cliente faturar antes da separação.</span></span></label>';
   if(_wmsPortal.msg){ var m=_wmsPortal.msg, cor=m.t==='ok'?'green':(m.t==='erro'?'red':'amber'); h+='<div style="padding:9px 12px;border-radius:8px;margin-bottom:10px;font-size:12px;background:var(--'+cor+'-bg);color:var(--'+cor+'-text)">'+m.x+'</div>'; }
   if(_wmsPortal.novo&&pode){
     h+='<div style="border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:12px;background:var(--bg2)">'
@@ -44773,6 +44776,13 @@ function wmsPortalAlcanceHtml(px,u){
 function wmsPortalLerAlcance(px){
   var m=!!(ge(px+'-master')||{}).checked, ops=[]; if(!m) document.querySelectorAll('.'+px+'-op').forEach(function(c){ if(c.checked) ops.push(c.value); });
   return {master:m,operacoes:ops};
+}
+
+async function wmsVolFatParam(cid,on){
+  var c=(clientes||[]).find(function(x){return x.id===cid;}); if(!c) return;
+  var par=Object.assign({},c.parametros||{},{volumes_faturamento:!!on});
+  try{ await dbUpdate('clientes',cid,{parametros:par}); c.parametros=par; showToast(on?'Volumes para faturamento ligados: os próximos pedidos importados já saem com os volumes.':'Volumes para faturamento desligados.','green'); }
+  catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 function wmsPortalModelo(px,k){ var m=PORTAL_PERM_MODELOS[k]||[]; document.querySelectorAll('.'+px+'-perm').forEach(function(c){ c.checked=m.indexOf(c.value)>=0; }); }
 function wmsPortalLerPerms(px){ var r=[]; document.querySelectorAll('.'+px+'-perm').forEach(function(c){ if(c.checked) r.push(c.value); }); return r; }
@@ -45650,6 +45660,16 @@ function wmsCliTabSaida(c){
         <input type="checkbox" id="wms-usa-termo-resp" ${c.wms_usa_termo_resp===true?'checked':''} style="width:16px;height:16px;cursor:pointer;margin-top:1px">
         <div><div style="font-weight:600;font-size:12px;color:var(--text)">Utilizar termos de responsabilidade</div><div style="font-size:11px;color:var(--text3);margin-top:1px">Gera o termo de responsabilidade no embarque deste depositante.</div></div>
       </label>
+      <div style="padding:2px 12px 6px 38px"><label class="fl" style="font-size:11px">Texto do termo deste cliente (vazio = padrão MKLOG). Marcadores: {motorista} {cpf} {placa} {romaneio} {volumes} {data}</label>
+        <textarea class="fi" id="wms-termo-texto" rows="3" placeholder="Ex.: Eu, {motorista}, CPF {cpf}, declaro que recebi {volumes} volume(s) do romaneio {romaneio}…" style="font-size:12px">${(c.wms_termo_texto||'').replace(/</g,'&lt;')}</textarea></div>
+      <label style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--bg2)">
+        <input type="checkbox" id="wms-exige-foto-bau" ${c.wms_exige_foto_bau===true?'checked':''} style="width:16px;height:16px;cursor:pointer;margin-top:1px">
+        <div><div style="font-weight:600;font-size:12px;color:var(--text)">Exigir foto do baú carregado</div><div style="font-size:11px;color:var(--text3);margin-top:1px">No "Finalizar embarque" o coletor pede a foto do baú com a carga. Fica no evento e o cliente vê no portal.</div></div>
+      </label>
+      <label style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--bg2)">
+        <input type="checkbox" id="wms-exige-foto-termo" ${c.wms_exige_foto_termo===true?'checked':''} style="width:16px;height:16px;cursor:pointer;margin-top:1px">
+        <div><div style="font-weight:600;font-size:12px;color:var(--text)">Exigir foto do termo assinado na saída</div><div style="font-size:11px;color:var(--text3);margin-top:1px">Na validação de saída, a portaria tira a foto da via assinada pelo motorista antes de liberar. Só vale se o termo de responsabilidade estiver ligado.</div></div>
+      </label>
       <label style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--bg2)">
         <input type="checkbox" id="wms-usa-packing-list" ${c.wms_usa_packing_list===true?'checked':''} style="width:16px;height:16px;cursor:pointer;margin-top:1px">
         <div><div style="font-weight:600;font-size:12px;color:var(--text)">Lista de packing list</div><div style="font-size:11px;color:var(--text3);margin-top:1px">Gera a packing list (conteúdo do pallet/carga) para este depositante.</div></div>
@@ -45751,6 +45771,9 @@ async function wmsSalvarParamCliente(clienteId){
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
   // aba Saída: documentos de saída
   const trm=ge('wms-usa-termo-resp'); if(trm)dados.wms_usa_termo_resp=trm.checked;
+  const _ttx=ge('wms-termo-texto'); if(_ttx)dados.wms_termo_texto=_ttx.value.trim()||null;   // v1.0.1240
+  const _fb=ge('wms-exige-foto-bau'); if(_fb)dados.wms_exige_foto_bau=_fb.checked;
+  const _ft=ge('wms-exige-foto-termo'); if(_ft)dados.wms_exige_foto_termo=_ft.checked;
   const pkl=ge('wms-usa-packing-list'); if(pkl)dados.wms_usa_packing_list=pkl.checked;
   // Entrada/Saída: tempo de operação contratado (hh:mm -> minutos)
   const opES=wmsHhmmLer('cli-op-entrada-sem'); if(opES!==undefined)dados.op_contrato_sem_abono_entrada=opES;
@@ -51655,12 +51678,22 @@ async function wmsFinalizarEmbarque(){
   }
   const pendentes=(window._wmsEmbPallets||[]).map(id=>wmsPalletsEmbarque.find(p=>p.id===id)).filter(p=>p&&p.status!=='embarcado');
   if(pendentes.length){ if(!confirm(pendentes.length+' pallet(s) ainda não bipado(s). Finalizar mesmo assim?'))return; }
+  // v1.0.1240: foto do baú carregado (parâmetro do depositante)
+  const _cliFb=(clientes||[]).find(c=>c.id===wmsRomClienteId(r));
+  let _fotoUrl=(window._wmsFotoBau||{})[r.id]||null;
+  if(_cliFb&&_cliFb.wms_exige_foto_bau===true&&!_fotoUrl){
+    const _f=await wmsPedirFoto();
+    if(!_f){ portErr('Tire a foto do baú carregado para finalizar o embarque.'); return; }
+    portSaving();
+    try{ _fotoUrl=await uploadDocBucket('gestao-docs',_f,'wms/foto-bau'); (window._wmsFotoBau=window._wmsFotoBau||{})[r.id]=_fotoUrl; }
+    catch(_eu){ portErr('Não consegui enviar a foto: '+(_eu.message||_eu)); return; }
+  }
   portSaving();
   try{
     await dbUpdate('wms_romaneios',r.id,{status:'carregado'});
     r.status='carregado';
     // carimba o evento (fim do carregamento)
-    await wmsEventoStamp(wmsEventoDoRomaneio(r.id),{fim_carreg_em:new Date().toISOString()});
+    await wmsEventoStamp(wmsEventoDoRomaneio(r.id),Object.assign({fim_carreg_em:new Date().toISOString()},_fotoUrl?{foto_bau_url:_fotoUrl}:{}));
     // NÃO libera o prisma aqui: o veículo pode permanecer na planta (pernoite etc.).
     // O prisma é entregue/liberado só quando a portaria confirma a saída do veículo.
     // Snapshot do motorista (persiste pra reimpressão do termo mesmo após a saída liberar o prisma).
@@ -51801,6 +51834,18 @@ function wmsEmbFooter(token){ return function(){ return {text:'Documento gerado 
 function wmsEmbQR(token){ return {stack:[{qr:token,fit:92,alignment:'right'},{text:'Validação de saída',fontSize:7,alignment:'center',color:'#666',margin:[0,2,0,0]}],width:'auto'}; }
 function wmsTermoDef(rom, token){
   var m=wmsRomMotorista(rom), BORDA='#000';
+  var _cliT=(clientes||[]).find(function(c){return c.id===wmsRomClienteId(rom);});   // v1.0.1240: termo do cliente
+  if(_cliT&&_cliT.wms_termo_texto){
+    var _vol=0; try{ (wmsRomPackingData(rom)||[]).forEach(function(g){ (g.pallets||g.volumes||[]).forEach(function(){ _vol++; }); }); }catch(_e){}
+    var _txt=String(_cliT.wms_termo_texto).replace(/\{motorista\}/g,m.nome||'____________________').replace(/\{cpf\}/g,m.cpf||'______________').replace(/\{placa\}/g,m.placa||'________')
+      .replace(/\{romaneio\}/g,rom.numero||'').replace(/\{volumes\}/g,_vol?String(_vol):'____').replace(/\{data\}/g,new Date().toLocaleString('pt-BR'));
+    var _ass=function(t){ return {stack:[{canvas:[{type:'line',x1:0,y1:0,x2:190,y2:0,lineWidth:1,lineColor:BORDA}]},{text:t,bold:true,fontSize:10,alignment:'center',margin:[0,3,0,0]}],width:'*'}; };
+    return { pageSize:'A4', pageMargins:[40,20,40,55], footer:wmsEmbFooter(token),
+      content:[ wmsEmbDocHeader('Termo de Responsabilidade de Carga', rom.numero||'', token), wmsEmbSecao('TERMO DE RESPONSABILIDADE'),
+        {text:_txt, fontSize:11, margin:[0,12,0,10], alignment:'justify'},
+        {stack:[{text:'Placa: '+(m.placa||'__________'), fontSize:10, margin:[0,22,0,0]},{text:'Romaneio: '+(rom.numero||''), fontSize:10, margin:[0,4,0,0]}], margin:[0,10,0,0]},
+        {columns:[_ass('Responsável MKLOG'), _ass('Motorista')], columnGap:44, margin:[0,46,0,0]} ], defaultStyle:{fontSize:10} };
+  }
   var texto='Eu, '+(m.nome||'____________________________')+', portador do CPF '+(m.cpf||'________________')+', declaro para os devidos fins de diretor, que a carga encontra-se em forma regular, conforme os pontos abaixo:';
   var pontos=[
     'Volume físico total condizente com o volume do pedido.',
@@ -51872,6 +51917,26 @@ async function wmsValidarSaidaBipe(raw){
     await wmsSaidaRenderStatus(doc.romaneio_id);
   }catch(e){ if(statusEl)statusEl.innerHTML='<span style="color:var(--red-text)">Erro: '+(e.message||e)+'</span>'; }
 }
+
+// v1.0.1240: câmera (celular/tablet) — devolve o arquivo da foto ou null
+function wmsPedirFoto(){
+  return new Promise(function(res){
+    var i=document.createElement('input'); i.type='file'; i.accept='image/*'; i.setAttribute('capture','environment'); i.style.display='none';
+    var feito=false; i.onchange=function(){ feito=true; var f=i.files&&i.files[0]; i.remove(); res(f||null); };
+    document.body.appendChild(i); i.click();
+    window.addEventListener('focus',function _vf(){ window.removeEventListener('focus',_vf); setTimeout(function(){ if(!feito){ i.remove(); res(null); } },800); });
+  });
+}
+async function wmsSaidaFotoTermo(docId,romId){
+  var f=await wmsPedirFoto(); if(!f){ showToast('Foto não tirada.','amber'); return; }
+  try{
+    var url=await uploadDocBucket('gestao-docs',f,'wms/termo-assinado');
+    await dbUpdate('wms_embarque_docs',docId,{arquivo_url:url});
+    var ev=wmsEventoDoRomaneio(romId); if(ev) await wmsEventoStamp(ev,{termo_assinado_url:url});
+    showToast('Termo assinado registrado.','green');
+    await wmsSaidaRenderStatus(romId);
+  }catch(e){ showToast('Não consegui enviar a foto: '+(e.message||e),'red'); }
+}
 async function wmsSaidaRenderStatus(romId){
   var statusEl=ge('saida-status');
   var rom=(wmsRomaneios||[]).find(function(r){return r.id===romId;});
@@ -51879,10 +51944,12 @@ async function wmsSaidaRenderStatus(romId){
   var cli=(clientes||[]).find(function(c){return c.id===cliId;});
   var obrig=[]; if(cli&&cli.wms_usa_termo_resp===true)obrig.push('termo'); if(cli&&cli.wms_usa_packing_list===true)obrig.push('packing');
   var docs=await dbSelect('wms_embarque_docs','romaneio_id=eq.'+romId);
-  var entregue=function(t){ return (docs||[]).some(function(d){return d.tipo===t && d.entregue_em;}); };
+  var entregue=function(t){ return (docs||[]).some(function(d){return d.tipo===t && d.entregue_em && (t!=='termo' || !(cli&&cli.wms_exige_foto_termo===true) || !!d.arquivo_url);}); };   // v1.0.1240: termo exige a foto da via assinada
   var lbl={termo:'Termo de responsabilidade',packing:'Packing list'};
+  var _dT=(docs||[]).find(function(d){return d.tipo==='termo';});
+  var _fotoTermoBtn=(_dT&&_dT.entregue_em&&!_dT.arquivo_url&&cli&&cli.wms_exige_foto_termo===true)?'<div style="margin-top:8px"><button class="btn btn-p" onclick="wmsSaidaFotoTermo(\''+_dT.id+'\',\''+romId+'\')">📷 Foto do termo assinado</button> <span style="font-size:11px;color:var(--text3)">obrigatória para liberar a saída</span></div>':'';   // v1.0.1241: só com o parâmetro próprio
   var linhas=obrig.map(function(t){ var ok=entregue(t); return '<div style="margin-top:3px">'+(ok?'✓':'○')+' '+lbl[t]+(ok?' <span style="color:var(--green-text)">validado</span>':' <span style="color:var(--text3)">pendente</span>')+'</div>'; }).join('');
-  if(statusEl) statusEl.innerHTML='<div style="padding:11px 13px;background:var(--bg2);border-radius:9px"><div style="font-weight:600;margin-bottom:4px">Romaneio '+(rom?rom.numero:romId)+(cli?(' · '+cli.nome):'')+'</div>'+(linhas||'<div style="color:var(--text3)">Sem documentos obrigatórios.</div>')+'</div>';
+  if(statusEl) statusEl.innerHTML='<div style="padding:11px 13px;background:var(--bg2);border-radius:9px"><div style="font-weight:600;margin-bottom:4px">Romaneio '+(rom?rom.numero:romId)+(cli?(' · '+cli.nome):'')+'</div>'+(linhas||'<div style="color:var(--text3)">Sem documentos obrigatórios.</div>')+'</div>'; if(statusEl&&_fotoTermoBtn) statusEl.innerHTML+=_fotoTermoBtn;   // v1.0.1240
   var todos=obrig.length>0 && obrig.every(entregue);
   if(todos){
     await wmsLiberarSaida(rom);
