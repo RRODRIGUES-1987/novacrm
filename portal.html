@@ -3159,7 +3159,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.6.8';   // v1.6.8: a transportadora informa motorista e placa por link; cartão de saída só com os dados completos   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
+const PORTAL_VERSION = 'v1.6.9';   // v1.6.9: acesso master troca de empresa do grupo; acesso restrito vê só os seus tipos de operação
+// v1.6.8 →   // v1.6.8: a transportadora informa motorista e placa por link; cartão de saída só com os dados completos   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
 const SUPABASE_URL  = 'https://trngaecaurksscwmkfsf.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRybmdhZWNhdXJrc3Njd21rZnNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNjY0NTYsImV4cCI6MjA5Mzc0MjQ1Nn0.VLi1x7l6dPooKRtuC6K2sY4K_2-0L2n4FvaqaaYU8I4';
 
@@ -4657,9 +4658,38 @@ function showDone(kind, protocolo, msg){
       try{ const { data:pm } = await sb.rpc('portal_permissoes'); state.perms = Array.isArray(pm) ? pm : null; }catch(_e){ state.perms = null; }   // v1.6.4
       state.user = { nome: ctx.usuario };
       state.depositanteId = ctx.depositante_id; state.depositante = ctx.depositante;
+      await portalAcessoCarregar();   // v1.6.9: master do grupo / tipos de operação
       await loadDados();
       enterApp();
+      portalEmpresaSeletor();
   }
+
+  // v1.6.9: acesso master do grupo (troca de empresa) e acesso restrito por tipo de operação
+  async function portalAcessoCarregar(){
+    try{ const { data } = await sb.rpc('portal_meu_acesso'); state.acesso = data || null;
+      if(data && data.depositante_id){ state.depositanteId = data.depositante_id; state.depositante = data.depositante || state.depositante; } }
+    catch(_e){ state.acesso = null; }
+  }
+  window.portalEmpresaSeletor = function(){
+    const a = state.acesso, el = $('hdrDep'); if(!el) return;
+    const emps = (a && a.master && Array.isArray(a.empresas)) ? a.empresas : [];
+    if(emps.length <= 1){ el.textContent = state.depositante; return; }
+    el.innerHTML = `<select id="selEmpresa" aria-label="Empresa" style="font:inherit;padding:2px 6px;border-radius:6px;border:1px solid var(--border,#ddd);background:transparent;max-width:240px" onchange="portalTrocarEmpresa(this.value)">`
+      + emps.map(e=>`<option value="${e.id}"${e.id===state.depositanteId?' selected':''}>${esc(e.nome)}${e.cnpj?' · '+esc(e.cnpj):''}</option>`).join('') + `</select>`;
+  };
+  window.portalTrocarEmpresa = async function(id){
+    try{
+      const { data, error } = await sb.rpc('portal_trocar_empresa', { p_id:id });
+      if(error) throw error;
+      state.acesso = data; state.depositanteId = data.depositante_id; state.depositante = data.depositante;
+      await loadDados();
+      $('whoDep').textContent = state.depositante;
+      if(typeof renderRelatorios==='function') renderRelatorios();
+      const _on=document.querySelector('#topnav button.on'); showScreen((_on&&_on.dataset.scr)||'home');
+      portalEmpresaSeletor();
+      if(typeof toast==='function') toast('Empresa: '+state.depositante);
+    }catch(err){ alert('Não consegui trocar de empresa: '+(err.message||err)); portalEmpresaSeletor(); }
+  };
   // nova senha (1º acesso ou link de recuperação) — resolve quando a senha foi trocada
   function portalDefinirSenha(titulo, sub){
     return new Promise(function(resolve){
