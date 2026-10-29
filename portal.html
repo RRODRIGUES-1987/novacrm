@@ -578,7 +578,9 @@
     <section id="scrPed" class="hide">
       <div class="screen-h">
         <h2>Meus pedidos</h2>
-        <button class="btn btn-primary" onclick="openPedido()">＋ Novo</button>
+        <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" onclick="$('plFile').click()">📄 Subir planilha de pedidos</button>
+        <input type="file" id="plFile" class="hide" accept=".xlsx,.xls" multiple onchange="plImportar(this.files);this.value=''">
+        <button class="btn btn-primary" onclick="openPedido()">＋ Novo</button></span>
       </div>
       <div id="nfBox" class="hide" style="margin:0 0 14px"></div>
       <div id="volFat" class="hide" style="margin:0 0 14px"></div>
@@ -3163,7 +3165,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.3';   // v1.7.3: rastreio do pedido (linha do tempo e bipes) depois da saída
+const PORTAL_VERSION = 'v1.7.4';   // v1.7.4: subir a planilha de pedidos (formato CASCO) direto no portal, igual à importação do VERUS
+// v1.7.3 →   // v1.7.3: rastreio do pedido (linha do tempo e bipes) depois da saída
 // v1.7.2 →   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
 // v1.7.1 →   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
 // v1.7.0 →   // v1.7.0: volumes para faturamento (calculados na importação do pedido)
@@ -4350,6 +4353,61 @@ function openAgd(){
 // v1.7.2: notas de venda (XML) — o cliente sobe, o VERUS liga ao pedido (OC + linha + produto)
 
 // v1.7.3: rastreio — depois da saída, a linha do tempo do pedido e cada bipe
+
+// v1.7.4: planilha de pedidos (formato CASCO · "Separação de Carga") — mesma leitura da importação do VERUS
+async function plXlsx(){
+  if(window.XLSX) return window.XLSX;
+  await new Promise((ok,err)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload=ok; sc.onerror=()=>err(new Error('não consegui carregar o leitor de planilhas')); document.head.appendChild(sc); });
+  return window.XLSX;
+}
+function plNorm(c){ return String(c==null?'':c).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim(); }
+async function plLerCasco(f){
+  const X=await plXlsx();
+  const wb0=X.read(await f.arrayBuffer(),{type:'array'}); const r0=X.utils.sheet_to_json(wb0.Sheets[wb0.SheetNames[0]],{header:1,defval:''});
+  const h=r0.findIndex(r=>r.some(c=>plNorm(c)==='numero do item')&&r.some(c=>plNorm(c).startsWith('qtde separar')));
+  if(h<0) return null;
+  const hd=r0[h].map(plNorm), ci=n=>hd.findIndex(x=>x===n||x.startsWith(n));
+  const cSku=ci('numero do item'), cQtd=ci('qtde separar'), cCli=ci('nome cliente'), cOv=ci('ov casco'), cOc=ci('oc cliente'), cItCli=ci('item cliente');
+  const ovs=[]; for(let i=h+1;i<r0.length;i++){ const ov=String((r0[i]||[])[cOv]||'').trim().split('-')[0]; if(ov && /^\d+$/.test(ov) && ovs.indexOf(ov)<0) ovs.push(ov); }
+  const mOs=String(f.name||'').match(/(\d{4,})/);
+  const base=String(f.name||'').replace(/\.[^.]+$/,'').replace(/^separa[cç][aã]o de carga\s*-\s*/i,'').slice(0,40);
+  const doc='OV '+(ovs.join('/')||'?')+(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
+  const itens=[];
+  for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
+    const oc=cOc>=0?String(r[cOc]||'').trim():''; const m=oc.match(/^(.*?)[-\/\s]+(\d+)$/);
+    itens.push({sku, qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0, destinatario:cCli>=0?String(r[cCli]||'').trim():'',
+      oc:m?m[1].trim():oc, ocLinha:m?m[2]:'', itemCliente:cItCli>=0?String(r[cItCli]||'').trim():''}); }
+  return {doc, arquivo:f.name, itens};
+}
+window.plImportar = async function(files){
+  const arr=Array.from(files||[]); if(!arr.length) return;
+  const lidos=[], fora=[];
+  for(const f of arr){ try{ const r=await plLerCasco(f); if(r&&r.itens.length) lidos.push(r); else fora.push(f.name); }catch(e){ fora.push(f.name+' ('+(e.message||e)+')'); } }
+  const old=$('mPl'); if(old) old.remove();
+  const n=v=>Number(v||0).toLocaleString('pt-BR');
+  document.body.insertAdjacentHTML('beforeend', `<div id="mPl" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:640px">
+    <div class="modal-h"><h3>Subir planilha de pedidos</h3></div>
+    <div class="modal-b">${lidos.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th class="num">Itens</th><th class="num">Peças</th></tr></thead><tbody>
+      ${lidos.map(r=>`<tr><td>${esc(r.doc)}</td><td>${esc(r.itens[0].destinatario||'—')}</td><td class="num">${r.itens.length}</td><td class="num">${n(r.itens.reduce((a,x)=>a+x.qtd,0))}</td></tr>`).join('')}
+      </tbody></table></div>`:'<p class="hint">Nenhuma planilha no formato de pedidos (colunas "Número do item" e "Qtde Separar").</p>'}
+      ${fora.length?`<p class="hint" style="margin-top:8px">Fora do formato: ${fora.map(esc).join(', ')}</p>`:''}
+      <div id="plRes" style="margin-top:10px"></div></div>
+    <div class="modal-f"><button class="btn btn-ghost" onclick="$('mPl').remove()">Fechar</button>${lidos.length?`<button class="btn btn-primary" id="plGo" onclick="plEnviar()">Enviar ${lidos.length} pedido(s)</button>`:''}</div></div></div>`);
+  window._plLidos=lidos;
+};
+window.plEnviar = async function(){
+  const L=window._plLidos||[], res=$('plRes'), bt=$('plGo'); if(bt){ bt.disabled=true; bt.textContent='Enviando…'; }
+  const out=[];
+  for(const r of L){
+    try{ const { data, error } = await sb.rpc('portal_importar_pedido', { p_documento:r.doc, p_itens:r.itens, p_arquivo:r.arquivo });
+      if(error) throw error;
+      out.push(data.ignorado?`${esc(r.doc)}: <span class="hint">${esc(data.motivo)}</span>`:`<b>${esc(r.doc)}</b> → OS ${esc(data.os)} · ${data.itens} item(ns)${data.volumes!=null?' · <b>'+data.volumes+' volume(s) para faturar</b>':''}${data.nao_cadastrados?' · <span style="color:#b45309">'+data.nao_cadastrados+' produto(s) não cadastrado(s): '+esc(data.skus_nao_cadastrados)+'</span>':''}`);
+    }catch(e){ out.push(`${esc(r.doc)}: <span style="color:#b91c1c">${esc(e.message||e)}</span>`); }
+    if(res) res.innerHTML=out.map(x=>'<div style="margin-top:4px">'+x+'</div>').join('');
+  }
+  if(bt){ bt.textContent='Enviado'; }
+  try{ const vf=await sb.rpc('portal_volumes_faturar'); state.volFat=vf.data||[]; renderVolFat(); }catch(_e){}
+};
 window.renderRastreio = function(){
   const box = $('rastBox'); if(!box) return;
   const L = state.rastreio || []; if(!L.length){ box.classList.add('hide'); return; }
