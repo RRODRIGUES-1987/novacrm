@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1245 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1246 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1245';
+const APP_VERSION='v1.0.1246';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -43467,12 +43467,24 @@ async function wmsLitCarregar(){
   _lit.carregando=true; wmsLitRender();
   try{
     var cid=company.id, ini=_lit.ini+'T00:00:00', fim=_lit.fim+'T23:59:59';
-    var evs=(await dbSelectAll('wms_eventos','company_id=eq.'+cid+'&saida_em=gte.'+ini+'&saida_em=lte.'+fim+'&select=romaneio_id,saida_em,placa').catch(function(){return [];}))||[];
+    // v1.0.1246: data da expedição = saída na portaria › fim do carregamento › último bipe de embarque (todos os volumes embarcados)
+    var evs=(await dbSelectAll('wms_eventos','company_id=eq.'+cid+'&or=(and(saida_em.gte.'+ini+',saida_em.lte.'+fim+'),and(fim_carreg_em.gte.'+ini+',fim_carreg_em.lte.'+fim+'))&select=romaneio_id,saida_em,fim_carreg_em,placa').catch(function(){return [];}))||[];
     var porRom={}; evs.forEach(function(e){ if(e.romaneio_id) porRom[e.romaneio_id]=e; });
-    var exp=(wmsPedidos||[]).filter(function(p){ return p.romaneio_id&&porRom[p.romaneio_id]&&p.status!=='cancelado'; }).map(function(p){
-      var e=porRom[p.romaneio_id], r=(wmsRomaneios||[]).find(function(x){return x.id===p.romaneio_id;})||{};
-      return {p:p,saida:e.saida_em,placa:e.placa||'',rom:r.numero||'',t:wmsLitTot(p)}; });
-    var par=(wmsPedidos||[]).filter(function(p){ return ['separado','conferido','em_romaneio'].indexOf(p.status)>=0 && !(p.romaneio_id&&porRomAll(p.romaneio_id)); });
+    var volsPed={}; (wmsPalletsEmbarque||[]).forEach(function(v){ if(!v.pedido_id) return; var o=volsPed[v.pedido_id]||(volsPed[v.pedido_id]={n:0,emb:0,ult:null}); o.n++; if(v.status==='embarcado'||v.embarcado_em){ o.emb++; if(!o.ult||String(v.embarcado_em)>o.ult) o.ult=v.embarcado_em; } });
+    var exp=[], jaFoi={};
+    (wmsPedidos||[]).forEach(function(p){
+      if(p.status==='cancelado') return;
+      var e=p.romaneio_id&&porRom[p.romaneio_id], r=(wmsRomaneios||[]).find(function(x){return x.id===p.romaneio_id;})||{}, vp=volsPed[p.id];
+      var data=null, base='';
+      if(e&&e.saida_em&&e.saida_em>=ini&&e.saida_em<=fim){ data=e.saida_em; base='portaria'; }
+      else if(e&&e.fim_carreg_em&&e.fim_carreg_em>=ini&&e.fim_carreg_em<=fim){ data=e.fim_carreg_em; base='fim do carregamento'; }
+      else if(vp&&vp.n>0&&vp.emb===vp.n&&vp.ult&&vp.ult>=ini&&vp.ult<=fim){ data=vp.ult; base='último bipe de embarque'; }
+      if(vp&&vp.n>0&&vp.emb===vp.n) jaFoi[p.id]=1;
+      if(e&&(e.saida_em||e.fim_carreg_em)) jaFoi[p.id]=1;
+      if(!data) return;
+      exp.push({p:p,saida:data,base:base,placa:(e&&e.placa)||'',rom:r.numero||'',t:wmsLitTot(p)});
+    });
+    var par=(wmsPedidos||[]).filter(function(p){ return ['separado','conferido','em_romaneio'].indexOf(p.status)>=0 && !jaFoi[p.id] && !(p.romaneio_id&&porRomAll(p.romaneio_id)); });
     var sep={};
     for(var k=0;k<par.length;k+=150){ var ids=par.slice(k,k+150).map(function(x){return x.id;});
       ((await dbSelect('wms_leituras','pedido_id=in.('+ids.join(',')+')&etapa=eq.separacao&select=pedido_id,created_at&order=created_at.desc').catch(function(){return [];}))||[]).forEach(function(l){ if(!sep[l.pedido_id]) sep[l.pedido_id]=l.created_at; }); }
@@ -43493,7 +43505,7 @@ function wmsLitRender(){
   var D=_lit.dados||{exp:[],par:[]}, EX=wmsLitFiltra(D.exp), PA=wmsLitFiltra(D.par);
   var abas=['Sintético por dia','Analítico por pedido','Perfil de fracionamento','Separados não carregados · '+PA.length];
   var h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><button class="btn btn-sm" onclick="wmsRelAbrir(\'hub\')">← Relatórios</button><b style="font-size:16px">Litragem e perfil de expedição</b>'+(_lit.carregando?' <span class="spin"></span>':'')+'</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><span style="font-size:12px;color:var(--text3)">Saída de</span><input type="date" class="fi" style="width:auto" value="'+(_lit.ini||'')+'" onchange="_lit.ini=this.value;wmsLitCarregar()"><span style="font-size:12px;color:var(--text3)">até</span><input type="date" class="fi" style="width:auto" value="'+(_lit.fim||'')+'" onchange="_lit.fim=this.value;wmsLitCarregar()">'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><span style="font-size:12px;color:var(--text3)">Expedição de</span><input type="date" class="fi" style="width:auto" value="'+(_lit.ini||'')+'" onchange="_lit.ini=this.value;wmsLitCarregar()"><span style="font-size:12px;color:var(--text3)">até</span><input type="date" class="fi" style="width:auto" value="'+(_lit.fim||'')+'" onchange="_lit.fim=this.value;wmsLitCarregar()">'
     +'<select class="fi" style="width:auto" onchange="_lit.cli=this.value;wmsLitRender()"><option value="">Todos os depositantes</option>'+cliOpts+'</select>'
     +(unOpts?'<select class="fi" style="width:auto" onchange="_lit.unit=this.value;wmsLitRender()"><option value="">Todas as unidades</option>'+unOpts+'</select>':'')
     +'<button class="btn btn-sm" onclick="wmsLitCarregar()">↻ Atualizar</button><button class="btn btn-sm" style="margin-left:auto" onclick="wmsLitExcel()">Exportar Excel</button></div>'
@@ -43504,6 +43516,8 @@ function wmsLitRender(){
   var kp=function(arr){ return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px">'+arr.map(function(k){ return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg)"><div style="font-size:11px;color:var(--text3)">'+k[0]+'</div><div style="font-size:20px;font-weight:800;color:'+(k[2]||'var(--text)')+'">'+k[1]+'</div></div>'; }).join('')+'</div>'; };
   if(_lit.aba===0||_lit.aba===1||_lit.aba===2){
     var S=soma(EX), pf=S.L>0?Math.round(S.Lf/S.L*100):0;
+    var _nPort=EX.filter(function(x){return x.base==='portaria';}).length;
+    if(EX.length&&_nPort<EX.length) h+='<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:8px">'+(EX.length-_nPort)+' de '+EX.length+' pedido(s) sem a saída registrada na portaria: a data veio do fim do carregamento ou do último bipe de embarque (coluna "Base da data" no analítico).</div>';
     h+=kp([['Litros expedidos',n(S.L)+' L'],['Pedidos',n(EX.length)],['Em pallet fechado',(S.L>0?100-pf:0)+'%','#8b5cf6'],['Fracionado',pf+'%','#d68910'],['Un. fracionadas',n(S.uf)],['Peso',n(S.kg/1000,1)+' t']]);
   }
   if(_lit.aba===0){
@@ -43511,11 +43525,11 @@ function wmsLitRender(){
     h+=T+th(['Dia','>Pedidos','>Litros','>L pallet','>L fração','Perfil','>Pallets fechados','>Un. fracionadas','>Peso (kg)'])+'<tbody>'
       +Object.keys(dias).sort().reverse().map(function(d){ var s=soma(dias[d]), dt=new Date(d+'T12:00:00'); return '<tr>'+td(dt.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' ('+dt.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')+')')+td(n(dias[d].length),1)+td('<b>'+n(s.L)+'</b>',1)+td(n(s.Lp),1)+td(n(s.Lf),1)+td(bar(s.Lp,s.Lf))+td(n(s.plt),1)+td(n(s.uf),1)+td(n(s.kg),1)+'</tr>'; }).join('')
       +'</tbody></table></div>';
-    if(!EX.length) h+='<div style="padding:18px;text-align:center;color:var(--text3)">Nenhuma saída no período.</div>';
+    if(!EX.length) h+='<div style="padding:18px;text-align:center;color:var(--text3)">Nenhuma expedição no período.</div>';
   } else if(_lit.aba===1){
-    h+=T+th(['Saída','Depositante','OS / Pedido','Destinatário','>Litros','>L pallet','>L fração','>% fração','>Pallets','>Un. frac.','>Peso (kg)','Romaneio · placa'])+'<tbody>'
+    h+=T+th(['Expedição','Base da data','Depositante','OS / Pedido','Destinatário','>Litros','>L pallet','>L fração','>% fração','>Pallets','>Un. frac.','>Peso (kg)','Romaneio · placa'])+'<tbody>'
       +EX.slice().sort(function(a,b){return String(b.saida).localeCompare(String(a.saida));}).map(function(x){ var c=(clientes||[]).find(function(cc){return cc.id===x.p.cliente_id;})||{}, pf=x.t.L>0?Math.round(x.t.Lf/x.t.L*100):0;
-        return '<tr>'+td(new Date(x.saida).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+td(e(String(c.nome||'').slice(0,26)))+td('MK '+e(wmsNumeroCurto(x.p)))+td(e(String(x.p.destinatario_nome||'').slice(0,28)))+td('<b>'+n(x.t.L)+'</b>',1)+td(n(x.t.Lp),1)+td(n(x.t.Lf),1)+td(pf+'%',1)+td(n(x.t.plt),1)+td(n(x.t.uf),1)+td(n(x.t.kg),1)+td(e((x.rom||'')+(x.placa?' · '+x.placa:'')))+'</tr>'; }).join('')
+        return '<tr>'+td(new Date(x.saida).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+td('<span style="font-size:11px;color:'+(x.base==='portaria'?'var(--green-text)':'var(--amber-text)')+'">'+x.base+'</span>')+td(e(String(c.nome||'').slice(0,26)))+td('MK '+e(wmsNumeroCurto(x.p)))+td(e(String(x.p.destinatario_nome||'').slice(0,28)))+td('<b>'+n(x.t.L)+'</b>',1)+td(n(x.t.Lp),1)+td(n(x.t.Lf),1)+td(pf+'%',1)+td(n(x.t.plt),1)+td(n(x.t.uf),1)+td(n(x.t.kg),1)+td(e((x.rom||'')+(x.placa?' · '+x.placa:'')))+'</tr>'; }).join('')
       +'</tbody></table></div>';
   } else if(_lit.aba===2){
     var por={}; EX.forEach(function(x){ (por[x.p.cliente_id]=por[x.p.cliente_id]||[]).push(x); });
@@ -43544,7 +43558,7 @@ function wmsLitExcel(){
   var wb=XLSX.utils.book_new();
   var dias={}; EX.forEach(function(x){ var d=String(x.saida).slice(0,10), o=dias[d]||(dias[d]={Dia:d.split('-').reverse().join('/'),Pedidos:0,Litros:0,'L pallet':0,'L fração':0,'Pallets fechados':0,'Un. fracionadas':0,'Peso (kg)':0}); o.Pedidos++; o.Litros+=x.t.L; o['L pallet']+=x.t.Lp; o['L fração']+=x.t.Lf; o['Pallets fechados']+=x.t.plt; o['Un. fracionadas']+=x.t.uf; o['Peso (kg)']+=x.t.kg; });
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(Object.keys(dias).sort().map(function(k){return dias[k];})),'Sintético por dia');
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(EX.map(function(x){ return {'Saída':new Date(x.saida).toLocaleString('pt-BR'),Depositante:cn(x.p.cliente_id),OS:'MK '+wmsNumeroCurto(x.p),Pedido:x.p.numero_pedido,Destinatário:x.p.destinatario_nome||'',Litros:x.t.L,'L pallet':x.t.Lp,'L fração':x.t.Lf,'Pallets fechados':x.t.plt,'Un. fracionadas':x.t.uf,'Peso (kg)':x.t.kg,Romaneio:x.rom,Placa:x.placa}; })),'Analítico por pedido');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(EX.map(function(x){ return {'Expedição':new Date(x.saida).toLocaleString('pt-BR'),'Base da data':x.base,Depositante:cn(x.p.cliente_id),OS:'MK '+wmsNumeroCurto(x.p),Pedido:x.p.numero_pedido,Destinatário:x.p.destinatario_nome||'',Litros:x.t.L,'L pallet':x.t.Lp,'L fração':x.t.Lf,'Pallets fechados':x.t.plt,'Un. fracionadas':x.t.uf,'Peso (kg)':x.t.kg,Romaneio:x.rom,Placa:x.placa}; })),'Analítico por pedido');
   var por={}; EX.forEach(function(x){ var o=por[x.p.cliente_id]||(por[x.p.cliente_id]={Depositante:cn(x.p.cliente_id),Pedidos:0,Litros:0,'L pallet':0,'L fração':0,'Pallets fechados':0,'Un. fracionadas':0,'Pedidos 100% pallet':0,'Pedidos 100% fração':0}); o.Pedidos++; o.Litros+=x.t.L; o['L pallet']+=x.t.Lp; o['L fração']+=x.t.Lf; o['Pallets fechados']+=x.t.plt; o['Un. fracionadas']+=x.t.uf; if(x.t.L>0&&x.t.Lf===0)o['Pedidos 100% pallet']++; if(x.t.L>0&&x.t.Lp===0)o['Pedidos 100% fração']++; });
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(Object.keys(por).map(function(k){ var o=por[k]; o['% fração']=o.Litros>0?Math.round(o['L fração']/o.Litros*100)+'%':''; return o; })),'Perfil de fracionamento');
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(PA.map(function(x){ return {OS:'MK '+wmsNumeroCurto(x.p),Pedido:x.p.numero_pedido,Depositante:cn(x.p.cliente_id),Destinatário:x.p.destinatario_nome||'',Situação:x.p.status,'Separado em':new Date(x.sepEm).toLocaleString('pt-BR'),'Parado há (h)':Math.round((Date.now()-new Date(x.sepEm).getTime())/36e5),Volumes:x.vols,Litros:x.t.L,'L pallet':x.t.Lp,'L fração':x.t.Lf,'Peso (kg)':x.t.kg}; })),'Separados não carregados');
