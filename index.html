@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1242 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1243 | Gerado: 2026-10-29 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1242';
+const APP_VERSION='v1.0.1243';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -34813,6 +34813,7 @@ async function wmsLeiturasCarregar(cid){
 }
 
 async function loadWmsData(cid){
+  try{ setTimeout(function(){ if(typeof wmsNfPreload==='function') wmsNfPreload(); },1500); }catch(_n){}   // v1.0.1243: notas de venda ligadas aos pedidos
   [wmsProdutos,wmsPedidos,wmsPedidoItens,wmsListasSeparacao,wmsListaPedidos,wmsTarefasSeparacao]=await Promise.all([
     dbSelectAll('wms_produtos',`company_id=eq.${cid}${unitFilter()}&order=sku.asc`).catch(()=>[]),
     dbSelectAll('wms_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
@@ -42571,7 +42572,7 @@ function wmsPedidoDetalhe(id){
   portModal(`Pedido ${p.numero_pedido}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
-        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div></div>
+        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${(_wmsNfPed[p.id]||[]).length?' · NF '+(_wmsNfPed[p.id]).map(function(n){return n.numero+(n.status==='divergente'?' <span style="color:var(--amber-text)" title="'+String(n.divergencias||'').replace(/"/g,'')+'">⚠ divergente</span>':'');}).join(', '):''}${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div></div>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
@@ -42927,7 +42928,7 @@ async function wmsImpProcessar(input){
       const h=r0.findIndex(r=>r.some(c=>normC(c)==='numero do item')&&r.some(c=>normC(c).startsWith('qtde separar')));
       if(h<0) return null;
       const hd=r0[h].map(normC), ci=n=>hd.findIndex(x=>x===n||x.startsWith(n));
-      const cSku=ci('numero do item'), cQtd=ci('qtde separar'), cPn=ci('item fornecedor'), cCli=ci('nome cliente'), cOv=ci('ov casco');
+      const cSku=ci('numero do item'), cQtd=ci('qtde separar'), cPn=ci('item fornecedor'), cCli=ci('nome cliente'), cOv=ci('ov casco'), cOc=ci('oc cliente'), cItCli=ci('item cliente');   // v1.0.1243: OC + linha e item do cliente
       // v1.0.1104: pedido do cliente = OV(s) da CASCO; a OS passa a ser o número do VERUS (gerado na gravação)
       const ovs=[]; for(let i=h+1;i<r0.length;i++){ const ov=String((r0[i]||[])[cOv]||'').trim().split('-')[0]; if(ov && /^\d+$/.test(ov) && ovs.indexOf(ov)<0) ovs.push(ov); }
       const mOs=String(f.name||'').match(/(\d{4,})/);
@@ -42937,7 +42938,10 @@ async function wmsImpProcessar(input){
       const out=[];
       for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
         out.push({documento:doc,sku,descricao:'',qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0,um:'PC',
-                  destinatario:cCli>=0?String(r[cCli]||'').trim():'',pn:cPn>=0?String(r[cPn]||'').trim():'',ov:cOv>=0?String(r[cOv]||'').trim():'',arquivo:f.name}); }
+                  destinatario:cCli>=0?String(r[cCli]||'').trim():'',pn:cPn>=0?String(r[cPn]||'').trim():'',ov:cOv>=0?String(r[cOv]||'').trim():'',arquivo:f.name,
+                  oc:(function(){ var v=cOc>=0?String(r[cOc]||'').trim():''; var m=v.match(/^(.*?)[-\/\s]+(\d+)$/); return m?m[1].trim():v; })(),
+                  ocLinha:(function(){ var v=cOc>=0?String(r[cOc]||'').trim():''; var m=v.match(/[-\/\s]+(\d+)$/); return m?m[1]:''; })(),
+                  itemCliente:cItCli>=0?String(r[cItCli]||'').trim():''}); }
       return out;
     };
     // v1.0.1108: cada arquivo é lido; os que não são pedido da CASCO ficam de fora e aparecem na mensagem
@@ -43064,10 +43068,10 @@ async function wmsImpSalvar(){
       if(wmsPedidos.some(p=>p.cliente_id===wmsImpCliente&&p.numero_pedido===doc)){ignorados++;continue;}
       const nDig=cli?.wms_digitos_pedido||5;
       const numCurto=wmsNumeroCurto(doc,nDig);
-      const ped=await dbInsert('wms_pedidos',{
-        company_id:cid, unit_id:wmsImpUnidade, cliente_id:wmsImpCliente,
-        numero_pedido:doc, numero_curto:numCurto, tipo:'saida', status:'importado', owner_id:cu?.id,
-      });
+      const _pedObj={company_id:cid, unit_id:wmsImpUnidade, cliente_id:wmsImpCliente,
+        numero_pedido:doc, numero_curto:numCurto, tipo:'saida', status:'importado', owner_id:cu?.id};
+      if(itens[0]&&itens[0].destinatario) _pedObj.destinatario_nome=itens[0].destinatario;   // v1.0.1243
+      let ped; try{ ped=await dbInsert('wms_pedidos',_pedObj); }catch(_e1){ if(/destinatario_nome/.test(String(_e1&&_e1.message))){ delete _pedObj.destinatario_nome; ped=await dbInsert('wms_pedidos',_pedObj); } else throw _e1; }
       const pedObj=Array.isArray(ped)?ped[0]:ped;
       // v1.0.1104: a OS é o número do VERUS — vira o número curto (listas, etiquetas, agendamento)
       if(pedObj && wmsImpOsVerus && pedObj.numero_interno){ try{ await dbUpdate('wms_pedidos',pedObj.id,{numero_curto:String(pedObj.numero_interno)}); pedObj.numero_curto=String(pedObj.numero_interno); }catch(_e){} }
@@ -43075,14 +43079,16 @@ async function wmsImpSalvar(){
       // itens (mantém separados, não soma)
       for(const it of itens){
         const prod=skuMap[it.sku];
-        const item=await dbInsert('wms_pedido_itens',{
+        const _itObj={
           company_id:cid, pedido_id:pedObj.id, produto_id:prod?.id||null,
           sku:it.sku, descricao:it.descricao||prod?.descricao||null,
           quantidade:it.qtd, lote:null,
           status:prod?'pendente':'produto_nao_encontrado',
+          ...(it.oc?{oc_cliente:it.oc,oc_linha:it.ocLinha||null}:{}), ...(it.itemCliente?{item_cliente:it.itemCliente}:{}),   // v1.0.1243
           ...(wmsImpFormato==='v2'?{endereco_origem:it.endereco||null,endereco_dep:it.end?.dep||null,endereco_nivel:it.end?.nivel||null,
             endereco_rua:it.end?.rua||null,endereco_posicao:it.end?.posicao||null,numero_os:it.os||null}:{}),
-        });
+        };
+        let item; try{ item=await dbInsert('wms_pedido_itens',_itObj); }catch(_e2){ if(/oc_cliente|oc_linha|item_cliente/.test(String(_e2&&_e2.message))){ delete _itObj.oc_cliente; delete _itObj.oc_linha; delete _itObj.item_cliente; item=await dbInsert('wms_pedido_itens',_itObj); } else throw _e2; }   // v1.0.1243: base sem as colunas novas
         if(item){wmsPedidoItens=[Array.isArray(item)?item[0]:item,...wmsPedidoItens];okItens++;}
       }
       // calcula e grava os totais físicos do pedido
@@ -43718,15 +43724,17 @@ function wmsReRender(){
 async function wmsReZebra(){
   var vols=wmsReVolumes().filter(function(_,i){return !!_reSel[i];});
   if(!vols.length)return;
+  await wmsNfPreload();   // v1.0.1243
   var zpl=vols.map(function(v){
     var cli=clientes.find(function(c){return c.id===v.ped.cliente_id;});
     var itens=(wmsPalletItens||[]).filter(function(x){return x.pallet_id===v.pl.id;});
-    return zplEtiquetaEmbarque({
+    var _mk=zplEtiquetaEmbarque({
       cliente:(cli&&cli.nome)||'', rom:String(_reLista.numero||'S/ ROMANEIO'),
       pedido:wmsNumeroCurto(v.ped), pallet:v.pl.numero,
       volNum:v.pl.vol_num, volTotal:v.N,
       codigo:v.pl.etiqueta_codigo, itens:itens, numCurto:wmsNumeroCurto(v.ped)
     });
+    return wmsCliEtqModelo(cli)==='casco_10x10'?(_mk+'\n'+wmsZplCascoDoPallet(v.pl,itens,{pedidoId:v.ped.id,numCurto:wmsNumeroCurto(v.ped),N:v.N})):_mk;
   }).join('\n');
   zebraImprimirOuBaixar(zpl,'reimp_emb_'+String(_reLista.numero||'rom')+'_'+vols.length+'vol.zpl');
   // registro por pedido afetado
@@ -46946,7 +46954,7 @@ function gerarEtiquetasEmbarquePedido(pedidoId){
       const img=tmp.querySelector('img')||tmp.querySelector('canvas');
       try{qrMap[pl.id]=img.tagName==='IMG'?img.src:img.toDataURL('image/png');}catch(e){qrMap[pl.id]='';}
       pend--;
-      if(pend<=0)wmsEtiquetasEmbarqueModal(pallets,qrMap,{cli,numCurto,N,romNumero});
+      if(pend<=0)wmsNfPreload().then(function(){ wmsEtiquetasEmbarqueModal(pallets,qrMap,{cli,numCurto,N,romNumero,pedidoId}); });   // v1.0.1243: NF da etiqueta do cliente
     },200);
   });
 }
@@ -52131,15 +52139,52 @@ function zplEtiquetaEmbarque(o){
   L.push('^XZ');
   return L.join('\n');
 }
+
+// v1.0.1243: notas de venda ligadas aos pedidos (para a etiqueta do cliente e o detalhe do pedido)
+var _wmsNfPed={};
+async function wmsNfPreload(){
+  try{ var L=(await dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,status,divergencias'))||[];
+    var m={}; L.forEach(function(n){ if(!n.pedido_id) return; (m[n.pedido_id]=m[n.pedido_id]||[]).push(n); }); _wmsNfPed=m; }catch(e){}
+}
+function wmsCliEtqModelo(cli){ var p=(cli&&cli.parametros)||{}; return (p.etiquetas&&p.etiquetas.modelo_embarque)||'padrao_mk'; }
+// ZPL da etiqueta 10x10 da CASCO (1 por produto em cada volume): cada campo num quadro, título pequeno + informação
+function zplEtiquetaCasco(o){
+  var E=function(v){ return zplEsc(String(v==null?'':v)); };
+  var L=['^XA','^CI28','^PW800','^LL800',
+    '^FO20,20^GB760,760,3^FS',
+    '^FO20,32^FB760,1,0,C,0^A0N,46,46^FDCASCO/MKLOG^FS','^FO20,90^GB760,2,2^FS',
+    '^FO34,98^A0N,20,20^FDPRODUTO^FS','^FO34,124^FB730,1,0,L,0^A0N,36,36^FD'+E(String(o.produto||'').slice(0,34))+'^FS','^FO20,170^GB760,2,2^FS',
+    '^FO34,178^A0N,20,20^FDCOD CASCO^FS','^FO34,206^A0N,34,34^FD'+E(o.sku)+'^FS',
+    '^FO414,178^A0N,20,20^FDCOD CLIENTE^FS','^FO414,206^FB360,1,0,L,0^A0N,34,34^FD'+E(o.itemCliente||'')+'^FS','^FO400,170^GB2,240,2^FS','^FO20,250^GB760,2,2^FS',
+    '^FO34,258^A0N,20,20^FDQUANTIDADE^FS','^FO34,300^FB360,1,0,L,0^A0N,70,70^FD'+E(o.qtd)+' '+E(o.un||'PC')+'^FS',
+    '^FO414,258^A0N,20,20^FDNF^FS','^FO414,300^FB360,1,0,L,0^A0N,70,64^FD'+E(o.nf||'')+'^FS','^FO20,410^GB760,2,2^FS',
+    '^FO34,418^A0N,20,20^FDCLIENTE^FS','^FO34,446^FB730,1,0,L,0^A0N,38,38^FD'+E(String(o.cliente||'').slice(0,32))+'^FS','^FO20,490^GB760,2,2^FS',
+    '^FO34,498^A0N,20,20^FDPROCESSO - SAIDA^FS','^FO34,532^FB360,1,0,L,0^A0N,52,52^FD'+E(o.processo||'')+'^FS',
+    '^FO414,498^A0N,20,20^FDVOLUME^FS','^FO414,528^FB360,1,0,L,0^A0N,60,60^FD'+E((o.volNum||'?')+'/'+(o.volTotal||'?'))+'^FS','^FO400,490^GB2,290,2^FS','^FO20,600^GB760,2,2^FS',
+    '^FO34,608^A0N,20,20^FDDATA^FS','^FO34,634^A0N,34,34^FD'+E(o.data||'')+'^FS','^FO34,690^A0N,20,20^FDCONTROLE QUALIDADE^FS',
+    '^FO414,608^A0N,20,20^FDQUANTIDADE^FS','^BY3,2,90^FO440,640^BCN,90,N,N,N^FD'+E(o.qtd)+'^FS',
+    '^XZ'];
+  return L.join('\n');
+}
+function wmsZplCascoDoPallet(pl,itens,ctx){
+  var ped=(wmsPedidos||[]).find(function(x){return x.id===(ctx.pedidoId||pl.pedido_id);})||{};
+  var nfs=_wmsNfPed[ped.id]||[], nf=nfs.map(function(n){return n.numero;}).join('/'), cliNome=ped.destinatario_nome||(nfs[0]&&nfs[0].dest_nome)||'';
+  return (itens||[]).map(function(it){
+    var pi=(wmsPedidoItens||[]).find(function(x){return x.pedido_id===ped.id&&String(x.sku)===String(it.sku);})||{};
+    return zplEtiquetaCasco({produto:it.descricao||pi.descricao||'',sku:it.sku,itemCliente:pi.item_cliente||'',qtd:it.quantidade,un:'PC',nf:nf,cliente:cliNome,
+      processo:'MK '+(ctx.numCurto||wmsNumeroCurto(ped)||''),volNum:pl.vol_num,volTotal:ctx.N,data:new Date().toLocaleDateString('pt-BR')});
+  }).join('\n');
+}
 function wmsEmbarqueZplLista(pallets,ctx){
   const base=(typeof wmsPalletItens!=='undefined'&&Array.isArray(wmsPalletItens))?wmsPalletItens:[];
   return pallets.map(function(pl){
     const itens=base.filter(function(x){return x.pallet_id===pl.id;});
-    return zplEtiquetaEmbarque({
+    var _mk=zplEtiquetaEmbarque({
       cliente:ctx.cli?.nome||'',rom:ctx.romNumero||'S/ ROMANEIO',
       pedido:ctx.numCurto,pallet:pl.numero,volNum:pl.vol_num,volTotal:ctx.N,
       codigo:pl.etiqueta_codigo,itens:itens,numCurto:ctx.numCurto
     });
+    return wmsCliEtqModelo(ctx.cli)==='casco_10x10'?(_mk+'\n'+wmsZplCascoDoPallet(pl,itens,ctx)):_mk;   // v1.0.1243: CASCO = etiqueta MK do volume + etiqueta CASCO por produto
   }).join('\n');
 }
 

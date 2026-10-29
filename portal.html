@@ -580,6 +580,7 @@
         <h2>Meus pedidos</h2>
         <button class="btn btn-primary" onclick="openPedido()">＋ Novo</button>
       </div>
+      <div id="nfBox" class="hide" style="margin:0 0 14px"></div>
       <div id="volFat" class="hide" style="margin:0 0 14px"></div>
       <div class="pchips" id="pedChips"></div>
       <div id="listaPed" class="list"></div>
@@ -3161,7 +3162,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.1';   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
+const PORTAL_VERSION = 'v1.7.2';   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
+// v1.7.1 →   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
 // v1.7.0 →   // v1.7.0: volumes para faturamento (calculados na importação do pedido)
 // v1.6.9 →   // v1.6.9: acesso master troca de empresa do grupo; acesso restrito vê só os seus tipos de operação
 // v1.6.8 →   // v1.6.8: a transportadora informa motorista e placa por link; cartão de saída só com os dados completos   // v1.6.7: encaixe para hoje (a partir da próxima hora; saída de hoje passa pela aprovação da MKLOG)   // v1.6.6: tipo de operação do cliente (com tempo médio) no agendamento; horários cheios calculados pelo VERUS   // v1.6.5: agendamento real (janelas liberadas pelo VERUS, vagas, protocolo, aprovação opcional)   // v1.6.4: permissões também no modo real (login, menu, home e atendimento); atendimento vira permissão   // v1.6.3: cada acesso vê só as funções liberadas pela MKLOG (permissões do acesso)   // v1.6.2: painel do motorista (fila/operação) e totem de autoatendimento
@@ -4342,6 +4344,43 @@ function openAgd(){
 // v1.7.0: volumes para faturamento — calculados pelo VERUS assim que o pedido é importado (antes da separação)
 
 // v1.7.1: coletas e recebimentos — quando o veículo chegou, entrou na doca, carregou e saiu (prova de coleta para o cliente)
+
+// v1.7.2: notas de venda (XML) — o cliente sobe, o VERUS liga ao pedido (OC + linha + produto)
+window.renderNfBox = function(){
+  const box = $('nfBox'); if(!box) return;
+  if(state.nfs === null || DEMO){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const L = state.nfs || [];
+  const st = s => s==='ligada' ? '<span style="color:#4d7a1a;font-weight:600">ligada ao pedido</span>' : s==='divergente' ? '<span style="color:#b45309;font-weight:600">ligada · divergente</span>' : '<span style="color:#b91c1c;font-weight:600">pedido não encontrado · MKLOG vai ligar</span>';
+  box.innerHTML = `<div id="nfDrop" style="border:1.5px dashed var(--border,#d4d4d4);border-radius:12px;padding:14px;text-align:center"
+      ondragover="event.preventDefault();this.style.background='rgba(0,0,0,.03)'" ondragleave="this.style.background=''" ondrop="event.preventDefault();this.style.background='';nfEnviar(event.dataTransfer.files)">
+      <b>Notas de venda</b> · arraste aqui os XMLs (um ou vários) ou <button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="$('nfFile').click()">escolher arquivos</button>
+      <input type="file" id="nfFile" accept=".xml,text/xml" multiple class="hide" onchange="nfEnviar(this.files);this.value=''">
+      <div class="hint" style="margin-top:4px">A MKLOG liga cada nota ao pedido pela OC do cliente e usa os dados dela na etiqueta e na expedição.</div>
+      <div id="nfRes" style="margin-top:8px;text-align:left"></div></div>
+    ${L.length?`<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>NF</th><th>Destinatário</th><th>Pedido</th><th class="num">Volumes</th><th>Situação</th></tr></thead><tbody>
+      ${L.slice(0,30).map(n=>`<tr><td>${esc(n.numero||'')}</td><td>${esc(n.dest_nome||'')}</td><td>${esc(n.pedido||'—')}</td><td class="num">${n.volumes!=null?Number(n.volumes).toLocaleString('pt-BR'):'—'}</td><td>${st(n.status)}${n.divergencias?'<div class="hint">'+esc(n.divergencias)+'</div>':''}</td></tr>`).join('')}
+      </tbody></table></div>`:''}`;
+};
+window.nfEnviar = async function(files, pedidoId){
+  const arr = Array.from(files||[]).filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)); const res = $('nfRes');
+  if(!arr.length){ if(res) res.innerHTML='<span class="hint">Escolha arquivos XML de NF-e.</span>'; return; }
+  const out = [];
+  for(const f of arr){
+    try{ const txt = await f.text();
+      const { data, error } = await sb.rpc('portal_enviar_nf', { p_xml: txt, p_pedido: pedidoId || null });
+      if(error) throw error;
+      out.push(`NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>':'ligada ao pedido '+esc(data.pedido||'')}`);
+    }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
+    if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
+  }
+  try{ const nf = await sb.rpc('portal_minhas_nfs'); state.nfs = nf.data||[]; const vf = await sb.rpc('portal_volumes_faturar'); state.volFat = vf.data||[]; }catch(_e){}
+  renderVolFat(); const keep = $('nfRes') ? $('nfRes').innerHTML : ''; renderNfBox(); if($('nfRes')) $('nfRes').innerHTML = keep;
+};
+window.nfEscolher = function(pedidoId){
+  const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml'; i.multiple=true;
+  i.onchange=()=>nfEnviar(i.files, pedidoId); i.click();
+};
 window.renderColetas = function(){
   const box = $('coletasBox'); if(!box) return;
   const L = state.coletas || []; if(!L.length){ box.classList.add('hide'); return; }
@@ -4376,7 +4415,8 @@ window.renderVolFat = function(){
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Importado</th><th class="num">Volumes</th><th class="num">Peso estimado</th><th></th></tr></thead><tbody>
     ${L.map((r,i)=>`<tr><td>${esc(r.pedido||'')}</td><td>${esc(r.destinatario||'—')}</td><td>${new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">a calcular</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
-      <td>${r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}</td></tr>`).join('')}
+      <td style="white-space:nowrap">${r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}
+        ${r.nf?`<span class="hint" style="margin-left:6px;color:${r.nf_status==='divergente'?'#b45309':'#4d7a1a'}">NF ${esc(r.nf)}${r.nf_status==='divergente'?' · divergente':''}</span>`:(r.id?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px;margin-left:4px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`:'')}</td></tr>`).join('')}
     </tbody></table></div></div>`;
 };
 window.volFatDet = function(i){
@@ -4812,6 +4852,8 @@ function showDone(kind, protocolo, msg){
       podeVer('agd') ? sb.rpc('portal_meus_agendamentos') : vazio,
       podeVer('agd') ? sb.rpc('portal_janelas_disponiveis') : vazio ]);
     try{ const vf = podeVer('ped') ? await sb.rpc('portal_volumes_faturar') : {data:[]}; state.volFat = (vf && !vf.error && vf.data) || []; }catch(_e){ state.volFat = []; }   // v1.7.0
+    try{ const nf = podeVer('ped') ? await sb.rpc('portal_minhas_nfs') : {data:[]}; state.nfs = (nf && !nf.error) ? (nf.data||[]) : null; }catch(_e){ state.nfs = null; }   // v1.7.2
+    setTimeout(renderNfBox, 0);
     try{ const co = podeVer('agd') ? await sb.rpc('portal_coletas', { p_dias:30 }) : {data:[]}; state.coletas = (co && !co.error && co.data) || []; }catch(_e){ state.coletas = []; }   // v1.7.1
     setTimeout(renderColetas, 0);
     setTimeout(renderVolFat, 0);
