@@ -582,6 +582,7 @@
       </div>
       <div id="nfBox" class="hide" style="margin:0 0 14px"></div>
       <div id="volFat" class="hide" style="margin:0 0 14px"></div>
+      <div id="rastBox" class="hide" style="margin:0 0 14px"></div>
       <div class="pchips" id="pedChips"></div>
       <div id="listaPed" class="list"></div>
     </section>
@@ -3162,7 +3163,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.2';   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
+const PORTAL_VERSION = 'v1.7.3';   // v1.7.3: rastreio do pedido (linha do tempo e bipes) depois da saída
+// v1.7.2 →   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
 // v1.7.1 →   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
 // v1.7.0 →   // v1.7.0: volumes para faturamento (calculados na importação do pedido)
 // v1.6.9 →   // v1.6.9: acesso master troca de empresa do grupo; acesso restrito vê só os seus tipos de operação
@@ -4346,6 +4348,32 @@ function openAgd(){
 // v1.7.1: coletas e recebimentos — quando o veículo chegou, entrou na doca, carregou e saiu (prova de coleta para o cliente)
 
 // v1.7.2: notas de venda (XML) — o cliente sobe, o VERUS liga ao pedido (OC + linha + produto)
+
+// v1.7.3: rastreio — depois da saída, a linha do tempo do pedido e cada bipe
+window.renderRastreio = function(){
+  const box = $('rastBox'); if(!box) return;
+  const L = state.rastreio || []; if(!L.length){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const f = d => d ? new Date(d).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
+    <div style="padding:10px 14px;font-weight:600">Rastreio dos pedidos que saíram <span class="hint" style="font-weight:400">cada etapa registrada por bipe na MKLOG</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>NF</th><th class="num">Volumes</th><th>Importado</th><th>Separado</th><th>Conferido</th><th>Embarcado</th><th>Saiu</th><th></th></tr></thead><tbody>
+    ${L.map(r=>`<tr><td>${esc(r.os?('MK '+r.os):r.pedido)}</td><td>${esc(r.destinatario||'—')}</td><td>${esc(r.nf||'—')}</td><td class="num">${r.volumes||'—'}</td>
+      <td>${f(r.importado_em)}</td><td>${f(r.separado_em)}</td><td>${f(r.conferido_em)}</td><td>${f(r.embarcado_em)}</td><td><b>${f(r.saiu_em)}</b></td>
+      <td><button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="rastBipes('${r.id}','${esc(r.os?('MK '+r.os):r.pedido)}')">ver bipes</button></td></tr>`).join('')}
+    </tbody></table></div></div>`;
+};
+window.rastBipes = async function(id, nome){
+  const { data, error } = await sb.rpc('portal_rastreio_bipes', { p_pedido:id });
+  const L = (!error && data) || [], et = {separacao:'Separação',conferencia:'Conferência',unitizacao:'Conferência',embarque:'Embarque',saida:'Saída'};
+  const old=$('mRast'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="mRast" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:760px">
+    <div class="modal-h"><h3>Bipes do pedido ${esc(nome)}</h3></div>
+    <div class="modal-b"><div class="tbl-wrap" style="max-height:60vh;overflow:auto"><table class="tbl"><thead><tr><th>Quando</th><th>Etapa</th><th>Volume</th><th>Produto</th><th>Tipo</th><th class="num">Qtd</th><th>Quem</th></tr></thead><tbody>
+      ${L.map(b=>`<tr><td>${new Date(b.quando).toLocaleString('pt-BR')}</td><td>${et[b.etapa]||esc(b.etapa)}</td><td>${esc(b.volume||'—')}</td><td>${esc(b.sku||'—')}</td><td>${esc(b.tipo||'')}</td><td class="num">${b.quantidade!=null?Number(b.quantidade).toLocaleString('pt-BR'):''}</td><td>${esc(b.quem||'')}</td></tr>`).join('') || '<tr><td colspan="7" class="hint">Sem bipes registrados.</td></tr>'}
+    </tbody></table></div></div>
+    <div class="modal-f"><button class="btn btn-primary" onclick="$('mRast').remove()">Fechar</button></div></div></div>`);
+};
 window.renderNfBox = function(){
   const box = $('nfBox'); if(!box) return;
   if(state.nfs === null || DEMO){ box.classList.add('hide'); return; }
@@ -4854,6 +4882,8 @@ function showDone(kind, protocolo, msg){
     try{ const vf = podeVer('ped') ? await sb.rpc('portal_volumes_faturar') : {data:[]}; state.volFat = (vf && !vf.error && vf.data) || []; }catch(_e){ state.volFat = []; }   // v1.7.0
     try{ const nf = podeVer('ped') ? await sb.rpc('portal_minhas_nfs') : {data:[]}; state.nfs = (nf && !nf.error) ? (nf.data||[]) : null; }catch(_e){ state.nfs = null; }   // v1.7.2
     setTimeout(renderNfBox, 0);
+    try{ const ra = podeVer('ped') ? await sb.rpc('portal_rastreio', { p_dias:30 }) : {data:[]}; state.rastreio = (ra && !ra.error && ra.data) || []; }catch(_e){ state.rastreio = []; }   // v1.7.3
+    setTimeout(renderRastreio, 0);
     try{ const co = podeVer('agd') ? await sb.rpc('portal_coletas', { p_dias:30 }) : {data:[]}; state.coletas = (co && !co.error && co.data) || []; }catch(_e){ state.coletas = []; }   // v1.7.1
     setTimeout(renderColetas, 0);
     setTimeout(renderVolFat, 0);
