@@ -3165,7 +3165,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.4';   // v1.7.4: subir a planilha de pedidos (formato CASCO) direto no portal, igual à importação do VERUS
+const PORTAL_VERSION = 'v1.7.5';   // v1.7.5: subir planilha com janela de progresso e erro visível (nada falha em silêncio)
+// v1.7.4 →   // v1.7.4: subir a planilha de pedidos (formato CASCO) direto no portal, igual à importação do VERUS
 // v1.7.3 →   // v1.7.3: rastreio do pedido (linha do tempo e bipes) depois da saída
 // v1.7.2 →   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
 // v1.7.1 →   // v1.7.1: coletas (chegada, doca, carregamento, saída) com a foto do baú e o termo assinado
@@ -4381,9 +4382,16 @@ async function plLerCasco(f){
 }
 window.plImportar = async function(files){
   const arr=Array.from(files||[]); if(!arr.length) return;
+  // v1.7.5: janela aberta na hora, com o progresso da leitura
+  let old=$('mPl'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="mPl" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:640px"><div class="modal-h"><h3>Subir planilha de pedidos</h3></div>
+    <div class="modal-b"><p id="plProg">Preparando o leitor de planilhas…</p></div></div></div>`);
+  try{
   const lidos=[], fora=[];
-  for(const f of arr){ try{ const r=await plLerCasco(f); if(r&&r.itens.length) lidos.push(r); else fora.push(f.name); }catch(e){ fora.push(f.name+' ('+(e.message||e)+')'); } }
-  const old=$('mPl'); if(old) old.remove();
+  try{ await plXlsx(); }catch(e){ $('plProg').innerHTML='<span style="color:#b91c1c">Não consegui carregar o leitor de planilhas: '+esc(e.message||e)+'. Verifique a internet e tente de novo.</span>'; return; }
+  for(let k=0;k<arr.length;k++){ const f=arr[k]; if($('plProg')) $('plProg').textContent='Lendo planilha '+(k+1)+' de '+arr.length+': '+f.name+'…';
+    try{ const r=await plLerCasco(f); if(r&&r.itens.length) lidos.push(r); else fora.push(f.name); }catch(e){ fora.push(f.name+' ('+(e.message||e)+')'); } }
+  old=$('mPl'); if(old) old.remove();
   const n=v=>Number(v||0).toLocaleString('pt-BR');
   document.body.insertAdjacentHTML('beforeend', `<div id="mPl" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:640px">
     <div class="modal-h"><h3>Subir planilha de pedidos</h3></div>
@@ -4394,10 +4402,12 @@ window.plImportar = async function(files){
       <div id="plRes" style="margin-top:10px"></div></div>
     <div class="modal-f"><button class="btn btn-ghost" onclick="$('mPl').remove()">Fechar</button>${lidos.length?`<button class="btn btn-primary" id="plGo" onclick="plEnviar()">Enviar ${lidos.length} pedido(s)</button>`:''}</div></div></div>`);
   window._plLidos=lidos;
+  }catch(err){ const pg=$('plProg'); if(pg) pg.innerHTML='<span style="color:#b91c1c">Erro ao ler as planilhas: '+esc(err.message||err)+'</span>'; else alert('Erro ao ler as planilhas: '+(err.message||err)); }
 };
 window.plEnviar = async function(){
   const L=window._plLidos||[], res=$('plRes'), bt=$('plGo'); if(bt){ bt.disabled=true; bt.textContent='Enviando…'; }
   const out=[];
+  if(res) res.innerHTML='<div class="hint">Enviando 1 de '+L.length+'…</div>';
   for(const r of L){
     try{ const { data, error } = await sb.rpc('portal_importar_pedido', { p_documento:r.doc, p_itens:r.itens, p_arquivo:r.arquivo });
       if(error) throw error;
@@ -4405,7 +4415,8 @@ window.plEnviar = async function(){
     }catch(e){ out.push(`${esc(r.doc)}: <span style="color:#b91c1c">${esc(e.message||e)}</span>`); }
     if(res) res.innerHTML=out.map(x=>'<div style="margin-top:4px">'+x+'</div>').join('');
   }
-  if(bt){ bt.textContent='Enviado'; }
+  if(bt){ bt.textContent='Concluído'; }
+  if(res) res.insertAdjacentHTML('beforeend','<div style="margin-top:8px;font-weight:600">✓ Envio concluído. Os pedidos já aparecem no quadro "Volumes para faturamento".</div>');
   try{ const vf=await sb.rpc('portal_volumes_faturar'); state.volFat=vf.data||[]; renderVolFat(); }catch(_e){}
 };
 window.renderRastreio = function(){
