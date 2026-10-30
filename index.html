@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1250 | Gerado: 2026-10-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1252 | Gerado: 2026-10-30 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1390,7 +1390,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1250';
+const APP_VERSION='v1.0.1252';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36120,8 +36120,9 @@ function wmsVolumesDaLista(listaId){
 }
 
 // ── Folha de separação impressa (A4). Nas listas por frente: uma folha por frente. ──
-function wmsListaPdf(listaId){
+async function wmsListaPdf(listaId){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
+  await wmsRgPreload([listaId]);   // v1.0.1252: RG de cada caixa na folha
   const content=wmsListaPdfContent(listaId,false);
   if(!content){alert('Lista sem tarefas.');return;}
   pdfMake.createPdf(wmsFolhaDoc(content)).open();
@@ -36208,6 +36209,7 @@ async function wmsCapaRomaneioPdf(rom){
 async function wmsListasPdfIds(ids){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
   ids=ids||[];
+  await wmsRgPreload(ids);   // v1.0.1252
   const ls=ids.map(id=>wmsListasSeparacao.find(l=>l.id===id)).filter(Boolean).sort((a,b)=>String(a.numero_lista||'').localeCompare(String(b.numero_lista||'')));
   if(!ls.length){showToast('Nenhuma lista marcada','amber');return;}
   // agrupa pelas cargas: capa na 1ª folha e a cada mudança de romaneio;
@@ -36249,6 +36251,15 @@ function wmsSepMarcarTodas(){
   wmsSelRerender();
   if(!todas)showToast(vis.length+' lista(s) marcada(s)','green');
 }
+
+// v1.0.1252: RG das caixas das tarefas (para a folha da lista de separação)
+var _wmsRgCache={};
+async function wmsRgPreload(listaIds){
+  try{
+    var ids=[...new Set((wmsTarefasSeparacao||[]).filter(function(t){return listaIds.indexOf(t.lista_id)>=0&&t.pallet_id&&_wmsRgCache[t.pallet_id]==null;}).map(function(t){return t.pallet_id;}))];
+    for(var i=0;i<ids.length;i+=150){ ((await dbSelect('wms_pallets','id=in.('+ids.slice(i,i+150).join(',')+')&select=id,rg'))||[]).forEach(function(p){ _wmsRgCache[p.id]=p.rg; }); }
+  }catch(e){}
+}
 // Definição do PDF da folha: A4, margens e rodapé (página X/Y · impresso em · VERUS)
 function wmsFolhaDoc(content){
   const impresso=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -36278,13 +36289,17 @@ function wmsListaPdfContent(listaId,quebraNoFim){
   const pedidos=[...new Set(tarefas.map(pedTxt).filter(Boolean))];
   const secoes=ehFrentes?['baixa','alta'].map(f=>({f,arr:tarefas.filter(t=>(t.frente||'baixa')===f)})).filter(s=>s.arr.length):[{f:null,arr:tarefas}];
   const geradaEm=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const CAB=()=>[{text:'#',bold:true},{text:'Endereço',bold:true},{text:'SKU',bold:true},{text:'Descrição',bold:true},{text:'Tipo',bold:true},{text:'Qtd',bold:true,alignment:'right'},{text:'OK',bold:true,alignment:'center'}];
+  // v1.0.1252: uma ação física por linha, na ordem do roteiro: endereço → RG → caixa/pacote → código → quantidade (sem agrupar)
+  const _cxPct=!!(cli&&cli.wms_checkout_volumes===true);   // operação por caixa (RG = caixa) e pacote
+  const _tipo=t=>{ var v=String(t.tipo_volume||''); if(v==='pallet') return _cxPct?'CAIXA':'PALLET'; if(v==='caixa') return 'CAIXA'; if(v==='saco') return 'PACOTE'; return _cxPct?'PACOTE':'FRAÇÃO'; };
+  const _rg=t=>{ if(!t.pallet_id) return '—'; var r=_wmsRgCache[t.pallet_id]; if(r==null){ var pl=(wmsPallets||[]).find(x=>x.id===t.pallet_id); r=pl?pl.rg:null; } return r==null?'—':wmsRgFmt(r); };
+  const CAB=()=>[{text:'#',bold:true},{text:'Endereço',bold:true},{text:'RG',bold:true},{text:'Tipo',bold:true},{text:'Código',bold:true},{text:'Qtd',bold:true,alignment:'right'},{text:'OK',bold:true,alignment:'center'}];
   const linha=t=>[
     {text:String(t.ordem||''),color:'#666'},
     {text:t.endereco_origem||'',bold:true,fontSize:10},
-    {text:t.sku||'',bold:true,fontSize:9},
-    {text:(t.descricao||'').slice(0,48),fontSize:8},
-    {text:t.tipo_volume==='pallet'?'PALLET':'FRAÇÃO',color:t.tipo_volume==='pallet'?'#6d28d9':'#b45309',bold:true},
+    {text:_rg(t),bold:true,fontSize:9.5},
+    {text:_tipo(t),color:(_tipo(t)==='PACOTE'||_tipo(t)==='FRAÇÃO')?'#b45309':'#6d28d9',bold:true},
+    {text:t.sku||'',bold:true,fontSize:10,noWrap:true},   // v1.0.1252: só o código (nada de descrição na folha)
     {text:(+t.quantidade||0).toLocaleString('pt-BR'),alignment:'right',bold:true,fontSize:10},
     {canvas:t.status==='concluida'
       ?[{type:'rect',x:0,y:0,w:11,h:11,lineWidth:0.8,lineColor:'#333'},{type:'polyline',lineWidth:1.4,lineColor:'#0f766e',points:[{x:2.2,y:5.8},{x:4.8,y:8.6},{x:9.2,y:2.6}]}]
@@ -36292,7 +36307,7 @@ function wmsListaPdfContent(listaId,quebraNoFim){
      alignment:'center',margin:[0,1,0,0]}
   ];
   // bloco fechado: moldura 0.8, só linhas horizontais internas finas, zebra por linha de tarefa
-  const tabela=arr=>({table:{headerRows:1,widths:[18,70,60,'*',44,40,24],body:[CAB(),...arr.map(linha)]},
+  const tabela=arr=>({table:{headerRows:1,widths:[16,62,62,46,'*',44,22],body:[CAB(),...arr.map(linha)]},
     layout:{fillColor:(i)=>i===0?'#dfe4ea':(i%2===1?'#f3f5f8':null),
       hLineWidth:(i,node)=>(i===0||i===node.table.body.length)?0.9:0.4,
       vLineWidth:(i,node)=>(i===0||i===node.table.widths.length)?0.9:0,
