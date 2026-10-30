@@ -505,6 +505,7 @@
       </nav>
     </div>
     <div class="tright">
+      <span id="pVer" title="Versão do portal · clique para verificar atualização" onclick="portalVerCheck(true)" style="font-size:10.5px;padding:2px 8px;border-radius:99px;background:rgba(127,127,127,.12);cursor:pointer;white-space:nowrap;margin-right:8px">—</span>
       <div class="whoami"><b id="hdrNome">—</b><span id="hdrDep">—</span></div>
       <button class="icon-btn" id="btnBack" title="Voltar" aria-label="Voltar" onclick="showScreen('home')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
       <button class="icon-btn" id="btnHome" title="Início" aria-label="Início" onclick="showScreen('home')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg></button>
@@ -3165,7 +3166,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.5';   // v1.7.5: subir planilha com janela de progresso e erro visível (nada falha em silêncio)
+const PORTAL_VERSION = 'v1.7.6';   // v1.7.6: esc global para os quadros novos (erro "esc is not defined"); versão no topo e atualização como no VERUS
+// v1.7.5 →   // v1.7.5: subir planilha com janela de progresso e erro visível (nada falha em silêncio)
 // v1.7.4 →   // v1.7.4: subir a planilha de pedidos (formato CASCO) direto no portal, igual à importação do VERUS
 // v1.7.3 →   // v1.7.3: rastreio do pedido (linha do tempo e bipes) depois da saída
 // v1.7.2 →   // v1.7.2: envio dos XMLs das notas de venda (ligação automática ao pedido) e "Enviar NF" por pedido
@@ -4502,6 +4504,45 @@ window.coletasCsv = function(){
     .concat(L.map(r=>[r.placa,r.movimento==='descarga'?'Recebimento':'Coleta',r.romaneio,f(r.agendado_em),f(r.chegada_em),f(r.doca_em),f(r.fim_carreg_em),f(r.saida_em),r.espera_min,r.total_min,r.foto_bau_url,r.termo_assinado_url].map(q).join(';')));
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['\ufeff'+lin.join('\n')],{type:'text/csv;charset=utf-8'})); a.download='coletas_'+(state.depositante||'').replace(/\W+/g,'_')+'.csv'; a.click();
 };
+if(typeof window.esc!=='function') window.esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));   // v1.7.6
+
+// v1.7.6: verificação de versão como no VERUS — nunca recarrega com janela aberta ou alguém digitando
+(function(){
+  const vn = v => { const m = String(v||'').match(/(\d+)\.(\d+)\.(\d+)/); return m ? (+m[1])*1e6 + (+m[2])*1e3 + (+m[3]) : 0; };
+  const ocupado = () => { try{
+    if(document.querySelector('.overlay:not(.hide)')) return true;
+    const a = document.activeElement; if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && String(a.value||'').length) return true;
+  }catch(e){} return false; };
+  const recarregar = () => { const u = new URL(location.href); u.searchParams.set('_v', Date.now()); location.replace(u.toString()); };
+  let timer = null;
+  const pendente = (nova) => {
+    if(!document.getElementById('pVerPend')){
+      const d = document.createElement('div'); d.id = 'pVerPend';
+      d.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9990;background:#0A2540;color:#fff;border-radius:99px;padding:8px 10px 8px 16px;font-size:12.5px;display:flex;gap:10px;align-items:center;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:92vw';
+      d.innerHTML = '<span>Nova versão '+nova+' disponível · atualiza quando você terminar</span><button style="border:none;border-radius:99px;padding:5px 12px;background:#fff;color:#0A2540;font-weight:700;cursor:pointer">Atualizar agora</button>';
+      d.querySelector('button').onclick = recarregar; document.body.appendChild(d);
+    }
+    if(!timer) timer = setInterval(() => { if(!ocupado()){ clearInterval(timer); recarregar(); } }, 20000);
+  };
+  window.portalVerCheck = async function(manual){
+    try{
+      const r = await fetch(location.pathname + '?_vc=' + Date.now(), { cache:'no-store' }); const t = await r.text();
+      const m = t.match(/PORTAL_VERSION\s*=\s*'(v[\d.]+)'/); const pub = m ? m[1] : null;
+      const el = document.getElementById('pVer');
+      if(pub && vn(pub) > vn(PORTAL_VERSION)){
+        if(el){ el.textContent = PORTAL_VERSION + ' → ' + pub; el.style.background = '#fde68a'; }
+        if(ocupado()) pendente(pub);
+        else { if(typeof toast==='function') toast('Nova versão ('+pub+') disponível. Atualizando...'); setTimeout(recarregar, 1500); }
+      } else {
+        if(el){ el.textContent = '✓ ' + PORTAL_VERSION; el.style.background = 'rgba(127,127,127,.12)'; }
+        if(manual && typeof toast==='function') toast('Você está na versão mais recente (' + PORTAL_VERSION + ').');
+      }
+    }catch(e){ const el = document.getElementById('pVer'); if(el) el.textContent = PORTAL_VERSION; }
+  };
+  const ini = () => { const el = document.getElementById('pVer'); if(el) el.textContent = PORTAL_VERSION; setTimeout(() => portalVerCheck(false), 4000); setInterval(() => portalVerCheck(false), 180000); };
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') portalVerCheck(false); });
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ini); else ini();
+})();
 window.renderVolFat = function(){
   const box = $('volFat'); if(!box) return;
   const L = state.volFat || []; if(!L.length){ box.classList.add('hide'); return; }
