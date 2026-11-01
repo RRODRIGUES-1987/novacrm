@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1256 | Gerado: 2026-11-01 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1257 | Gerado: 2026-11-01 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1391,7 +1391,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1256';
+const APP_VERSION='v1.0.1257';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36042,6 +36042,38 @@ function wmsCalcTarefas(qtd, multiplo){
   return tarefas;
 }
 
+// ═══ v1.0.1257 · PROTEÇÃO CONTRA "UM BIPE POR UNIDADE" ═══════════════════════════════════════════════════════
+// Um pedido Usiquímica com 35.301 un. de um SKU sem "un. por caixa" gerou 35.301 tarefas (22 min de inserts) e
+// inflou o boot de todos. Agora: a importação avisa, a geração de listas bloqueia, e nada passa de WMS_MAX_BIPES_ITEM.
+var WMS_MAX_BIPES_ITEM=200;
+// itens = [{sku, produto_id?, qtd|quantidade}] → [{sku, qtd, bipes}] dos que estourariam sem múltiplo cadastrado
+function wmsPendenciasMultiplo(itens,clienteId){
+  var out=[];
+  if(wmsSaldoVerus(clienteId)) return out;   // depositante com saldo no VERUS separa por RG/saco: não explode
+  (itens||[]).forEach(function(it){
+    var q=+(it.qtd!=null?it.qtd:it.quantidade)||0; if(q<=WMS_MAX_BIPES_ITEM) return;
+    var m=wmsMultiploDe(it.produto_id||null,it.sku,clienteId);
+    var bipes=m>0?Math.ceil(q/m):Math.round(q);
+    if(bipes>WMS_MAX_BIPES_ITEM) out.push({sku:it.sku,qtd:q,bipes:bipes,semMultiplo:!(m>0)});
+  });
+  return out;
+}
+function wmsPendenciasMultiploHtml(pend,titulo){
+  if(!pend||!pend.length) return '';
+  var li=pend.slice(0,8).map(function(p){ return '<b>'+esc(String(p.sku))+'</b> · '+p.qtd.toLocaleString('pt-BR')+' un. → '+p.bipes.toLocaleString('pt-BR')+' bipes'+(p.semMultiplo?' (sem un. por caixa)':''); }).join('<br>');
+  return '<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6">⚠ <b>'+(titulo||'Cadastro incompleto')+'</b> — '+pend.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes:<br>'+li+(pend.length>8?'<br>+'+(pend.length-8)+' item(ns)':'')+'<br><span style="color:var(--text2)">Cadastre <b>un. por caixa</b> no produto (Cadastros › Produtos do depositante) antes de gerar a lista de separação.</span></div>';
+}
+// Fim do ciclo: romaneio carregado (ou veículo liberado na portaria) → pedidos do romaneio viram 'embarcado'.
+async function wmsEncerrarPedidosRomaneio(romId,origem){
+  var fim={}; WMS_FIM_STATUS.split(',').forEach(function(k){fim[k]=1;}); fim.excluido=1;
+  var agora=new Date().toISOString(), n=0;
+  var peds=(wmsPedidos||[]).filter(function(p){ return p.romaneio_id===romId && !fim[p.status]; });
+  for(var i=0;i<peds.length;i++){
+    try{ await dbUpdate('wms_pedidos',peds[i].id,{status:'embarcado',embarcado_em:agora,embarcado_obs:origem||null}); peds[i].status='embarcado'; peds[i].embarcado_em=agora; n++; }
+    catch(e){ console.warn('[embarque] pedido não encerrado:',peds[i].numero_pedido,e&&e.message); }
+  }
+  return n;
+}
 function wmsMultiploDe(produtoId,sku,clienteId){
   let p=produtoId?wmsProdutos.find(x=>x.id===produtoId):null;
   if(!p&&sku)p=wmsProdutos.find(x=>x.cliente_id===clienteId&&String(x.sku).trim()===String(sku).trim());
@@ -37771,6 +37803,12 @@ async function wmsGerarListas(tipo){
   const peds=wmsPedidos.filter(p=>ids.includes(p.id));
   if(!peds.length){portClose();return;}
   const cid=company?.id;
+  // v1.0.1257: nenhum item pode virar mais de WMS_MAX_BIPES_ITEM bipes — resolve-se no cadastro, não gerando
+  if(tipo!=='consolidada'){
+    var _bloq=[];
+    peds.forEach(function(p){ var pend=wmsPendenciasMultiplo(wmsPedidoItens.filter(function(it){return it.pedido_id===p.id;}),p.cliente_id); pend.forEach(function(x){ _bloq.push((p.numero_curto||p.numero_pedido||'')+' · '+x.sku+' · '+x.qtd.toLocaleString('pt-BR')+' un. → '+x.bipes.toLocaleString('pt-BR')+' bipes'); }); });
+    if(_bloq.length){ portErr('Lista não gerada: '+_bloq.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes. Cadastre un. por caixa no produto. '+_bloq.slice(0,4).join(' | ')+(_bloq.length>4?' | +'+(_bloq.length-4):'')); return; }
+  }
   portSaving();
   document.querySelectorAll('.wms-tipo-opt').forEach(b=>{b.disabled=true;b.style.opacity='.35';b.style.pointerEvents='none';});
   const criadas=[];const pulados=[];const empenhos=[];   // v1.0.1110
@@ -37831,6 +37869,7 @@ async function wmsGerarListas(tipo){
           tarefas.sort((a,b)=>{const ka=wmsRotaKey(a,p.cliente_id),kb=wmsRotaKey(b,p.cliente_id);return ka<kb?-1:(ka>kb?1:0);});
           tarefas.forEach((t,i)=>{t.ordem=i+1;});
         }
+        if(tarefas.length>25*WMS_MAX_BIPES_ITEM){ pulados.push((p.numero_curto||p.numero_pedido||p.id)+' ('+tarefas.length+' bipes)'); continue; }   // v1.0.1257: rede de segurança
         const lista=await dbInsert('wms_listas_separacao',{
           company_id:cid,unit_id:p.unit_id||null,cliente_id:p.cliente_id,
           numero_lista:await seq(),tipo,status:'gerada',qtd_pedidos:1,qtd_tarefas:tarefas.length,owner_id:cu?.id,
@@ -43251,6 +43290,7 @@ function wmsImpRenderPreview(){
   const naoEnc=[...new Set(dados.filter(d=>!skuSet.has(d.sku)).map(d=>d.sku))];
   // já existe pedido com esse número?
   const jaExiste=Object.keys(docs).filter(doc=>wmsPedidos.some(p=>p.cliente_id===wmsImpCliente&&p.numero_pedido===doc));
+  const pendMult=wmsPendenciasMultiplo(dados,wmsImpCliente);   // v1.0.1257
 
   prev.innerHTML=`
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
@@ -43272,6 +43312,7 @@ function wmsImpRenderPreview(){
         <br><span style="color:var(--text3)">Ao gerar as listas, escolha <b>Pedido a pedido · 2 frentes</b> para separar por rota e equipamento.</span></div>`;})():''}
     ${jaExiste.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${jaExiste.length} pedido(s) já existe(m) e serão ignorados: ${jaExiste.slice(0,5).join(', ')}${jaExiste.length>5?'...':''}</div>`:''}
     ${naoEnc.length?`<div style="font-size:12px;color:var(--text2);background:var(--bg2);padding:8px 12px;border-radius:8px;margin-bottom:10px">SKUs não cadastrados (itens serão importados como 'produto não encontrado'): ${naoEnc.slice(0,8).join(', ')}${naoEnc.length>8?` +${naoEnc.length-8}`:''}</div>`:''}
+    ${wmsPendenciasMultiploHtml(pendMult,'Produtos sem unidades por caixa')}
     <button class="btn btn-p" onclick="wmsImpSalvar()">Importar ${nDocs} pedido(s)</button>
   `;
 }
@@ -52205,6 +52246,7 @@ async function wmsFinalizarEmbarque(){
   try{
     await dbUpdate('wms_romaneios',r.id,{status:'carregado'});
     r.status='carregado';
+    await wmsEncerrarPedidosRomaneio(r.id,'embarque · romaneio carregado');   // v1.0.1257: fecha o ciclo do pedido
     // carimba o evento (fim do carregamento)
     await wmsEventoStamp(wmsEventoDoRomaneio(r.id),Object.assign({fim_carreg_em:new Date().toISOString()},_fotoUrl?{foto_bau_url:_fotoUrl}:{}));
     // NÃO libera o prisma aqui: o veículo pode permanecer na planta (pernoite etc.).
@@ -52516,6 +52558,7 @@ async function wmsLiberarSaida(rom){
   }
   try{ await dbUpdate('wms_romaneios',rom.id,{status:'liberado',doca_id:null}); }catch(e){}
   rom.status='liberado'; rom.doca_id=null;
+  try{ await wmsEncerrarPedidosRomaneio(rom.id,'portaria · saída liberada'); }catch(e){}   // v1.0.1257: pedidos sem bipe de embarque também encerram
   var pt=(wmsPatio||[]).find(function(x){return x.romaneio_id===rom.id && x.status!=='finalizado';});
   if(pt){ try{ await dbUpdate('wms_patio',pt.id,{status:'finalizado'}); }catch(e){} pt.status='finalizado'; }
   // encerra o EVENTO: carimba saída e grava as durações
