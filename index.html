@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1254 | Gerado: 2026-10-30 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1255 | Gerado: 2026-11-01 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1021,6 +1021,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
         <span id="unit-badge" style="display:none;font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--accent);color:var(--accent-text)"></span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <span id="vivo-pill" title="Esta tela se atualiza sozinha a cada minuto (quando nada está aberto ou em digitação)" style="display:none;align-items:center;gap:6px;font-size:11px;color:var(--text3);white-space:nowrap"><span id="vivo-pill-txt"></span><button type="button" class="btn btn-sm" onclick="vivoAgora()" title="Atualizar agora" style="padding:1px 7px;font-size:13px;line-height:1.2">&#x27F3;</button></span>
         <div id="unit-selector-desktop" style="display:none;align-items:center;gap:6px;overflow-x:auto"></div>
         <button class="btn btn-p btn-sm" id="dadd" onclick="openFor()" style="display:none">+ Novo contato</button>
       </div>
@@ -1390,7 +1391,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1254';
+const APP_VERSION='v1.0.1255';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1505,7 +1506,7 @@ function bootTick(){
   if(b){ b.style.transition='width .25s linear'; b.style.width=_bootPct.toFixed(1)+'%'; }
 }
 function bootIniciar(){
-  _bootPct=0; _bootTeto=0; _bootAtivo=true;
+  _bootPct=0; _bootTeto=0; _bootAtivo=true; _bootStats=[]; _bootMedir=true; _bootT0=performance.now();
   var b=document.getElementById('boot-bar');
   if(b){ b.style.transition='none'; b.style.width='0'; setTimeout(function(){ b.style.transition='width .45s cubic-bezier(.4,0,.2,1)'; },30); }
   var ld=document.getElementById('app-loading'); if(ld){ ld.style.opacity='1'; ld.style.display='flex'; }
@@ -1546,6 +1547,7 @@ async function sbAuth(path,body){
 // abertura do VERUS e a leitura voltava vazia em silêncio. Agora repete sem a ordenação e memoriza a tabela.
 var _dbSemCreatedAt={workflow_empresa:1};
 async function dbSelect(table,filter=''){
+  var _t0=performance.now();
   var ord=(/(^|&)order=/.test(filter)||_dbSemCreatedAt[table])?'':'&order=created_at.desc';
   var r=await sbFetch('GET',`/rest/v1/${table}?${filter}${ord}`,null,tok);
   if(!r.ok && ord && (r.status===400 || /created_at/.test(JSON.stringify(r.data||'')))){
@@ -1553,11 +1555,13 @@ async function dbSelect(table,filter=''){
     r=await sbFetch('GET',`/rest/v1/${table}?${filter}`,null,tok);
   }
   bootTick(); // alimenta a barra de progresso durante o boot
-  return r.ok?(Array.isArray(r.data)?r.data:[]):[];
+  var _out=r.ok?(Array.isArray(r.data)?r.data:[]):[]; bootMed(table,_t0,_out.length);
+  return _out;
 }
 // Busca TODAS as linhas paginando (evita o teto de 1000 do PostgREST).
 // Desempate por id garante paginação estável (sem pular/duplicar).
 async function dbSelectAll(table,filter=''){
+  var _t0=performance.now();
   var f=filter;
   if(/(^|&)order=/.test(f)){ if(!/order=[^&]*\bid\b/.test(f)) f=f.replace(/(order=[^&]*)/, '$1,id.asc'); }
   else { f=(f?f+'&':'')+'order=id.asc'; }
@@ -1572,6 +1576,7 @@ async function dbSelectAll(table,filter=''){
     if(offset>500000) break;
   }
   bootTick(); // alimenta a barra de progresso durante o boot
+  bootMed(table,_t0,all.length);
   return all;
 }
 async function dbInsert(table,body){
@@ -1974,6 +1979,7 @@ async function finishEnterApp(user){
   }
   resetIdle();
   if(HERMES_BOLSO) hermesBolsoIniciar();
+  vivoIniciar();   // v1.0.1255: atualização automática das telas dinâmicas
   bootFinalizar(); // dashboard renderizado — libera a tela
   checkFechamentoSemanal();
 }
@@ -5240,6 +5246,305 @@ async function carregarHierarquia(){
     if(['rh-ferias','rh-avaliacoes','rh-experiencia','rh-performance'].indexOf(curPage)>=0 && typeof render==='function') render();
   }catch(e){ console.warn('carregarHierarquia',e); pessoasHier=null; }
 }
+
+// ═══ v1.0.1255 · BOOT EM DOIS TEMPOS ═══════════════════════════════════════════════════════════════════
+// Antes, o login esperava ~100 consultas em fila (RH, financeiro, WMS inteiro, compras...) antes de mostrar a tela.
+// Agora: (1) base da empresa em paralelo (lotes de 8); (2) só o módulo da tela que vai abrir; (3) a splash sai;
+// (4) os outros módulos chegam em segundo plano e a tela redesenha sozinha. Uma tela cujo módulo ainda não chegou
+// mostra "carregando dados do módulo" em vez de aparecer vazia. A limpeza entre usuários continua garantida pelo
+// logout (recarrega a página) — nada depende de recarregar tudo no login.
+var _bootStats=[], _bootMedir=false, _bootT0=0;
+function bootMed(tabela,t0,n){ if(!_bootMedir) return; _bootStats.push({tabela:tabela,ms:Math.round(performance.now()-t0),linhas:n||0}); }
+function bootRelatorio(rotulo){
+  try{
+    if(!_bootStats.length) return;
+    var tot=0, agg={};
+    _bootStats.forEach(function(x){ tot+=x.ms; var a=agg[x.tabela]||(agg[x.tabela]={tabela:x.tabela,consultas:0,ms:0,linhas:0}); a.consultas++; a.ms+=x.ms; a.linhas+=x.linhas; });
+    var lista=Object.keys(agg).map(function(k){return agg[k];}).sort(function(a,b){return b.ms-a.ms;});
+    console.groupCollapsed('[boot] '+rotulo+' · '+Math.round(performance.now()-_bootT0)+' ms desde o login · '+_bootStats.length+' consultas em '+lista.length+' tabelas ('+tot+' ms somados)');
+    console.table(lista);
+    console.groupEnd();
+  }catch(e){}
+}
+// Executa funções (que devolvem promessas) em lotes paralelos; erro em uma não derruba as outras.
+async function paralelo(fns,lote){
+  lote=lote||8; var out=[];
+  for(var i=0;i<fns.length;i+=lote){
+    var r=await Promise.all(fns.slice(i,i+lote).map(function(f){ return Promise.resolve().then(f).catch(function(e){ console.warn('[boot] consulta falhou:',e&&e.message||e); return null; }); }));
+    out=out.concat(r);
+  }
+  return out;
+}
+var _modPronto={}, _modPromessa={}, _modGating=false, _modCid=null;
+// A que módulo de dados a página pertence (null = só precisa da base, já carregada antes da splash sair)
+function modDaPagina(p){
+  if(!p||p==='dashboard') return null;
+  if(/^(cp-|fat|fin|contas|dre|orcamento)/.test(p)) return 'financeiro';
+  if(/^compras/.test(p)) return 'compras';
+  var m=(typeof MODULE_MAP!=='undefined'&&MODULE_MAP[p])||'';
+  if(m==='wms'||m==='ecom'||m==='portaria'||/^(wms|ecom|coletor|portaria)/.test(p)) return 'wms';
+  if(m==='financeiro'||m==='controladoria') return 'financeiro';
+  if(m==='rh'||/^(rh-|qual-|epi|exame|disciplin)/.test(p)) return 'rh';
+  return null;
+}
+function modPaginaAlvo(role){
+  if(role==='portaria') return 'portaria-entradas';
+  if(role==='customer_service') return 'portaria-painel';
+  if(role==='operacao') return 'wms-pedidos';
+  if(role==='manutencao') return 'manut-chamados';
+  return safeSession.getItem('crm_page')||'dashboard';
+}
+function modPlaceholder(m){
+  var nomes={wms:'do WMS',financeiro:'do Financeiro',rh:'do RH',compras:'de Compras',capas:'das capas'};
+  return '<div style="padding:70px 20px;text-align:center;color:var(--text3)"><div class="spin" style="width:26px;height:26px;margin:0 auto 14px"></div>Carregando dados '+(nomes[m]||'')+'…<div style="font-size:11px;margin-top:6px">A tela abre sozinha quando terminar.</div></div>';
+}
+// Base da empresa: cadastros e tabelas pequenas que praticamente toda tela usa. Em paralelo.
+async function modBaseCarregar(cid,role){
+  var adm=(role==='admin');
+  var t=[
+    function(){ return dbSelect('contacts',`company_id=eq.${cid}`).then(function(v){contacts=v;}); },
+    function(){ return dbSelect('deals',`company_id=eq.${cid}`).then(function(v){deals=v;}); },
+    function(){ return dbSelect('tasks',`company_id=eq.${cid}`).then(function(v){tasks=v;}); },
+    function(){ return dbSelect('profiles',`company_id=eq.${cid}`).then(function(v){profiles=v;}); },
+    function(){ return dbSelect('clientes',`company_id=eq.${cid}`).then(function(v){clientes=v;}); },
+    function(){ return dbSelect('fornecedores',`company_id=eq.${cid}`).then(function(v){fornecedores=v;}); },
+    function(){ return dbSelect('pessoas',`company_id=eq.${cid}${unitFilter()}`).then(function(v){pessoas=v;}); },
+    function(){ return dbSelect('rh_funcoes',`company_id=eq.${cid}`).then(function(v){rhFuncoes=v;}); },
+    function(){ return dbSelect('rh_horarios',`company_id=eq.${cid}`).then(function(v){rhHorarios=v;}); },
+    function(){ return dbSelect('tabelas_tarifarias',`company_id=eq.${cid}&or=(status.is.null,status.neq.historico)`).then(function(v){tabelasTarifarias=v;}); },
+    function(){ return dbSelect('representantes',`company_id=eq.${cid}`).then(function(v){representantes=v;}); },
+    function(){ return dbSelect('propostas',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).then(function(v){propostas=v;}); },
+    function(){ return dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`).then(function(v){tarifarioPadrao=v;}); },
+    function(){ return dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).then(function(v){gruposClientes=v;}); },
+    function(){ return dbSelect('workflow_config',`company_id=eq.${cid}`).then(function(v){ workflowConfig=v; return wfCarregar(cid).catch(function(){}); }); },
+    function(){ return loadPortariaData(cid); },
+  ];
+  if(adm){
+    t.push(function(){ return dbSelect('companies','select=*').then(function(v){companies=v;}); });
+    t.push(function(){ return dbSelect('user_companies','select=*').then(function(v){userCompanies=v;}); });
+    t.push(function(){ return dbSelect('tarefas_gestao',`company_id=eq.${cid}`).then(function(v){tarefasGestao=v;}); });
+    t.push(function(){ return dbSelect('atas',`company_id=eq.${cid}`).then(function(v){atas=v;}); });
+    t.push(function(){ return dbSelect('plano_acao',`company_id=eq.${cid}`).then(function(v){planoAcao=v;}); });
+  }
+  await paralelo(t,8);
+}
+// Módulos carregados depois da base: cada um em paralelo por dentro.
+var _MODULOS={
+  // capas de processo + regras e endereços do armazém (a tela de capas e o WMS usam os dois)
+  capas: async function(cid){ await loadCapasData(cid); },
+  wms: async function(cid){ await Promise.all([ loadWmsData(cid), modGarantir('capas') ]); },
+  financeiro: async function(cid){
+    var r=await paralelo([
+      function(){ return dbSelectAll('faturamento',`company_id=eq.${cid}${unitFilterEmpresa()}`); },
+      function(){ return dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`); },
+      function(){ return dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`); },
+      function(){ return dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`); },   // uma vez só (antes carregava duas)
+      function(){ return dbSelect('orcamento_receitas',`company_id=eq.${cid}${unitFilter()}&order=ano.asc,mes.asc`); },
+      function(){ return dbSelect('dre_projeto',`company_id=eq.${cid}${unitFilter()}`); },
+      function(){ return dbSelect('dre_avulso',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`); },
+      function(){ return modGarantir('capas'); },
+    ],8);
+    faturamento=r[0]||[]; fatProgramacao=r[1]||[]; contasReceber=r[2]||[]; orcamentoReceitas=r[4]||[]; dresProjeto=r[5]||[]; dreAvulso=r[6]||[];
+    contasPagar=await cpComRateio(r[3]||[],cid);   // v1.0.1038: corpo dos títulos
+  },
+  rh: async function(cid){
+    await paralelo([
+      function(){ return loadRHFerias(); },
+      function(){ return dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).then(function(v){rhExperiencia=v;}); },
+      function(){ return dbSelect('qualidade_documentos',`company_id=eq.${cid}&order=codigo.asc`).then(function(v){qualDocumentos=v;}); },
+      function(){ return dbSelect('qualidade_revisoes',`company_id=eq.${cid}&order=numero_rev.desc`).then(function(v){qualRevisoes=v;}); },
+      function(){ return dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).then(function(v){rhCiclos=v;}); },
+      function(){ return dbSelect('rh_avaliacoes',`company_id=eq.${cid}&order=data_avaliacao.desc`).then(function(v){rhAvaliacoes=v;}); },
+      function(){ return dbSelect('historico_profissional',`company_id=eq.${cid}`).then(function(v){historicoProfissional=v;}); },
+      function(){ return loadOrgData(cid); },
+      function(){ return loadEpiData(cid); },
+      function(){ return loadExameData(cid); },
+      function(){ return loadAgendamentosData(cid); },
+      function(){ return loadDisciplinarData(cid); },
+    ],6);
+    await verificarAbrirCiclo().catch(function(e){ console.warn('verificarAbrirCiclo:',e); });
+    setTimeout(verificarAlertasFerias,2000);
+  },
+  compras: async function(cid){
+    var r=await paralelo([
+      function(){ return dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`); },
+      function(){ return dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`); },
+      function(){ return dbSelect('compras_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`); },
+    ],8);
+    comprasSolicitacoes=r[0]||[]; comprasCotacoes=r[1]||[]; comprasPedidos=r[2]||[];
+  },
+};
+function modGarantir(nome){
+  if(!_MODULOS[nome]||_modPronto[nome]) return Promise.resolve();
+  if(_modPromessa[nome]) return _modPromessa[nome];
+  var cid=company&&company.id; if(!cid) return Promise.resolve();
+  var t0=performance.now();
+  var p=Promise.resolve().then(function(){ return _MODULOS[nome](cid); })
+    .catch(function(e){ console.error('[boot] módulo '+nome+':',e); })
+    .then(function(){
+      delete _modPromessa[nome];
+      if(_modCid!==cid) return modGarantir(nome);   // empresa trocada no meio: carrega de novo para a atual
+      _modPronto[nome]=true;
+      console.log('[boot] módulo '+nome+' pronto em '+Math.round(performance.now()-t0)+' ms');
+      modAoConcluir(nome);
+    });
+  _modPromessa[nome]=p; return p;
+}
+// Redesenha a tela quando um módulo chega: a página que esperava por ele sempre; as outras só se nada estiver aberto.
+function modAoConcluir(nome){
+  try{
+    var app=ge('app'); if(!app||!app.classList.contains('on')) return;
+    if(modDaPagina(curPage)===nome){ render(); return; }
+    if(document.querySelector('.modal-overlay')) return;
+    if(typeof verusOcupado==='function'&&verusOcupado()) return;
+    var c=ge('content'), sc=c?c.scrollTop:0; render(); if(c) c.scrollTop=sc;
+  }catch(e){ console.warn('[boot] redesenho após módulo:',e); }
+}
+async function modCarregarResto(alvo){
+  var ordem=['wms','financeiro','rh','compras'].filter(function(n){ return n!==alvo; });
+  for(var i=0;i<ordem.length;i++){ await modGarantir(ordem[i]); }
+  bootRelatorio('todos os módulos carregados'); _bootMedir=false;
+}
+// Ao trocar de empresa, nada da anterior pode sobrar em memória enquanto os módulos novos não chegam.
+function modLimpar(){
+  _modPronto={}; _modPromessa={};
+  faturamento=[]; fatProgramacao=[]; contasReceber=[]; contasPagar=[]; orcamentoReceitas=[]; dresProjeto=[]; dreAvulso=[];
+  capasProcesso=[]; comprasSolicitacoes=[]; comprasCotacoes=[]; comprasPedidos=[];
+  rhAvaliacoes=[]; rhExperiencia=[]; qualDocumentos=[]; qualRevisoes=[]; rhCiclos=[]; historicoProfissional=[]; exameAgendamentos=[];
+  wmsPedidos=[]; wmsPedidoItens=[]; wmsProdutos=[]; wmsListasSeparacao=[]; wmsListaPedidos=[]; wmsTarefasSeparacao=[]; wmsRomaneios=[];
+  wmsEntradas=[]; wmsEntradaItens=[]; wmsPatio=[]; wmsEventos=[]; wmsLeituras=[]; wmsContraOrdens=[]; wmsPedidosExcluidos=[];
+}
+
+// ═══ v1.0.1255 · DADOS VIVOS (atualização automática das telas dinâmicas) ═══════════════════════════════════
+// Um timer só para todas as telas. Cada página do registro diz quais recargas precisa; a cada minuto (aba visível,
+// sem janela aberta, sem bipe/digitação em curso) só essas tabelas são relidas — pedidos e listas só os em andamento,
+// com merge por id — e a tela redesenha mantendo filtro e rolagem. Selo "Atualizado há X s ⟳" no topo da tela.
+var VIVO_INTERVALO=60000;
+var VIVO={
+  'dashboard':['wmsAtivos','capas'],
+  'wms-visao':['wmsAtivos','patio'],
+  'wms-pedidos':['wmsAtivos'], 'wms-tracking':['wmsAtivos'], 'wms-aprovacoes':['wmsAtivos'],
+  'wms-separacao':['wmsAtivos'], 'wms-conferencia':['wmsAtivos'],
+  'wms-romaneio':['wmsAtivos','romaneios'], 'wms-expedicao':['wmsAtivos','romaneios','patio'],
+  'wms-patio':['patio'], 'portaria-painel':['patio','portaria'],
+  'portaria-entradas':['portaria'], 'portaria-autorizacoes':['portaria'], 'portaria-liberacoes':['portaria'],
+  'fat-capas':['capas'],
+};
+var WMS_FIM_STATUS='embarcado,carregado,concluido,concluida,cancelado,cancelada,faturado,faturada,finalizado,finalizada,expedido';
+function vivoMescla(arr,rows){
+  var idx={}; (arr||[]).forEach(function(r,i){ idx[r.id]=i; });
+  var out=(arr||[]).slice(), novos=[];
+  (rows||[]).forEach(function(r){ if(idx[r.id]!=null) out[idx[r.id]]=r; else novos.push(r); });
+  return novos.concat(out);
+}
+async function vivoPorIds(tabela,campo,ids,extra){
+  var out=[];
+  for(var i=0;i<ids.length;i+=120){ out=out.concat(await dbSelectAll(tabela,campo+'=in.('+ids.slice(i,i+120).join(',')+')'+(extra||'')).catch(function(){return [];})); }
+  return out;
+}
+async function vivoWmsAtivos(cid){
+  var fim={}; WMS_FIM_STATUS.split(',').forEach(function(k){fim[k]=1;});
+  var ativos=await dbSelectAll('wms_pedidos',`company_id=eq.${cid}${unitFilter()}&status=not.in.(${WMS_FIM_STATUS})&order=created_at.desc`);
+  var vistos={}; ativos.forEach(function(p){vistos[p.id]=1;});
+  // pedidos que estavam em andamento aqui e saíram da lista de ativos: busca o estado final deles
+  var sumiram=(wmsPedidos||[]).filter(function(p){ return !fim[p.status]&&p.status!=='excluido'&&!vistos[p.id]; }).map(function(p){return p.id;});
+  var mudados=sumiram.length?await vivoPorIds('wms_pedidos','id',sumiram):[];
+  wmsPedidos=vivoMescla(wmsPedidos,ativos.concat(mudados)).filter(function(p){ return p.status!=='excluido'; });
+  // itens só dos pedidos que ainda não têm itens em memória
+  var temItem={}; (wmsPedidoItens||[]).forEach(function(i){temItem[i.pedido_id]=1;});
+  var semItem=ativos.filter(function(p){return !temItem[p.id];}).map(function(p){return p.id;});
+  if(semItem.length) wmsPedidoItens=(wmsPedidoItens||[]).concat(await vivoPorIds('wms_pedido_itens','pedido_id',semItem));
+  // listas de separação em andamento (+ as que acabaram desde a última leitura)
+  var listas=await dbSelectAll('wms_listas_separacao',`company_id=eq.${cid}${unitFilter()}&status=not.in.(concluida,cancelada)&order=created_at.desc`);
+  var vistosL={}; listas.forEach(function(l){vistosL[l.id]=1;});
+  var sumL=(wmsListasSeparacao||[]).filter(function(l){ return l.status!=='concluida'&&l.status!=='cancelada'&&!vistosL[l.id]; }).map(function(l){return l.id;});
+  var mudL=sumL.length?await vivoPorIds('wms_listas_separacao','id',sumL):[];
+  wmsListasSeparacao=vivoMescla(wmsListasSeparacao,listas.concat(mudL));
+  // vínculos e tarefas dos pedidos das listas em andamento (é onde o progresso muda bipe a bipe)
+  var idsL=listas.map(function(l){return l.id;});
+  if(idsL.length){
+    var lp=await vivoPorIds('wms_lista_pedidos','lista_id',idsL);
+    var setL={}; idsL.forEach(function(k){setL[k]=1;});
+    wmsListaPedidos=(wmsListaPedidos||[]).filter(function(x){ return !setL[x.lista_id]; }).concat(lp);
+    var idsP=lp.map(function(x){return x.pedido_id;}).filter(function(v,i,a){return v&&a.indexOf(v)===i;});
+    if(idsP.length){
+      var tar=await vivoPorIds('wms_tarefas_separacao','pedido_id',idsP);
+      var setP={}; idsP.forEach(function(k){setP[k]=1;});
+      wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(function(t){ return !setP[t.pedido_id]; }).concat(tar);
+    }
+  }
+  wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${cid}&status=eq.pendente&order=created_at.asc`).catch(function(){return wmsContraOrdens;});
+  wmsLeituras=await wmsLeiturasCarregar(cid).catch(function(){return wmsLeituras;});
+}
+async function vivoRomaneios(cid){
+  var desde=new Date(Date.now()-7*864e5).toISOString();
+  var rec=await dbSelectAll('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&created_at=gte.${desde}&order=created_at.desc`);
+  wmsRomaneios=vivoMescla(wmsRomaneios,rec);
+}
+async function vivoPatio(cid){
+  var r=await paralelo([
+    function(){ return dbSelectAll('wms_patio',`company_id=eq.${cid}${unitFilter()}&order=chegada_em.desc`); },
+    function(){ return dbSelectAll('wms_eventos',`company_id=eq.${cid}&status=eq.aberto&order=chegada_em.desc`); },
+    function(){ return dbSelectAll('wms_docas',`company_id=eq.${cid}${unitFilter()}&order=galpao.asc,doca.asc`); },
+  ],8);
+  if(r[0]) wmsPatio=r[0]; if(r[1]) wmsEventos=r[1]; if(r[2]) wmsDocas=r[2];
+}
+var _VIVO_REC={
+  wmsAtivos: vivoWmsAtivos,
+  romaneios: vivoRomaneios,
+  patio: vivoPatio,
+  portaria: function(cid){ return loadPortariaData(cid); },
+  capas: function(cid){ return dbSelect('processo_capas',`company_id=eq.${cid}&order=created_at.desc`).then(function(v){ capasProcesso=v||[]; }); },
+};
+// Ocupado para os dados vivos: coletor aberto, janela aberta, checkout com pedido, digitação em curso.
+// (verusOcupado() também trava pelas telas de separação/conferência, que aqui são justamente as que precisam atualizar.)
+function vivoOcupado(){
+  try{
+    var col=document.getElementById('coletor'); if(col&&col.offsetParent!==null&&col.innerHTML.trim()) return true;
+    if(document.querySelector('.modal-overlay')) return true;
+    if(typeof ecomCx!=='undefined'&&ecomCx&&ecomCx.fila&&ecomCx.fila.length) return true;
+    var a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&String(a.value||'').length) return true;
+  }catch(e){}
+  return false;
+}
+var _vivoTimer=null, _vivoUlt=0, _vivoRodando=false;
+function vivoIniciar(){
+  if(_vivoTimer) return;
+  _vivoUlt=Date.now();
+  _vivoTimer=setInterval(function(){ vivoTick(false); },5000);
+  document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='visible') vivoTick(false); });
+}
+function vivoAtivo(){ var app=ge('app'); return !!(VIVO[curPage]&&company&&company.id&&app&&app.classList.contains('on')); }
+async function vivoTick(forcar){
+  vivoPill();
+  if(!vivoAtivo()||_vivoRodando) return;
+  if(!forcar&&Date.now()-_vivoUlt<VIVO_INTERVALO) return;
+  if(document.visibilityState!=='visible') return;
+  if(vivoOcupado()) return;
+  var m=modDaPagina(curPage); if(m&&_modGating&&!_modPronto[m]) return;   // módulo ainda chegando: o boot cuida
+  _vivoRodando=true; vivoPill();
+  var pagina=curPage, cid=company.id;
+  try{
+    var recs=VIVO[pagina]||[];
+    for(var i=0;i<recs.length;i++){ var f=_VIVO_REC[recs[i]]; if(f) await f(cid); }
+    _vivoUlt=Date.now();
+    if(curPage===pagina&&company&&company.id===cid&&!vivoOcupado()){
+      var c=ge('content'), sc=c?c.scrollTop:0; render(); if(c) c.scrollTop=sc;
+    }
+  }catch(e){ console.warn('[vivo]',e); _vivoUlt=Date.now(); }
+  _vivoRodando=false; vivoPill();
+}
+function vivoAgora(){ _vivoUlt=0; vivoTick(true); }
+function vivoPill(){
+  var p=ge('vivo-pill'); if(!p) return;
+  if(!vivoAtivo()){ p.style.display='none'; return; }
+  p.style.display='inline-flex';
+  var t=ge('vivo-pill-txt'); if(!t) return;
+  if(_vivoRodando){ t.textContent='Atualizando…'; return; }
+  var s=Math.round((Date.now()-_vivoUlt)/1000);
+  t.textContent='Atualizado há '+(s<5?'instantes':(s<60?s+' s':Math.round(s/60)+' min'));
+}
+
 async function loadData(){
   const uid=cu.id;
   const role=profile?.role||'vendedor';
@@ -5250,135 +5555,36 @@ async function loadData(){
   // Carrega templates de relatório da empresa (editor de relatórios)
   if(cid){ try{ window._reportTemplates=await dbSelect('report_templates',`company_id=eq.${cid}`); }catch(e){ window._reportTemplates=[]; } }
 
-  if(role==='admin'){
-    if(cid){
-      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,tarefasGestao,atas,planoAcao,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
-        dbSelect('contacts',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('deals',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('tasks',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('companies','select=*').catch(()=>[]),
-        dbSelect('profiles',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('clientes',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('fornecedores',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('pessoas',`company_id=eq.${cid}${unitFilter()}`).catch(()=>[]),
-        dbSelect('tarefas_gestao',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('atas',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('plano_acao',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('rh_funcoes',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('rh_horarios',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelectAll('faturamento',`company_id=eq.${cid}${unitFilterEmpresa()}`).catch(()=>[]),
-        dbSelect('tabelas_tarifarias',`company_id=eq.${cid}&or=(status.is.null,status.neq.historico)`).catch(()=>[]),
-        dbSelect('representantes',`company_id=eq.${cid}`).catch(()=>[]),
-        dbSelect('propostas',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-        dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
-        dbSelect('user_companies',`select=*`).catch(()=>[]),
-      ]);
-      workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]); try{ await wfCarregar(cid); }catch(_wf){}
-      await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
-      await loadRHFerias().catch(console.warn);
-      rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
-      qualDocumentos = await dbSelect('qualidade_documentos',`company_id=eq.${cid}&order=codigo.asc`).catch(()=>[]);
-      qualRevisoes   = await dbSelect('qualidade_revisoes',`company_id=eq.${cid}&order=numero_rev.desc`).catch(()=>[]);
-      rhCiclos = await dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).catch(()=>[]);
-      await verificarAbrirCiclo().catch(e=>console.warn('verificarAbrirCiclo:',e));
-      setTimeout(verificarAlertasFerias,2000);
-      [fatProgramacao, gruposClientes] = await Promise.all([
-        dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
-        dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]),
-      ]);
-      contasReceber=await dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`).catch(()=>[]);
-    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
-      contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
-      [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
-        dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-        dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-        dbSelect('compras_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-      ]);
-      orcamentoReceitas=await dbSelect('orcamento_receitas',`company_id=eq.${cid}${unitFilter()}&order=ano.asc,mes.asc`).catch(()=>[]);
-      dresProjeto=await dbSelect('dre_projeto',`company_id=eq.${cid}${unitFilter()}`).catch(()=>[]);
-      dreAvulso=await dbSelect('dre_avulso',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
-      rhAvaliacoes=await dbSelect('rh_avaliacoes',`company_id=eq.${cid}&order=data_avaliacao.desc`).catch(()=>[]);
-      await loadOrgData(cid).catch(console.warn);
-      await loadEpiData(cid).catch(console.warn);
-      await loadExameData(cid).catch(console.warn);
-      await loadAgendamentosData(cid).catch(console.warn);
-      await loadDisciplinarData(cid).catch(console.warn);
-      await loadCapasData(cid).catch(console.warn);
-      await loadWmsData(cid).catch(console.warn);
-      historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}`).catch(()=>[]);
-    } else {
-      [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
-        dbSelect('contacts','select=*'),
-        dbSelect('deals','select=*'),
-        dbSelect('tasks','select=*'),
-        dbSelect('companies','select=*'),
-        dbSelect('profiles','select=*'),
-        dbSelect('clientes','select=*'),
-        dbSelect('fornecedores','select=*'),
-        dbSelect('pessoas','select=*'),
-        dbSelect('rh_funcoes','select=*'),
-        dbSelect('rh_horarios','select=*'),
-        dbSelectAll('faturamento','select=*'),
-        dbSelect('tabelas_tarifarias','select=*&or=(status.is.null,status.neq.historico)'),
-        dbSelect('representantes','select=*'),
-        dbSelect('propostas','select=*&order=created_at.desc'),
-        dbSelect('tarifario_padrao','select=*&order=created_at.desc'),
-        dbSelect('user_companies','select=*'),
-      ]);
-      workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*'); try{ await wfCarregar(cid); }catch(_wf){}
-      contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc');
-      contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc').catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
-    }
-  } else if((role==='gestor'||role==='adm'||role==='operacao'||role==='rh'||role==='controladoria'||role==='qualidade'||role==='manutencao'||role==='customer_service')&&cid){
-    [contacts,deals,tasks,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao]=await Promise.all([
-      dbSelect('contacts',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('deals',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('tasks',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('profiles',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('clientes',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('fornecedores',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('pessoas',`company_id=eq.${cid}${unitFilter()}`).catch(()=>[]),
-      dbSelect('rh_funcoes',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('rh_horarios',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelectAll('faturamento',`company_id=eq.${cid}${unitFilterEmpresa()}`).catch(()=>[]),
-      dbSelect('tabelas_tarifarias',`company_id=eq.${cid}&or=(status.is.null,status.neq.historico)`).catch(()=>[]),
-      dbSelect('representantes',`company_id=eq.${cid}`).catch(()=>[]),
-      dbSelect('propostas',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-      dbSelect('tarifario_padrao',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
+  if(role==='admin'&&!cid){
+    [contacts,deals,tasks,companies,profiles,clientes,fornecedores,pessoas,rhFuncoes,rhHorarios,faturamento,tabelasTarifarias,representantes,propostas,tarifarioPadrao,userCompanies]=await Promise.all([
+      dbSelect('contacts','select=*'),
+      dbSelect('deals','select=*'),
+      dbSelect('tasks','select=*'),
+      dbSelect('companies','select=*'),
+      dbSelect('profiles','select=*'),
+      dbSelect('clientes','select=*'),
+      dbSelect('fornecedores','select=*'),
+      dbSelect('pessoas','select=*'),
+      dbSelect('rh_funcoes','select=*'),
+      dbSelect('rh_horarios','select=*'),
+      dbSelectAll('faturamento','select=*'),
+      dbSelect('tabelas_tarifarias','select=*&or=(status.is.null,status.neq.historico)'),
+      dbSelect('representantes','select=*'),
+      dbSelect('propostas','select=*&order=created_at.desc'),
+      dbSelect('tarifario_padrao','select=*&order=created_at.desc'),
+      dbSelect('user_companies','select=*'),
     ]);
-    workflowConfig=await dbSelect('workflow_config',`company_id=eq.${cid}`).catch(()=>[]); try{ await wfCarregar(cid); }catch(_wf){}
-    await loadUserUnits().catch(e=>console.warn('loadUserUnits:',e));
-    contasReceber=await dbSelectAll('contas_receber',`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`).catch(()=>[]);
-    contasPagar=await dbSelectAll('contas_pagar',`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
-    [comprasSolicitacoes,comprasCotacoes,comprasPedidos]=await Promise.all([
-      dbSelect('compras_solicitacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-      dbSelect('compras_cotacoes',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-      dbSelect('compras_pedidos',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-    ]);
-    // Módulos de RH/SST (faltavam neste ramo → causavam "some tudo" para adm/gestor)
-    await loadRHFerias().catch(e=>console.warn('loadRHFerias:',e));
-    rhExperiencia = await dbSelect('rh_experiencia',`company_id=eq.${cid}&order=data_fim.asc`).catch(()=>[]);
-    qualDocumentos = await dbSelect('qualidade_documentos',`company_id=eq.${cid}&order=codigo.asc`).catch(()=>[]);
-    qualRevisoes   = await dbSelect('qualidade_revisoes',`company_id=eq.${cid}&order=numero_rev.desc`).catch(()=>[]);
-    rhCiclos = await dbSelect('rh_ciclos_avaliacao',`company_id=eq.${cid}&order=ano.desc,mes.desc`).catch(()=>[]);
-    await verificarAbrirCiclo().catch(e=>console.warn('verificarAbrirCiclo:',e));
-    setTimeout(verificarAlertasFerias,2000);
-    rhAvaliacoes=await dbSelect('rh_avaliacoes',`company_id=eq.${cid}&order=data_avaliacao.desc`).catch(()=>[]);
-    [fatProgramacao, gruposClientes] = await Promise.all([
-      dbSelect('fat_programacao',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]),
-      dbSelect('grupos_clientes',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]),
-    ]);
-    orcamentoReceitas=await dbSelect('orcamento_receitas',`company_id=eq.${cid}${unitFilter()}&order=ano.asc,mes.asc`).catch(()=>[]);
-    dresProjeto=await dbSelect('dre_projeto',`company_id=eq.${cid}${unitFilter()}`).catch(()=>[]);
-    dreAvulso=await dbSelect('dre_avulso',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
-    await loadOrgData(cid).catch(e=>console.warn('loadOrgData:',e));
-    await loadEpiData(cid).catch(e=>console.warn('loadEpiData:',e));
-    await loadExameData(cid).catch(e=>console.warn('loadExameData:',e));
-    await loadAgendamentosData(cid).catch(e=>console.warn('loadAgendamentosData:',e));
-    await loadDisciplinarData(cid).catch(e=>console.warn('loadDisciplinarData:',e));
-    await loadCapasData(cid).catch(e=>console.warn('loadCapasData:',e));
-    await loadWmsData(cid).catch(e=>console.warn('loadWmsData:',e));
-    historicoProfissional=await dbSelect('historico_profissional',`company_id=eq.${cid}`).catch(()=>[]);
+    workflowConfig=await dbSelect('workflow_config',cid?`company_id=eq.${cid}`:'select=*'); try{ await wfCarregar(cid); }catch(_wf){}
+    contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc');
+    contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}&order=vencimento.asc`:'select=*&order=vencimento.asc').catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
+  } else if((role==='admin'||role==='gestor'||role==='adm'||role==='operacao'||role==='rh'||role==='controladoria'||role==='qualidade'||role==='manutencao'||role==='customer_service')&&cid){
+    // v1.0.1255: base em paralelo → módulo da tela que vai abrir → splash sai → resto em segundo plano
+    _modCid=cid; _modGating=true; modLimpar();
+    await modBaseCarregar(cid,role);
+    var _alvo=modDaPagina(modPaginaAlvo(role));
+    if(_alvo) await modGarantir(_alvo);
+    bootRelatorio('tela liberada'+(_alvo?' (módulo '+_alvo+')':''));
+    modCarregarResto(_alvo);
   } else if(role==='portaria'&&cid){
     [profiles,pessoas,rhFuncoes]=await Promise.all([
       dbSelect('profiles',`company_id=eq.${cid}`),
@@ -5420,7 +5626,7 @@ async function loadData(){
     contasReceber=await dbSelectAll('contas_receber',cid?`company_id=eq.${cid}${unitFilterEmpresa()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`);
     contasPagar=await dbSelectAll('contas_pagar',cid?`company_id=eq.${cid}${unitFilter()}&order=vencimento.asc`:`owner_id=eq.${uid}&order=vencimento.asc`).catch(()=>[]); contasPagar=await cpComRateio(contasPagar,cid);   // v1.0.1038: corpo dos títulos
   }
-  if(cid){ try{ await loadPortariaData(cid); }catch(e){ console.warn('portaria load',e); } }
+  if(cid&&!_modGating){ try{ await loadPortariaData(cid); }catch(e){ console.warn('portaria load',e); } }
   // Garante que o usuário logado está sempre no array de profiles
   if(cu&&profile&&!profiles.find(p=>p.id===cu.id)){
     profiles=[profile,...profiles];
@@ -5800,6 +6006,8 @@ function wmsListaProg(listaId){
 function render(){ return wmsIdxEscopo(render_i); }
 function render_i(){
   const c=ge('content');if(!c)return;
+  var _mg=modDaPagina(curPage);   // v1.0.1255: boot em dois tempos
+  if(_mg&&_modGating&&!_modPronto[_mg]&&company&&company.id){ modGarantir(_mg); c.innerHTML=modPlaceholder(_mg); return; }
   if(typeof helpdeskFabSync==='function')helpdeskFabSync();
   // Guard: bloqueia render de telas sem permissão
   const _rRole=profile?.role||'vendedor';
@@ -34830,40 +35038,41 @@ async function loadWmsData(cid){
     wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(t=>!_exc.has(t.pedido_id));
     wmsListaPedidos=(wmsListaPedidos||[]).filter(lp=>!_exc.has(lp.pedido_id));
   }
-  try{ wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${cid}&status=eq.pendente&order=created_at.asc`); }catch(e){ wmsContraOrdens=[]; }
-  wmsRomaneios=await dbSelectAll('wms_romaneios',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]);
-  wmsEntradas=await dbSelectAll('wms_entradas',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]);
-  wmsEntradaItens=await dbSelectAll('wms_entrada_itens',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsProdutoDepara=await dbSelectAll('wms_produto_depara',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsAtributos=await dbSelectAll('wms_atributos',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]);
-  wmsProdutoAtributos=await dbSelectAll('wms_produto_atributos',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsTarefasConfEnt=await dbSelectAll('wms_tarefas_conf_entrada',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsConfEntItens=await dbSelectAll('wms_conf_entrada_itens',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsUnidades=await dbSelectAll('wms_unidades',`company_id=eq.${cid}&order=ordem.asc`).catch(()=>[]);
-  wmsPallets=await dbSelectAll('wms_pallets',`company_id=eq.${cid}&order=rg.desc`).catch(()=>[]);
-  wmsPalletConteudo=await dbSelectAll('wms_pallet_conteudo',`company_id=eq.${cid}&status=eq.ativo`).catch(()=>[]);
-  wmsDescargas=await dbSelectAll('wms_descargas',`company_id=eq.${cid}`).catch(()=>[]);
-  wmsOperadores=await dbSelectAll('wms_operadores',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
-  wmsDocas=await dbSelectAll('wms_docas',`company_id=eq.${cid}${unitFilter()}&order=galpao.asc,doca.asc`).catch(()=>[]);
-  wmsPalletTipos=await dbSelectAll('wms_pallet_tipos',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
-  wmsEnderecoMascaras=await dbSelectAll('wms_endereco_mascaras',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
-  // Regras de armazenagem: tabelas podem ainda não existir no banco —
-  // nada aqui pode derrubar o carregamento do sistema.
-  try{ wmsRegrasArm  =await dbSelectAll('wms_regras_armazenagem',`company_id=eq.${cid}&order=peso.desc,nome.asc`); }catch(e){ wmsRegrasArm=[]; }
-  try{ wmsRegraFaixas=await dbSelectAll('wms_regra_faixas',`company_id=eq.${cid}`); }catch(e){ wmsRegraFaixas=[]; }
-  try{ wmsRegraItens =await dbSelectAll('wms_regra_itens',`company_id=eq.${cid}`); }catch(e){ wmsRegraItens=[]; }
-  wmsPatio=await dbSelectAll('wms_patio',`company_id=eq.${cid}${unitFilter()}&order=chegada_em.desc`).catch(()=>[]);
-  wmsTransportadoras=await dbSelectAll('wms_transportadoras',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
-  wmsMotoristas=await dbSelectAll('wms_motoristas',`company_id=eq.${cid}&order=nome.asc`).catch(()=>[]);
-  wmsEventos=await dbSelectAll('wms_eventos',`company_id=eq.${cid}&status=eq.aberto&order=chegada_em.desc`).catch(()=>[]);
-  [wmsConferencias,wmsPalletsEmbarque,wmsPalletItens,wmsEtiquetas,wmsPrismas,wmsLeituras]=await Promise.all([
-    dbSelectAll('wms_conferencias',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
-    dbSelectAll('wms_pallets_embarque',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`).catch(()=>[]),
-    dbSelectAll('wms_pallet_itens',`company_id=eq.${cid}`).catch(()=>[]),
-    dbSelectAll('wms_etiquetas',`company_id=eq.${cid}&order=created_at.desc`).catch(()=>[]),
-    dbSelectAll('wms_prismas_caminhao',`company_id=eq.${cid}${unitFilter()}&order=codigo.asc`).catch(()=>[]),
-    wmsLeiturasCarregar(cid).catch(()=>[]),   // v1.0.1099: só as leituras dos pedidos em andamento + unitização recente
-  ]);
+  // v1.0.1255: as 29 leituras abaixo eram uma fila de esperas; agora saem em lotes de 8 em paralelo.
+  var _u=unitFilter();
+  var q=function(tab,f,cb){ return function(){ return dbSelectAll(tab,f).catch(function(){ return []; }).then(function(v){ cb(v||[]); }); }; };
+  await paralelo([
+    q('wms_contra_ordens',`company_id=eq.${cid}&status=eq.pendente&order=created_at.asc`,function(v){wmsContraOrdens=v;}),
+    q('wms_romaneios',`company_id=eq.${cid}${_u}&order=created_at.desc`,function(v){wmsRomaneios=v;}),
+    q('wms_entradas',`company_id=eq.${cid}&order=created_at.desc`,function(v){wmsEntradas=v;}),
+    q('wms_entrada_itens',`company_id=eq.${cid}`,function(v){wmsEntradaItens=v;}),
+    q('wms_produto_depara',`company_id=eq.${cid}`,function(v){wmsProdutoDepara=v;}),
+    q('wms_atributos',`company_id=eq.${cid}&order=ordem.asc`,function(v){wmsAtributos=v;}),
+    q('wms_produto_atributos',`company_id=eq.${cid}`,function(v){wmsProdutoAtributos=v;}),
+    q('wms_tarefas_conf_entrada',`company_id=eq.${cid}`,function(v){wmsTarefasConfEnt=v;}),
+    q('wms_conf_entrada_itens',`company_id=eq.${cid}`,function(v){wmsConfEntItens=v;}),
+    q('wms_unidades',`company_id=eq.${cid}&order=ordem.asc`,function(v){wmsUnidades=v;}),
+    q('wms_pallets',`company_id=eq.${cid}&order=rg.desc`,function(v){wmsPallets=v;}),
+    q('wms_pallet_conteudo',`company_id=eq.${cid}&status=eq.ativo`,function(v){wmsPalletConteudo=v;}),
+    q('wms_descargas',`company_id=eq.${cid}`,function(v){wmsDescargas=v;}),
+    q('wms_operadores',`company_id=eq.${cid}&order=nome.asc`,function(v){wmsOperadores=v;}),
+    q('wms_docas',`company_id=eq.${cid}${_u}&order=galpao.asc,doca.asc`,function(v){wmsDocas=v;}),
+    q('wms_pallet_tipos',`company_id=eq.${cid}&order=nome.asc`,function(v){wmsPalletTipos=v;}),
+    q('wms_endereco_mascaras',`company_id=eq.${cid}&order=nome.asc`,function(v){wmsEnderecoMascaras=v;}),
+    q('wms_regras_armazenagem',`company_id=eq.${cid}&order=peso.desc,nome.asc`,function(v){wmsRegrasArm=v;}),   // tabelas podem não existir: cai em []
+    q('wms_regra_faixas',`company_id=eq.${cid}`,function(v){wmsRegraFaixas=v;}),
+    q('wms_regra_itens',`company_id=eq.${cid}`,function(v){wmsRegraItens=v;}),
+    q('wms_patio',`company_id=eq.${cid}${_u}&order=chegada_em.desc`,function(v){wmsPatio=v;}),
+    q('wms_transportadoras',`company_id=eq.${cid}&order=nome.asc`,function(v){wmsTransportadoras=v;}),
+    q('wms_motoristas',`company_id=eq.${cid}&order=nome.asc`,function(v){wmsMotoristas=v;}),
+    q('wms_eventos',`company_id=eq.${cid}&status=eq.aberto&order=chegada_em.desc`,function(v){wmsEventos=v;}),
+    q('wms_conferencias',`company_id=eq.${cid}&order=created_at.desc`,function(v){wmsConferencias=v;}),
+    q('wms_pallets_embarque',`company_id=eq.${cid}${_u}&order=created_at.desc`,function(v){wmsPalletsEmbarque=v;}),
+    q('wms_pallet_itens',`company_id=eq.${cid}`,function(v){wmsPalletItens=v;}),
+    q('wms_etiquetas',`company_id=eq.${cid}&order=created_at.desc`,function(v){wmsEtiquetas=v;}),
+    q('wms_prismas_caminhao',`company_id=eq.${cid}${_u}&order=codigo.asc`,function(v){wmsPrismas=v;}),
+    function(){ return wmsLeiturasCarregar(cid).catch(function(){ return []; }).then(function(v){ wmsLeituras=v||[]; }); },   // v1.0.1099: só leituras em andamento + unitização recente
+  ],8);
   // Backfill: recalcula totais de pedidos importados que ainda não têm (uma vez)
   wmsBackfillTotais(cid);
 }
