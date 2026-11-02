@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1260 | Gerado: 2026-11-02 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1261 | Gerado: 2026-11-02 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -348,7 +348,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .hm-k .s{color:var(--text3);font-size:11px;margin-top:2px}
 .hm-k .d{font-size:11px;font-weight:600;margin-left:6px}
 .hm-up{color:var(--green-text)}.hm-dn{color:var(--red-text)}
-.hm-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.hm-resumo{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .hm-resumo .n{font-size:26px;letter-spacing:-.6px}
 .hm-resumo .hm-card{padding:16px 18px}
 .hm-2{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px}
@@ -367,7 +367,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .hm-tbl th:first-child,.hm-tbl td:first-child{text-align:left;padding-left:0}.hm-tbl td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
 .hm-tbl tr:last-child td{border-bottom:none}.hm-tbl tr.go{cursor:pointer}.hm-tbl tr.go:hover td{background:var(--bg2)}
 .hm-vazio{color:var(--text3);font-size:12px;padding:18px 0;text-align:center}
-@media (max-width:900px){.hm-resumo,.hm-2,.hm-plantas,.hm-charts{grid-template-columns:1fr}.hm-5{grid-template-columns:repeat(2,minmax(0,1fr))}.hm-k4{grid-template-columns:repeat(2,minmax(0,1fr))}.hm-3{grid-template-columns:1fr}}
+@media (max-width:900px){.hm-resumo{grid-template-columns:repeat(2,minmax(0,1fr))}.hm-2,.hm-plantas,.hm-charts{grid-template-columns:1fr}.hm-5{grid-template-columns:repeat(2,minmax(0,1fr))}.hm-k4{grid-template-columns:repeat(2,minmax(0,1fr))}.hm-3{grid-template-columns:1fr}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -1427,7 +1427,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1260';
+const APP_VERSION='v1.0.1261';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5379,6 +5379,8 @@ var _MODULOS={
       function(){ return dbSelect('dre_projeto',`company_id=eq.${cid}${unitFilter()}`); },
       function(){ return dbSelect('dre_avulso',`company_id=eq.${cid}${unitFilter()}&order=created_at.desc`); },
       function(){ return modGarantir('capas'); },
+      function(){ return dbSelect('dfc_blocos',`company_id=eq.${cid}&order=ordem.asc`).then(function(v){ if(v&&v.length) dfcBlocos=v; }); },   // v1.0.1261: Home separa investimento pelo grupo do bloco
+      function(){ return dbSelect('dfc_contas',`company_id=eq.${cid}&order=ordem.asc`).then(function(v){ if(v&&v.length) dfcContas=v; }); },
     ],8);
     faturamento=r[0]||[]; fatProgramacao=r[1]||[]; contasReceber=r[2]||[]; orcamentoReceitas=r[4]||[]; dresProjeto=r[5]||[]; dreAvulso=r[6]||[];
     contasPagar=await cpComRateio(r[3]||[],cid);   // v1.0.1038: corpo dos títulos
@@ -5446,7 +5448,7 @@ async function modCarregarResto(alvo){
 // Ao trocar de empresa, nada da anterior pode sobrar em memória enquanto os módulos novos não chegam.
 function modLimpar(){
   _modPronto={}; _modPromessa={};
-  faturamento=[]; fatProgramacao=[]; contasReceber=[]; contasPagar=[]; orcamentoReceitas=[]; dresProjeto=[]; dreAvulso=[];
+  faturamento=[]; fatProgramacao=[]; contasReceber=[]; contasPagar=[]; orcamentoReceitas=[]; dresProjeto=[]; dreAvulso=[]; dfcBlocos=[]; dfcContas=[];
   capasProcesso=[]; comprasSolicitacoes=[]; comprasCotacoes=[]; comprasPedidos=[];
   rhAvaliacoes=[]; rhExperiencia=[]; qualDocumentos=[]; qualRevisoes=[]; rhCiclos=[]; historicoProfissional=[]; exameAgendamentos=[];
   wmsPedidos=[]; wmsPedidoItens=[]; wmsProdutos=[]; wmsListasSeparacao=[]; wmsListaPedidos=[]; wmsTarefasSeparacao=[]; wmsRomaneios=[];
@@ -14218,6 +14220,10 @@ function hmFatValor(f){ return +(f.valor_total!=null?f.valor_total:f.total)||0; 
 function hmFatData(f){ return hmData(f.data_emissao||f.competencia||f.created_at); }
 function hmFatConta(f){ return f.status&&['rascunho','cancelado','cancelada','excluido'].indexOf(f.status)<0; }
 function hmCpPago(c){ return c.status==='pago'||c.status==='pago_atraso'; }
+// v1.0.1261: quanto de um título é investimento (conta DFC em bloco do grupo 'Investimento')
+var _hmInvCache=null;
+function hmContasInvest(){ if(_hmInvCache) return _hmInvCache; var bl={}; (dfcBlocos||[]).forEach(function(b){ if(String(b.grupo||'').toLowerCase()==='investimento'||/invest|capex|imobiliz/i.test(b.nome||'')) bl[b.id]=1; }); var ct={}; (dfcContas||[]).forEach(function(c){ if(bl[c.bloco_id]) ct[c.id]=1; }); return (_hmInvCache=ct); }
+function hmCpInvest(cp){ var ct=hmContasInvest(); var v=0; try{ cpLinhas(cp).forEach(function(l){ if(l.dfc_conta_id&&ct[l.dfc_conta_id]) v+=(+l.valor||0); }); }catch(e){ if(cp.dfc_conta_id&&ct[cp.dfc_conta_id]) v=+cp.valor||0; } return v; }
 function hmUnits(){ var u=(userUnits||[]).filter(function(x){ return x&&x.id; }); return u.length?u:[{id:null,name:company&&company.nome||'Unidade'}]; }
 function hmUnitNome(u){ return u.name||u.nome||u.codigo||'Unidade'; }
 function hmPedidoVenceEm(p){ var d=hmData(p.created_at); if(!d||!p.validade_dias) return null; d.setDate(d.getDate()+(+p.validade_dias||0)); return d; }
@@ -14236,16 +14242,18 @@ function rHome(){
 
   // ── Resumo do ano ─────────────────────────────────────────────────────────────────────────────
   if(podeFin){
-    var fatAno=0,fatAnt=0,fatMes=0,pagAno=0,pagAnt=0,pagMes=0, limAnt=new Date(ano-1,hoje.getMonth(),hoje.getDate(),23,59,59);
+    _hmInvCache=null;
+    var fatAno=0,fatAnt=0,fatMes=0,pagAno=0,pagAnt=0,pagMes=0,invAno=0,invAnt=0,invMes=0, limAnt=new Date(ano-1,hoje.getMonth(),hoje.getDate(),23,59,59);
     (faturamento||[]).forEach(function(f){ if(!hmFatConta(f)) return; var d=hmFatData(f); if(!d) return; var v=hmFatValor(f);
       if(d.getFullYear()===ano){ fatAno+=v; if(hmMesmoMes(d,hoje)) fatMes+=v; } else if(d.getFullYear()===ano-1&&d<=limAnt) fatAnt+=v; });
-    (contasPagar||[]).forEach(function(c){ if(!hmCpPago(c)) return; var d=hmData(c.data_pagamento||c.vencimento); if(!d) return; var v=+c.valor||0;
-      if(d.getFullYear()===ano){ pagAno+=v; if(hmMesmoMes(d,hoje)) pagMes+=v; } else if(d.getFullYear()===ano-1&&d<=limAnt) pagAnt+=v; });
-    var cx=fatAno-pagAno, cxMes=fatMes-pagMes, mesNome=hoje.toLocaleDateString('pt-BR',{month:'long'});
+    (contasPagar||[]).forEach(function(c){ if(!hmCpPago(c)) return; var d=hmData(c.data_pagamento||c.vencimento); if(!d) return; var v=+c.valor||0, inv=hmCpInvest(c), desp=v-inv;
+      if(d.getFullYear()===ano){ pagAno+=desp; invAno+=inv; if(hmMesmoMes(d,hoje)){ pagMes+=desp; invMes+=inv; } } else if(d.getFullYear()===ano-1&&d<=limAnt){ pagAnt+=desp; invAnt+=inv; } });
+    var cx=fatAno-pagAno, cxMes=fatMes-pagMes, sobra=cx-invAno, mesNome=hoje.toLocaleDateString('pt-BR',{month:'long'});
     h+='<section class="hm-g"><div class="hm-h">'+ano+' até agora · janeiro a '+mesNome+'</div><div class="hm-resumo">'
       +'<div class="hm-card go hm-k" onclick="pg(\'faturamento\')"><div class="l">Total faturado</div><div class="n">'+hmMil(fatAno)+hmDelta(fatAno,fatAnt)+'</div><div class="s">'+(fatAnt?'vs. mesmo período de '+(ano-1)+' · ':'')+mesNome+' '+hmMil(fatMes)+' até aqui</div></div>'
-      +'<div class="hm-card go hm-k" onclick="pg(\'contas-pagar\')"><div class="l">Total pago · despesas</div><div class="n">'+hmMil(pagAno)+hmDelta(pagAno,pagAnt,true)+'</div><div class="s">'+(pagAnt?'vs. mesmo período de '+(ano-1)+' · ':'')+mesNome+' '+hmMil(pagMes)+' até aqui</div></div>'
-      +'<div class="hm-card hm-k"><div class="l">Geração de caixa</div><div class="n" style="color:var(--'+(cx>=0?'green':'red')+'-text)">'+hmMil(cx)+'</div><div class="s">faturado − pago · '+(fatAno?Math.round(cx/fatAno*100)+'% do faturado · ':'')+mesNome+' '+hmMil(cxMes)+'</div></div>'
+      +'<div class="hm-card go hm-k" onclick="pg(\'contas-pagar\')"><div class="l">Total pago · despesas</div><div class="n">'+hmMil(pagAno)+hmDelta(pagAno,pagAnt,true)+'</div><div class="s">sem investimentos · '+(pagAnt?'vs. '+(ano-1)+' · ':'')+mesNome+' '+hmMil(pagMes)+'</div></div>'
+      +'<div class="hm-card go hm-k" onclick="pg(\'contas-pagar\')"><div class="l">Investimentos</div><div class="n" style="color:var(--blue-text)">'+hmMil(invAno)+hmDelta(invAno,invAnt,true)+'</div><div class="s">'+(Object.keys(hmContasInvest()).length?'contas do bloco Investimento no DFC · ':'nenhum bloco do DFC marcado como Investimento · ')+mesNome+' '+hmMil(invMes)+'</div></div>'
+      +'<div class="hm-card hm-k"><div class="l">Geração de caixa</div><div class="n" style="color:var(--'+(cx>=0?'green':'red')+'-text)">'+hmMil(cx)+'</div><div class="s">faturado − despesas · '+(fatAno?Math.round(cx/fatAno*100)+'% · ':'')+'após investimentos <b style="color:var(--'+(sobra>=0?'green':'red')+'-text)">'+hmMil(sobra)+'</b> · '+mesNome+' '+hmMil(cxMes)+'</div></div>'
       +'</div></section>';
   }
 
@@ -14331,9 +14339,9 @@ function rHome(){
     var idx=function(d){ if(!d) return -1; for(var j=0;j<12;j++) if(hmMesmoMes(d,meses[j])) return j; return -1; };
     var rec=meses.map(function(){ return 0; }), desp=meses.map(function(){ return 0; });
     (faturamento||[]).forEach(function(f){ if(!hmFatConta(f)) return; var j=idx(hmFatData(f)); if(j>=0) rec[j]+=hmFatValor(f); });
-    (contasPagar||[]).forEach(function(c){ if(c.status==='cancelado') return; var j=idx(hmData(c.competencia||c.vencimento)); if(j>=0) desp[j]+=(+c.valor||0); });
+    (contasPagar||[]).forEach(function(c){ if(c.status==='cancelado') return; var j=idx(hmData(c.competencia||c.vencimento)); if(j>=0) desp[j]+=(+c.valor||0)-hmCpInvest(c); });   // sem investimento
     h+='<div class="hm-charts"><div class="hm-card"><div class="hm-ct">Receita</div><div class="hm-chart"><canvas id="hm-c-rec"></canvas></div><div class="hm-foot">últimos 12 meses · todas as unidades · faturamento por data de emissão</div></div>'
-      +'<div class="hm-card"><div class="hm-ct">Despesa</div><div class="hm-chart"><canvas id="hm-c-desp"></canvas></div><div class="hm-foot">últimos 12 meses · todas as unidades · contas a pagar por competência</div></div></div></section>';
+      +'<div class="hm-card"><div class="hm-ct">Despesa</div><div class="hm-chart"><canvas id="hm-c-desp"></canvas></div><div class="hm-foot">últimos 12 meses · todas as unidades · contas a pagar por competência, sem investimentos</div></div></div></section>';
     pend.push({id:'hm-c-rec',area:'green',labels:labels,data:rec.map(function(v){ return Math.round(v); })});
     pend.push({id:'hm-c-desp',area:'red',labels:labels,data:desp.map(function(v){ return Math.round(v); })});
   }
