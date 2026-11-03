@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1266 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1267 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1266';
+const APP_VERSION='v1.0.1267';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38136,14 +38136,24 @@ async function wmsGerarListas(tipo){
         if(wmsSaldoVerus(p.cliente_id)){
           // v1.0.1110: depositante com saldo no VERUS — empenha primeiro e cada RG empenhado vira UMA tarefa
           // (caixa inteira = volume cheio; retirada parcial = fração com a quantidade). O que faltar vira tarefa "SEM SALDO".
+          // v1.0.1267: reserva antiga presa em pallet morto/expedido/sem endereço (ex.: pré-reserva feita antes de uma carga de saldo) → solta antes de empenhar
+          try{
+            const r0=(await dbSelect('wms_reservas','pedido_id=eq.'+p.id+'&status=eq.reservada&select=pallet_id').catch(()=>[]))||[];
+            const ids0=[...new Set(r0.map(x=>x.pallet_id).filter(Boolean))];
+            if(ids0.length){
+              let pp=[]; for(let k=0;k<ids0.length;k+=150) pp=pp.concat((await dbSelect('wms_pallets','id=in.('+ids0.slice(k,k+150).join(',')+')&select=id,status,endereco_codigo').catch(()=>[]))||[]);
+              if(pp.length<ids0.length||pp.some(x=>x.status==='morto'||x.status==='expedido'||!x.endereco_codigo)){ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); console.warn('[listas] reservas antigas soltas antes do empenho:',p.numero_pedido); }
+            }
+          }catch(_e){}
           let empR=null; try{ empR=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:p.id}); }catch(eE){ empR={erro:eE.message||String(eE)}; }
           empenhos.push({p,r:empR});
-          // v1.0.1215: pedido do SAP com saldo parcial NÃO vai para separação — desfaz o empenho, trava e avisa (Torre + grupo do cliente)
-          if(p.origem==='sap_b1' && empR && !empR.erro && Number(empR.faltou_total||0)>0){
+          // v1.0.1215 → v1.0.1267: pedido com saldo parcial NÃO vai para separação (qualquer origem, não só SAP) — desfaz o empenho, trava e avisa
+          if(empR && !empR.erro && Number(empR.faltou_total||0)>0){
             try{ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); }catch(_e){}
             try{ await dbUpdate('wms_pedidos',p.id,{status:'aguardando_saldo'}); p.status='aguardando_saldo'; }catch(_e){}
-            sapAcao('aviso_saldo',{pedido_id:p.id});
-            empenhos.pop(); pulados.push((p.numero_curto||p.numero_pedido||p.id)+' (sem saldo completo: travado e avisado)'); continue;
+            if(p.origem==='sap_b1') sapAcao('aviso_saldo',{pedido_id:p.id});
+            const _fal=(empR.itens||[]).filter(x=>Number(x.faltou)>0).map(x=>x.sku+' falta '+Number(x.faltou).toLocaleString('pt-BR')+(Number(x.retido_shelf_life)>0?' ('+Number(x.retido_shelf_life).toLocaleString('pt-BR')+' retido por validade)':''));
+            empenhos.pop(); pulados.push((p.numero_curto||p.numero_pedido||p.id)+' — SEM SALDO COMPLETO, não gerado (pedido em "aguardando saldo"): '+_fal.join(' · ')); continue;
           }
           const res=(await dbSelect('wms_reservas','pedido_id=eq.'+p.id+'&status=eq.reservada&order=created_at.asc').catch(()=>[]))||[];
           const pids=[...new Set(res.map(r=>r.pallet_id))], pals={}, conts={};
@@ -38261,7 +38271,7 @@ async function wmsGerarListas(tipo){
     portModal('Listas geradas',`
       <div style="font-size:14px;margin-bottom:8px"><b>${criadas.length}</b> lista(s) de separação gerada(s)${nums.length?` — ${nums[0]}${nums.length>1?' a '+nums[nums.length-1]:''}`:''}.</div>
       ${empHtml}
-      ${pulados.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${pulados.length} pedido(s) pulado(s) por já terem lista vinculada: ${pulados.slice(0,8).join(', ')}${pulados.length>8?' +'+(pulados.length-8):''}</div>`:''}
+      ${pulados.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${pulados.length} pedido(s) sem lista gerada:<br>${pulados.slice(0,8).map(x=>'• '+esc(String(x))+(String(x).indexOf(' ')<0?' (já tinha lista vinculada)':'')).join('<br>')}${pulados.length>8?'<br>+'+(pulados.length-8):''}</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button>`:''}
         <button class="btn" onclick="portClose();pg('wms-separacao')">Ver listas →</button>
