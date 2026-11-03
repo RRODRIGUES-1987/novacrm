@@ -812,7 +812,7 @@
       </div>
       <div class="row fgroup hide" id="agdTrBox">
         <div><label for="agdTrNome">Transportadora</label><input id="agdTrNome" placeholder="Nome da transportadora"></div>
-        <div><label for="agdTrCt">WhatsApp ou e-mail da transportadora</label><input id="agdTrCt" placeholder="(11) 90000-0000 ou email@transp.com.br"></div>
+        <div><label for="agdTrCt">E-mail (ou WhatsApp) do contato da transportadora</label><input id="agdTrCt" placeholder="(11) 90000-0000 ou email@transp.com.br"></div>
       </div>
       <div class="row fgroup agd-mot">
         <div><label for="agdVeic">Tipo de veículo</label>
@@ -828,7 +828,11 @@
         <div><label for="agdTransp">Transportadora (opcional)</label><input id="agdTransp"></div>
         <div><label for="agdVol">Volumes (opcional)</label><input id="agdVol" type="number" min="1" inputmode="numeric"></div>
       </div>
-      <div class="fgroup">
+      <div class="fgroup hide" id="agdPedsBox">
+        <label>Pedidos a carregar <span class="hint" style="font-weight:400">· aptos = nota ligada e sem pendência</span></label>
+        <div id="agdPeds"></div>
+      </div>
+      <div class="fgroup" id="agdPedidoBox">
         <label for="agdPedido">Vincular a um pedido (opcional)</label>
         <select id="agdPedido"><option value="">Sem vínculo — informar depois</option></select>
         <div class="hint">Dá para associar a nota/pedido mais tarde, quando o documento existir.</div>
@@ -3166,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.2';   // v1.8.2: quadro único de pedidos com a nota (e a DANFE) na linha; resultado do envio em caixa de diálogo
+const PORTAL_VERSION = 'v1.8.3';   // v1.8.3: agendamento de saída com os pedidos a carregar (aptos = nota ligada); e-mail automático para a transportadora informar o motorista
+// v1.8.2: quadro único de pedidos com a nota (e a DANFE) na linha; resultado do envio em caixa de diálogo
 // v1.8.1: notas de venda aceitam XML + DANFE (PDF) juntos; a DANFE fica no pedido para a cópia do motorista e o bipe da portaria
 // v1.8.0: home conta os pedidos REAIS do WMS; volumes ao vivo e situação de cada pedido (aguardando saldo/separação)
 // v1.7.9: tela de pedidos sem os filtros e a lista vazia herdados do demo (Valeo)
@@ -4357,6 +4362,7 @@ function openAgd(){
   state.pedidos.filter(p=>['enviado','em_analise','aprovado'].includes(p.status))
     .forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=`${p.protocolo} · ${p.tipo==='entrada'?'Entrada':'Saída'}${p.nf_numero?' · NF '+p.nf_numero:''}`; sel.appendChild(o); });
   agd.op=null; agd.por='cliente'; ['agdTrNome','agdTrCt'].forEach(i=>{ if($(i)) $(i).value=''; }); agdPor('cliente'); agdOpsMontar(); renderDias(); renderSlots();
+  agd.peds=[]; agdPedsRender();
   restoreFoot('agd'); openModal('mAgd');
 }
 
@@ -4624,7 +4630,29 @@ window.volFatDet = function(i){
     </tbody></table></div><p class="hint" style="margin-top:10px">Cada caixa inteira do estoque sai como 1 volume; o que sai de caixa aberta vai em pacotes, numa caixa de embarque por produto (sem caixa mista). "Estimado" usa o estoque disponível no momento; "confirmado" usa as caixas já reservadas para o pedido.</p></div>
     <div class="modal-f"><button class="btn btn-primary" onclick="$('mVolFat').remove()">Fechar</button></div></div></div>`);
 };
-function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); }
+function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); agdPedsRender(); }
+if(typeof window.toast!=='function'){ window.toast=function(m){ const d=document.createElement('div'); d.textContent=m; d.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99999;background:#0A2540;color:#fff;border-radius:10px;padding:10px 16px;font-size:13px;max-width:90vw;box-shadow:0 6px 24px rgba(0,0,0,.25)'; document.body.appendChild(d); setTimeout(()=>d.remove(),5000); }; }
+// v1.8.3: pedidos aptos a carregar (saída) — o cliente marca o que vai nesta coleta; volumes e peso somam sozinhos
+async function agdPedsRender(){
+  const box=$('agdPedsBox'), el=$('agdPeds'), pb=$('agdPedidoBox'); if(!box||!el) return;
+  const real = !DEMO && agd.tipo==='saida';
+  box.classList.toggle('hide', !real); if(pb) pb.classList.toggle('hide', real);
+  if(!real) return;
+  el.innerHTML='<div class="hint">Carregando os pedidos aptos…</div>';
+  let L=[]; try{ const r=await sb.rpc('portal_pedidos_aptos'); if(r.error) throw r.error; L=r.data||[]; }catch(e){ el.innerHTML='<div class="hint" style="color:#b91c1c">Não consegui carregar os pedidos: '+esc(e.message||e)+'</div>'; return; }
+  agd.aptos=L; agd.peds=(agd.peds||[]).filter(id=>L.some(x=>x.id===id&&!x.agendado_em));
+  if(!L.length){ el.innerHTML='<div class="hint">Nenhum pedido apto agora (o pedido precisa estar em separação ou separado, com a nota ligada). Dá para agendar mesmo assim e vincular depois.</div>'; return; }
+  const n=v=>Number(v||0).toLocaleString('pt-BR');
+  const sel=L.filter(x=>agd.peds.includes(x.id)), vol=sel.reduce((a,x)=>a+(+x.volumes||0),0), pes=sel.reduce((a,x)=>a+(+x.peso_kg||0),0);
+  el.innerHTML=`<div class="tbl-wrap" style="border:1px solid var(--border,#e5e5e5);border-radius:10px"><table class="tbl"><thead><tr><th style="width:30px"></th><th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Vol.</th><th class="num">Peso</th></tr></thead><tbody>
+    ${L.map(x=>{ const ja=!!x.agendado_em, on=agd.peds.includes(x.id), p=String(x.pedido||'').split(' · ')[0];
+      return `<tr style="${ja?'color:#999':''}"><td><input type="checkbox" ${on?'checked':''} ${ja?'disabled':''} onchange="agdPedToggle('${x.id}',this.checked)"></td><td>${esc(p)}${x.nf?' · NF '+esc(x.nf):''}</td><td>${esc(x.destinatario||'—')}</td>
+        <td>${ja?'já em outro agendamento ('+esc(x.agendado_em)+')':(x.situacao==='separado'?'<span style="color:#166534">separado</span>':'<span style="color:#1e40af">em separação</span>')}</td>
+        <td class="num">${x.volumes!=null?n(x.volumes):'—'}</td><td class="num">${x.peso_kg?n(x.peso_kg)+' kg':'—'}</td></tr>`; }).join('')}
+    </tbody></table></div><div class="hint" style="margin-top:6px">${sel.length?`<b>${sel.length} pedido(s) · ${n(vol)} volume(s) · ${n(pes)} kg</b> · os volumes entram no agendamento e no romaneio`:'Marque os pedidos que vão nesta coleta.'}</div>`;
+  if(sel.length && $('agdVol')) $('agdVol').value = vol || '';
+}
+window.agdPedToggle=function(id,on){ agd.peds=(agd.peds||[]).filter(x=>x!==id); if(on) agd.peds.push(id); agdPedsRender(); };
 // v1.6.6: tipos de operação do cliente (vêm com os horários calculados pelo VERUS)
 function agdOpsMontar(){
   const box=$('agdOpBox'); if(!box) return;
@@ -5150,6 +5178,23 @@ function showDone(kind, protocolo, msg){
     try{
       const { data:a, error } = await sb.rpc('portal_agendar', { p: novo });
       if(error) throw error;
+      // v1.8.3: pedidos a carregar
+      if(novo.tipo==='saida' && (agd.peds||[]).length){
+        try{ const r=await sb.rpc('portal_agendar_pedidos', { p_agendamento:a.id, p_pedidos:agd.peds }); if(r.error) throw r.error;
+          if(r.data && r.data.recusados) toast('Não entraram (já em outro agendamento ou deixaram de estar aptos): '+r.data.recusados); }
+        catch(e1){ toast('Agendamento criado, mas os pedidos não foram vinculados: '+(e1.message||e1)); }
+      }
+      // v1.8.3: transportadora informa o motorista → e-mail automático com o link (WhatsApp continua pelo botão)
+      if(a.motorista_por==='transportadora' && /@/.test(String(a.transp_contato||'')) && a.transp_token){
+        try{
+          const url=agdLinkTransp(a), peds=(agd.aptos||[]).filter(x=>(agd.peds||[]).includes(x.id));
+          const html=`<p>Olá,</p><p><b>${esc(state.depositante||'')}</b> agendou uma <b>${a.tipo==='entrada'?'entrega':'coleta'}</b> na MK Logística (${esc(cdNome(a.cd))}) para <b>${esc(fmtDataLonga(a.data))}, ${esc(fmtHora(a.hora_inicio))}</b> · protocolo <b>${esc(a.protocolo||'')}</b>.</p>`
+            +(peds.length?`<p>Carga: ${peds.length} pedido(s), ${peds.reduce((s,x)=>s+(+x.volumes||0),0)} volume(s).</p>`:'')
+            +`<p>Informe o <b>motorista, o documento e a placa</b> neste link (sem login):<br><a href="${url}">${url}</a></p><p>A portaria só libera a entrada com os dados preenchidos.</p>`;
+          const { error:eM } = await sb.functions.invoke('send-email', { body:{ from:'MK Logística · Agendamentos <noreply@mklogistica.com>', to:[String(a.transp_contato).trim()], subject:`Agendamento ${a.protocolo} · informe o motorista e a placa`, html } });
+          if(eM) throw eM; toast('E-mail enviado para '+a.transp_contato);
+        }catch(eE){ toast('Não consegui enviar o e-mail automático — use o link abaixo para enviar.'); }
+      }
       await loadDados();
       if(a.motorista_por==='transportadora'){ showDone('agd', a.protocolo, (a.status==='confirmado'?'Agendamento CONFIRMADO':'Solicitação registrada')+` para ${fmtDataLonga(a.data)}, ${fmtHora(a.hora_inicio)} em ${cdNome(a.cd)}. Envie o link abaixo à transportadora para ela informar o motorista e a placa.`); const b=$('agdBody'); if(b){ const d=document.createElement('div'); d.innerHTML=agdLinkPainel(a); b.querySelector('.done') && b.querySelector('.done').appendChild(d); } return; }
       showDone('agd', a.protocolo, a.status==='confirmado'
