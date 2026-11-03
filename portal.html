@@ -579,7 +579,7 @@
     <section id="scrPed" class="hide">
       <div class="screen-h">
         <h2>Meus pedidos</h2>
-        <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" onclick="$('plFile').click()">📄 Subir planilha de pedidos</button>
+        <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" onclick="$('plFile').click()">📄 Subir planilha de pedidos</button><button class="btn btn-ghost nf-only" onclick="var f=$('nfFile'); if(f) f.click();">🧾 Enviar notas (XML + DANFE)</button>
         <input type="file" id="plFile" class="hide" accept=".xlsx,.xls" multiple onchange="plImportar(this.files);this.value=''">
         <button class="btn btn-primary" onclick="openPedido()">＋ Novo</button></span>
       </div>
@@ -3166,7 +3166,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.1';   // v1.8.1: notas de venda aceitam XML + DANFE (PDF) juntos; a DANFE fica no pedido para a cópia do motorista e o bipe da portaria
+const PORTAL_VERSION = 'v1.8.2';   // v1.8.2: quadro único de pedidos com a nota (e a DANFE) na linha; resultado do envio em caixa de diálogo
+// v1.8.1: notas de venda aceitam XML + DANFE (PDF) juntos; a DANFE fica no pedido para a cópia do motorista e o bipe da portaria
 // v1.8.0: home conta os pedidos REAIS do WMS; volumes ao vivo e situação de cada pedido (aguardando saldo/separação)
 // v1.7.9: tela de pedidos sem os filtros e a lista vazia herdados do demo (Valeo)
 // v1.7.8 →   // v1.7.8: detalhe dos volumes pelo estoque real (caixas inteiras + pacotes; estimado × confirmado)
@@ -4456,20 +4457,14 @@ window.rastBipes = async function(id, nome){
     <div class="modal-f"><button class="btn btn-primary" onclick="$('mRast').remove()">Fechar</button></div></div></div>`);
 };
 window.renderNfBox = function(){
+  // v1.8.2: só a faixa para soltar os arquivos — as notas aparecem na linha de cada pedido, no quadro de baixo
   const box = $('nfBox'); if(!box) return;
   if(state.nfs === null || DEMO){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
-  const L = state.nfs || [];
-  const st = s => s==='ligada' ? '<span style="color:#4d7a1a;font-weight:600">ligada ao pedido</span>' : s==='divergente' ? '<span style="color:#b45309;font-weight:600">ligada · divergente</span>' : '<span style="color:#b91c1c;font-weight:600">pedido não encontrado · MKLOG vai ligar</span>';
-  box.innerHTML = `<div id="nfDrop" style="border:1.5px dashed var(--border,#d4d4d4);border-radius:12px;padding:14px;text-align:center"
+  box.innerHTML = `<div id="nfDrop" style="border:1.5px dashed var(--border,#d4d4d4);border-radius:10px;padding:8px 12px;text-align:center;font-size:12.5px;color:var(--text2,#666)"
       ondragover="event.preventDefault();this.style.background='rgba(0,0,0,.03)'" ondragleave="this.style.background=''" ondrop="event.preventDefault();this.style.background='';nfEnviar(event.dataTransfer.files)">
-      <b>Notas de venda</b> · arraste aqui os XMLs <b>e as DANFEs (PDF)</b> — um ou vários — ou <button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="$('nfFile').click()">escolher arquivos</button>
-      <input type="file" id="nfFile" accept=".xml,text/xml,.pdf,application/pdf" multiple class="hide" onchange="nfEnviar(this.files);this.value=''">
-      <div class="hint" style="margin-top:4px">A MKLOG liga cada nota ao pedido pela OC do cliente. A DANFE (PDF) é casada com a nota pela chave de acesso e vai impressa com o motorista.</div>
-      <div id="nfRes" style="margin-top:8px;text-align:left"></div></div>
-    ${L.length?`<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>NF</th><th>Destinatário</th><th>Pedido</th><th class="num">Volumes</th><th>Situação</th></tr></thead><tbody>
-      ${L.slice(0,30).map(n=>`<tr><td>${esc(n.numero||'')}</td><td>${esc(n.dest_nome||'')}</td><td>${esc(n.pedido||'—')}</td><td class="num">${n.volumes!=null?Number(n.volumes).toLocaleString('pt-BR'):'—'}</td><td>${st(n.status)}${n.divergencias?'<div class="hint">'+esc(n.divergencias)+'</div>':''}</td></tr>`).join('')}
-      </tbody></table></div>`:''}`;
+      Solte aqui os <b>XMLs e as DANFEs (PDF)</b> · a MKLOG liga cada nota ao pedido pela OC
+      <input type="file" id="nfFile" accept=".xml,text/xml,.pdf,application/pdf" multiple class="hide" onchange="nfEnviar(this.files);this.value=''"></div>`;
 };
 // v1.8.1: DANFE em PDF — lê a chave de acesso do texto do PDF (pdf.js); sem texto legível, casa pelo nome do arquivo com o XML do mesmo envio
 async function nfPdfLib(){
@@ -4491,7 +4486,11 @@ async function nfChaveDoPdf(f){
 const nfBase = n => String(n||'').toLowerCase().replace(/\.(xml|pdf)$/,'').replace(/[_\- ]?danfe$/,'');
 window.nfEnviar = async function(files, pedidoId){
   const todos = Array.from(files||[]);
-  const arr = todos.filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)), pdfs = todos.filter(f=>/\.pdf$/i.test(f.name)||/pdf/.test(f.type)); const res = $('nfRes');
+  const arr = todos.filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)), pdfs = todos.filter(f=>/\.pdf$/i.test(f.name)||/pdf/.test(f.type));
+  // v1.8.2: o resultado aparece numa caixa de diálogo
+  const old = $('mNfRes'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="mNfRes" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:560px"><div class="modal-h"><h3>Notas recebidas · ${todos.length} arquivo(s)</h3></div><div class="modal-b"><div id="nfRes" style="font-size:13px;line-height:1.8"><span class="hint">Processando…</span></div></div><div class="modal-f"><button class="btn btn-primary" onclick="$('mNfRes').remove()">Ok</button></div></div></div>`);
+  const res = $('nfRes');
   if(!arr.length && !pdfs.length){ if(res) res.innerHTML='<span class="hint">Escolha os XMLs de NF-e e, se tiver, as DANFEs em PDF.</span>'; return; }
   const out = [], chavePorBase = {};
   for(const f of arr){
@@ -4499,7 +4498,7 @@ window.nfEnviar = async function(files, pedidoId){
       const mCh = txt.match(/<chNFe>(\d{44})<\/chNFe>/) || txt.match(/Id="NFe(\d{44})"/); if(mCh) chavePorBase[nfBase(f.name)] = mCh[1];
       const { data, error } = await sb.rpc('portal_enviar_nf', { p_xml: txt, p_pedido: pedidoId || null });
       if(error) throw error;
-      out.push(`NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>':'ligada ao pedido '+esc(data.pedido||'')}`);
+      out.push(`${data.status==='divergente'||data.status==='sem_pedido'?'<span style="color:#b45309">!</span>':'<span style="color:#4d7a1a">✓</span>'} NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>':'ligada ao pedido '+esc(data.pedido||'')}`);
     }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
   }
@@ -4517,7 +4516,7 @@ window.nfEnviar = async function(files, pedidoId){
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
   }
   try{ const nf = await sb.rpc('portal_minhas_nfs'); state.nfs = nf.data||[]; const vf = await sb.rpc('portal_volumes_faturar'); state.volFat = vf.data||[]; }catch(_e){}
-  renderVolFat(); const keep = $('nfRes') ? $('nfRes').innerHTML : ''; renderNfBox(); if($('nfRes')) $('nfRes').innerHTML = keep;
+  renderVolFat(); renderNfBox();
 };
 window.nfEscolher = function(pedidoId){
   const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
@@ -4594,15 +4593,24 @@ window.renderVolFat = function(){
   box.classList.remove('hide');
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
-    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Volumes para faturamento <span class="hint" style="font-weight:400">pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Importado</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso estimado</th><th></th></tr></thead><tbody>
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
     ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
-      return `<tr><td>${esc(r.pedido||'')}</td><td>${esc(r.destinatario||'—')}</td><td>${new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
+      const dt = new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      let nf = '';
+      if(r.nf){ const div = r.nf_status==='divergente', cor = div ? '#b91c1c' : (r.danfe===false ? '#b45309' : '#4d7a1a');
+        const sub = div ? esc(r.nf_divergencias||'divergente') : (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''));
+        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}</div>`; }
+      else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
+      else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
+      else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
+      return `<tr><td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${SIT[1]};color:${SIT[2]};white-space:nowrap">${SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
-      <td style="white-space:nowrap">${semSaldo?'<span class="hint">ajuste o pedido ou aguarde a entrada do material</span>':semLista?'<span class="hint">aguardando a MKLOG gerar a separação</span>':r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}
-        ${r.nf?`<span class="hint" style="margin-left:6px;color:${r.nf_status==='divergente'?'#b45309':'#4d7a1a'}">NF ${esc(r.nf)}${r.nf_status==='divergente'?' · divergente':''}</span>`:((r.id&&!semSaldo&&!semLista)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px;margin-left:4px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`:'')}</td></tr>`; }).join('')}
+      <td>${nf}</td>
+      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''}</td></tr>`; }).join('')}
     </tbody></table></div></div>`;
 };
 window.volFatDet = function(i){
