@@ -3166,7 +3166,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.0';   // v1.8.0: home conta os pedidos REAIS do WMS; volumes ao vivo e situação de cada pedido (aguardando saldo/separação)
+const PORTAL_VERSION = 'v1.8.1';   // v1.8.1: notas de venda aceitam XML + DANFE (PDF) juntos; a DANFE fica no pedido para a cópia do motorista e o bipe da portaria
+// v1.8.0: home conta os pedidos REAIS do WMS; volumes ao vivo e situação de cada pedido (aguardando saldo/separação)
 // v1.7.9: tela de pedidos sem os filtros e a lista vazia herdados do demo (Valeo)
 // v1.7.8 →   // v1.7.8: detalhe dos volumes pelo estoque real (caixas inteiras + pacotes; estimado × confirmado)
 // v1.7.7 →   // v1.7.7: F5 mantém o login (sessão restaurada) e os dados se atualizam sozinhos a cada 2 min
@@ -4462,23 +4463,56 @@ window.renderNfBox = function(){
   const st = s => s==='ligada' ? '<span style="color:#4d7a1a;font-weight:600">ligada ao pedido</span>' : s==='divergente' ? '<span style="color:#b45309;font-weight:600">ligada · divergente</span>' : '<span style="color:#b91c1c;font-weight:600">pedido não encontrado · MKLOG vai ligar</span>';
   box.innerHTML = `<div id="nfDrop" style="border:1.5px dashed var(--border,#d4d4d4);border-radius:12px;padding:14px;text-align:center"
       ondragover="event.preventDefault();this.style.background='rgba(0,0,0,.03)'" ondragleave="this.style.background=''" ondrop="event.preventDefault();this.style.background='';nfEnviar(event.dataTransfer.files)">
-      <b>Notas de venda</b> · arraste aqui os XMLs (um ou vários) ou <button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="$('nfFile').click()">escolher arquivos</button>
-      <input type="file" id="nfFile" accept=".xml,text/xml" multiple class="hide" onchange="nfEnviar(this.files);this.value=''">
-      <div class="hint" style="margin-top:4px">A MKLOG liga cada nota ao pedido pela OC do cliente e usa os dados dela na etiqueta e na expedição.</div>
+      <b>Notas de venda</b> · arraste aqui os XMLs <b>e as DANFEs (PDF)</b> — um ou vários — ou <button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="$('nfFile').click()">escolher arquivos</button>
+      <input type="file" id="nfFile" accept=".xml,text/xml,.pdf,application/pdf" multiple class="hide" onchange="nfEnviar(this.files);this.value=''">
+      <div class="hint" style="margin-top:4px">A MKLOG liga cada nota ao pedido pela OC do cliente. A DANFE (PDF) é casada com a nota pela chave de acesso e vai impressa com o motorista.</div>
       <div id="nfRes" style="margin-top:8px;text-align:left"></div></div>
     ${L.length?`<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>NF</th><th>Destinatário</th><th>Pedido</th><th class="num">Volumes</th><th>Situação</th></tr></thead><tbody>
       ${L.slice(0,30).map(n=>`<tr><td>${esc(n.numero||'')}</td><td>${esc(n.dest_nome||'')}</td><td>${esc(n.pedido||'—')}</td><td class="num">${n.volumes!=null?Number(n.volumes).toLocaleString('pt-BR'):'—'}</td><td>${st(n.status)}${n.divergencias?'<div class="hint">'+esc(n.divergencias)+'</div>':''}</td></tr>`).join('')}
       </tbody></table></div>`:''}`;
 };
+// v1.8.1: DANFE em PDF — lê a chave de acesso do texto do PDF (pdf.js); sem texto legível, casa pelo nome do arquivo com o XML do mesmo envio
+async function nfPdfLib(){
+  if(window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((ok,err)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; sc.onload=ok; sc.onerror=()=>err(new Error('leitor de PDF não carregou')); document.head.appendChild(sc); });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  return window.pdfjsLib;
+}
+async function nfChaveDoPdf(f){
+  try{ const lib=await nfPdfLib(); const doc=await lib.getDocument({data:await f.arrayBuffer()}).promise; let txt='';
+    for(let i=1;i<=Math.min(doc.numPages,2);i++){ const pg=await doc.getPage(i); const tc=await pg.getTextContent(); txt+=' '+tc.items.map(x=>x.str).join(' '); }
+    // todos os dígitos do texto em sequência; procura 44 dígitos com cara de chave (UF, AAMM, CNPJ, modelo 55/65) e DV módulo 11 válido
+    const d=txt.replace(/\D/g,'');
+    const dvOk=ch=>{ let s=0,p=2; for(let i=42;i>=0;i--){ s+=(+ch[i])*p; p=p===9?2:p+1; } const r=s%11, dv=(r<2)?0:11-r; return dv===+ch[43]; };
+    for(let k=0;k+44<=d.length;k++){ const ch=d.slice(k,k+44); if(/^(1[1-7]|2[1-9]|3[1-5]|4[1-3]|5[0-3])\d{4}\d{14}(55|65)/.test(ch) && dvOk(ch)) return ch; }
+  }catch(_e){}
+  return null;
+}
+const nfBase = n => String(n||'').toLowerCase().replace(/\.(xml|pdf)$/,'').replace(/[_\- ]?danfe$/,'');
 window.nfEnviar = async function(files, pedidoId){
-  const arr = Array.from(files||[]).filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)); const res = $('nfRes');
-  if(!arr.length){ if(res) res.innerHTML='<span class="hint">Escolha arquivos XML de NF-e.</span>'; return; }
-  const out = [];
+  const todos = Array.from(files||[]);
+  const arr = todos.filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)), pdfs = todos.filter(f=>/\.pdf$/i.test(f.name)||/pdf/.test(f.type)); const res = $('nfRes');
+  if(!arr.length && !pdfs.length){ if(res) res.innerHTML='<span class="hint">Escolha os XMLs de NF-e e, se tiver, as DANFEs em PDF.</span>'; return; }
+  const out = [], chavePorBase = {};
   for(const f of arr){
     try{ const txt = await f.text();
+      const mCh = txt.match(/<chNFe>(\d{44})<\/chNFe>/) || txt.match(/Id="NFe(\d{44})"/); if(mCh) chavePorBase[nfBase(f.name)] = mCh[1];
       const { data, error } = await sb.rpc('portal_enviar_nf', { p_xml: txt, p_pedido: pedidoId || null });
       if(error) throw error;
       out.push(`NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>':'ligada ao pedido '+esc(data.pedido||'')}`);
+    }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
+    if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
+  }
+  for(const f of pdfs){
+    try{
+      let ch = await nfChaveDoPdf(f); const porNome = !ch && chavePorBase[nfBase(f.name)];
+      if(!ch) ch = porNome || null;
+      if(!ch) throw new Error('não encontrei a chave de acesso no PDF — envie junto com o XML da mesma nota (mesmo nome de arquivo)');
+      const path = `${state.depositanteId}/danfe/${ch}.pdf`;
+      const { error:eU } = await sb.storage.from('portal-anexos').upload(path, f, { upsert:true, contentType:'application/pdf' });
+      if(eU) throw new Error('falha ao guardar o PDF: '+eU.message);
+      const { data, error } = await sb.rpc('portal_nf_danfe', { p_chave: ch, p_path: path }); if(error) throw error;
+      out.push(`DANFE ${esc(data && data.numero || ch.slice(25,34).replace(/^0+/,''))}: ${data && data.ligada ? '<span style="color:#4d7a1a">guardada no pedido '+esc(data.pedido||'')+'</span>' : '<span class="hint">guardada — fica no pedido assim que a nota for ligada</span>'}`);
     }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
   }
@@ -4486,7 +4520,7 @@ window.nfEnviar = async function(files, pedidoId){
   renderVolFat(); const keep = $('nfRes') ? $('nfRes').innerHTML : ''; renderNfBox(); if($('nfRes')) $('nfRes').innerHTML = keep;
 };
 window.nfEscolher = function(pedidoId){
-  const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml'; i.multiple=true;
+  const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
   i.onchange=()=>nfEnviar(i.files, pedidoId); i.click();
 };
 window.renderColetas = function(){
