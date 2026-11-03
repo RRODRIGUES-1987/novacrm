@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1262 | Gerado: 2026-11-02 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1263 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1262';
+const APP_VERSION='v1.0.1263';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -57231,6 +57231,17 @@ function flAlertaTxt(a){
 }
 function flProxMin(passo,resto){ var d=new Date(); d.setSeconds(0,0); do{ d=new Date(d.getTime()+60000); }while(d.getMinutes()%passo!==resto); return d; }
 function flVerus(ep){ return ep?('E-'+String(ep.numero_interno||'').padStart(6,'0')):'—'; }
+// v1.0.1263: leitura que NÃO engole erro — a falha do banco aparece na tela em vez de "tudo 0"
+async function flFetchAll(table,filter){
+  var all=[],off=0,PAGE=1000;
+  while(true){
+    var r=await sbFetch('GET','/rest/v1/'+table+'?'+filter+'&order=created_at.desc,id.asc&limit='+PAGE+'&offset='+off,null,tok);
+    if(!r.ok){ var m=(r.data&&(r.data.message||r.data.hint||r.data.details))||JSON.stringify(r.data||'').slice(0,200); var e=new Error('HTTP '+r.status+' · '+m); e.status=r.status; throw e; }
+    var d=Array.isArray(r.data)?r.data:[]; all=all.concat(d);
+    if(d.length<PAGE) break; off+=PAGE; if(off>50000) break;
+  }
+  return all;
+}
 async function flCarregar(){
   var cid=ecomCid(); if(!cid) return;
   _fl.carregando=true; _fl.erro=''; flRender();
@@ -57243,8 +57254,9 @@ async function flCarregar(){
     var cols='id,integracao_id,numero,pedido_verus_id,status_importacao,situacao_tiny,situacao_enviada,situacao_enviada_em,situacao_confirmada_em,situacao_reenvios,nf_numero,nf_situacao,nf_autorizada_em,agrupamento_id,etiqueta_url,etiqueta_arquivo,alerta,erro_msg,updated_at,created_at,pode_faturar_em,nf_lida_em';
     var filtro='company_id=eq.'+cid+'&created_at=gte.'+desde+'&or=(situacao_tiny.is.null,situacao_tiny.not.in.(cancelado,enviado,entregue))';
     var _errLeit=null;
-    var rows=await invFetchAll('intg_pedidos',filtro+'&select='+cols+',acomp_lido_em').catch(function(e){ _errLeit=e; return null; });
-    if(!rows) rows=await invFetchAll('intg_pedidos',filtro+'&select='+cols).catch(function(e){ _errLeit=e; return null; });
+    var rows=await flFetchAll('intg_pedidos',filtro+'&select='+cols+',acomp_lido_em').catch(function(e){ _errLeit=e; console.warn('[filas] leitura com acomp_lido_em:',e.message); return null; });
+    if(!rows) rows=await flFetchAll('intg_pedidos',filtro+'&select='+cols).catch(function(e){ _errLeit=e; console.warn('[filas] leitura:',e.message); return null; });
+    console.log('[filas] intg_pedidos lidos:',rows?rows.length:'falhou');
     if(!rows){ _fl.erro='Não consegui ler os pedidos da integração agora (banco ocupado ou tempo esgotado). Tente de novo em 1 minuto.'+(_errLeit&&_errLeit.message?' · '+_errLeit.message:''); _fl.carregando=false; flRender(); return; }
     var ids=rows.map(function(r){return r.pedido_verus_id;}).filter(Boolean), ped={}, etq={};
     for(var i=0;i<ids.length;i+=150){
