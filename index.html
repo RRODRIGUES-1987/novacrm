@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1269 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1271 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1269';
+const APP_VERSION='v1.0.1271';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36763,6 +36763,58 @@ async function wmsCapaRomaneioPdf(rom){
   c.push({text:String(rom.numero||''),fontSize:8,color:'#888',alignment:'center',margin:[0,18,0,0],pageBreak:'after'});
   return c;
 }
+
+// ═══ v1.0.1270 · CAPA DO PEDIDO (resumo + código de barras) — impressa sozinha, para o checkout saber de quem é cada caixa ═══
+async function wmsCapaPedidosPrint(pedidoIds){
+  pedidoIds=(pedidoIds||[]).filter(Boolean); if(!pedidoIds.length){ showToast('Nenhum pedido','amber'); return; }
+  try{ await ecomLoadLabelLibs(); }catch(e){ showToast('Não consegui carregar o gerador de código de barras','red'); return; }
+  showToast('Gerando capa(s)…','blue');
+  const e=ecomEsc, n=v=>Number(v||0).toLocaleString('pt-BR');
+  let pags='';
+  for(const pid of pedidoIds){
+    const p=(wmsPedidos||[]).find(x=>x.id===pid); if(!p) continue;
+    const vin=(wmsListaPedidos||[]).find(v=>v.pedido_id===pid), lst=vin&&(wmsListasSeparacao||[]).find(l=>l.id===vin.lista_id);
+    let tar=(wmsTarefasSeparacao||[]).filter(t=>t.pedido_id===pid&&t.endereco_origem!=='SEM SALDO');
+    try{ const tdb=await dbSelect('wms_tarefas_separacao','pedido_id=eq.'+pid+'&select=sku,quantidade,tipo_volume,endereco_origem'); if(Array.isArray(tdb)&&tdb.length) tar=tdb.filter(t=>t.endereco_origem!=='SEM SALDO'); }catch(_e){}
+    const itens=(await dbSelect('wms_pedido_itens','pedido_id=eq.'+pid+'&order=created_at.asc').catch(()=>[]))||[];
+    const cli=(clientes||[]).find(c=>c.id===p.cliente_id)||{};
+    // volumes: cada tarefa CAIXA/caixa inteira = 1 volume; frações = 1 caixa aberta por SKU
+    const porSku={}; itens.filter(i=>String(i.status||'')!=='cancelado').forEach(i=>{ const k=String(i.sku).trim(); (porSku[k]=porSku[k]||{sku:k,desc:i.descricao||'',qtd:0,cx:0,fr:false}).qtd+=Number(i.quantidade||0); });
+    tar.forEach(t=>{ const k=String(t.sku||'').trim(); const o=porSku[k]||(porSku[k]={sku:k,desc:'',qtd:0,cx:0,fr:false}); if(t.tipo_volume==='pallet'||t.tipo_volume==='caixa') o.cx++; else o.fr=true; });
+    const L=Object.values(porSku).sort((a,b)=>a.sku.localeCompare(b.sku));
+    const cheias=L.reduce((a,o)=>a+o.cx,0), abertas=L.filter(o=>o.fr).length, vols=cheias+abertas;
+    const cod=String(p.numero_curto||p.numero_pedido||p.id).replace(/\s+/g,'');
+    const bc=ecomBcSvg(cod);
+    pags+=`<section class="pg">
+      <div class="top"><div><div class="k">CAPA DO PEDIDO · SEPARAÇÃO E CHECKOUT</div><div class="ped">${e(p.numero_pedido||'')}</div>
+        <div class="sub">OS ${e(p.numero_curto||'—')}${lst?' · '+e(lst.numero_lista||''):''}</div></div>
+        <div class="dir"><b>${e(cli.nome||'')}</b><br>${new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>
+      <div class="grid">
+        <div><div class="l">DESTINATÁRIO</div><b>${e(p.destinatario_nome||'—')}</b></div>
+        <div><div class="l">TRANSPORTADORA</div><b>${e(p.transportadora||'—')}</b></div>
+        <div><div class="l">ITENS · TAREFAS</div><b>${L.length} SKU(s) · ${tar.length} bipe(s)</b></div>
+        <div><div class="l">VOLUMES PREVISTOS</div><b class="big">${vols||'—'}</b>${vols?` <span class="sm">(${cheias} caixa(s) fechada(s)${abertas?' + '+abertas+' aberta(s)':''})</span>`:''}</div>
+      </div>
+      <table><tr><th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">Volumes</th></tr>
+        ${L.map(o=>`<tr><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,40))}</td><td class="r">${n(o.qtd)}</td><td class="r">${o.cx+(o.fr?1:0)||'—'}</td></tr>`).join('')}</table>
+      <div class="bcbox">${bc||''}<div class="code">${e(cod)}</div><div class="hint">Bipe a capa no checkout para abrir o pedido · cada volume fechado recebe a etiqueta MK deste pedido</div></div>
+    </section>`;
+  }
+  if(!pags){ showToast('Pedido não encontrado na tela — atualize (F5)','amber'); return; }
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Capa do pedido</title><style>
+    @page{size:A4;margin:14mm} body{font-family:Arial,sans-serif;color:#111;margin:0}
+    .pg{page-break-after:always;border:1px solid #999;border-radius:6px;padding:18px 22px}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px}
+    .k{font-size:11px;letter-spacing:1px;color:#555}.ped{font-size:26px;font-weight:700;margin-top:2px}.sub{font-size:13px}
+    .dir{text-align:right;font-size:12px;line-height:1.5}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;font-size:13px}.l{font-size:10px;color:#666}.big{font-size:22px}.sm{font-size:11px}
+    table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px} th{background:#eee;text-align:left;padding:5px 6px} td{padding:5px 6px;border-bottom:1px solid #ddd} .r{text-align:right}
+    .bcbox{text-align:center;border-top:1px dashed #999;padding-top:12px} .bcbox svg{width:330px;height:70px} .code{font-family:monospace;font-size:14px;margin-top:4px} .hint{font-size:11px;color:#444;margin-top:4px}
+  </style></head><body>${pags}</body></html>`;
+  const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px'; document.body.appendChild(fr);
+  fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+  setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(function(){ fr.remove(); },4000); },600);
+}
 async function wmsListasPdfIds(ids){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
   ids=ids||[];
@@ -37577,7 +37629,7 @@ function colRgArea(listaId){
   if(_colRg.msg){ var m=_colRg.msg, cor=m.tipo==='ok'?['var(--green-bg)','var(--green-text)']:m.tipo==='erro'?['var(--red-bg)','var(--red-text)']:['var(--amber-bg)','var(--amber-text)'];
     h+='<div style="padding:10px 12px;border-radius:10px;margin-bottom:10px;font-size:13.5px;font-weight:700;background:'+cor[0]+';color:'+cor[1]+'">'+esc(m.txt)+'</div>'; }
   if(prox){
-    var pal=_colRg.pal[prox.pallet_id]||{}, emSaco=prox.tipo_volume!=='pallet';
+    var pal=_colRg.pal[prox.pallet_id]||{}, emSaco=prox.tipo_volume!=='pallet'&&prox.tipo_volume!=='caixa';
     var irmaos=ts.filter(function(t){return t.reserva_id&&t.reserva_id===prox.reserva_id;}), nSaco=irmaos.filter(function(t){return t.status==='concluida';}).length+1;
     var cont=Object.values(_colRg.cont).find(function(c){return c.pallet_id===prox.pallet_id&&c.sku===prox.sku;});
     var etapa=!emSaco?'Bipe a etiqueta da CAIXA':(passo?'Agora bipe o SACO':'Bipe a etiqueta da CAIXA');
@@ -37599,7 +37651,7 @@ function colRgArea(listaId){
   ts.forEach(function(t){ var k=t.pallet_id?(t.reserva_id||t.id):('ss-'+t.id); if(!porChave[k]){porChave[k]={k:k,t:t,itens:[]};grupos.push(porChave[k]);} porChave[k].itens.push(t); });
   h+='<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:.04em;margin:4px 2px 6px">CAIXAS DA LISTA</div>';
   h+=grupos.map(function(g){ var t=g.t, ok=g.itens.filter(function(x){return x.status==='concluida';}).length, tot=g.itens.length, fim=ok===tot, atual=prox&&g.itens.some(function(x){return x.id===prox.id;});
-    var sacos=t.tipo_volume!=='pallet', qtd=g.itens.reduce(function(a,x){return a+(+x.quantidade||0);},0);
+    var sacos=t.tipo_volume!=='pallet'&&t.tipo_volume!=='caixa', qtd=g.itens.reduce(function(a,x){return a+(+x.quantidade||0);},0);
     return '<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;margin-bottom:6px;border:'+(atual?'2px solid var(--blue-text)':'1px solid var(--border)')+';background:'+(fim?'var(--green-bg)':(!t.pallet_id?'var(--red-bg)':'var(--bg)'))+'">'
       +'<div style="font-size:17px">'+(fim?'✅':(!t.pallet_id?'⛔':(ok?'⏳':'⬜')))+'</div>'
       +'<div style="flex:1;min-width:0"><div style="font-family:monospace;font-size:12px;font-weight:800;color:var(--blue-text)">'+esc(t.endereco_origem||'—')+'</div><div style="font-size:13.5px;font-weight:800">'+(t.pallet_id?esc(colRgNome(t.pallet_id)):'SEM SALDO')+' <span style="font-weight:600;font-size:12px;color:var(--text2)">· '+esc(t.sku)+'</span></div></div>'
@@ -37666,8 +37718,8 @@ async function coletorSepRgBipe(listaId,code){
         colRgMsg('ok','✓ Saco '+feitos+' de '+irm.length+' · '+passo.sku+' · '+(+passo.quantidade).toLocaleString('pt-BR')+' pç'); colRgRefresh(listaId); return;
       }
       var outraCx=colRgAcha(raw);
-      if(outraCx===passo.pallet_id){ colRgMsg('aviso','Caixa já confirmada. Agora bipe o SACO.'); colRgRefresh(listaId); return; }
-      if(!outraCx){ colRgMsg('erro','O saco não confere: esperado '+passo.sku+', lido '+raw+'.'); colRgRefresh(listaId); return; }
+      if(outraCx===passo.pallet_id){ colRgMsg('aviso','RG já confirmado. Agora bipe o PACOTE.'); colRgRefresh(listaId); return; }
+      if(!outraCx){ colRgMsg('erro','O pacote não confere: esperado '+passo.sku+', lido '+raw+'.'); colRgRefresh(listaId); return; }
       _colRg.passo=null;   // bipou outra caixa da lista: recomeça por ela
     }
     // bipe de caixa
@@ -37680,7 +37732,7 @@ async function coletorSepRgBipe(listaId,code){
     }
     var t=ts.find(function(x){return x.status!=='concluida'&&x.pallet_id===palId;});
     if(!t){ colRgMsg(ts.some(function(x){return x.pallet_id===palId;})?'aviso':'erro', ts.some(function(x){return x.pallet_id===palId;})?'A caixa '+colRgNome(palId)+' já foi separada.':'A caixa '+colRgNome(palId)+' não é desta lista.'); colRgRefresh(listaId); return; }
-    if(t.tipo_volume==='pallet'){ await colRgConcluir(listaId,t); colRgMsg('ok','✓ Caixa '+colRgNome(palId)+' · '+t.sku+' · '+(+t.quantidade).toLocaleString('pt-BR')+' pç'); colRgRefresh(listaId); return; }
+    if(t.tipo_volume==='pallet'||t.tipo_volume==='caixa'){ await colRgConcluir(listaId,t); colRgMsg('ok','✓ Caixa '+colRgNome(palId)+' · '+t.sku+' · '+(+t.quantidade).toLocaleString('pt-BR')+' pç'); colRgRefresh(listaId); return; }
     _colRg.passo={tarefaId:t.id}; if(!_colRg.msg||_colRg.msg.tipo!=='aviso') colRgMsg('ok','✓ Caixa '+colRgNome(palId)+' confirmada. Agora bipe o SACO.'); colRgRefresh(listaId);
   }catch(e){ colRgMsg('erro','Erro: '+(e.message||e)); colRgRefresh(listaId); }
 }
@@ -37724,7 +37776,7 @@ function sepDlgPasso(listaId){
     var caixas=[...new Set(aqui.map(function(x){return x.pallet_id;}))].length;
     return {tipo:'endereco',t:t,end:end,caixas:caixas};
   }
-  if(t.tipo_volume==='pallet') return {tipo:'caixa',t:t,end:end,inteira:true};
+  if(t.tipo_volume==='pallet'||t.tipo_volume==='caixa') return {tipo:'caixa',t:t,end:end,inteira:true,fechada:t.tipo_volume==='caixa'};   // v1.0.1271: CAIXA fechada = só o RG
   var irm=colRgTarefas(listaId).filter(function(x){return x.reserva_id&&x.reserva_id===t.reserva_id;});
   var n=irm.filter(function(x){return x.status==='concluida';}).length+1;
   var ok=SEP_DLG_RECONFIRMA_CAIXA?_sepDlg.cxOk===t.id:_sepDlg.cxOk===t.pallet_id;
@@ -37737,12 +37789,15 @@ function sepDlgInstrucao(p){
     detalhe:p.caixas>1?p.caixas+' caixas para pegar aqui':'1 caixa para pegar aqui',acao:'Bipe a etiqueta do endereço',cor:'var(--blue-text)',
     fala:'Endereço '+String(p.end).split(/[^0-9A-Za-z]+/).join(' ')};
   var cx=colRgNome(t.pallet_id), cont=Object.values(_colRg.cont).find(function(c){return c.pallet_id===t.pallet_id&&c.sku===t.sku;});
-  if(p.tipo==='caixa') return {icone:'📦',titulo:p.inteira?'Pegue a caixa inteira':'Abra a caixa'+(p.de>1?' · saco '+p.n+' de '+p.de:''),destaque:cx,
+  if(p.tipo==='caixa' && p.fechada) return {icone:'📦',titulo:'Pegue 1 caixa fechada',destaque:cx,
+detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç',acao:'Bipe o RG',cor:'#8b5cf6',
+fala:'Uma caixa fechada do R G '+cx+'. '+t.sku+', '+nBR(t.quantidade)+' peças'};
+if(p.tipo==='caixa') return {icone:'📦',titulo:p.inteira?'Pegue o RG inteiro':'Abra o RG'+(p.de>1?' · pacote '+p.n+' de '+p.de:''),destaque:cx,
     detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+(p.inteira?' · '+nBR(t.quantidade)+' pç':(cont?' · caixa com '+nBR(cont.qtd_fiscal)+' pç':'')),
-    acao:'Bipe a etiqueta da caixa',cor:p.inteira?'#8b5cf6':'#f59e0b',
+    acao:'Bipe o RG',cor:p.inteira?'#8b5cf6':'#f59e0b',
     fala:(p.inteira?'Caixa inteira ':'Abra a caixa ')+cx+'. '+t.sku+(p.inteira?', '+nBR(t.quantidade)+' peças':'')};
-  return {icone:'🛍️',titulo:'Tire 1 saco · '+p.n+' de '+p.de,destaque:t.sku,
-    detalhe:String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç no saco',acao:'Bipe o saco',cor:'#f59e0b',
+  return {icone:'🛍️',titulo:'Tire 1 pacote · '+p.n+' de '+p.de,destaque:t.sku,
+    detalhe:String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç no pacote',acao:'Bipe o pacote',cor:'#f59e0b',
     fala:'Um saco de '+t.sku+'. Saco '+p.n+' de '+p.de};
 }
 function sepDlgLog(txt,falta){ _sepDlg.log.push({txt:txt,falta:!!falta}); if(_sepDlg.log.length>60) _sepDlg.log.shift(); }
@@ -37796,8 +37851,8 @@ async function sepDlgLer(listaId,raw){
     if(!colRgTarefas(listaId).some(function(x){return x.status!=='concluida'&&x.pallet_id===t.pallet_id;})) _sepDlg.emMaos=null;   // caixa terminada
     sepDlgLog('Saco '+p.n+' de '+p.de+' · '+t.sku+' · '+nBR(t.quantidade)+' pç'); return;
   }
-  if(colRgAcha(raw)===t.pallet_id) return sepDlgAviso('aviso','Caixa já confirmada. Agora bipe o SACO.');
-  return sepDlgAviso('erro','O saco não confere: esperado '+t.sku+', lido '+raw+'.');
+  if(colRgAcha(raw)===t.pallet_id) return sepDlgAviso('aviso','RG já confirmado. Agora bipe o PACOTE.');
+  return sepDlgAviso('erro','O pacote não confere: esperado '+t.sku+', lido '+raw+'.');
 }
 // "não encontrei a caixa": marca falta nas tarefas desta caixa que ainda não começaram e segue
 async function sepDlgFalta(listaId){
@@ -38280,7 +38335,7 @@ async function wmsGerarListas(tipo){
       ${empHtml}
       ${pulados.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${pulados.length} pedido(s) sem lista gerada:<br>${pulados.slice(0,8).map(x=>'• '+esc(String(x))+(String(x).indexOf(' ')<0?' (já tinha lista vinculada)':'')).join('<br>')}${pulados.length>8?'<br>+'+(pulados.length-8):''}</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-        ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button>`:''}
+        ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button><button class="btn" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>wmsUltimasListasGeradas.indexOf(v.lista_id)>=0).map(v=>v.pedido_id))">🖨 Só as capas</button>`:''}
         <button class="btn" onclick="portClose();pg('wms-separacao')">Ver listas →</button>
         <button class="btn" style="margin-left:auto" onclick="portClose()">Fechar</button>
       </div>`,'portClose()',{noFooter:true});
@@ -43178,6 +43233,7 @@ function wmsPedidoDetalhe(id){
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
+        <button class="btn btn-sm" onclick="wmsCapaPedidosPrint(['${p.id}'])" title="Imprime só a capa (resumo + código de barras) para o checkout">🖨 Capa</button>
         ${wmsPedBadge(p.status,p.id)}
       </div>
     </div>${p.status==='excluido'?`<div style="background:var(--red-bg);color:var(--red-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px">Excluído por <b>${ecomEsc(p.excluido_por_nome||'?')}</b> em ${p.excluido_em?new Date(p.excluido_em).toLocaleString('pt-BR'):'?'} · motivo: ${ecomEsc(p.motivo_exclusao||'—')}</div>`:''}<div style="display:none">
