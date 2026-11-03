@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1267 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1268 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1267';
+const APP_VERSION='v1.0.1268';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38130,7 +38130,9 @@ async function wmsGerarListas(tipo){
         nPed++;portProgress(nPed-1,peds.length,'Gerando listas de separação…','Pedido '+(p.numero_curto||p.numero_pedido||''));
         // blindagem: pedido já vinculado a uma lista (wms_lista_pedidos é unique por pedido) → pula
         if(wmsListaPedidos.some(v=>v.pedido_id===p.id)){pulados.push(p.numero_curto||p.numero_pedido||p.id);continue;}
-        const itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
+        let itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
+        // v1.0.1268: relê os itens do banco — a memória pode estar com a quantidade de antes de um ajuste (gerava "SEM SALDO" falso)
+        try{ const _itDb=await dbSelect('wms_pedido_itens','pedido_id=eq.'+p.id+'&order=created_at.asc'); if(Array.isArray(_itDb)&&_itDb.length){ itens=_itDb.filter(x=>String(x.status||'')!=='cancelado'); wmsPedidoItens=wmsPedidoItens.filter(x=>x.pedido_id!==p.id).concat(_itDb); } }catch(_e){}
         // monta tarefas (cada linha do Excel = SKU × endereço × qtd; qtd = múltiplo → pallet)
         const tarefas=[];
         if(wmsSaldoVerus(p.cliente_id)){
@@ -38171,10 +38173,13 @@ async function wmsGerarListas(tipo){
               const base={it,end,frente:null,pallet_id:r.pallet_id,reserva_id:r.id};
               if(c.qtd_fiscal!=null&&Number(r.qtd)>=Number(c.qtd_fiscal)){ tarefas.push({...base,tipo_volume:'pallet',quantidade:Number(r.qtd),ordem:tarefas.length+1}); return; }   // caixa inteira = 1 bipe
               // v1.0.1111: retirada parcial = 1 tarefa (bipe) por saco
-              if(saco>1 && Number(r.qtd)%saco===0){ const n=Number(r.qtd)/saco; for(let k=0;k<n;k++) tarefas.push({...base,tipo_volume:'fracao',quantidade:saco,ordem:tarefas.length+1}); }
-              else tarefas.push({...base,tipo_volume:'fracao',quantidade:Number(r.qtd),ordem:tarefas.length+1});   // sem saco cadastrado: 1 bipe com a quantidade
+              // v1.0.1268: o fator do produto é a CAIXA fechada — cada múltiplo inteiro é uma CAIXA (1 bipe); só a sobra é pacote/fração
+              if(saco>1 && Number(r.qtd)>=saco){ const n=Math.floor(Number(r.qtd)/saco), resto=+(Number(r.qtd)-n*saco).toFixed(4);
+                for(let k=0;k<n;k++) tarefas.push({...base,tipo_volume:'caixa',quantidade:saco,ordem:tarefas.length+1});
+                if(resto>0) tarefas.push({...base,tipo_volume:'fracao',quantidade:resto,ordem:tarefas.length+1}); }
+              else tarefas.push({...base,tipo_volume:'fracao',quantidade:Number(r.qtd),ordem:tarefas.length+1});   // menor que uma caixa (ou sem fator): 1 bipe com a quantidade
             });
-            const emp=rs.reduce((a,r)=>a+Number(r.qtd||0),0), falta=Number(it.quantidade||0)-emp;
+            const emp=rs.reduce((a,r)=>a+Number(r.qtd||0),0), _fe=((empR&&empR.itens)||[]).find(x=>x.item_id===it.id), falta=_fe?Number(_fe.faltou||0):Number(it.quantidade||0)-emp;   // v1.0.1268
             if(falta>0) tarefas.push({tipo_volume:'fracao',quantidade:falta,it,end:{raw:'SEM SALDO',rua:null,posicao:null,nivel:null},frente:null,sem_saldo:true,ordem:tarefas.length+1});
           });
           tarefas.sort((a,b)=>String(a.end&&a.end.raw||'~').localeCompare(String(b.end&&b.end.raw||'~'))); tarefas.forEach((t,i)=>{t.ordem=i+1;});
