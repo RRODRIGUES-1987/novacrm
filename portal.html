@@ -3166,7 +3166,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.7.9';   // v1.7.9: tela de pedidos sem os filtros e a lista vazia herdados do demo (Valeo)
+const PORTAL_VERSION = 'v1.8.0';   // v1.8.0: home conta os pedidos REAIS do WMS; volumes ao vivo e situação de cada pedido (aguardando saldo/separação)
+// v1.7.9: tela de pedidos sem os filtros e a lista vazia herdados do demo (Valeo)
 // v1.7.8 →   // v1.7.8: detalhe dos volumes pelo estoque real (caixas inteiras + pacotes; estimado × confirmado)
 // v1.7.7 →   // v1.7.7: F5 mantém o login (sessão restaurada) e os dados se atualizam sozinhos a cada 2 min
 // v1.7.6 →   // v1.7.6: esc global para os quadros novos (erro "esc is not defined"); versão no topo e atualização como no VERUS
@@ -3483,7 +3484,9 @@ function render(){
   const abertosP = state.pedidos.filter(p=>['enviado','em_analise','aprovado','em_operacao'].includes(p.status));
   const futurosA = state.agendamentos.filter(a=>a.data>=hoje() && ['solicitado','confirmado'].includes(a.status));
   const hj = state.agendamentos.filter(a=>a.data===hoje() && a.status!=='cancelado').length;
-  $('sumPed').textContent=abertosP.length;
+  // v1.8.0: no portal real os pedidos vêm do WMS (planilha/integração) — conta pelo quadro de volumes, com a situação de cada um
+  const _vf = (!DEMO && Array.isArray(state.volFat)) ? state.volFat : null;
+  $('sumPed').textContent = _vf ? _vf.length : abertosP.length;
   $('sumPallets').textContent = state.pallets != null ? state.pallets.toLocaleString('pt-BR') : '—';
   $('sumHoje').textContent=hj;
   $('cntPed').textContent=abertosP.length; $('cntPed').classList.toggle('hide', !abertosP.length);
@@ -3496,7 +3499,10 @@ function render(){
   // v1.1: menu do topo, detalhes dos indicadores, painel e estoque
   [['nbPed',abertosP.length],['nbAgd',futurosA.length],['nbNc',ncAbertas]].forEach(([id,n])=>{ const e=$(id); if(e){ e.textContent=n; e.classList.toggle('hide',!n); } });
   const emOp = abertosP.filter(p=>p.status==='em_operacao').length;
-  $('sumPedD').textContent = emOp ? emOp+' em separação agora' : (abertosP.length?'aguardando operação':'');
+  if(_vf){ const c={}; _vf.forEach(r=>{ const k=r.situacao||'aguardando_separacao'; c[k]=(c[k]||0)+1; });
+    const NOM={em_separacao:'em separação',separado:'separado(s)',aguardando_saldo:'aguardando saldo',aguardando_separacao:'aguardando separação'};
+    $('sumPedD').textContent = ['em_separacao','separado','aguardando_saldo','aguardando_separacao'].filter(k=>c[k]).map(k=>c[k]+' '+NOM[k]).join(' · '); }
+  else $('sumPedD').textContent = emOp ? emOp+' em separação agora' : (abertosP.length?'aguardando operação':'');
   $('sumPalD').textContent = state.palletsDelta ? '▲ '+state.palletsDelta+' no mês' : '';
   const hjList = state.agendamentos.filter(a=>a.data===hoje() && a.status!=='cancelado');
   $('sumHojeD').textContent = hjList.length ? hjList.filter(a=>estagioDe(a)==='liberado').length+' concluída(s)' : '';
@@ -4554,12 +4560,15 @@ window.renderVolFat = function(){
   box.classList.remove('hide');
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
-    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Volumes para faturamento <span class="hint" style="font-weight:400">calculados pela MKLOG ao importar o pedido · caixas fechadas + 1 caixa por produto com sobra</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Importado</th><th class="num">Volumes</th><th class="num">Peso estimado</th><th></th></tr></thead><tbody>
-    ${L.map((r,i)=>`<tr><td>${esc(r.pedido||'')}</td><td>${esc(r.destinatario||'—')}</td><td>${new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
-      <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">a calcular</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
-      <td style="white-space:nowrap">${r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}
-        ${r.nf?`<span class="hint" style="margin-left:6px;color:${r.nf_status==='divergente'?'#b45309':'#4d7a1a'}">NF ${esc(r.nf)}${r.nf_status==='divergente'?' · divergente':''}</span>`:(r.id?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px;margin-left:4px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`:'')}</td></tr>`).join('')}
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Volumes para faturamento <span class="hint" style="font-weight:400">pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Importado</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso estimado</th><th></th></tr></thead><tbody>
+    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
+      const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
+      return `<tr><td>${esc(r.pedido||'')}</td><td>${esc(r.destinatario||'—')}</td><td>${new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${SIT[1]};color:${SIT[2]};white-space:nowrap">${SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
+      <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
+      <td style="white-space:nowrap">${semSaldo?'<span class="hint">ajuste o pedido ou aguarde a entrada do material</span>':semLista?'<span class="hint">aguardando a MKLOG gerar a separação</span>':r.pendentes?'<span class="hint" style="color:#b45309">produto sem múltiplo · MKLOG verificando</span>':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`}
+        ${r.nf?`<span class="hint" style="margin-left:6px;color:${r.nf_status==='divergente'?'#b45309':'#4d7a1a'}">NF ${esc(r.nf)}${r.nf_status==='divergente'?' · divergente':''}</span>`:((r.id&&!semSaldo&&!semLista)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px;margin-left:4px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`:'')}</td></tr>`; }).join('')}
     </tbody></table></div></div>`;
 };
 window.volFatDet = function(i){
