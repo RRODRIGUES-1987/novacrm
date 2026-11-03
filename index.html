@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1268 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1269 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1268';
+const APP_VERSION='v1.0.1269';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5548,6 +5548,7 @@ async function vivoWmsAtivos(cid){
     }
   }
   wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${cid}&status=eq.pendente&order=created_at.asc`).catch(function(){return wmsContraOrdens;});
+  await wmsPedEmpCarregar(cid);   // v1.0.1269
   // v1.0.1256: leituras só dos pedidos das listas em andamento (a releitura completa trazia ~120 mil bipes por minuto)
   if(idsP.length){
     var lei=await vivoPorIds('wms_leituras','pedido_id',idsP);
@@ -35387,6 +35388,7 @@ async function loadWmsData(cid){
     q('wms_prismas_caminhao',`company_id=eq.${cid}${_u}&order=codigo.asc`,function(v){wmsPrismas=v;}),
     function(){ return wmsLeiturasCarregar(cid).catch(function(){ return []; }).then(function(v){ wmsLeituras=v||[]; }); },   // v1.0.1099: só leituras em andamento + unitização recente
   ],8);
+  wmsPedEmpCarregar(cid);   // v1.0.1269
   // Backfill: recalcula totais de pedidos importados que ainda não têm (uma vez)
   wmsBackfillTotais(cid);
 }
@@ -38300,7 +38302,13 @@ const WMS_PED_STATUS={
 };
 let wmsPedFiltroStatus='', wmsPedFiltroCliente='', wmsPedFiltroDe='', wmsPedFiltroAte='';
 
-function wmsPedBadge(st){
+// v1.0.1269: pedido "importado" que já tem estoque reservado aparece como "Empenhado" (antes parecia sem empenho)
+var _wmsPedEmp={}, _wmsPedEmpEm=0;
+async function wmsPedEmpCarregar(cid){
+  try{ const r=await dbSelectAll('wms_reservas','company_id=eq.'+cid+'&status=eq.reservada&select=pedido_id'); const m={}; (r||[]).forEach(x=>{ if(x.pedido_id) m[x.pedido_id]=1; }); _wmsPedEmp=m; _wmsPedEmpEm=Date.now(); }catch(_e){}
+}
+function wmsPedBadge(st,pedId){
+  if(st==='importado' && pedId && _wmsPedEmp[pedId]) return '<span style="background:rgba(16,185,129,.14);color:#059669;font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap" title="Estoque reservado (empenhado) — falta gerar a lista de separação">Empenhado</span>';
   if(st==='excluido') return '<span class="bdg" style="background:var(--red-bg);color:var(--red-text)">Excluído</span>';   // v1.0.1171
   const s=WMS_PED_STATUS[st]||{l:st,c:'#888',bg:'rgba(136,136,136,.12)'};
   return `<span style="background:${s.bg};color:${s.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${s.l}</span>`;
@@ -42886,7 +42894,7 @@ function wmsPedLinha(p){
     </div>
     <div class="lright" style="align-items:center;gap:10px">
       ${p.romaneio_id?(function(){const rom=wmsRomaneios.find(r=>r.id===p.romaneio_id);return `<span title="Romaneio ${rom?rom.numero:''}" style="display:inline-flex;color:var(--text3)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>`;})():''}
-      ${wmsPedBadge(p.status)}
+      ${wmsPedBadge(p.status,p.id)}
     </div>
   </div>`;
 }
@@ -43006,12 +43014,14 @@ async function wmsPedEmpenhar(pedidoId){
     showToast(f>0?('Empenho feito com '+f.toLocaleString('pt-BR')+' peça(s) sem saldo'):'Empenho completo',f>0?'amber':'green'); }
   catch(e){ showToast('Erro ao empenhar: '+(e.message||e),'red'); }
   wmsPedEmpenhoCarregar(pedidoId);
+  try{ await wmsPedEmpCarregar(company.id); if(curPage==='wms-pedidos'&&typeof wmsSelRerender==='function') wmsSelRerender(); }catch(_e){}   // v1.0.1269
 }
 async function wmsPedLiberarEmpenho(pedidoId){
   if(!confirm('Liberar o empenho deste pedido? O saldo volta a ficar disponível para outros pedidos.')) return;
   try{ var n=await wmsRpc('wms_liberar_empenho',{p_pedido_id:pedidoId}); showToast(n+' reserva(s) liberada(s)','green'); }
   catch(e){ showToast('Erro ao liberar: '+(e.message||e),'red'); }
   wmsPedEmpenhoCarregar(pedidoId);
+  try{ await wmsPedEmpCarregar(company.id); if(curPage==='wms-pedidos'&&typeof wmsSelRerender==='function') wmsSelRerender(); }catch(_e){}   // v1.0.1269
 }
 
 // ═══ v1.0.1171 · EXCLUSÃO LÓGICA DO PEDIDO WMS + CONTRA-ORDEM DE DEVOLUÇÃO AO ENDEREÇO ═══
@@ -43168,7 +43178,7 @@ function wmsPedidoDetalhe(id){
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
-        ${wmsPedBadge(p.status)}
+        ${wmsPedBadge(p.status,p.id)}
       </div>
     </div>${p.status==='excluido'?`<div style="background:var(--red-bg);color:var(--red-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:10px">Excluído por <b>${ecomEsc(p.excluido_por_nome||'?')}</b> em ${p.excluido_em?new Date(p.excluido_em).toLocaleString('pt-BR'):'?'} · motivo: ${ecomEsc(p.motivo_exclusao||'—')}</div>`:''}<div style="display:none">
       <div>
