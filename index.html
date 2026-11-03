@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1263 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1264 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1263';
+const APP_VERSION='v1.0.1264';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53907,36 +53907,80 @@ async function capaDigitarModal(id){
   const c=capasProcesso.find(x=>x.id===id);if(!c)return;
   const servicos=await dbSelect('processo_capa_servicos',`capa_id=eq.${id}&order=ordem.asc`);
   _capaServicosCache=servicos;
-  const servHtml=servicos.length?servicos.map((s,i)=>`
-    <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-      <div style="font-size:12px">${s.servico} ${s.unidade_cobranca?`<span style="color:var(--text3)">(${s.unidade_cobranca})</span>`:''}</div>
-      <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer">
-        <input type="checkbox" id="capaserv-real-${i}" ${s.realizado?'checked':''} style="width:15px;height:15px"> Realizado
-      </label>
-      <input class="fi" id="capaserv-qtd-${i}" type="number" step="0.0001" value="${s.quantidade||''}" placeholder="Qtd" style="width:90px;padding:5px 8px">
-    </div>`).join(''):'<div class="lsub" style="color:var(--text3)">Nenhum serviço na tabela tarifária deste cliente.</div>';
-
+  _capaDCtx={id:id,valores:{}};
+  // v1.0.1264: o 1º bloco nasce com o que já está na capa
+  _capaDCtx.valores['__0']={nf:c.nf_numero||'',vnf:c.valor_nf!=null?c.valor_nf:'',pal:c.pallets_movimentados||'',serv:servicos.map(function(sv){ return {r:!!sv.realizado,q:sv.quantidade!=null?sv.quantidade:''}; })};
+  const temTipos=wmsTiposProduto(c.cliente_id).length>0;
   portModal(`Digitar — ${c.numero}`,
-    `<div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Dados da Carga</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+    `<div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Comum à operação</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
       <div><label class="fl">Local de descarga</label><input class="fi" id="capa-d-local" value="${c.local_descarga||''}"></div>
       <div><label class="fl">Operador responsável</label><input class="fi" id="capa-d-oper" value="${c.operador_resp||''}"></div>
-      <div><label class="fl">Pallets ${c.tipo==='expedicao'?'separados':'descarregados'} *</label><input class="fi" id="capa-d-pallets" type="number" value="${c.pallets_movimentados||''}"></div>
       <div style="grid-column:1/-1"><label class="fl">Tipo de carga</label>
         <div style="display:flex;gap:18px;padding:8px 0">
           ${CAPA_CARGA.map((t,i)=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
             <input type="radio" name="capa-d-carga" value="${t}" ${c.tipo_carga===t?'checked':''} style="width:16px;height:16px;cursor:pointer"> ${t}
           </label>`).join('')}
         </div></div>
-      <div><label class="fl">PBR</label><input class="fi" id="capa-d-pbr" type="number" value="${c.pallets_pbr||''}"></div>
-      <div><label class="fl">CHEP</label><input class="fi" id="capa-d-chep" type="number" value="${c.pallets_chep||''}"></div>
-      <div><label class="fl">Outros</label><input class="fi" id="capa-d-outros" type="number" value="${c.pallets_outros||''}"></div>
+      <div><label class="fl">PBR</label><input class="fi" id="capa-d-pbr" type="number" value="${c.qtd_pbr||c.pallets_pbr||''}"></div>
+      <div><label class="fl">CHEP</label><input class="fi" id="capa-d-chep" type="number" value="${c.qtd_chep||c.pallets_chep||''}"></div>
+      <div><label class="fl">Outros</label><input class="fi" id="capa-d-outros" type="number" value="${c.qtd_outros||c.pallets_outros||''}"></div>
     </div>
-    <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Serviços Realizados</div>
-    <div>${servHtml}</div>
     ${capaTiposHtml('capa-d',c.cliente_id,c.tipos_produto)}
+    ${temTipos?'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Marcou mais de um tipo? Cada tipo ganha sua NF, valor, pallets e serviços — e vira uma capa própria ao salvar.</div>':''}
+    <div id="capa-d-blocos" style="margin-top:12px"></div>
     <div style="margin-top:12px"><label class="fl">Observações</label><textarea class="fi" id="capa-d-obs" rows="2">${c.observacoes||''}</textarea></div>`,
     `capaSalvarDigitacao('${id}')`,{saveLabel:'Salvar digitação'});
+  setTimeout(function(){
+    document.querySelectorAll('.capa-d-tp').forEach(function(cb){ cb.addEventListener('change',function(){ capaDBlocos(); }); });
+    capaDBlocos();
+  },0);
+}
+// v1.0.1264: blocos de digitação — um por tipo marcado (ou um só, se o depositante não usa tipos)
+var _capaDCtx={id:null,valores:{}};
+function capaDListaTipos(){
+  var c=(capasProcesso||[]).find(function(x){return x.id===_capaDCtx.id;})||{};
+  var L=wmsTiposProduto(c.cliente_id), marc=capaTiposLer('capa-d');
+  var sel=L.filter(function(t){ return marc.indexOf(t.id)>=0; });
+  return sel.length?sel:[{id:null,nome:''}];
+}
+function capaDGuardar(){
+  document.querySelectorAll('#capa-d-blocos [data-bloco]').forEach(function(b){
+    var k=b.getAttribute('data-bloco'), i=b.getAttribute('data-i');
+    _capaDCtx.valores[k]={nf:(ge('capa-d-nf-'+i)||{}).value||'',vnf:(ge('capa-d-vnf-'+i)||{}).value||'',pal:(ge('capa-d-pal-'+i)||{}).value||'',
+      serv:(_capaServicosCache||[]).map(function(sv,j){ return {r:!!(ge('capa-d-sr-'+i+'-'+j)||{}).checked,q:(ge('capa-d-sq-'+i+'-'+j)||{}).value||''}; })};
+  });
+}
+function capaDBlocos(){
+  var box=ge('capa-d-blocos'); if(!box) return;
+  capaDGuardar();
+  var c=(capasProcesso||[]).find(function(x){return x.id===_capaDCtx.id;})||{}, tipos=capaDListaTipos(), e=ecomEsc;
+  var multi=tipos.length>1;
+  var h='<div style="display:grid;grid-template-columns:'+(multi?'repeat(auto-fit,minmax(280px,1fr))':'1fr')+';gap:10px">';
+  tipos.forEach(function(t,i){
+    var k=t.id||'__0', v=_capaDCtx.valores[k]||(i===0?_capaDCtx.valores['__0']:null)||{nf:'',vnf:'',pal:'',serv:[]};
+    _capaDCtx.valores[k]=v;
+    h+='<div data-bloco="'+k+'" data-i="'+i+'" style="border:1px solid var(--border2);border-radius:10px;padding:10px 12px;background:var(--bg)">';
+    h+='<div style="font-weight:700;font-size:13px;margin-bottom:8px">'+(multi||t.id?(i+1)+' · '+e(t.nome||'Operação'):'Dados da carga')
+      +(multi?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+(i===0?'fica nesta capa · '+e(c.numero||''):'nova capa ao salvar')+'</span>':'')+'</div>';
+    h+='<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,.8fr);gap:8px;align-items:end;margin-bottom:8px">'
+      +'<div><label class="fl" style="white-space:nowrap">NF</label><input class="fi" id="capa-d-nf-'+i+'" value="'+e(v.nf)+'" style="width:100%"></div>'
+      +'<div><label class="fl" style="white-space:nowrap">Valor NF (R$)</label><input class="fi" id="capa-d-vnf-'+i+'" type="number" step="0.01" value="'+e(v.vnf)+'" style="width:100%"></div>'
+      +'<div><label class="fl" style="white-space:nowrap">Pallets *</label><input class="fi" id="capa-d-pal-'+i+'" type="number" value="'+e(v.pal)+'" style="width:100%"></div>'
+      +'</div>';
+    if((_capaServicosCache||[]).length){
+      h+='<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin:2px 0 4px">Serviços da tabela</div>';
+      (_capaServicosCache||[]).forEach(function(sv,j){ var sj=(v.serv||[])[j]||{r:false,q:''};
+        h+='<div style="display:grid;grid-template-columns:1fr auto 90px;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)">'
+          +'<div style="font-size:12px">'+e(sv.servico||'')+(sv.unidade_cobranca?' <span style="color:var(--text3)">('+e(sv.unidade_cobranca)+')</span>':'')+'</div>'
+          +'<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer"><input type="checkbox" id="capa-d-sr-'+i+'-'+j+'"'+(sj.r?' checked':'')+' style="width:15px;height:15px"> Realizado</label>'
+          +'<input class="fi" id="capa-d-sq-'+i+'-'+j+'" type="number" step="0.0001" value="'+e(sj.q)+'" placeholder="Qtd" style="width:90px;padding:5px 8px"></div>';
+      });
+    } else h+='<div class="lsub" style="color:var(--text3)">Nenhum serviço na tabela tarifária deste cliente.</div>';
+    h+='</div>';
+  });
+  box.innerHTML=h+'</div>';
+  var btn=ge('port-modal-save'); if(btn) btn.textContent=multi?'Salvar '+tipos.length+' digitações':'Salvar digitação';
 }
 
 let _capaServicosCache=[];
@@ -53981,42 +54025,58 @@ function capaTiposHtml(px,clienteId,marcados){
 }
 function capaTiposLer(px){ var a=[]; document.querySelectorAll('.'+px+'-tp').forEach(function(c){ if(c.checked) a.push(c.value); }); return a; }
 async function capaSalvarDigitacao(id){
-  const pallets=ge('capa-d-pallets')?.value;
-  if(!pallets){portErr('Informe a quantidade de pallets.');return;}
-  const _capaD=(capasProcesso||[]).find(x=>x.id===id)||{}, _tiposD=capaTiposLer('capa-d');   // v1.0.1254
-  if(wmsTiposProduto(_capaD.cliente_id).length&&!_tiposD.length){portErr('Marque o(s) tipo(s) de produto da capa.');return;}
+  const c=(capasProcesso||[]).find(x=>x.id===id)||{}, temTipos=wmsTiposProduto(c.cliente_id).length>0, marc=capaTiposLer('capa-d');
+  if(temTipos&&!marc.length){portErr('Marque o(s) tipo(s) de produto da capa.');return;}
+  const tipos=capaDListaTipos();
+  // v1.0.1264: lê cada bloco (um por tipo)
+  const blocos=tipos.map(function(t,i){ return {tipo:t,nf:(ge('capa-d-nf-'+i)?.value||'').trim()||null,vnf:ge('capa-d-vnf-'+i)?.value,pal:Number(ge('capa-d-pal-'+i)?.value)||0,
+    serv:(_capaServicosCache||[]).map(function(sv,j){ return {realizado:!!ge('capa-d-sr-'+i+'-'+j)?.checked,quantidade:Number(ge('capa-d-sq-'+i+'-'+j)?.value)||null}; })}; });
+  const semPal=blocos.findIndex(function(b){ return !b.pal; });
+  if(semPal>=0){ portErr('Informe os pallets'+(blocos.length>1?' de '+(blocos[semPal].tipo.nome||'cada tipo'):'')+'.'); return; }
   portSaving();
-  const qtdPBR=Number(ge('capa-d-qtd-PBR')?.value)||0;
-  const qtdCHEP=Number(ge('capa-d-qtd-CHEP')?.value)||0;
-  const qtdOutros=Number(ge('capa-d-qtd-Outros')?.value)||0;
-  // tipos com quantidade > 0 (compatibilidade com tipo_carga_pallet)
+  const qtdPBR=Number(ge('capa-d-pbr')?.value||ge('capa-d-qtd-PBR')?.value)||0;
+  const qtdCHEP=Number(ge('capa-d-chep')?.value||ge('capa-d-qtd-CHEP')?.value)||0;
+  const qtdOutros=Number(ge('capa-d-outros')?.value||ge('capa-d-qtd-Outros')?.value)||0;
   const palletTipos=[['PBR',qtdPBR],['CHEP',qtdCHEP],['Outros',qtdOutros]].filter(([t,q])=>q>0).map(([t])=>t).join(',');
-  const dados={
+  const comum={
     local_descarga:ge('capa-d-local')?.value||null,
     operador_resp:ge('capa-d-oper')?.value||null,
-    inicio_operacao:ge('capa-d-inicio')?.value||null,
-    fim_operacao:ge('capa-d-fim')?.value||null,
-    pallets_movimentados:Number(pallets)||0,
-    pallets_pbr:Number(ge('capa-d-armaz')?.value)||null,
-    qtd_pbr:qtdPBR||null,
-    qtd_chep:qtdCHEP||null,
-    qtd_outros:qtdOutros||null,
+    qtd_pbr:qtdPBR||null, qtd_chep:qtdCHEP||null, qtd_outros:qtdOutros||null,
     tipo_carga:document.querySelector('input[name="capa-d-carga"]:checked')?.value||null,
     tipo_carga_pallet:palletTipos||null,
     observacoes:ge('capa-d-obs')?.value||null,
-    ...(wmsTiposProduto(_capaD.cliente_id).length?{tipos_produto:_tiposD}:{}),
     status:'digitada',
   };
+  const doBloco=function(b){ return {nf_numero:b.nf, valor_nf:(b.vnf!==''&&b.vnf!=null)?Number(b.vnf):null, pallets_movimentados:b.pal, ...(temTipos&&b.tipo.id?{tipos_produto:[b.tipo.id]}:{})}; };
   try{
-    await dbUpdate('processo_capas',id,dados);
-    capasProcesso=capasProcesso.map(c=>c.id===id?{...c,...dados}:c);
-    await Promise.all(_capaServicosCache.map((s,i)=>{
-      const realizado=ge(`capaserv-real-${i}`)?.checked||false;
-      const qtd=Number(ge(`capaserv-qtd-${i}`)?.value)||null;
-      return dbUpdate('processo_capa_servicos',s.id,{realizado,quantidade:qtd});
-    }));
+    // 1º tipo: fica na capa original
+    const d0={...comum,...doBloco(blocos[0])};
+    await dbUpdate('processo_capas',id,d0);
+    capasProcesso=capasProcesso.map(x=>x.id===id?{...x,...d0}:x);
+    await Promise.all((_capaServicosCache||[]).map((sv,j)=>dbUpdate('processo_capa_servicos',sv.id,blocos[0].serv[j])));
+    // demais tipos: uma capa nova cada, já digitada, ligada à original
+    const criadas=[];
+    const CAB=['company_id','unit_id','tipo','cliente_id','cliente_nome','cliente_cnpj','tipo_operacao','responsavel_id','tabela_id','data_operacao','pagador_id','pagador_nome',
+      'motorista','transportadora','placa_cavalo','placa_carreta','origem','rg','lacre','doc','tipo_veiculo'];
+    for(let k=1;k<blocos.length;k++){
+      const b=blocos[k], cab={}; CAB.forEach(f=>{ if(c[f]!==undefined) cab[f]=c[f]; });
+      const numero=await capaReservarNumero(c.tipo);
+      const nova={...cab,...comum,...doBloco(b),numero,capa_origem_id:id,owner_id:cu?.id||null};
+      let salvo;
+      try{ salvo=await dbInsert('processo_capas',nova); }
+      catch(e1){ if(/capa_origem_id/.test(String(e1&&e1.message))){ delete nova.capa_origem_id; salvo=await dbInsert('processo_capas',nova); } else throw e1; }
+      if(!salvo) throw new Error('capa do tipo '+(b.tipo.nome||k+1)+' não foi criada');
+      capasProcesso=[salvo,...capasProcesso];
+      for(let j=0;j<(_capaServicosCache||[]).length;j++){
+        const sv=_capaServicosCache[j];
+        await dbInsert('processo_capa_servicos',{capa_id:salvo.id,servico:sv.servico,unidade_cobranca:sv.unidade_cobranca||null,ordem:sv.ordem!=null?sv.ordem:j,realizado:b.serv[j].realizado,quantidade:b.serv[j].quantidade});
+      }
+      criadas.push(salvo.numero||numero);
+    }
+    portClose();
+    if(criadas.length) showToast('Digitação salva · '+(c.numero||'')+' + '+criadas.length+' capa(s) nova(s): '+criadas.join(', '),'green');
     capaViewId=null;render();
-  }catch(e){alert('Erro: '+e.message);}
+  }catch(e){ portErr('Erro: '+(e.message||e)); }
 }
 
 async function capaExcluir(id){
