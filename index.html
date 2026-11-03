@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1271 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1272 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1271';
+const APP_VERSION='v1.0.1272';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38221,24 +38221,32 @@ async function wmsGerarListas(tipo){
             ((await dbSelect('wms_pallets','id=in.('+lote+')&select=id,rg,endereco_codigo').catch(()=>[]))||[]).forEach(x=>{pals[x.id]=x;});
             ((await dbSelect('wms_pallet_conteudo','pallet_id=in.('+lote+')&select=id,pallet_id,qtd_fiscal').catch(()=>[]))||[]).forEach(x=>{conts[x.id]=x;});
           }
-          itens.forEach(it=>{
-            const rs=res.filter(r=>r.pedido_item_id===it.id);
-            const prodIt=wmsProdutoDe(it.produto_id,it.sku,p.cliente_id), saco=Number(prodIt&&prodIt.fator_conversao)||0;   // peças por saco
-            rs.forEach(r=>{
-              const pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{};
-              const cod=String(pl.endereco_codigo||''), end=cod?{raw:cod,rua:cod.slice(0,2),posicao:cod.slice(2,5),nivel:cod.slice(5)}:null;
-              const base={it,end,frente:null,pallet_id:r.pallet_id,reserva_id:r.id};
-              if(c.qtd_fiscal!=null&&Number(r.qtd)>=Number(c.qtd_fiscal)){ tarefas.push({...base,tipo_volume:'pallet',quantidade:Number(r.qtd),ordem:tarefas.length+1}); return; }   // caixa inteira = 1 bipe
-              // v1.0.1111: retirada parcial = 1 tarefa (bipe) por saco
-              // v1.0.1268: o fator do produto é a CAIXA fechada — cada múltiplo inteiro é uma CAIXA (1 bipe); só a sobra é pacote/fração
-              if(saco>1 && Number(r.qtd)>=saco){ const n=Math.floor(Number(r.qtd)/saco), resto=+(Number(r.qtd)-n*saco).toFixed(4);
-                for(let k=0;k<n;k++) tarefas.push({...base,tipo_volume:'caixa',quantidade:saco,ordem:tarefas.length+1});
+          // v1.0.1272: RG = UMA CAIXA. Agrupa as reservas do pedido por RG (a mesma caixa pode atender mais de uma linha da OC):
+          //   reservas do pedido somam a caixa inteira → 1 tarefa CAIXA (1 bipe do RG) com a quantidade total;
+          //   retirada parcial → pacotes (o fator do produto é o tamanho do PACOTE dentro da caixa).
+          const porCont={};
+          res.forEach(r=>{ const k=r.conteudo_id||('pal-'+r.pallet_id); (porCont[k]=porCont[k]||[]).push(r); });
+          Object.keys(porCont).forEach(k=>{
+            const rr=porCont[k], r0=rr[0], c=conts[r0.conteudo_id]||{}, pl=pals[r0.pallet_id]||{};
+            const it0=itens.find(x=>x.id===r0.pedido_item_id)||itens.find(x=>String(x.sku).trim()===String(r0.sku||'').trim())||itens[0];
+            const tot=rr.reduce((a,r)=>a+Number(r.qtd||0),0);
+            const cod=String(pl.endereco_codigo||''), end=cod?{raw:cod,rua:cod.slice(0,2),posicao:cod.slice(2,5),nivel:cod.slice(5)}:null;
+            if(c.qtd_fiscal!=null && tot>=Number(c.qtd_fiscal)){ tarefas.push({it:it0,end,frente:null,pallet_id:r0.pallet_id,reserva_id:r0.id,tipo_volume:'pallet',quantidade:tot,ordem:tarefas.length+1}); return; }   // caixa fechada = 1 bipe do RG
+            rr.forEach(r=>{
+              const itR=itens.find(x=>x.id===r.pedido_item_id)||it0;
+              const prodIt=wmsProdutoDe(itR.produto_id,itR.sku,p.cliente_id), pac=Number(prodIt&&prodIt.fator_conversao)||0;   // peças por pacote
+              const base={it:itR,end,frente:null,pallet_id:r.pallet_id,reserva_id:r.id};
+              if(pac>1 && Number(r.qtd)>=pac){ const n=Math.floor(Number(r.qtd)/pac), resto=+(Number(r.qtd)-n*pac).toFixed(4);
+                for(let m=0;m<n;m++) tarefas.push({...base,tipo_volume:'fracao',quantidade:pac,ordem:tarefas.length+1});
                 if(resto>0) tarefas.push({...base,tipo_volume:'fracao',quantidade:resto,ordem:tarefas.length+1}); }
-              else tarefas.push({...base,tipo_volume:'fracao',quantidade:Number(r.qtd),ordem:tarefas.length+1});   // menor que uma caixa (ou sem fator): 1 bipe com a quantidade
+              else tarefas.push({...base,tipo_volume:'fracao',quantidade:Number(r.qtd),ordem:tarefas.length+1});
             });
-            const emp=rs.reduce((a,r)=>a+Number(r.qtd||0),0), _fe=((empR&&empR.itens)||[]).find(x=>x.item_id===it.id), falta=_fe?Number(_fe.faltou||0):Number(it.quantidade||0)-emp;   // v1.0.1268
+          });
+          itens.forEach(it=>{
+            const emp=res.filter(r=>r.pedido_item_id===it.id).reduce((a,r)=>a+Number(r.qtd||0),0), _fe=((empR&&empR.itens)||[]).find(x=>x.item_id===it.id), falta=_fe?Number(_fe.faltou||0):Number(it.quantidade||0)-emp;
             if(falta>0) tarefas.push({tipo_volume:'fracao',quantidade:falta,it,end:{raw:'SEM SALDO',rua:null,posicao:null,nivel:null},frente:null,sem_saldo:true,ordem:tarefas.length+1});
           });
+
           tarefas.sort((a,b)=>String(a.end&&a.end.raw||'~').localeCompare(String(b.end&&b.end.raw||'~'))); tarefas.forEach((t,i)=>{t.ordem=i+1;});
         } else itens.forEach(it=>{
           const m=wmsMultiploDe(it.produto_id,it.sku,p.cliente_id);
