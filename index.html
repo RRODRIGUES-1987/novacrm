@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1275 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1277 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1275';
+const APP_VERSION='v1.0.1277';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35947,7 +35947,7 @@ function wmsSelBarHtml(sc){
   return '<div id="wms-'+sc+'-selbar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:9px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
     +'<span id="wms-'+sc+'-seltxt" style="font-size:12px;font-weight:700;color:var(--blue-text)"></span>'
     +'<div style="display:flex;gap:8px">'
-    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button>'
+    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
       +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
       +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
@@ -36814,6 +36814,67 @@ async function wmsCapaPedidosPrint(pedidoIds){
   const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px'; document.body.appendChild(fr);
   fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
   setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(function(){ fr.remove(); },4000); },600);
+}
+
+// ═══ v1.0.1276 · ETIQUETA DE ENDEREÇO · MODELO COLUNA (A4 sulfite, 2 colunas por folha, níveis do alto para o chão) ═══
+function wmsEndPartes(cod){
+  const e=(wmsEnderecos||[]).find(x=>String(x.codigo||'').trim()===String(cod).trim());
+  if(e && e.rua!=null && e.posicao!=null) return {codigo:String(e.codigo).trim(),rua:String(e.rua),pos:String(e.posicao),nivel:String(e.nivel??''),galpao:e.galpao||''};
+  const m=String(cod).trim().match(/^([A-Za-z]+)(\d{3})(\d+)$/); if(!m) return null;
+  return {codigo:String(cod).trim(),rua:m[1],pos:m[2],nivel:m[3],galpao:(e&&e.galpao)||''};
+}
+async function wmsEtiqColunaPrint(codigos,titulo){
+  codigos=[...new Set((codigos||[]).map(c=>String(c||'').trim()).filter(c=>c&&c!=='SEM SALDO'))];
+  if(!codigos.length){ showToast('Nenhum endereço para imprimir','amber'); return; }
+  try{ await ecomLoadLabelLibs(); }catch(e){ showToast('Não consegui carregar o gerador de código de barras','red'); return; }
+  // agrupa por coluna (rua + posição) e completa com TODOS os níveis cadastrados daquela coluna
+  const cols={};
+  codigos.forEach(c=>{ const p=wmsEndPartes(c); if(!p) return; const k=p.galpao+'|'+p.rua+'|'+p.pos; cols[k]=cols[k]||{rua:p.rua,pos:p.pos,galpao:p.galpao,niv:{}}; });
+  Object.values(cols).forEach(col=>{
+    (wmsEnderecos||[]).filter(e=>String(e.rua)===col.rua&&String(e.posicao)===col.pos&&(!col.galpao||e.galpao===col.galpao)&&e.ativo!==false&&!e.is_virtual).forEach(e=>{ col.niv[String(e.codigo).trim()]=String(e.nivel??''); });
+    codigos.forEach(c=>{ const p=wmsEndPartes(c); if(p&&p.rua===col.rua&&p.pos===col.pos&&!col.niv[p.codigo]) col.niv[p.codigo]=p.nivel; });
+  });
+  const lista=Object.values(cols).sort((a,b)=>(a.rua+a.pos).localeCompare(b.rua+b.pos));
+  const e=ecomEsc;
+  const etq=lista.map(col=>{
+    const nv=Object.entries(col.niv).sort((a,b)=>Number(b[1])-Number(a[1])||b[0].localeCompare(a[0]));
+    const minN=Math.min(...nv.map(x=>Number(x[1])||0));
+    return `<div class="col"><div class="cab">RUA ${e(col.rua)} · COLUNA ${e(col.pos)}</div>`
+      +nv.map(([cod,n])=>`<div class="niv"><div class="lin"><div class="seta">${(Number(n)||0)===minN?'▼':'▲'}</div><div><div class="nl">NÍVEL ${e(n)}${(Number(n)||0)===minN?' · CHÃO':''}</div><div class="cod">${e(cod)}</div></div></div><div class="bc">${ecomBcSvg(cod)||''}</div></div>`).join('')
+      +`</div>`;
+  });
+  let pags=''; for(let i=0;i<etq.length;i+=2) pags+=`<section class="pg">${etq[i]}${etq[i+1]||'<div class="col vazio"></div>'}</section>`;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>${e(titulo||'Etiquetas de endereço')}</title><style>
+    @page{size:A4 portrait;margin:8mm} body{margin:0;font-family:Arial,sans-serif;color:#000}
+    .pg{display:grid;grid-template-columns:1fr 1fr;height:279mm;page-break-after:always;box-sizing:border-box}
+    .col{padding:2mm 5mm;box-sizing:border-box;display:flex;flex-direction:column;gap:4mm}
+    .col:first-child{border-right:1px dashed #888}
+    .cab{text-align:center;font-weight:900;font-size:15pt;border-bottom:3px solid #000;padding-bottom:2mm}
+    .niv{border:2px solid #000;border-radius:3mm;padding:3mm;flex:1;display:flex;flex-direction:column;justify-content:center;max-height:62mm}
+    .lin{display:flex;align-items:center;gap:4mm}.seta{font-size:40pt;font-weight:900;line-height:1}
+    .nl{font-size:10pt;font-weight:700}.cod{font-size:34pt;font-weight:900;letter-spacing:1px;line-height:1.05}
+    .bc svg{width:100%;height:22mm;display:block;margin-top:2mm}
+  </style></head><body>${pags}</body></html>`;
+  const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px'; document.body.appendChild(fr);
+  fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+  setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(function(){ fr.remove(); },4000); },700);
+  showToast(lista.length+' etiqueta(s) de coluna · '+Math.ceil(lista.length/2)+' folha(s)','green');
+}
+// endereços das listas (só os que vão ser usados — as estantes ainda têm a etiqueta antiga)
+async function wmsEtiqColunaListas(listaIds){
+  listaIds=(listaIds||[]).filter(Boolean); if(!listaIds.length){ showToast('Nenhuma lista','amber'); return; }
+  let t=[]; try{ t=await dbSelect('wms_tarefas_separacao','lista_id=in.('+listaIds.join(',')+')&select=endereco_origem')||[]; }catch(_e){}
+  if(!t.length) t=(wmsTarefasSeparacao||[]).filter(x=>listaIds.indexOf(x.lista_id)>=0);
+  return wmsEtiqColunaPrint(t.map(x=>x.endereco_origem),'Etiquetas de endereço das listas');
+}
+// pela tela de endereços: rua + faixa de colunas
+function wmsEtiqColunaFiltro(){
+  const rua=(prompt('Rua (ex.: CA)')||'').trim().toUpperCase(); if(!rua) return;
+  const fx=(prompt('Colunas (ex.: 001-010 · vazio = a rua toda)')||'').trim();
+  let de=0, ate=999; const m=fx.match(/(\d+)\s*[-a]\s*(\d+)/); if(m){ de=+m[1]; ate=+m[2]; } else if(/^\d+$/.test(fx)){ de=ate=+fx; }
+  const cods=(wmsEnderecos||[]).filter(e=>String(e.rua||'').toUpperCase()===rua&&(+e.posicao)>=de&&(+e.posicao)<=ate&&e.ativo!==false&&!e.is_virtual).map(e=>e.codigo);
+  if(!cods.length){ showToast('Nenhum endereço na rua '+rua+(fx?' · '+fx:''),'amber'); return; }
+  wmsEtiqColunaPrint(cods,'Etiquetas de endereço · rua '+rua);
 }
 async function wmsListasPdfIds(ids){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
@@ -38359,7 +38420,7 @@ async function wmsGerarListas(tipo){
       ${empHtml}
       ${pulados.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${pulados.length} pedido(s) sem lista gerada:<br>${pulados.slice(0,8).map(x=>'• '+esc(String(x))+(String(x).indexOf(' ')<0?' (já tinha lista vinculada)':'')).join('<br>')}${pulados.length>8?'<br>+'+(pulados.length-8):''}</div>`:''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-        ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button><button class="btn" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>wmsUltimasListasGeradas.indexOf(v.lista_id)>=0).map(v=>v.pedido_id))">🖨 Só as capas</button>`:''}
+        ${criadas.length?`<button class="btn btn-p" onclick="wmsListasPdfIds(wmsUltimasListasGeradas)">🖨 Imprimir folhas de separação (${criadas.length})</button><button class="btn" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>wmsUltimasListasGeradas.indexOf(v.lista_id)>=0).map(v=>v.pedido_id))">🖨 Só as capas</button><button class="btn" onclick="wmsEtiqColunaListas(wmsUltimasListasGeradas)" title="Etiquetas de coluna (A4 sulfite) só dos endereços destas listas">🏷 Etiquetas de endereço</button>`:''}
         <button class="btn" onclick="portClose();pg('wms-separacao')">Ver listas →</button>
         <button class="btn" style="margin-left:auto" onclick="portClose()">Fechar</button>
       </div>`,'portClose()',{noFooter:true});
@@ -50802,7 +50863,8 @@ function rWmsMalha(){
     +'<select class="fi" style="width:auto" onchange="malhaSetFiltro(\'fRua\',this.value)">'+ruaOpts+'</select>'
     +'<select class="fi" style="width:auto" onchange="malhaSetFiltro(\'fEstado\',this.value)">'+estOpts+'</select>'
     +'<input class="fi" style="width:180px" placeholder="Buscar código..." value="'+esc(_malha.fBusca)+'" oninput="malhaBuscaInput(this.value)">'
-    +'<button class="btn btn-p" style="margin-left:auto" onclick="wmsEndView(\'gerar\')">+ Gerar endereços</button>'
+    +'<button class="btn" style="margin-left:auto" onclick="wmsEtiqColunaFiltro()" title="Etiquetas de coluna em A4 sulfite (rua + faixa de colunas)">🏷 Etiquetas de coluna</button>'
+    +'<button class="btn btn-p" onclick="wmsEndView(\'gerar\')">+ Gerar endereços</button>'
     +'</div>';
   // cards
   var _tps=(wmsPalletTipos||[]).filter(function(t){return t.company_id===cid&&t.unit_id===unit&&t.ativo!==false;});
@@ -57465,6 +57527,8 @@ async function flCarregar(){
         return;
       }
       var nfOk=!!r.nf_numero && ['6','7'].indexOf(String(r.nf_situacao||''))>=0;
+      // v1.0.1277 (sync-olist v7.71): espera do MARKETPLACE (TikTok processando a nota · Mercado Livre segurando a etiqueta) → gaveta do cliente/marketplace, não atraso do VERUS
+      if(nfOk && /^aguardando marketplace/i.test(String(r.erro_msg||''))){ cli.push({...base,pf:r.pode_faturar_em||null,conf:r.situacao_confirmada_em||r.updated_at,sit:String(r.erro_msg).replace(/^aguardando marketplace:\s*/i,'Marketplace: '),lida:r.updated_at}); return; }
       if(nfOk){
         if(r.agrupamento_id){
           // v1.0.1117: preso em lote travado por pedido do cliente (nota não transmitida) → travados, não atraso do VERUS
