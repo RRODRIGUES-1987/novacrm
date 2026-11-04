@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1274 | Gerado: 2026-11-03 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1275 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1461,7 +1461,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1274';
+const APP_VERSION='v1.0.1275';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38197,7 +38197,12 @@ async function wmsGerarListas(tipo){
       for(const p of peds){
         nPed++;portProgress(nPed-1,peds.length,'Gerando listas de separação…','Pedido '+(p.numero_curto||p.numero_pedido||''));
         // blindagem: pedido já vinculado a uma lista (wms_lista_pedidos é unique por pedido) → pula
-        if(wmsListaPedidos.some(v=>v.pedido_id===p.id)){pulados.push(p.numero_curto||p.numero_pedido||p.id);continue;}
+        if(wmsListaPedidos.some(v=>v.pedido_id===p.id)){
+          // v1.0.1275: confere no banco — a lista pode ter sido desfeita em outro computador (ou por script) e a tela ainda lembrar dela
+          let _vinc=null; try{ _vinc=await dbSelect('wms_lista_pedidos','pedido_id=eq.'+p.id+'&select=id,lista_id&limit=1'); }catch(_e){}
+          if(Array.isArray(_vinc)&&!_vinc.length){ wmsListaPedidos=wmsListaPedidos.filter(v=>v.pedido_id!==p.id); }
+          else { pulados.push(p.numero_curto||p.numero_pedido||p.id); continue; }
+        }
         let itens=wmsPedidoItens.filter(it=>it.pedido_id===p.id);
         // v1.0.1268: relê os itens do banco — a memória pode estar com a quantidade de antes de um ajuste (gerava "SEM SALDO" falso)
         try{ const _itDb=await dbSelect('wms_pedido_itens','pedido_id=eq.'+p.id+'&order=created_at.asc'); if(Array.isArray(_itDb)&&_itDb.length){ itens=_itDb.filter(x=>String(x.status||'')!=='cancelado'); wmsPedidoItens=wmsPedidoItens.filter(x=>x.pedido_id!==p.id).concat(_itDb); } }catch(_e){}
@@ -38222,7 +38227,7 @@ async function wmsGerarListas(tipo){
             try{ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); }catch(_e){}
             try{ await dbUpdate('wms_pedidos',p.id,{status:'aguardando_saldo'}); p.status='aguardando_saldo'; }catch(_e){}
             if(p.origem==='sap_b1') sapAcao('aviso_saldo',{pedido_id:p.id});
-            const _fal=(empR.itens||[]).filter(x=>Number(x.faltou)>0).map(x=>x.sku+' falta '+Number(x.faltou).toLocaleString('pt-BR')+(Number(x.retido_shelf_life)>0?' ('+Number(x.retido_shelf_life).toLocaleString('pt-BR')+' retido por validade)':''));
+            const _fal=(empR.itens||[]).filter(x=>Number(x.faltou)>0).map(x=>x.sku+(x.motivo?' — '+x.motivo:' falta '+Number(x.faltou).toLocaleString('pt-BR'))+(Number(x.retido_shelf_life)>0?' ('+Number(x.retido_shelf_life).toLocaleString('pt-BR')+' retido por validade)':''));   // v1.0.1275: motivo (ex.: fora do múltiplo do pacote)
             empenhos.pop(); pulados.push((p.numero_curto||p.numero_pedido||p.id)+' — SEM SALDO COMPLETO, não gerado (pedido em "aguardando saldo"): '+_fal.join(' · ')); continue;
           }
           const res=(await dbSelect('wms_reservas','pedido_id=eq.'+p.id+'&status=eq.reservada&order=created_at.asc').catch(()=>[]))||[];
