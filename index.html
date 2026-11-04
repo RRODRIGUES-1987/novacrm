@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1283 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1284 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1283';
+const APP_VERSION='v1.0.1284';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37334,11 +37334,14 @@ const COLETOR_FUNCS={
   separar:{key:'separar',label:'Separar',icon:'📦',desc:'Separar pedidos por bipe',abrir:'coletorSepListas'},
   conferir:{key:'conferir',label:'Conferir',icon:'✅',desc:'Conferir pedidos separados',abrir:'coletorConfListas'},
   embarcar:{key:'embarcar',label:'Embarcar',icon:'🚚',desc:'Conferência de embarque — bipar pallets na doca',abrir:'coletorEmbListas'},
+  receber:{key:'receber',label:'Receber',icon:'📥',desc:'Receber por caixa: QR, código, RG',abrir:'coletorRecListas'},   // v1.0.1284
+  armazenar:{key:'armazenar',label:'Armazenar',icon:'🏷',desc:'Guardar a caixa: RG e endereço',abrir:'coletorArmAbrir'},   // v1.0.1284
   inventario:{key:'inventario',label:'Inventário',icon:'📋',desc:'Contar bipando endereço e produto',abrir:'coletorInvListas'}
   // futuro: mover/enderecar (empilhadeira):{...}
 };
 const COLETOR_ROLES={
-  coletor:['separar','conferir','embarcar','inventario'],
+  coletor:['separar','conferir','embarcar','receber','armazenar','inventario'],
+  recebedor:['receber','armazenar'],   // v1.0.1284
   separador:['separar'],
   conferente:['conferir','embarcar'],
   inventariante:['inventario']          // só conta; não separa nem confere
@@ -37828,6 +37831,126 @@ async function colRgCarregar(listaId){
   for(var i=0;i<ids.length;i+=150){ var lote=ids.slice(i,i+150).join(',');
     ((await dbSelect('wms_pallets','id=in.('+lote+')&select=id,rg,endereco_codigo,codigo_externo,depositante_id').catch(function(){return [];}))||[]).forEach(function(p){_colRg.pal[p.id]=p;});
     ((await dbSelect('wms_pallet_conteudo','pallet_id=in.('+lote+')&status=eq.ativo&select=id,pallet_id,sku,qtd_fiscal,controles').catch(function(){return [];}))||[]).forEach(function(c){_colRg.cont[c.id]=c;}); }
+}
+
+// ═══ v1.0.1284 · RECEBIMENTO POR CAIXA (CASCO) — QR → CUST P/N → RG → QR · ARMAZENAGEM RG → endereço ═══
+var _rec=null, _arm=null;
+function recParseQr(raw){ var t=String(raw||'').trim(); if(t.indexOf('&')<0) return null; var p=t.split('&'); if(p.length<4) return null;
+  var q=Number(String(p[3]||'').replace(',','.')); if(!p[0]||!(q>0)) return null; return {raw:t,id:p[0].trim(),lote:(p[2]||'').trim(),qtd:q,wo:String(p[6]||'').replace(/^01/,'')}; }
+function recEhRg(raw){ return /^\d{6,7}$/.test(String(raw||'').trim()); }
+function recEhPn(raw){ return /^\d{10}-\d{2}S?$/i.test(String(raw||'').trim()); }
+async function coletorRecListas(){
+  _colScanHandler=null; _rec=null;
+  coletorShow('Receber','coletorHome()','<div style="padding:24px;text-align:center;color:var(--text3)">Carregando recebimentos…</div>');
+  var deps=(clientes||[]).filter(function(c){ return c.company_id===company?.id && c.parametros && (c.parametros.recebimento_por_caixa===true||c.parametros.recebimento_por_caixa==='true'); }).map(function(c){return c.id;});
+  var L=[]; try{ L=await dbSelect('wms_entradas','company_id=eq.'+company.id+'&status=in.(previsto,recebendo)&order=created_at.desc&limit=60')||[]; }catch(e){}
+  L=L.filter(function(e){ return !deps.length || deps.indexOf(e.depositante_id)>=0; });
+  window._recSel=window._recSel||[];
+  if(!L.length){ coletorShow('Receber','coletorHome()','<div style="padding:24px;text-align:center;color:var(--text3)">Nenhum recebimento aberto. Crie a entrada no VERUS (Entradas → importar o XML da NF).</div>'); return; }
+  var html='<div style="font-size:13px;color:var(--text3);margin-bottom:10px">Marque as notas da carga (pode ser mais de uma) e toque em Receber:</div>'
+    +L.map(function(e){ var on=window._recSel.indexOf(e.id)>=0, cli=(clientes||[]).find(function(c){return c.id===e.depositante_id;});
+      return '<button onclick="coletorRecMarcar(&apos;'+e.id+'&apos;)" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:'+(on?'var(--blue-bg)':'var(--bg)')+';border:'+(on?'2px solid var(--blue-text)':'1px solid var(--border)')+';border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer">'
+        +'<span style="font-size:20px">'+(on?'☑':'☐')+'</span><span style="flex:1"><b style="font-size:15px">NF '+ecomEsc(e.nf_numero||e.ref_documento||e.numero_entrada||'—')+'</b> · '+ecomEsc((cli&&cli.nome)||'')
+        +'<div style="font-size:11.5px;color:var(--text3)">'+ecomEsc(e.numero_entrada||'')+' · '+ecomEsc(e.fornecedor_nome||e.remetente||'')+' · '+(e.status==='recebendo'?'em recebimento':'previsto')+'</div></span></button>'; }).join('')
+    +'<button onclick="coletorRecAbrir()" style="display:block;width:100%;margin-top:6px;padding:16px;border:0;border-radius:14px;background:#1e3a8a;color:#fff;font-size:16px;font-weight:800;cursor:pointer">📥 Receber '+(window._recSel.length?'('+window._recSel.length+' nota'+(window._recSel.length>1?'s':'')+')':'')+'</button>';
+  coletorShow('Receber','coletorHome()',html);
+}
+function coletorRecMarcar(id){ window._recSel=window._recSel||[]; var i=window._recSel.indexOf(id); if(i>=0) window._recSel.splice(i,1); else window._recSel.push(id); coletorRecListas(); }
+async function coletorRecAbrir(){
+  var ids=(window._recSel||[]).slice(); if(!ids.length){ showToast('Marque pelo menos uma nota','amber'); return; }
+  var itens=[]; try{ itens=await dbSelect('wms_entrada_itens','entrada_id=in.('+ids.join(',')+')&select=entrada_id,sku,qtd_prevista')||[]; }catch(e){}
+  _rec={ids:ids,itens:itens,passo:'qr',qr:null,sku:null,rg:null,resumo:[],log:[],msg:null,ultima:null};
+  await coletorRecResumo(); coletorRecRender();
+}
+async function coletorRecResumo(){ try{ _rec.resumo=await dbRpc('wms_receb_resumo',{p_entradas:_rec.ids})||[]; }catch(e){ _rec.msg={t:'erro',x:'Resumo: '+(e.message||e)}; } }
+function coletorRecRender(){
+  var R=_rec, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var tot=R.resumo.reduce(function(a,x){return a+(+x.caixas||0);},0);
+  var passos={qr:['Bipe o QR da caixa','começa a próxima caixa','#1e3a8a'],pn:['Bipe o CUST P/N','código da CASCO, na mesma etiqueta','#7c3aed'],rg:['Cole o RG e bipe o RG','etiqueta do rolo','#b45309'],conf:['Bipe o QR de novo','confirma o RG nesta caixa','#059669']};
+  var ps=passos[R.passo]||passos.qr;
+  var card=R.qr?('<div style="border:1.5px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;font-size:13px">'
+      +'<div style="color:var(--green-text);font-size:12px">✓ QR · '+nb(R.qr.qtd)+' pç · lote '+ecomEsc(R.qr.lote||'—')+'</div>'
+      +(R.sku?'<div style="font-weight:800;font-size:15px;margin-top:4px">'+ecomEsc(R.sku)+'</div>':'')
+      +(R.rg?'<div style="color:var(--green-text);font-size:12px;margin-top:2px">✓ RG '+ecomEsc(R.rg)+'</div>':'')
+      +'<div style="font-size:11px;color:var(--text3)">caixa '+ecomEsc(R.qr.id)+'</div></div>'):'';
+  var msg=R.msg?'<div style="padding:9px 10px;border-radius:10px;margin-bottom:10px;font-size:13px;font-weight:600;background:'+(R.msg.t==='erro'?'var(--red-bg)':R.msg.t==='ok'?'var(--green-bg)':'var(--amber-bg)')+';color:'+(R.msg.t==='erro'?'var(--red-text)':R.msg.t==='ok'?'var(--green-text)':'var(--amber-text)')+'">'+ecomEsc(R.msg.x)+'</div>':'';
+  var btn='<button type="button" id="col-acao-btn" onclick="'+(coletorCamSuporta()?'coletorCamToggle(coletorScanSubmit)':'coletorDigitar()')+'" style="display:block;width:100%;padding:18px 10px;border:0;border-radius:16px;text-align:center;background:'+ps[2]+';color:#fff;cursor:pointer;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+ps[0]+'</div><div style="font-size:11px;opacity:.85">'+ps[1]+'</div></button>';
+  var tab='<div style="font-size:11px;color:var(--text3);margin:4px 0">Conferido × nota · '+tot+' caixa(s)</div>'+R.resumo.map(function(x){ var ok=Number(x.conferido)===Number(x.previsto)&&Number(x.previsto)>0, sobra=Number(x.conferido)>Number(x.previsto);
+      return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>'+ecomEsc(x.sku)+'</span><b style="color:'+(ok?'var(--green-text)':sobra?'var(--red-text)':'var(--text)')+'">'+nb(x.conferido)+'/'+nb(x.previsto)+'</b></div>'; }).join('');
+  var rod='<div style="display:flex;gap:8px;margin-top:12px">'+(R.ultima?'<button onclick="coletorRecDesfazer()" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:12px">↩ Desfazer a última caixa</button>':'')
+    +(R.passo!=='qr'?'<button onclick="_rec.passo=\'qr\';_rec.qr=null;_rec.sku=null;_rec.rg=null;_rec.msg=null;coletorRecRender()" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:12px">✕ Recomeçar esta caixa</button>':'')
+    +'</div><button onclick="coletorRecFechar()" style="display:block;width:100%;margin-top:10px;padding:12px;border:1px solid var(--blue-text);border-radius:12px;background:var(--bg);color:var(--blue-text);font-weight:700">Fechar o recebimento</button>';
+  coletorShow('Receber','coletorRecListas()',coletorScanBox()+msg+card+btn+tab+rod);
+  setTimeout(function(){ var bb=ge('col-bigbtn'); if(bb) bb.style.display='none'; var i=ge('col-scan'); if(i){ try{i.focus({preventScroll:true});}catch(e){} } },30);
+  _colScanHandler=coletorRecBipe;
+}
+async function coletorRecBipe(raw){
+  var R=_rec; if(!R) return; raw=String(raw||'').trim(); R.msg=null; coletorCamStop();
+  var aviso=function(t,x){ R.msg={t:t,x:x}; if(navigator.vibrate) navigator.vibrate(t==='erro'?[60,40,60]:40); if(typeof wmsBeep==='function') wmsBeep(t==='erro'); coletorRecRender(); };
+  if(R.passo==='qr'){ var q=recParseQr(raw); if(!q) return aviso('erro','Isso não é o QR da caixa. Bipe o QR (quadrado) da etiqueta.'); R.qr=q; R.passo='pn'; return coletorRecRender(); }
+  if(R.passo==='pn'){
+    if(recParseQr(raw)) return aviso('erro','Agora é o CUST P/N (código de barras com o código da CASCO).');
+    if(recEhRg(raw)) return aviso('erro','Isso é um RG. Antes, bipe o CUST P/N da etiqueta da caixa.');
+    var sku=raw.toUpperCase(); var naNota=R.itens.some(function(i){return String(i.sku||'').trim().toUpperCase()===sku;});
+    R.sku=sku; R.passo='rg'; if(!naNota) R.msg={t:'aviso',x:sku+' não está nas notas desta carga: vai como sobra.'}; return coletorRecRender(); }
+  if(R.passo==='rg'){ if(!recEhRg(raw)) return aviso('erro','Bipe a etiqueta do RG (número de 6 ou 7 dígitos).'); R.rg=raw; R.passo='conf'; return coletorRecRender(); }
+  if(R.passo==='conf'){
+    var q2=recParseQr(raw); if(!q2) return aviso('erro','Confirme bipando o QR da MESMA caixa.');
+    if(q2.id!==R.qr.id){ R.passo='rg'; R.rg=null; return aviso('erro','QR de outra caixa! O RG foi colado na caixa errada? Confira, cole o RG na caixa certa e bipe o RG de novo.'); }
+    var ent=(R.itens.find(function(i){return String(i.sku||'').trim().toUpperCase()===R.sku;})||{}).entrada_id||R.ids[0];
+    try{
+      var r=await dbRpc('wms_receber_caixa',{p_entrada:ent,p_qr:R.qr.raw,p_sku:R.sku,p_rg:Number(R.rg),p_operador:coletorAutor()});
+      R.ultima=r&&r.pallet_id?r:null; R.log.unshift(r); var tx='✓ Caixa RG '+R.rg+' · '+R.sku+' · '+Number(R.qr.qtd).toLocaleString('pt-BR')+' pç';
+      R.passo='qr'; R.qr=null; R.sku=null; R.rg=null; await coletorRecResumo(); return aviso('ok',tx);
+    }catch(e){ var m=String(e.message||e); if(/RG .* já está em uso/i.test(m)){ R.passo='rg'; R.rg=null; } else if(/já foi conferida/i.test(m)){ R.passo='qr'; R.qr=null; R.sku=null; R.rg=null; } return aviso('erro',m.replace(/^.*?:\s*(?=[A-ZÁÉÍÓÚ])/,'')); }
+  }
+}
+async function coletorRecDesfazer(){
+  var R=_rec; if(!R||!R.ultima) return; if(!confirm('Desfazer a caixa RG '+R.ultima.rg+' ('+R.ultima.sku+')?')) return;
+  try{ await dbRpc('wms_receber_caixa_desfazer',{p_pallet:R.ultima.pallet_id}); R.msg={t:'aviso',x:'Caixa RG '+R.ultima.rg+' desfeita. A etiqueta pode ser usada de novo.'}; R.ultima=null; await coletorRecResumo(); }
+  catch(e){ R.msg={t:'erro',x:String(e.message||e)}; }
+  coletorRecRender();
+}
+async function coletorRecFechar(){
+  var R=_rec; if(!R) return; await coletorRecResumo();
+  var dv=R.resumo.filter(function(x){return Number(x.conferido)!==Number(x.previsto);});
+  var txt=dv.length?('Há divergência com a nota:\n'+dv.slice(0,12).map(function(x){ var d=Number(x.conferido)-Number(x.previsto); return '• '+x.sku+': '+(d>0?'sobra ':'falta ')+Math.abs(d).toLocaleString('pt-BR'); }).join('\n')+'\n\nO conferido entra e a diferença fica registrada para a CASCO.'):'Tudo bate com a nota. Fechar o recebimento?';
+  if(!confirm(txt)) return;
+  var resp=coletorAutor();
+  if(dv.length){ resp=prompt('Divergência: nome do supervisor que autoriza fechar',''); if(!resp) return; }
+  try{ var r=await dbRpc('wms_receb_fechar',{p_entradas:R.ids,p_responsavel:resp}); showToast('Recebimento fechado'+(dv.length?' com '+dv.length+' divergência(s)':'')+'. Falta armazenar as caixas.','green'); window._recSel=[]; coletorRecListas(); }
+  catch(e){ R.msg={t:'erro',x:String(e.message||e)}; coletorRecRender(); }
+}
+// armazenagem (sugestão manual por enquanto: parâmetro armazenagem_sugestao do depositante)
+function coletorArmAbrir(){ _arm={passo:'rg',rg:null,info:null,msg:null,log:[]}; coletorArmRender(); }
+function coletorArmRender(){
+  var A=_arm, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var msg=A.msg?'<div style="padding:9px 10px;border-radius:10px;margin-bottom:10px;font-size:13px;font-weight:600;background:'+(A.msg.t==='erro'?'var(--red-bg)':'var(--green-bg)')+';color:'+(A.msg.t==='erro'?'var(--red-text)':'var(--green-text)')+'">'+ecomEsc(A.msg.x)+'</div>':'';
+  var card=A.info?'<div style="border:1.5px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3)">RG '+ecomEsc(A.rg)+(A.info.endereco_codigo?' · hoje em '+ecomEsc(A.info.endereco_codigo):' · aguardando endereço')+'</div><div style="font-weight:800;font-size:15px">'+ecomEsc(A.info.sku||'')+' · '+nb(A.info.qtd)+' pç</div><div style="font-size:11px;color:var(--text3)">'+ecomEsc(A.info.descricao||'')+'</div></div>':'';
+  var ps=A.passo==='rg'?['Bipe o RG da caixa','etiqueta do RG','#1e3a8a']:['Bipe a etiqueta do endereço','onde você guardou a caixa','#059669'];
+  var btn='<button type="button" id="col-acao-btn" onclick="'+(coletorCamSuporta()?'coletorCamToggle(coletorScanSubmit)':'coletorDigitar()')+'" style="display:block;width:100%;padding:18px 10px;border:0;border-radius:16px;text-align:center;background:'+ps[2]+';color:#fff;cursor:pointer;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+ps[0]+'</div><div style="font-size:11px;opacity:.85">'+ps[1]+'</div></button>';
+  var log=A.log.slice(0,8).map(function(x){return '<div style="font-size:12px;color:var(--text2);padding:3px 0">✓ RG '+ecomEsc(x.rg)+' → '+ecomEsc(x.endereco)+' · '+ecomEsc(x.sku||'')+'</div>';}).join('');
+  coletorShow('Armazenar','coletorHome()',coletorScanBox()+msg+card+btn+(log?'<div style="font-size:11px;color:var(--text3);margin-top:6px">Últimas guardadas</div>'+log:''));
+  setTimeout(function(){ var bb=ge('col-bigbtn'); if(bb) bb.style.display='none'; var i=ge('col-scan'); if(i){ try{i.focus({preventScroll:true});}catch(e){} } },30);
+  _colScanHandler=coletorArmBipe;
+}
+async function coletorArmBipe(raw){
+  var A=_arm; if(!A) return; raw=String(raw||'').trim(); A.msg=null; coletorCamStop();
+  var erro=function(x){ A.msg={t:'erro',x:x}; if(navigator.vibrate) navigator.vibrate([60,40,60]); if(typeof wmsBeep==='function') wmsBeep(true); coletorArmRender(); };
+  if(A.passo==='rg'){
+    if(!/^\d{5,8}$/.test(raw)) return erro('Bipe o RG da caixa.');
+    try{ var p=await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+raw+'&status=neq.morto&select=id,rg,endereco_codigo,status&limit=1'); p=(p||[])[0];
+      if(!p) return erro('RG '+raw+' não encontrado.');
+      var c=(await dbSelect('wms_pallet_conteudo','pallet_id=eq.'+p.id+'&select=sku,descricao,qtd_fiscal&limit=1')||[])[0]||{};
+      A.rg=raw; A.info={endereco_codigo:p.endereco_codigo,sku:c.sku,descricao:c.descricao,qtd:c.qtd_fiscal}; A.passo='end'; coletorArmRender();
+    }catch(e){ erro(String(e.message||e)); }
+    return;
+  }
+  if(/^\d{6,7}$/.test(raw)&&raw!==A.rg) return erro('Isso é outro RG. Bipe a etiqueta do endereço (ou toque em ✕ para trocar de caixa).');
+  try{ var r=await dbRpc('wms_armazenar_rg',{p_company:company.id,p_rg:Number(A.rg),p_endereco:raw,p_operador:coletorAutor()});
+    A.log.unshift(r); A.msg={t:'ok',x:'✓ RG '+A.rg+' guardado em '+r.endereco+(r.antes&&r.antes!==r.endereco?' (antes em '+r.antes+')':'')}; A.passo='rg'; A.rg=null; A.info=null;
+    if(navigator.vibrate) navigator.vibrate(60); coletorArmRender();
+  }catch(e){ erro(String(e.message||e)); }
 }
 async function coletorSepRgAbrir(listaId){
   if(_colRg.listaId!==listaId){ _colRg={listaId:listaId,pal:{},cont:{},passo:null,msg:null}; coletorShow('Separar','coletorSepListas()','<div style="padding:30px;text-align:center;color:var(--text3)">Carregando caixas…</div>'); await colRgCarregar(listaId); }
