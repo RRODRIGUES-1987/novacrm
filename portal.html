@@ -499,7 +499,7 @@
         <button data-scr="est" onclick="showScreen('est')">Estoque</button>
         <button data-scr="agd" onclick="showScreen('agd')">Agendamentos <span class="nb hide" id="nbAgd"></span></button>
         <button data-scr="rel" onclick="showScreen('rel')">Relatórios</button>
-        <button data-scr="fin" onclick="showScreen('fin')">Financeiro</button>
+        <button data-scr="fin" onclick="showScreen('fin')">Faturas</button>
         <button data-scr="nc" onclick="showScreen('nc')">Não conformidades <span class="nb hide" id="nbNc"></span></button>
         <button data-scr="mot" class="so-demo" onclick="showScreen('mot')">Motorista</button>
       </nav>
@@ -555,7 +555,7 @@
         <div class="tile-wrap">
           <button class="tile" onclick="showScreen('fin')">
             <div class="ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="13" rx="2"/><circle cx="12" cy="12.5" r="2.5"/><path d="M6 10v5M18 10v5"/></svg></div>
-            <div class="tt">Financeiro</div>
+            <div class="tt">Faturas</div>
           </button>
         </div>
         <div class="tile-wrap">
@@ -706,7 +706,7 @@
 
     <!-- ===== TELA: FINANCEIRO ===== -->
     <section id="scrFin" class="hide">
-      <div class="screen-h"><h2>Financeiro</h2></div>
+      <div class="screen-h"><h2>Faturas</h2></div>
       <div id="listaFin" class="list"></div>
 
     </section>
@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.4';   // v1.8.4: a planilha de pedidos avisa quando a quantidade não fecha o pacote do produto
+const PORTAL_VERSION = 'v1.8.5';   // v1.8.5: aba Faturas real (estilo fatura de cartão): faturas aprovadas, situação, lançamentos, bruto e líquido
+// v1.8.4: a planilha de pedidos avisa quando a quantidade não fecha o pacote do produto
 // v1.8.3: agendamento de saída com os pedidos a carregar (aptos = nota ligada); e-mail automático para a transportadora informar o motorista
 // v1.8.2: quadro único de pedidos com a nota (e a DANFE) na linha; resultado do envio em caixa de diálogo
 // v1.8.1: notas de venda aceitam XML + DANFE (PDF) juntos; a DANFE fica no pedido para a cópia do motorista e o bipe da portaria
@@ -3550,7 +3551,91 @@ function openNc(id){
   openModal('mDet');
 }
 const fmtBRL = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+
+// ═══ v1.8.5 · FATURAS (portal real) — estilo fatura de cartão ═══
+const _fz={sel:null};
+const fzBRL=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const fzMes=d=>{ if(!d) return '—'; const x=new Date(String(d).slice(0,10)+'T12:00'); return x.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); };
+const fzMesC=d=>{ if(!d) return ''; const x=new Date(String(d).slice(0,10)+'T12:00'); return x.toLocaleDateString('pt-BR',{month:'short'}).replace('.',''); };
+const fzData=d=>d?new Date(String(d).slice(0,10)+'T12:00').toLocaleDateString('pt-BR'):'—';
+function fzSit(f){
+  if(f.situacao==='paga') return ['paga'+(f.pago_em?' em '+fzData(f.pago_em):''),'#166534'];
+  if(f.situacao==='paga_parcial') return ['paga parcialmente','#b45309'];
+  if(f.situacao==='vencida') return ['vencida'+(f.dias_atraso?' · '+f.dias_atraso+' dia(s)':''),'#b91c1c'];
+  return ['em aberto','#1e40af'];
+}
+function renderFinReal(){
+  const L=$('listaFin'); if(!L) return;
+  const F=state.fatReal||[];
+  if(!F.length){ L.innerHTML='<div class="empty">Nenhuma fatura disponível.</div>'; return; }
+  if(!_fz.sel || !F.some(f=>f.id===_fz.sel)) _fz.sel=F[0].id;
+  const f=F.find(x=>x.id===_fz.sel), [sTxt,sCor]=fzSit(f);
+  // dias até o vencimento
+  let diasV=null; if(f.vencimento && f.situacao!=='paga'){ diasV=Math.ceil((new Date(String(f.vencimento).slice(0,10)+'T12:00')-new Date())/864e5); }
+  // últimos 6 meses
+  const ult=F.slice(0,6).reverse(), mx=Math.max(1,...ult.map(x=>+x.total||0));
+  const med=ult.length?ult.reduce((a,x)=>a+(+x.total||0),0)/ult.length:0;
+  const ant=F[1]?+F[1].total:0, varp=ant?Math.round(((+F[0].total)-ant)/ant*100):null;
+  const linhas=(Array.isArray(f.linhas)?f.linhas:[]).filter(l=>Number(l.subtotal||0)!==0||Number(l.quantidade||l.qtd||0)!==0);
+  const somaLin=linhas.reduce((a,l)=>a+(+l.subtotal||0),0);
+  const impostos=Math.max(0, +f.total - somaLin);
+  L.innerHTML=`<div class="fz-wrap" style="display:grid;gap:12px">
+    <div style="display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px" class="fz-top">
+      <div style="background:linear-gradient(135deg,#0A2540,#1e3a8a);color:#fff;border-radius:16px;padding:18px 20px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;opacity:.85"><span>Fatura de ${esc(fzMes(f.competencia))}</span><span>${esc(f.numero||'')}</span></div>
+        <div style="font-size:30px;font-weight:700;margin:10px 0 2px">${fzBRL(f.total)}</div>
+        ${f.retem_iss&&+f.iss_valor>0?`<div style="font-size:12.5px;opacity:.9">ISS retido por vocês ${fzBRL(f.iss_valor)} · <b>a pagar ${fzBRL(f.a_pagar)}</b></div>`:''}
+        <div style="font-size:12.5px;opacity:.9;margin-top:2px">${f.situacao==='paga'?'':'vence em <b>'+fzData(f.vencimento)+'</b> · '}<span style="background:rgba(255,255,255,.18);padding:1px 8px;border-radius:99px">${esc(sTxt)}</span></div>
+        ${diasV!=null&&diasV>=0?`<div style="height:6px;background:rgba(255,255,255,.2);border-radius:99px;margin:14px 0 6px"><div style="width:${Math.max(4,Math.min(100,100-diasV/30*100))}%;height:6px;background:#93c5fd;border-radius:99px"></div></div><div style="font-size:11px;opacity:.8">${diasV} dia(s) para o vencimento</div>`:''}
+        <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" style="width:auto;background:#fff;color:#0A2540;border:0" onclick="fzImprimir('${f.id}')">Imprimir fatura</button></div>
+      </div>
+      <div style="border:1px solid var(--border,#e5e5e5);border-radius:16px;padding:14px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Últimos meses</div>
+        <div style="display:flex;align-items:flex-end;gap:10px;height:92px;margin-bottom:6px">
+          ${ult.map(x=>`<div style="flex:1;text-align:center;cursor:pointer" onclick="_fz.sel='${x.id}';renderFin()" title="${fzBRL(x.total)}"><div style="height:${Math.max(6,Math.round((+x.total||0)/mx*78))}px;background:${x.id===f.id?'#1e3a8a':'#e5e7eb'};border-radius:4px"></div><div style="font-size:10px;color:#888">${esc(fzMesC(x.competencia))}</div></div>`).join('')}
+        </div>
+        <div style="font-size:12px;color:#666">média ${ult.length} meses ${fzBRL(med)}${varp!=null?` · último mês <b>${varp>0?'+':''}${varp}%</b>`:''}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:12px" class="fz-bot">
+      <div style="border:1px solid var(--border,#e5e5e5);border-radius:16px;overflow:hidden">
+        <div style="padding:10px 14px;font-size:13px;font-weight:600">Faturas</div>
+        ${F.map(x=>{ const [t,c]=fzSit(x); return `<button onclick="_fz.sel='${x.id}';renderFin()" style="display:flex;justify-content:space-between;width:100%;text-align:left;border:0;border-top:1px solid var(--border,#eee);padding:10px 14px;background:${x.id===f.id?'#f3f4f6':'transparent'};cursor:pointer;font:inherit;font-size:13px">
+          <span>${esc(fzMes(x.competencia))}<div style="font-size:11px;color:#888">${esc(x.numero||'')} · ${x.situacao==='paga'?'venceu':'vence'} ${fzData(x.vencimento)}</div></span>
+          <span style="text-align:right">${fzBRL(x.total)}<div style="font-size:11px;color:${c}">${esc(t)}</div></span></button>`; }).join('')}
+      </div>
+      <div style="border:1px solid var(--border,#e5e5e5);border-radius:16px;padding:12px 16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600">Lançamentos · ${esc(fzMes(f.competencia))}</span><span style="font-size:11px;color:#888">${f.periodo_inicio?'período '+fzData(f.periodo_inicio)+' a '+fzData(f.periodo_fim):''}</span></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Serviço</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>
+          ${linhas.map(l=>`<tr><td>${esc(l.servico||l.nome||l.descricao||'—')}${l.nota_debito?' <span class="hint">(nota de débito)</span>':''}</td><td class="num">${Number(l.quantidade||l.qtd||0).toLocaleString('pt-BR')}${l.unidade?' '+esc(l.unidade):''}</td><td class="num">${fzBRL(l.subtotal)}</td></tr>`).join('')}
+          ${impostos>0.009?`<tr><td style="color:#666">Impostos (ISS / PIS / COFINS)</td><td></td><td class="num" style="color:#666">${fzBRL(impostos)}</td></tr>`:''}
+          <tr><td><b>Total da fatura</b></td><td></td><td class="num"><b>${fzBRL(f.total)}</b></td></tr>
+          ${f.retem_iss&&+f.iss_valor>0?`<tr><td style="color:#666">ISS retido por vocês</td><td></td><td class="num" style="color:#666">− ${fzBRL(f.iss_valor)}</td></tr><tr><td><b>A pagar</b></td><td></td><td class="num"><b>${fzBRL(f.a_pagar)}</b></td></tr>`:''}
+        </tbody></table></div>
+        <div class="hint" style="font-size:11px;margin-top:6px">${f.nf?'NF de serviço '+esc(f.nf):''}${f.nd?(f.nf?' · ':'')+'nota de débito '+esc(f.nd):''}</div>
+      </div>
+    </div></div>
+    <style>@media(max-width:760px){.fz-top,.fz-bot{grid-template-columns:1fr!important}}</style>`;
+}
+window.fzImprimir=function(id){
+  const f=(state.fatReal||[]).find(x=>x.id===id); if(!f) return; const [sTxt]=fzSit(f);
+  const linhas=(Array.isArray(f.linhas)?f.linhas:[]).filter(l=>Number(l.subtotal||0)!==0);
+  const somaLin=linhas.reduce((a,l)=>a+(+l.subtotal||0),0), impostos=Math.max(0,+f.total-somaLin);
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Fatura ${esc(f.numero||'')}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:18mm}h1{font-size:20px;margin:0}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}th,td{padding:6px;border-bottom:1px solid #ddd;text-align:left}td.n,th.n{text-align:right}.k{color:#666;font-size:12px}</style></head><body>
+    <h1>Fatura ${esc(f.numero||'')} · ${esc(fzMes(f.competencia))}</h1><div class="k">${esc(state.depositante||'')} · MK Logística</div>
+    <p class="k">Emissão ${fzData(f.emissao)} · Vencimento ${fzData(f.vencimento)} · Situação: ${esc(sTxt)}${f.periodo_inicio?' · Período '+fzData(f.periodo_inicio)+' a '+fzData(f.periodo_fim):''}</p>
+    <table><tr><th>Serviço</th><th class="n">Qtd</th><th class="n">Valor</th></tr>
+    ${linhas.map(l=>`<tr><td>${esc(l.servico||l.nome||l.descricao||'')}${l.nota_debito?' (nota de débito)':''}</td><td class="n">${Number(l.quantidade||l.qtd||0).toLocaleString('pt-BR')} ${esc(l.unidade||'')}</td><td class="n">${fzBRL(l.subtotal)}</td></tr>`).join('')}
+    ${impostos>0.009?`<tr><td>Impostos (ISS / PIS / COFINS)</td><td></td><td class="n">${fzBRL(impostos)}</td></tr>`:''}
+    <tr><th>Total da fatura</th><th></th><th class="n">${fzBRL(f.total)}</th></tr>
+    ${f.retem_iss&&+f.iss_valor>0?`<tr><td>ISS retido pelo tomador</td><td></td><td class="n">− ${fzBRL(f.iss_valor)}</td></tr><tr><th>A pagar</th><th></th><th class="n">${fzBRL(f.a_pagar)}</th></tr>`:''}
+    </table><p class="k">${f.nf?'NF de serviço '+esc(f.nf):''}${f.nd?' · nota de débito '+esc(f.nd):''}</p></body></html>`;
+  const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px'; document.body.appendChild(fr);
+  fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+  setTimeout(()=>{ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(()=>fr.remove(),4000); },500);
+};
 function renderFin(){
+  if(!DEMO){ renderFinReal(); return; }   // v1.8.5
   const L=$('listaFin'); L.innerHTML='';
   const rows=state.faturas||[];
   if(!rows.length){ L.innerHTML='<div class="empty">Nenhuma fatura disponível.</div>'; return; }
@@ -5130,6 +5215,7 @@ function showDone(kind, protocolo, msg){
     state.janelasView = (jan && !jan.error ? (jan.data||[]) : []);
     if(ags && ags.error) console.warn('agendamentos:', ags.error.message);
     state.ncs = []; state.faturas = [];
+    try{ const fz = podeVer('fin') ? await sb.rpc('portal_minhas_faturas') : {data:[]}; state.fatReal = (fz && !fz.error && fz.data) || []; if(fz&&fz.error) console.warn('faturas:', fz.error.message); }catch(_e){ state.fatReal = []; }   // v1.8.5
     const dl = $('skuList'); if(dl) dl.innerHTML = state.catalogo.map(c=>`<option value="${esc(c.sku)}">${esc(c.descricao||'')}</option>`).join('');
   };
 
