@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1277 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1279 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -329,7 +329,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 @keyframes dot-bounce{0%,80%,100%{transform:translateY(0);opacity:0.4}40%{transform:translateY(-8px);opacity:1}}
 @keyframes fi{from{opacity:0}to{opacity:1}}
 @keyframes colCamLaser{0%{transform:translateY(-46px)}50%{transform:translateY(46px)}100%{transform:translateY(-46px)}}
-.col-cam-laser{animation:colCamLaser 1.9s ease-in-out infinite}
+.col-cam-laser{animation:none}
+body:has(#col-acao-btn) #col-bigbtn{display:none!important}   /* v1.0.1279: um botão só */   /* v1.0.1279: linha fixa no meio */
 @keyframes su{from{transform:translateY(28px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes rotate{to{transform:rotate(360deg)}}
 
@@ -1461,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1277';
+const APP_VERSION='v1.0.1279';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -35996,7 +35997,7 @@ function rWmsSeparacao_i(){
     return rWmsEmConstrucao('Separação','Nenhuma lista de separação gerada ainda. Vá em Pedidos, selecione os pedidos e clique em "Gerar listas de separação".');
   }
   // progresso por lista (tarefas concluídas / total)
-  const prog=l=>wmsListaProg(l.id);   // v1.0.1150: índice por lista
+  const prog=l=>{ const p=wmsListaProg(l.id); if(l.status==='concluida'&&p.tot&&p.feitas<p.tot) return {...p,feitas:p.tot,pct:100}; return p; };   // v1.0.1279: lista concluída = 100% (as tarefas na memória podem estar desatualizadas)
   // macro: totais
   const _srcSep=_wmsSel.sep.size?wmsListasSeparacao.filter(l=>l.company_id===cid&&_wmsSel.sep.has(l.id)):_listasView;
   const totListas=_srcSep.length;
@@ -37355,6 +37356,7 @@ async function coletorCamStart(onCode){
     try{
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
       _colCamStream=stream;v.srcObject=stream;await v.play();
+      try{ const _tr=stream.getVideoTracks()[0], _cap=_tr&&_tr.getCapabilities?_tr.getCapabilities():{}; if(_cap&&_cap.torch) await _tr.applyConstraints({advanced:[{torch:true}]}); }catch(_eT){}   // v1.0.1279: lanterna
       let det;try{det=new window.BarcodeDetector({formats:['code_128','ean_13','ean_8','code_39','itf','codabar','data_matrix','qr_code','upc_a','upc_e']});}catch(_){det=new window.BarcodeDetector();}
       // recorta a faixa da mira antes de decodificar: evita pegar a etiqueta do lado
       var _cv=document.createElement('canvas'), _cx=_cv.getContext('2d',{willReadFrequently:true});
@@ -37488,7 +37490,18 @@ function coletorInvRender(){
 
 // ── SEPARAR ──
 function coletorSepListas(){
-  _colScanHandler=null;
+  // v1.0.1279: na escolha da lista, o bipe da CAPA do pedido (OS) ou do número da lista abre a lista direto
+  _colScanHandler=function(code){
+    var c=String(code||'').trim(), d=c.replace(/\D/g,''); if(!c) return;
+    var ls=wmsListasSeparacao.filter(function(l){return l.company_id===company?.id&&l.status!=='concluida'&&l.status!=='cancelada';});
+    var achou=ls.find(function(l){ var n=String(l.numero_lista||''); return n===c || (d && n.replace(/\D/g,'').replace(/2026$|26$/,'')===d.replace(/2026$|26$/,'')); });
+    if(!achou){
+      var ped=(wmsPedidos||[]).find(function(p){ return String(p.numero_curto||'')===c || (d&&String(p.numero_curto||'').replace(/\D/g,'')===d) || String(p.numero_pedido||'')===c; });
+      if(ped){ var v=(wmsListaPedidos||[]).find(function(x){ return x.pedido_id===ped.id && ls.some(function(l){return l.id===x.lista_id;}); }); if(v) achou=ls.find(function(l){return l.id===v.lista_id;}); }
+    }
+    if(achou){ if(navigator.vibrate) navigator.vibrate(60); coletorCamStop(); coletorSepAbrir(achou.id); }
+    else showToast('Nenhuma lista pendente para '+c,'amber');
+  };
   const cid=company?.id;
   const todas=wmsListasSeparacao.filter(function(l){return l.company_id===cid&&l.status!=='concluida'&&l.status!=='cancelada';});
   // depositantes com listas pendentes
@@ -37523,7 +37536,8 @@ function coletorSepListas(){
     }).join('');
   }
   const back=coletorFuncs(profile?.role).length>1?'coletorHome()':null;
-  coletorShow('Separar',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:10px">Selecione a lista para separar:</div>'+chips+html);
+  coletorShow('Separar',back,coletorScanBox()+'<div style="font-size:13px;color:var(--text3);margin:4px 0 10px">Toque na lista ou bipe a capa do pedido:</div>'+chips+html);
+  setTimeout(function(){ var t=ge('col-bigbtn-t'); if(t) t.textContent='Bipar a capa do pedido'; var i=ge('col-scan'); if(i){ try{i.focus({preventScroll:true});}catch(e){} } },50);   // v1.0.1279
 }
 function coletorSepSetDep(v){_colSepDep=v;coletorSepListas();}
 function coletorSepRowHtml(t){
@@ -37820,7 +37834,7 @@ async function coletorSepRgBipe(listaId,code){
 //  outra caixa do mesmo produto troca o empenho; "não encontrei" registra falta (houve_falta)
 //  e segue — a tarefa fica pendente para o supervisor.
 // ═══════════════════════════════════════════════════════════════════
-var SEP_DLG_RECONFIRMA_CAIXA=true;   // true = cada saco pede a caixa de novo (regra atual da CASCO)
+var SEP_DLG_RECONFIRMA_CAIXA=false;   // v1.0.1279: o RG é bipado UMA vez; os pacotes seguintes da mesma caixa vão direto
 var _sepDlg={listaId:null,endOk:null,tarefaId:null,cxOk:null,emMaos:null,msg:null,log:[],falta:false,visao:'dialogo'};
 function sepDlgKey(s){ return String(s==null?'':s).toUpperCase().replace(/[^0-9A-Z]/g,''); }
 function sepDlgEnd(t){ var p=_colRg.pal[t.pallet_id]||{}; return t.endereco_origem||p.endereco_codigo||'—'; }
@@ -37861,15 +37875,15 @@ function sepDlgInstrucao(p){
     detalhe:p.caixas>1?p.caixas+' caixas para pegar aqui':'1 caixa para pegar aqui',acao:'Bipe a etiqueta do endereço',cor:'var(--blue-text)',
     fala:'Endereço '+String(p.end).split(/[^0-9A-Za-z]+/).join(' ')};
   var cx=colRgNome(t.pallet_id), cont=Object.values(_colRg.cont).find(function(c){return c.pallet_id===t.pallet_id&&c.sku===t.sku;});
-  if(p.tipo==='caixa' && p.fechada) return {icone:'📦',titulo:'Pegue 1 caixa fechada',destaque:cx,
-detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç',acao:'Bipe o RG',cor:'#8b5cf6',
+  if(p.tipo==='caixa' && p.fechada) return {icone:'📦',titulo:'Separe a caixa e bipe o RG',destaque:cx,
+detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç',acao:'Bipe o RG da caixa',cor:'#8b5cf6',
 fala:'Uma caixa fechada do R G '+cx+'. '+t.sku+', '+nBR(t.quantidade)+' peças'};
-if(p.tipo==='caixa') return {icone:'📦',titulo:p.inteira?'Pegue o RG inteiro':'Abra o RG'+(p.de>1?' · pacote '+p.n+' de '+p.de:''),destaque:cx,
+if(p.tipo==='caixa') return {icone:'📦',titulo:p.inteira?'Separe a caixa e bipe o RG':'Bipe o RG da caixa',destaque:cx,
     detalhe:t.sku+' · '+String(t.descricao||'').slice(0,40)+(p.inteira?' · '+nBR(t.quantidade)+' pç':(cont?' · caixa com '+nBR(cont.qtd_fiscal)+' pç':'')),
-    acao:'Bipe o RG',cor:p.inteira?'#8b5cf6':'#f59e0b',
+    acao:'Bipe o RG da caixa',cor:p.inteira?'#8b5cf6':'#f59e0b',
     fala:(p.inteira?'Caixa inteira ':'Abra a caixa ')+cx+'. '+t.sku+(p.inteira?', '+nBR(t.quantidade)+' peças':'')};
-  return {icone:'🛍️',titulo:'Tire 1 pacote · '+p.n+' de '+p.de,destaque:t.sku,
-    detalhe:String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç no pacote',acao:'Bipe o pacote',cor:'#f59e0b',
+  return {icone:'🛍️',titulo:'Abra a caixa e bipe o pacote · '+p.n+' de '+p.de,destaque:t.sku,
+    detalhe:String(t.descricao||'').slice(0,40)+' · '+nBR(t.quantidade)+' pç no pacote',acao:'Bipe o código do pacote',cor:'#f59e0b',
     fala:'Um saco de '+t.sku+'. Saco '+p.n+' de '+p.de};
 }
 function sepDlgLog(txt,falta){ _sepDlg.log.push({txt:txt,falta:!!falta}); if(_sepDlg.log.length>60) _sepDlg.log.shift(); }
@@ -54811,6 +54825,11 @@ async function helpdeskChatEnviar(){
     if(pensando) pensando.remove();
     if(!r.ok||j.error){ helpdeskChatBot('Não consegui consultar o assistente agora ('+helpdeskEsc(j.error||('HTTP '+r.status))+'). Quer abrir o chamado direto?',[['Abrir chamado','helpdeskChatChamado()']]); return; }
     _hdChat.conversaId=j.conversa_id||_hdChat.conversaId; _hdChat.grupo=j.grupo&&j.grupo!=='indefinido'?j.grupo:_hdChat.grupo; _hdChat.ultimo=j;
+    // v1.0.1278: resposta VAZIA do assistente (ex.: muitos pedidos de uma vez e a verificação não terminou) — nunca mostrar balão em branco
+    if(!String(j.texto||'').trim()){
+      j.texto='Não consegui terminar a verificação agora (o assistente não devolveu a análise). Tente mandar até 3 pedidos por vez, ou abra o chamado: a TI recebe a lista e o contexto da tela.';
+      _hdChat.respostaVazia=true;
+    }
     _hdChat.msgs.push({role:'assistant',texto:j.texto});
     var html=helpdeskEsc(j.texto).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
     // v1.0.1193 (etapa 2): botões que levam ao lugar da correção e pedido de acesso ao admin
@@ -54860,7 +54879,7 @@ async function helpdeskChatResolveu(){
 function helpdeskChatChamado(){
   var u=_hdChat.ultimo||{}, pre=u.chamado_pre||{};
   var hist=_hdChat.msgs.map(function(m){ return (m.role==='user'?'Usuário: ':'Assistente: ')+(m.texto||''); }).join('\n');
-  var desc=(pre.descricao?pre.descricao+'\n\n':'')+'— Conversa com o assistente —\n'+hist;
+  var desc=(_hdChat.respostaVazia?'⚠ O assistente NÃO devolveu a análise nesta conversa (resposta vazia) — verificar a function helpdesk-chat.\n\n':'')+(pre.descricao?pre.descricao+'\n\n':'')+'— Conversa com o assistente —\n'+hist;   // v1.0.1278
   var arquivos=_hdChat.msgs.filter(function(m){return m.arquivo;}).map(function(m){return m.arquivo;});
   helpdeskChatFechar();
   abrirChamadoModal({titulo:pre.titulo||(_hdChat.msgs[0]&&_hdChat.msgs[0].texto||'').slice(0,120),categoria:_hdChat.grupo||'erro',descricao:desc,arquivos:arquivos});
