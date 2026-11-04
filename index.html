@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1281 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1282 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1281';
+const APP_VERSION='v1.0.1282';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -29575,9 +29575,9 @@ const COMPRAS_STATUS={
   aguardando_aprovacao_cotacao:{lbl:'Ag. Liberação p/ Cotar',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
   aguardando_informacao:{lbl:'Ag. Informação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
   em_cotacao:{lbl:'Em Cotação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
-  aguardando_homologacao:{lbl:'Ag. Homologação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
-  aguardando_aprovacao_compra:{lbl:'Ag. Aprovação Compra',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
-  aprovado:{lbl:'Aprovado',cls:'bdg bg',cor:'background:var(--green-bg);color:var(--green-text)'},
+  aguardando_homologacao:{lbl:'Em Cotação',cls:'bdg ba',cor:'background:var(--amber-bg);color:var(--amber-text)'},
+  aguardando_aprovacao_compra:{lbl:'Ag. Autorização de Compra',cls:'bdg bb',cor:'background:var(--blue-bg);color:var(--blue-text)'},
+  aprovado:{lbl:'Compra autorizada',cls:'bdg bg',cor:'background:var(--green-bg);color:var(--green-text)'},
   recebido:{lbl:'Recebido',cls:'bdg bg',cor:'background:var(--green-bg);color:var(--green-text)'},
   conferido:{lbl:'Conferido',cls:'bdg bg',cor:'background:var(--green-bg);color:var(--green-text)'},
   concluido:{lbl:'Concluído',cls:'bdg bg',cor:'background:var(--green-bg);color:var(--green-text)'},
@@ -29594,6 +29594,23 @@ const COMPRAS_PRIORIDADE={
 };
 
 // ═══════════ COMPRAS · fluxo com o diretor (v1.0.1006) ═══════════
+// v1.0.1282: fluxo SEQUENCIAL em 5 etapas, cada uma com um dono e uma tela (sem homologação)
+const COMPRAS_ETAPAS=[
+  {n:1,nome:'Solicitação',dono:'SOLICITANTE',st:['rascunho','aguardando_informacao']},
+  {n:2,nome:'Pode cotar?',dono:'DIRETOR',st:['aguardando_aprovacao_cotacao']},
+  {n:3,nome:'Cotação',dono:'COMPRAS',st:['em_cotacao','aguardando_homologacao']},
+  {n:4,nome:'Autorização de compra',dono:'DIRETOR',st:['aguardando_aprovacao_compra']},
+  {n:5,nome:'Pedido e entrega',dono:'COMPRAS',st:['aprovado','recebido','conferido']},
+];
+function cotTotal(f){ return (Number(f&&f.valor_total)||0)+(Number(f&&f.frete)||0); }   // preço + frete
+function cotIndicadoIdx(fns){ var m=-1,v=Infinity; (fns||[]).forEach(function(f,i){ var t=cotTotal(f); if(f&&f.nome&&Number(f.valor_total)>0&&t<v){ v=t; m=i; } }); return m; }
+function comprasEtapasHtml(ativa){
+  return '<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:8px 0 12px">'+COMPRAS_ETAPAS.map(function(e){
+    var q=comprasSolicitacoes.filter(function(s){return e.st.indexOf(s.status)>=0;}).length, dir=e.dono==='DIRETOR', on=ativa===e.n;
+    return '<div onclick="filtrarSolicitacoes(\'etapa:'+e.n+'\')" style="cursor:pointer;border:'+(on?'2px solid var(--blue-text)':(dir?'1.5px solid #1e3a8a':'1px solid var(--border)'))+';border-radius:10px;padding:8px 10px;background:'+(dir?'var(--blue-bg)':'var(--bg)')+'">'
+      +'<div style="font-size:10px;color:'+(dir?'var(--blue-text)':'var(--text3)')+';letter-spacing:.3px">'+e.n+' · '+e.dono+'</div><div style="font-size:12.5px;font-weight:600">'+e.nome+'</div><div style="font-size:18px;font-weight:700">'+q+'</div></div>';
+  }).join('')+'</div>';
+}
 function compraSouDiretor(){ return String((cu&&cu.email)||'').toLowerCase()===String(AS_DEMO_EMAIL||'').toLowerCase(); }
 async function uploadDocBucket(bucket,arquivo,pasta){
   if(!window.supabase||!window.supabase.storage){ if(typeof sbStorageInit==='function') sbStorageInit(tok); }
@@ -29638,6 +29655,24 @@ async function responderInfoSolicitacao(id){
   showToast('Resposta enviada ao diretor','green'); render();
 }
 // linha de resposta do fornecedor na cotacao: valor, entrega, pagamento, proposta
+// v1.0.1282: total = preço + frete; o VERUS indica o menor total; justificativa só com < 3 orçamentos ou escolha diferente do indicado
+function cotLerLinhas(){
+  var L=[]; document.querySelectorAll('#fornecedores-list [id^="forn-row-"]').forEach(function(row){ var i=row.id.replace('forn-row-',''), nome=(ge('forn-nome-'+i)||{}).value||''; if(!nome.trim()) return;
+    var v=parseFloat(String((ge('forn-valor-'+i)||{}).value||'').replace(',','.')), fr=parseFloat(String((ge('forn-frete-'+i)||{}).value||'').replace(',','.'));
+    L.push({i:i,nome:nome.trim(),valor_total:isNaN(v)?0:v,frete:isNaN(fr)?0:fr}); });
+  return L;
+}
+function cotAtualizarIndicado(){
+  var L=cotLerLinhas(), ind=cotIndicadoIdx(L), indI=ind>=0?L[ind].i:null;
+  document.querySelectorAll('#fornecedores-list [id^="forn-row-"]').forEach(function(row){ var i=row.id.replace('forn-row-',''), el=ge('forn-tot-'+i); if(!el) return;
+    var x=L.find(function(y){return y.i===i;});
+    el.innerHTML=x&&x.valor_total>0?('Total <b>'+fmtV(cotTotal(x))+'</b>'+(i===indI?' <span class="bdg" style="background:var(--green-bg);color:var(--green-text);font-size:10px;margin-left:6px">indicado · menor total</span>':'')):'';
+    row.style.borderColor=(i===indI)?'#166534':'var(--border2)'; });
+  var esc=document.querySelector('input[name="cot-escolha"]:checked'), escI=esc?esc.value:null;
+  var precisa=(L.filter(function(x){return x.valor_total>0;}).length<3)||(escI!=null&&indI!=null&&escI!==indI);
+  var lb=ge('cot-just-lbl'); if(lb) lb.innerHTML=precisa?'<b style="color:var(--red-text)">Justificativa obrigatória</b> — '+((L.filter(function(x){return x.valor_total>0;}).length<3)?'menos de 3 orçamentos':'')+((escI!=null&&indI!=null&&escI!==indI)?((L.filter(function(x){return x.valor_total>0;}).length<3)?' e ':'')+'o escolhido não é o indicado':''):'Justificativa <span style="color:var(--text3);font-weight:400">(não precisa: 3 orçamentos e escolhido = indicado)</span>';
+  window._cotIndI=indI;
+}
 function cotRespostaHTML(f,i){
   f=f||{};
   var _esc=(window._cotEscIdx===i);   // v1.0.1233: URL do produto (marketplace) + escolha do comprador
@@ -29645,11 +29680,13 @@ function cotRespostaHTML(f,i){
       <div><label class="lbl" style="font-size:10px">URL do produto (marketplace, se a cotação foi feita em site)</label><input class="fi" id="forn-url-${i}" value="${tgEsc(f.produto_url||'')}" placeholder="https://…" style="font-size:12px"></div>
       <label style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:600;padding:6px 10px;border-radius:8px;border:1px solid ${_esc?'#166534':'var(--border)'};background:${_esc?'var(--green-bg)':'var(--bg)'};cursor:pointer;white-space:nowrap"><input type="radio" name="cot-escolha" value="${i}" ${_esc?'checked':''} onchange="cotMarcarEscolha()"> escolher este</label>
     </div>
-    <div style="border-top:1px dashed var(--border2);padding-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-      <div><label class="lbl" style="font-size:10px">Valor total cotado</label><input class="fi" id="forn-valor-${i}" type="number" step="0.01" value="${f.valor_total||''}" placeholder="0,00" style="font-size:12px"></div>
+    <div style="border-top:1px dashed var(--border2);padding-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+      <div><label class="lbl" style="font-size:10px">Preço (produtos)</label><input class="fi" id="forn-valor-${i}" type="number" step="0.01" value="${f.valor_total||''}" placeholder="0,00" oninput="cotAtualizarIndicado()" style="font-size:12px"></div>
+      <div><label class="lbl" style="font-size:10px">Frete</label><input class="fi" id="forn-frete-${i}" type="number" step="0.01" value="${f.frete!=null?f.frete:''}" placeholder="0,00" oninput="cotAtualizarIndicado()" style="font-size:12px"></div>
       <div><label class="lbl" style="font-size:10px">Prazo de entrega</label><input class="fi" id="forn-entrega-${i}" value="${f.prazo||''}" placeholder="Ex.: 10 dias" style="font-size:12px"></div>
       <div><label class="lbl" style="font-size:10px">Pagamento</label><input class="fi" id="forn-pgto-${i}" value="${f.condicao_pagamento||''}" placeholder="Ex.: 30/60 dias" style="font-size:12px"></div>
     </div>
+    <div id="forn-tot-${i}" style="font-size:12px;color:var(--text2)"></div>
     <div style="display:flex;align-items:center;gap:8px">
       <input type="hidden" id="forn-pdf-${i}" value="${f.proposta_url||''}">
       <span id="forn-pdf-st-${i}" style="font-size:11.5px;flex:1;color:${f.proposta_url?'var(--green-text)':'var(--text3)'}">${f.proposta_url?`✓ <a href="${f.proposta_url}" target="_blank" style="color:inherit">proposta anexada</a>`:'nenhuma proposta anexada'}</span>
@@ -29750,7 +29787,9 @@ function rComprasSolicitacoes(){
   const filtro=ge('cmp-sol-filtro')?.value||'todos';
 
   let lista=[...comprasSolicitacoes];
-  if(filtro!=='todos') lista=lista.filter(s=>s.status===filtro);
+  const _fEt=String(window._cmpFiltroEtapa||'');   // v1.0.1282: filtro pela etapa do fluxo
+  if(_fEt){ const e=COMPRAS_ETAPAS.find(x=>'etapa:'+x.n===_fEt); if(e) lista=lista.filter(s=>e.st.indexOf(s.status)>=0); }
+  else if(filtro!=='todos') lista=lista.filter(s=>s.status===filtro);
 
   const rows=lista.map(s=>{
     const st=COMPRAS_STATUS[s.status]||COMPRAS_STATUS.rascunho;
@@ -29772,15 +29811,7 @@ function rComprasSolicitacoes(){
           <button class="bicon btn-sm" title="Ver detalhes" onclick="openSolicitacaoDetalhe('${s.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
           ${s.status==='aguardando_informacao'&&s.owner_id===cu?.id?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);padding:3px 8px;font-size:11px;border-radius:6px" onclick="responderInfoSolicitacao('${s.id}')">Responder ao diretor</button>`:''}
           ${s.status==='rascunho'?`<button class="bicon btn-sm" title="Editar" onclick="openSolicitacaoEditor('${s.id}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`:''}
-          ${isAprovador&&s.status==='aguardando_aprovacao_cotacao'?`
-            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="aprovarParaCotacao('${s.id}')">Pode cotar</button>
-            <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="reprovarSolicitacao('${s.id}')">Reprovar</button>
-            <button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);padding:3px 8px;font-size:11px;border-radius:6px" onclick="pedirInfoSolicitacao('${s.id}')">Pedir mais informação</button>
-          `:''}
-          ${isAprovador&&s.status==='aguardando_aprovacao_compra'?`
-            <button class="btn btn-sm" style="background:var(--green);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="abrirAprovacaoCompra('${s.id}')">Analisar e aprovar</button>
-            <button class="btn btn-sm" style="background:var(--red);color:#fff;padding:3px 8px;font-size:11px;border-radius:6px" onclick="reprovarCompra('${s.id}')">Reprovar</button>
-          `:''}
+          ${(isAprovador&&(s.status==='aguardando_aprovacao_cotacao'||s.status==='aguardando_aprovacao_compra'))?`<button class="btn btn-sm" style="padding:3px 8px;font-size:11px;border-radius:6px;border-color:var(--blue-text);color:var(--blue-text)" onclick="pg('compras-aprovacoes')">Ir para Aprovações →</button>`:''}
         </div>
       </div>
     </div>`;
@@ -29795,7 +29826,8 @@ function rComprasSolicitacoes(){
   return `<div class="sechdr">
     <div>
       <div class="pg-title">Solicitações de Compra</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${contadores}</div>
+      ${comprasEtapasHtml(window._cmpFiltroEtapa?Number(String(window._cmpFiltroEtapa).split(':')[1]):0)}
+      ${window._cmpFiltroEtapa?'<span style="font-size:11.5px;color:var(--blue-text);cursor:pointer" onclick="window._cmpFiltroEtapa=\'\';render()">✕ limpar filtro da etapa</span>':''}
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <select id="cmp-sol-filtro" class="fi" style="width:180px;padding:6px 10px;font-size:12px" onchange="render()">
@@ -29810,10 +29842,8 @@ function rComprasSolicitacoes(){
   </div>`;
 }
 
-function filtrarSolicitacoes(status){
-  const el=ge('cmp-sol-filtro');
-  if(el){el.value=status;render();}
-}
+function filtrarSolicitacoes(status){ if(String(status).indexOf('etapa:')===0){ window._cmpFiltroEtapa=(window._cmpFiltroEtapa===status?'':status); render(); return; } window._cmpFiltroEtapa=''; var el=ge('cmp-sol-filtro'); if(el){ el.value=status; } render(); }   // v1.0.1282
+
 
 function openSolicitacaoEditor(id){
   const sol=id?comprasSolicitacoes.find(s=>s.id===id):null;
@@ -29969,8 +29999,7 @@ function openSolicitacaoDetalhe(id){
     {k:'rascunho',lbl:'Solicitação'},
     {k:'aguardando_aprovacao_cotacao',lbl:'Aguardando Cotação'},
     {k:'em_cotacao',lbl:'Em Cotação'},
-    {k:'aguardando_homologacao',lbl:'Homologação'},
-    {k:'aguardando_aprovacao_compra',lbl:'Aprovação Compra'},
+    {k:'aguardando_aprovacao_compra',lbl:'Autorização de compra'},
     {k:'aprovado',lbl:'Aprovado'},
     {k:'recebido',lbl:'Recebido'},
     {k:'conferido',lbl:'Conferido'},
@@ -30045,8 +30074,8 @@ function openSolicitacaoDetalhe(id){
         <!-- Ações -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           ${sol.status==='em_cotacao'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openCotacaoEditor('${id}')">📋 Gerenciar Cotação</button>`:''}
-          ${sol.status==='aguardando_homologacao'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openHomologacao('${id}')">✅ Homologar Fornecedor</button>`:''}
-          ${sol.status==='aguardando_homologacao'&&compraSouDiretor()?`<button class="btn" style="background:#166534;color:#fff;border-color:#166534" onclick="ge('modal-sol-detalhe').remove();compraAprovarAbas('${id}')">Abrir e aprovar</button>`:''}
+          ${false?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openHomologacao('${id}')">✅ Homologar Fornecedor</button>`:''}
+          ${false&&compraSouDiretor()?`<button class="btn" style="background:#166534;color:#fff;border-color:#166534" onclick="ge('modal-sol-detalhe').remove();compraAprovarAbas('${id}')">Abrir e aprovar</button>`:''}
           ${sol.status==='aprovado'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openRecebimento('${id}')">📦 Registrar Recebimento</button>`:''}
           ${sol.status==='recebido'?`<button class="btn btn-primary" onclick="ge('modal-sol-detalhe').remove();openConferencia('${id}')">🔍 Realizar Conferência</button>`:''}
           ${sol.status==='aguardando_informacao'&&sol.owner_id===cu?.id?`<button class="btn" style="background:var(--amber-bg);color:var(--amber-text)" onclick="ge('modal-sol-detalhe').remove();responderInfoSolicitacao('${id}')">Responder ao diretor</button>`:''}
@@ -30152,8 +30181,8 @@ function openCotacaoEditor(solId){
         <button class="btn" style="width:100%;border:1px dashed var(--border2);background:transparent;color:var(--text2)" onclick="adicionarFornCot()">+ Adicionar Fornecedor</button>
 
         <div>
-          <label class="lbl">Justificativa (obrigatória se menos de 3 fornecedores)</label>
-          <textarea class="fi" id="cot-justificativa" rows="2" placeholder="Justifique por que há menos de 3 fornecedores...">${cot?.justificativa_menos3||''}</textarea>
+          <label class="lbl" id="cot-just-lbl">Justificativa</label>
+          <textarea class="fi" id="cot-justificativa" rows="2" placeholder="Por que menos de 3 orçamentos ou por que não o indicado…">${cot?.justificativa_escolha||cot?.justificativa_menos3||''}</textarea>
         </div>
 
         <div id="cot-status-msg" style="display:none"></div>
@@ -30161,7 +30190,7 @@ function openCotacaoEditor(solId){
         <div style="display:flex;justify-content:flex-end;gap:10px;position:sticky;bottom:0;background:var(--bg);padding-top:10px;margin-top:4px">
           <button class="btn" onclick="ge('modal-cotacao').remove()">Cancelar</button>
           <button class="btn" style="background:var(--bg3)" onclick="salvarCotacao('${solId}','${cot?.id||''}',false)">Salvar rascunho</button>
-          <button class="btn btn-primary" onclick="salvarCotacao('${solId}','${cot?.id||''}',true)" title="Com um fornecedor escolhido, a compra vai para a aprovação do diretor">Salvar</button>
+          <button class="btn btn-primary" onclick="salvarCotacao('${solId}','${cot?.id||''}',true)" title="Com o fornecedor escolhido, vai para a autorização do diretor">Solicitar autorização de compra</button>
         </div>
       </div>
     </div>
@@ -30169,6 +30198,7 @@ function openCotacaoEditor(solId){
   document.body.insertAdjacentHTML('beforeend',html);
   window._cotNumForn=fornList.length;
   window._cotSolId=solId;
+  setTimeout(cotAtualizarIndicado,30);   // v1.0.1282
 }
 
 function adicionarFornCot(){
@@ -30625,6 +30655,7 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
         prazo_retorno:ge(`forn-prazo-${idx}`)?.value?.trim()||'',
         observacoes:ge(`forn-obs-${idx}`)?.value?.trim()||'',
         valor_total:isNaN(_v)?null:_v,
+        frete:(function(){ var fr=parseFloat(String(ge(`forn-frete-${idx}`)?.value||'').replace(',','.')); return isNaN(fr)?0:fr; })(),   // v1.0.1282
         prazo:ge(`forn-entrega-${idx}`)?.value?.trim()||'',
         condicao_pagamento:ge(`forn-pgto-${idx}`)?.value?.trim()||'',
         proposta_url:ge(`forn-pdf-${idx}`)?.value||_ant.proposta_url||null,
@@ -30635,9 +30666,14 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
   });
 
   const justificativa=ge('cot-justificativa')?.value?.trim()||'';
-  if(enviarHomologacao&&fns.length<3&&!justificativa){
+  const _comValor=fns.filter(f=>Number(f.valor_total)>0).length, _indIdx=cotIndicadoIdx(fns);   // v1.0.1282
+  if(enviarHomologacao&&_comValor<3&&!justificativa){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
-    statusEl.textContent='Com menos de 3 fornecedores, justificativa é obrigatória.';return;
+    statusEl.textContent='Com menos de 3 orçamentos, a justificativa é obrigatória.';return;
+  }
+  if(enviarHomologacao&&_escNovo>=0&&_indIdx>=0&&_escNovo!==_indIdx&&!justificativa){
+    statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
+    statusEl.textContent='O escolhido não é o indicado ('+fns[_indIdx].nome+', menor total '+fmtV(cotTotal(fns[_indIdx]))+'): justifique a escolha.';return;
   }
   if(enviarHomologacao&&fns.length===0){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
@@ -30658,14 +30694,16 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
     statusEl.textContent='Informe o valor do fornecedor escolhido.';return;
   }
-  const _precos=fns.map(f=>Number(f.valor_total)).filter(v=>v>0);
+  const _precos=fns.filter(f=>Number(f.valor_total)>0).map(f=>cotTotal(f));   // v1.0.1282: preço + frete
   const cid=company?.id;
   const dadosCot={
     solicitacao_id:solId,company_id:cid,...unitPayload(),
     fornecedores:fns,
     melhor_preco:_precos.length?Math.min.apply(null,_precos):null,
-    justificativa_menos3:justificativa,
-    status:enviarHomologacao?'aguardando_homologacao':'em_cotacao',
+    justificativa_menos3:_comValor<3?justificativa:'',
+    justificativa_escolha:justificativa||null,
+    indicado_idx:_indIdx>=0?_indIdx:null,
+    status:enviarHomologacao?'aguardando_autorizacao':'em_cotacao',   // v1.0.1282: sem homologação
     fornecedor_escolhido_idx:_escNovo>=0?_escNovo:null,
     fornecedor_escolhido:_escF||null,
   };
@@ -30680,13 +30718,13 @@ async function salvarCotacao(solId,cotId,enviarHomologacao){
       if(salvo)comprasCotacoes=[salvo,...comprasCotacoes];
     }
     if(enviarHomologacao){
-      await dbUpdate('compras_solicitacoes',solId,{status:'aguardando_aprovacao_compra',valor_total:Number(_escF.valor_total)||null});
-      comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'aguardando_aprovacao_compra',valor_total:Number(_escF.valor_total)||null}:s);
+      await dbUpdate('compras_solicitacoes',solId,{status:'aguardando_aprovacao_compra',valor_total:cotTotal(_escF)||null});
+      comprasSolicitacoes=comprasSolicitacoes.map(s=>s.id===solId?{...s,status:'aguardando_aprovacao_compra',valor_total:cotTotal(_escF)||null}:s);
       const _s=comprasSolicitacoes.find(x=>x.id===solId)||{};
       try{ compraAvisarDiretor('Compra aguardando tua aprovação','<p><b>'+tgEsc(_s.titulo||'')+'</b> ('+tgEsc(_s.numero||'')+')</p><p>Escolhido pelo comprador: <b>'+tgEsc(_escF.nome||'')+'</b> · '+fmtV(Number(_escF.valor_total)||0)+'</p>'); }catch(_e){}
     }
     ge('modal-cotacao')?.remove();
-    showToast(enviarHomologacao?'Cotação salva e enviada para a aprovação do diretor.':'Cotação salva.','green');
+    showToast(enviarHomologacao?'Autorização de compra solicitada ao diretor.':'Cotação salva.','green');
     render();
   }catch(err){
     statusEl.style.cssText='display:block;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px';
@@ -30861,10 +30899,10 @@ async function cpaAprovar(){   // v1.0.1233: confirmação do VERUS (sem pop-up 
     if(_cmpRev.ativo) compraRevNav(); else { var m=ge('modal-cpa'); if(m) m.remove(); render(); }
   }catch(x){ showToast('Erro ao aprovar: '+(x.message||x),'red'); }
 }
-function cotMarcarEscolha(){   // destaca o "escolher este" marcado
+function cotMarcarEscolha(){ setTimeout(cotAtualizarIndicado,0);   // destaca o "escolher este" marcado
   document.querySelectorAll('input[name="cot-escolha"]').forEach(function(r){ var l=r.closest('label'); if(!l) return; l.style.borderColor=r.checked?'#166534':'var(--border)'; l.style.background=r.checked?'var(--green-bg)':'var(--bg)'; });
 }
-function compraFilaAprov(){ return comprasSolicitacoes.filter(function(s){ return s.status==='aguardando_aprovacao_compra'||s.status==='aguardando_homologacao'; }); }
+function compraFilaAprov(){ return comprasSolicitacoes.filter(function(s){ return s.status==='aguardando_aprovacao_compra'; }); }   // v1.0.1282: sem homologação
 function compraEscolhaDe(solId){   // fornecedor da escolha do comprador, ou o de menor valor
   var cot=comprasCotacoes.find(function(c){return c.solicitacao_id===solId;}); if(!cot) return null;
   var fns=(cot.fornecedores||[]).filter(function(f){return f&&f.nome;}); if(!fns.length) return null;
@@ -30876,36 +30914,39 @@ function rComprasAprovacoes(){   // v1.0.1233: mesmo padrão da aprovação de d
   var dir=compraSouDiretor();
   var liberar=comprasSolicitacoes.filter(function(s){return s.status==='aguardando_aprovacao_cotacao';});
   var fila=compraFilaAprov();
-  var tot=fila.reduce(function(a,s){ var e=compraEscolhaDe(s.id); return a+(e?Number(e.f.valor_total)||0:Number(s.valor_estimado)||0); },0);
+  var tot=fila.reduce(function(a,s){ var e=compraEscolhaDe(s.id); return a+(e?cotTotal(e.f):Number(s.valor_estimado)||0); },0);   // v1.0.1282: com frete
   var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">'
-    +'<div><div style="font-size:15px;font-weight:600">Aprovação de compras</div><div style="font-size:11px;color:var(--text3)">Toda compra precisa ser aprovada antes do pedido ao fornecedor</div></div>'
+    +'<div><div style="font-size:15px;font-weight:600">Aprovações de compras</div><div style="font-size:11px;color:var(--text3)">Etapa 2: pode cotar? · Etapa 4: autorização de compra (antes do pedido ao fornecedor)</div></div>'
     +'<div style="display:flex;align-items:center;gap:12px">'+(fila.length&&dir?'<button onclick="compraRevIniciar()" style="padding:8px 16px;border:none;border-radius:8px;background:#0A2540;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Revisar uma a uma</button>':'')
     +'<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#854d0e">'+fmtV(tot)+'</div><div style="font-size:11px;color:var(--text2)">'+fila.length+' aguardando</div></div></div></div>';
   if(liberar.length){
-    h+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:0 0 6px">Liberar para cotação ('+liberar.length+')</div><div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px">';
+    h+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:0 0 6px">Etapa 2 · Pode cotar? ('+liberar.length+')</div><div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px">';
     liberar.forEach(function(sol,i){
       h+='<div style="padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;background:'+(i%2?'var(--bg2)':'var(--bg)')+'">'
         +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">'+tgEsc(sol.titulo||'')+'</div><div style="font-size:11px;color:var(--text2)">'+[sol.numero,sol.categoria,sol.solicitante_nome].filter(Boolean).map(tgEsc).join(' · ')+'</div></div>'
         +(sol.valor_estimado?'<div style="font-size:13px;font-weight:700;margin-right:8px">'+fmtV(sol.valor_estimado)+'</div>':'')
-        +(dir?'<div style="display:flex;gap:6px"><button onclick="aprovarParaCotacao(\''+sol.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Liberar</button>'
+        +(dir?'<div style="display:flex;gap:6px"><button onclick="aprovarParaCotacao(\''+sol.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Pode cotar</button>'
           +'<button onclick="reprovarSolicitacao(\''+sol.id+'\')" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:#991b1b;font-size:12px;cursor:pointer">Recusar</button></div>':'<span style="font-size:12px;color:var(--text3)">Aguardando o diretor</span>')
         +'</div>';
     });
     h+='</div>';
   }
   if(!fila.length) return h+'<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;border:1px solid var(--border);border-radius:12px">Nenhuma compra aguardando aprovação ✓</div>';
-  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden">';
+  h+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:0 0 6px">Etapa 4 · Autorização de compra ('+fila.length+')</div><div style="border:1px solid var(--border);border-radius:12px;overflow:hidden">';
   fila.forEach(function(sol,i){
     var e=compraEscolhaDe(sol.id), f=e&&e.f, n=e?e.fns.length:0;
-    var tag=f?('<span class="bdg" style="background:'+(e.doComprador?'var(--blue-bg);color:var(--blue-text)':'var(--amber-bg);color:var(--amber-text)')+';font-size:10.5px;margin-left:6px">'+(e.doComprador?'escolhido: ':'menor valor: ')+tgEsc(f.nome||'')+'</span>'):'<span class="bdg" style="background:var(--red-bg);color:var(--red-text);font-size:10.5px;margin-left:6px">sem cotação</span>';
+    var _ind=e?cotIndicadoIdx(e.fns):-1, _eInd=e&&_ind===e.idx;   // v1.0.1282: escolhido × indicado (menor preço + frete)
+    var tag=f?('<span class="bdg" style="background:'+(_eInd?'var(--green-bg);color:var(--green-text)':'var(--amber-bg);color:var(--amber-text)')+';font-size:10.5px;margin-left:6px">'+(_eInd?'escolhido = indicado: ':'escolhido (não é o indicado): ')+tgEsc(f.nome||'')+'</span>'):'<span class="bdg" style="background:var(--red-bg);color:var(--red-text);font-size:10.5px;margin-left:6px">sem cotação</span>';
+    var _just=e&&e.cot&&(e.cot.justificativa_escolha||e.cot.justificativa_menos3);
     h+='<div style="padding:12px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:10px;background:'+(i%2?'var(--bg2)':'var(--bg)')+'">'
       +(dir&&f?'<input type="checkbox" class="cmp-aprov-chk" value="'+sol.id+'" onchange="compraAprovTick()" style="width:auto">':'<span style="width:13px"></span>')
       +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">'+tgEsc(sol.titulo||'')+tag+'</div>'
-      +'<div style="font-size:11px;color:var(--text2)">'+[sol.numero,sol.categoria,n?(n+' cotação(ões)'):'',(e&&e.cot&&e.cot.justificativa_menos3?'com justificativa':''),sol.solicitante_nome].filter(Boolean).map(tgEsc).join(' · ')+'</div></div>'
-      +'<div style="text-align:right;white-space:nowrap;margin-right:8px"><div style="font-size:13px;font-weight:700">'+(f&&Number(f.valor_total)>0?fmtV(Number(f.valor_total)):'—')+'</div></div>'
+      +'<div style="font-size:11px;color:var(--text2)">'+[sol.numero,sol.categoria,n?(n+' orçamento(s)'):'',(!_eInd&&_ind>=0&&e.fns[_ind]?'indicado: '+e.fns[_ind].nome+' '+fmtV(cotTotal(e.fns[_ind])):''),sol.solicitante_nome].filter(Boolean).map(tgEsc).join(' · ')+'</div>'
+      +(_just?'<div style="font-size:11.5px;color:var(--amber-text);margin-top:2px">justificativa: '+tgEsc(_just)+'</div>':'')+'</div>'
+      +'<div style="text-align:right;white-space:nowrap;margin-right:8px"><div style="font-size:13px;font-weight:700">'+(f&&Number(f.valor_total)>0?fmtV(cotTotal(f)):'—')+'</div>'+(f&&Number(f.frete)>0?'<div style="font-size:10.5px;color:var(--text3)">com frete '+fmtV(Number(f.frete))+'</div>':'')+'</div>'
       +'<div style="display:flex;gap:6px">'
       +'<button onclick="compraAprovarAbas(\''+sol.id+'\')" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:12px;cursor:pointer">Cotações</button>'
-      +(dir&&f?'<button onclick="compraAprovarDireto(\''+sol.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Aprovar</button>'
+      +(dir&&f?'<button onclick="compraAprovarDireto(\''+sol.id+'\')" style="padding:5px 10px;border:none;border-radius:6px;background:#166534;color:#fff;font-size:12px;cursor:pointer;font-weight:600">Autorizar compra</button>'
         +'<button onclick="compraRecusar(\''+sol.id+'\')" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:#991b1b;font-size:12px;cursor:pointer">Recusar</button>':'')
       +'</div></div>';
   });
