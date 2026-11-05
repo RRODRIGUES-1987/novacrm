@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1303 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1304 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1303';
+const APP_VERSION='v1.0.1304';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -1660,6 +1660,11 @@ async function dbInsert(table,body){
   return null;
 }
 async function dbUpdate(table,id,body){
+  // v1.0.1304: o mapa das etiquetas do Full ML não vai no registro do pedido (vai para ecom_full_cells)
+  if(table==='ecom_pedidos'&&body&&body.full_meta&&typeof body.full_meta==='object'&&body.full_meta.unid_cells){
+    var _cells=body.full_meta.unid_cells, _mc=Object.assign({},body.full_meta); delete _mc.unid_cells; body=Object.assign({},body,{full_meta:_mc});
+    if(window._ecomCells[id]!==_cells){ try{ await ecomFullCellsGravar(id,_cells); }catch(_c){} }
+  }
   const r=await sbFetch('PATCH',`/rest/v1/${table}?id=eq.${id}`,body,tok);
   if(!r.ok){
     const msg=r.data?.message||r.data?.msg||JSON.stringify(r.data)||'Erro ao atualizar';
@@ -2991,7 +2996,20 @@ function capaPdfViewer(url,titulo,aviso,nomeArq){
 // telas de sempre: importação (ASN no lugar da planilha; etiquetas no passo das etiquetas), OS por pedido,
 // checkout (bipa cada etiqueta de unidade; caixa cheia imprime a master) e embarque (bipa as caixas).
 function ecomEhFull(p){ return !!(p&&p.tipo_envio==='full'); }
-function ecomFullMeta(p){ var m=p&&p.full_meta; if(typeof m==='string'){ try{ m=JSON.parse(m); }catch(e){ m=null; } } return m||{}; }
+function ecomFullMeta(p){ var m=p&&p.full_meta; if(typeof m==='string'){ try{ m=JSON.parse(m); }catch(e){ m=null; } } m=m||{};
+  if(p&&m.ml&&!m.unid_cells&&window._ecomCells&&window._ecomCells[p.id]) m.unid_cells=window._ecomCells[p.id];   // v1.0.1304: mapa das etiquetas fica fora do pedido
+  return m; }
+// v1.0.1304: o mapa das etiquetas de unidade do Full ML (milhares de posições) fica numa tabela própria, carregado só no checkout
+window._ecomCells=window._ecomCells||{};
+async function ecomFullCellsGarantir(p){
+  if(!p) return; var m=ecomFullMeta(p); if(!m.ml||m.unid_cells) return;
+  try{ var r=await dbSelect('ecom_full_cells','id=eq.'+p.id+'&select=cells'); if(r&&r[0]&&r[0].cells){ window._ecomCells[p.id]=r[0].cells; m.unid_cells=r[0].cells; p.full_meta=m; } }catch(_e){}
+}
+async function ecomFullCellsGravar(pid,cells){
+  if(!pid||!cells) return; window._ecomCells[pid]=cells;
+  try{ await dbInsert('ecom_full_cells',{id:pid,company_id:company?.id||null,cells:cells}); }
+  catch(_e){ try{ await dbUpdate('ecom_full_cells',pid,{cells:cells,updated_at:new Date().toISOString()}); }catch(_e2){ console.warn('mapa das etiquetas não gravado',_e2); } }
+}
 function ecomFullDaOs(osId){ var p=(ecomPedidos||[]).find(function(x){ return x.os_id===osId&&ecomEhFull(x); }); return p?p.id:''; }
 function ecomFullNormQr(s){ return String(s||'').toUpperCase().replace(/\s+/g,''); }
 // ── 1) lista de separação (ASN) → um pedido com os SKUs da remessa ──
@@ -3433,7 +3451,7 @@ function ecomFullImprimirCaixasTodas(pid){ var p=(ecomPedidos||[]).find(function
   var it=(meta.caixas||[]).filter(function(c){return c.pagina;}).map(function(c){ return ecomFullItemCaixa(meta,c); });
   if(!it.length){ showToast('Sem etiquetas de caixa.','red'); return; } return ecomFullImprimirPaginas(meta.master_pdf,it,'master'); }
 async function ecomFullImprimirUnidML(pid,sku){   // v1.0.1126
-  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p);
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p);   // v1.0.1304
   if(meta.unid_grade!=='auto' && meta.unidades_pdf){   // v1.0.1167: refaz o mapa pela leitura automática (layout novo do ML)
     try{
       var _r=await window.supabase.storage.from('ecom-etiquetas').download(meta.unidades_pdf);
@@ -3662,6 +3680,7 @@ async function ecomFullBip(p,its,code){
   // etiquetas serem ligadas (sem os códigos ML nem os PDFs): o bipe dava "Etiqueta não é deste Full"/"não localizada",
   // e, pior, ao gravar o progresso, regravava o full_meta antigo por cima do que estava no banco.
   try{ var _fm=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=full_meta,status'); if(_fm&&_fm[0]&&_fm[0].full_meta){ p.full_meta=_fm[0].full_meta; if(_fm[0].status) p.status=_fm[0].status; } }catch(_e){}
+  await ecomFullCellsGarantir(p);   // v1.0.1304
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
   if(meta.modo_produto!==false&&!meta.ml){ await ecomFullProdBip(p,its,meta,code); return; }   // v1.0.1185: checkout por produto (caixas de 48) — Full Shopee
   if(meta.ml&&ecomFullMlPorProduto(meta)){ await ecomFullProdBipML(p,its,meta,code); return; }   // v1.0.1220: Full ML por produto (EAN → etiquetas → bipa cada uma → etiqueta da caixa)
