@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1301 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1302 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1301';
+const APP_VERSION='v1.0.1302';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -47813,8 +47813,12 @@ function wmsCkvPlano(pedId){
     N+=g.m>0?(Math.floor(g.qtd/g.m)+((g.qtd%g.m)>0?1:0)):1; });
   return {p:p,itens:por,N:Math.max(N,(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id===pedId;}).length)};
 }
-function wmsCkvAbrir(pedId){
+async function wmsCkvAbrir(pedId){
   try{ portClose(); }catch(e){}
+  // v1.0.1302: volumes e itens deste pedido relidos do banco (outro computador pode ter fechado/estornado)
+  try{ var _pe=await dbSelect('wms_pallets_embarque','pedido_id=eq.'+pedId)||[]; var _pi=_pe.length?(await dbSelect('wms_pallet_itens','pallet_id=in.('+_pe.map(function(x){return x.id;}).join(',')+')')||[]):[];
+    wmsPalletsEmbarque=(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id!==pedId;}).concat(_pe); var _ids={}; _pe.forEach(function(x){_ids[x.id]=1;});
+    wmsPalletItens=(wmsPalletItens||[]).filter(function(x){return !(x.pedido_id===pedId||_ids[x.pallet_id]);}).concat(_pi); }catch(_e){}
   var pl=wmsCkvPlano(pedId); if(!pl){ showToast('Pedido não encontrado.','red'); return; }
   var abertoSalvo=null; try{ abertoSalvo=JSON.parse(safeLocal.getItem('ckv_'+pedId)||'null'); }catch(e){}
   _ckv={pedId:pedId,plano:pl,aberto:abertoSalvo||null,msg:null,passos:null};
@@ -47951,12 +47955,22 @@ async function wmsCkvAcharCaixa(raw){
   }
   return null;
 }
+function wmsCkvQtdPacoteObrigatoria(){ var p=_ckv&&_ckv.plano&&_ckv.plano.p, cl=p&&(clientes||[]).find(function(c){return c.id===p.cliente_id;}); var pr=(cl&&cl.parametros)||{}; return pr.pacote_fechado===true||pr.pacote_fechado==='true'; }
 async function wmsCkvBipe(raw){
   if(!_ckv) return; raw=String(raw||'').trim(); if(!raw) return;
   var pl=_ckv.plano, k=null, g=null;
+  // v1.0.1302: pacote = código do produto + QUANTIDADE do pacote (os dois códigos da etiqueta do pacote). A quantidade garante que é
+  //            pacote e não a caixa (a caixa traz a quantidade da caixa, que não bate com o pacote).
+  if(_ckv.aguardaQtd){
+    var aq=_ckv.aguardaQtd, gq=pl.itens[aq.sku], saco=gq?(gq.saco||1):1;
+    if(!/^\d{1,5}$/.test(raw)){ _ckv.msg={t:'erro',x:'Agora bipe a QUANTIDADE que está na etiqueta do pacote de '+ecomEsc(aq.sku)+' (esperado '+saco.toLocaleString('pt-BR')+').'}; wmsBeep(true); return wmsCkvRender(); }
+    var nq=+raw; _ckv.aguardaQtd=null;
+    if(nq!==saco){ _ckv.msg={t:'erro',x:'Quantidade '+nq.toLocaleString('pt-BR')+' não é de pacote de '+ecomEsc(aq.sku)+' (pacote = '+saco.toLocaleString('pt-BR')+'). Você bipou a etiqueta da CAIXA? Caixa inteira é pelo RG.'}; wmsBeep(true); return wmsCkvRender(); }
+    k=aq.sku;
+  }
   // 1) pacote: código do produto (SKU ou EAN)
   var cod=wmsNorm(raw);
-  Object.keys(pl.itens).forEach(function(x){ var it=pl.itens[x]; if(!k&&(wmsNorm(x)===cod||(it.ean&&wmsNorm(it.ean)===cod))) k=x; });
+  if(!k) Object.keys(pl.itens).forEach(function(x){ var it=pl.itens[x]; if(!k&&(wmsNorm(x)===cod||(it.ean&&wmsNorm(it.ean)===cod))) k=x; });
   // v1.0.1295: sem direção — qualquer ordem; o que importa é todos os volumes serem bipados
   // v1.0.1298: a etiqueta da CAIXA também tem o código do produto; se para este SKU só restam caixas inteiras, o bipe do código é na caixa → pedir o RG
   if(k&&_ckv.passos){
@@ -47967,6 +47981,7 @@ async function wmsCkvBipe(raw){
   if(k){ g=pl.itens[k];
     if(_ckv.aberto&&_ckv.aberto.sku!==k){ _ckv.msg={t:'erro',x:'O volume aberto é de '+ecomEsc(_ckv.aberto.sku)+' (sem caixa mista). Feche o volume antes de começar '+ecomEsc(k)+'.'}; wmsBeep(true); return wmsCkvRender(); }
     var rest=wmsCkvRestante(g); if(rest<=0){ _ckv.msg={t:'erro',x:ecomEsc(k)+' já está completo neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
+    if(!/^\d{1,5}$/.test(raw)&&wmsCkvQtdPacoteObrigatoria()&&(g.saco||0)>1){ _ckv.aguardaQtd={sku:k}; _ckv.msg={t:'aviso',x:'Código de '+ecomEsc(k)+' lido. Agora bipe a QUANTIDADE da etiqueta do pacote ('+g.saco.toLocaleString('pt-BR')+').'}; if(navigator.vibrate) navigator.vibrate(30); return wmsCkvRender(); }   // v1.0.1302
     var q=Math.min(g.saco||1,rest);
     _ckv.aberto=_ckv.aberto||{sku:k,qtd:0,bipes:[]}; _ckv.aberto.qtd+=q; _ckv.aberto.bipes.push({q:q,em:new Date().toISOString()}); wmsCkvSalvarAberto();
     _ckv.msg={t:'ok',x:'✓ Pacote '+_ckv.aberto.bipes.length+' · '+q.toLocaleString('pt-BR')+' pç de '+ecomEsc(k)};
@@ -48044,6 +48059,7 @@ async function wmsCkvFinalizar(){
     await dbUpdate('wms_pedidos',p.id,{unitizado:true}); p.unitizado=true;
     try{ safeLocal.removeItem('ckv_'+p.id); }catch(e){}
     _ckv.msg={t:'ok',x:'✓ Pedido conferido · '+N+' volume(s). Pode seguir para o embarque.'}; if(N!==pl.N) _ckv.msg.x+=' (planejado: '+pl.N+'; as etiquetas mostram o total planejado — reimprima se precisar)';
+    showToast('✓ Pedido '+wmsNumeroCurto(p)+' conferido · '+N+' volume(s)','green'); setTimeout(function(){ if(_ckv&&_ckv.pedId===p.id) wmsCkvSair(); },1800);   // v1.0.1302: volta para a capa sozinho (como o checkout do e-commerce)
   }catch(e){ _ckv.msg={t:'erro',x:'Volumes gravados, mas não consegui encerrar a conferência: '+ecomEsc(e.message||e)}; }
   wmsCkvRender();
 }
