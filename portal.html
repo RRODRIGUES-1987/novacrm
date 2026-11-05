@@ -3170,7 +3170,9 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.5';   // v1.8.5: aba Faturas real (estilo fatura de cartão): faturas aprovadas, situação, lançamentos, bruto e líquido
+const PORTAL_VERSION = 'v1.8.7';   // v1.8.7: situação do pedido mostra CONFERIDO e EM ROMANEIO
+// v1.8.6: planilha de pedidos → UM pedido por OV (o mesmo SKU em OVs diferentes nunca é agrupado)
+// v1.8.5: aba Faturas real (estilo fatura de cartão): faturas aprovadas, situação, lançamentos, bruto e líquido
 // v1.8.4: a planilha de pedidos avisa quando a quantidade não fecha o pacote do produto
 // v1.8.3: agendamento de saída com os pedidos a carregar (aptos = nota ligada); e-mail automático para a transportadora informar o motorista
 // v1.8.2: quadro único de pedidos com a nota (e a DANFE) na linha; resultado do envio em caixa de diálogo
@@ -3509,7 +3511,7 @@ function render(){
   [['nbPed',abertosP.length],['nbAgd',futurosA.length],['nbNc',ncAbertas]].forEach(([id,n])=>{ const e=$(id); if(e){ e.textContent=n; e.classList.toggle('hide',!n); } });
   const emOp = abertosP.filter(p=>p.status==='em_operacao').length;
   if(_vf){ const c={}; _vf.forEach(r=>{ const k=r.situacao||'aguardando_separacao'; c[k]=(c[k]||0)+1; });
-    const NOM={em_separacao:'em separação',separado:'separado(s)',aguardando_saldo:'aguardando saldo',aguardando_separacao:'aguardando separação'};
+    const NOM={em_separacao:'em separação',separado:'separado(s)',conferido:'conferido(s)',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',aguardando_separacao:'aguardando separação'};
     $('sumPedD').textContent = ['em_separacao','separado','aguardando_saldo','aguardando_separacao'].filter(k=>c[k]).map(k=>c[k]+' '+NOM[k]).join(' · '); }
   else $('sumPedD').textContent = emOp ? emOp+' em separação agora' : (abertosP.length?'aguardando operação':'');
   $('sumPalD').textContent = state.palletsDelta ? '▲ '+state.palletsDelta+' no mês' : '';
@@ -4477,13 +4479,16 @@ async function plLerCasco(f){
   const ovs=[]; for(let i=h+1;i<r0.length;i++){ const ov=String((r0[i]||[])[cOv]||'').trim().split('-')[0]; if(ov && /^\d+$/.test(ov) && ovs.indexOf(ov)<0) ovs.push(ov); }
   const mOs=String(f.name||'').match(/(\d{4,})/);
   const base=String(f.name||'').replace(/\.[^.]+$/,'').replace(/^separa[cç][aã]o de carga\s*-\s*/i,'').slice(0,40);
-  const doc='OV '+(ovs.join('/')||'?')+(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
-  const itens=[];
+  // v1.8.6: UM pedido por OV — a planilha é de um cliente, mas cada OV é um pedido; o mesmo SKU em OVs diferentes nunca é agrupado
+  const sufixo=(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
+  const porOv={}, ordem=[];
   for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
     const oc=cOc>=0?String(r[cOc]||'').trim():''; const m=oc.match(/^(.*?)[-\/\s]+(\d+)$/);
-    itens.push({sku, qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0, destinatario:cCli>=0?String(r[cCli]||'').trim():'',
+    const ovL=String(r[cOv]||'').trim().split('-')[0]; const doc='OV '+(/^\d+$/.test(ovL)?ovL:(ovs.join('/')||'?'))+sufixo;
+    if(!porOv[doc]){ porOv[doc]={doc, arquivo:f.name, itens:[]}; ordem.push(doc); }
+    porOv[doc].itens.push({sku, qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0, destinatario:cCli>=0?String(r[cCli]||'').trim():'',
       oc:m?m[1].trim():oc, ocLinha:m?m[2]:'', itemCliente:cItCli>=0?String(r[cItCli]||'').trim():''}); }
-  return {doc, arquivo:f.name, itens};
+  return ordem.map(d=>porOv[d]);
 }
 window.plImportar = async function(files){
   const arr=Array.from(files||[]); if(!arr.length) return;
@@ -4495,7 +4500,7 @@ window.plImportar = async function(files){
   const lidos=[], fora=[];
   try{ await plXlsx(); }catch(e){ $('plProg').innerHTML='<span style="color:#b91c1c">Não consegui carregar o leitor de planilhas: '+esc(e.message||e)+'. Verifique a internet e tente de novo.</span>'; return; }
   for(let k=0;k<arr.length;k++){ const f=arr[k]; if($('plProg')) $('plProg').textContent='Lendo planilha '+(k+1)+' de '+arr.length+': '+f.name+'…';
-    try{ const r=await plLerCasco(f); if(r&&r.itens.length) lidos.push(r); else fora.push(f.name); }catch(e){ fora.push(f.name+' ('+(e.message||e)+')'); } }
+    try{ const r=await plLerCasco(f); if(Array.isArray(r)&&r.length) r.forEach(x=>{ if(x.itens.length) lidos.push(x); }); else fora.push(f.name); }catch(e){ fora.push(f.name+' ('+(e.message||e)+')'); } }
   old=$('mPl'); if(old) old.remove();
   const n=v=>Number(v||0).toLocaleString('pt-BR');
   document.body.insertAdjacentHTML('beforeend', `<div id="mPl" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:640px">
@@ -4687,7 +4692,7 @@ window.renderVolFat = function(){
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
     <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
-    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
+    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
       const dt = new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
