@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1296 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1297 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1296';
+const APP_VERSION='v1.0.1297';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -47898,9 +47898,24 @@ async function wmsCkvCapa(raw){
   var c=String(raw||'').trim(), d=c.replace(/\D/g,''); if(!c) return;
   // v1.0.1296: procura em TODOS os pedidos da empresa (numero curto, numero do pedido, OS antiga no nome, id); depois confere o checkout do depositante
   var cid=company?.id, todos=(wmsPedidos||[]).filter(function(p){ return !p.company_id||p.company_id===cid; });
+  // v1.0.1297: a tela pode não ter os pedidos do WMS na memória (perfil de bancada): carrega do banco antes de procurar
+  if(!todos.length){ showToast('Carregando os pedidos…','blue'); try{ await loadWmsData(cid); }catch(_e){} todos=(wmsPedidos||[]).filter(function(p){ return !p.company_id||p.company_id===cid; }); }
   var bate=function(x){ var nc=String(x.numero_curto||''), np=String(x.numero_pedido||'');
     return nc===c||(d&&nc.replace(/\D/g,'')===d)||np===c||(d&&d.length>=4&&new RegExp('(^|\\D)'+d+'(\\D|$)').test(np))||String(x.id)===c; };
   var achados=todos.filter(bate).filter(function(x){ return ['cancelado','excluido'].indexOf(x.status)<0; });
+  if(!achados.length && !window._ckvCapaRetry){
+    // v1.0.1297: o pedido pode ser de OUTRA UNIDADE (a tela filtra pela unidade do cabeçalho): procura no banco e troca a unidade sozinho
+    var db=[]; try{ db=await dbSelect('wms_pedidos','company_id=eq.'+cid+(d?'&or=(numero_curto.eq.'+d+',numero_pedido.ilike.*'+d+'*)':'&numero_pedido.eq.'+encodeURIComponent(c))+'&select=id,numero_curto,numero_pedido,unit_id,status&limit=5')||[]; }catch(_e){}
+    db=db.filter(function(x){ return ['cancelado','excluido'].indexOf(x.status)<0; });
+    if(db.length){
+      var alvo=db[0], un=(userUnits||[]).find(function(u){return u.id===alvo.unit_id;});
+      if(alvo.unit_id && alvo.unit_id!==activeUnit && !un && profile?.role!=='admin' && profile?.role!=='gestor'){ showToast('O pedido '+(alvo.numero_curto||alvo.numero_pedido)+' é de outra unidade, à qual o seu usuário não tem acesso.','amber'); return; }
+      if(alvo.unit_id && alvo.unit_id!==activeUnit){ showToast('Pedido de outra unidade ('+((un&&un.name)||'')+'): trocando a unidade…','blue'); setActiveUnit(alvo.unit_id); }
+      try{ await loadWmsData(cid); }catch(_e){} if(typeof render==='function') render();
+      window._ckvCapaRetry=true; try{ await wmsCkvCapa(raw); } finally { window._ckvCapaRetry=false; }
+      return;
+    }
+  }
   if(!achados.length){ showToast('Nenhum pedido com a capa '+c+' (procurei em '+todos.length+' pedidos carregados)','amber'); return; }
   var p=achados.find(function(x){ return ['conferido','em_romaneio','expedido'].indexOf(x.status)<0; })||achados[0];
   var clP=(clientes||[]).find(function(x){return x.id===p.cliente_id;});
