@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1286 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1287 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1286';
+const APP_VERSION='v1.0.1287';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3158,6 +3158,18 @@ async function ecomFullEtiqImportar(file,det){
     if(det.tipo==='master'){
       var vol=ecomMlLerVolumes(pags);
       ped=cands.find(function(p){ return String(p.numero_pedido||'')==='ML-'+vol.envio || ecomFullMeta(p).envio===vol.envio; });
+      // v1.0.1287 (CH-0058): o PDF de produtos nem sempre traz o número do envio — o pedido fica com envio em branco.
+      // Sem achar pelo envio, usa o Full ML aguardando etiqueta SEM envio (se for um só; se houver mais, pergunta qual) e grava o envio nele.
+      if(!ped && vol.envio){
+        var _semEnv=cands.filter(function(p){ return !String(ecomFullMeta(p).envio||'').trim() && p.status==='aguardando_etiqueta'; });
+        if(_semEnv.length===1) ped=_semEnv[0];
+        else if(_semEnv.length>1){
+          var _op=_semEnv.map(function(p,i){ var m=ecomFullMeta(p); return (i+1)+') E-'+String(p.numero_interno||0).padStart(6,'0')+' · '+Number(m.total||0).toLocaleString('pt-BR')+' un · '+Object.keys(m.unidades||{}).slice(0,3).join(', '); }).join('\n');
+          var _esc=prompt('Envio '+vol.envio+': há '+_semEnv.length+' pedidos Full ML sem número de envio. Qual é este?\n\n'+_op+'\n\nDigite o número da opção:','1');
+          var _ix=parseInt(_esc,10); if(_ix>=1&&_ix<=_semEnv.length) ped=_semEnv[_ix-1];
+        }
+        if(ped){ var _mE=ecomFullMeta(ped); _mE.envio=vol.envio; try{ await dbUpdate('ecom_pedidos',ped.id,{full_meta:_mE, numero_pedido:'ML-'+vol.envio}); ped.full_meta=_mE; ped.numero_pedido='ML-'+vol.envio; }catch(_eE){ console.warn('envio não gravado',_eE); } }
+      }
       if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Etiquetas dos volumes do envio <b>'+ecomEsc(vol.envio)+'</b>, mas não há pedido Full ML com esse envio aguardando etiqueta.','Importe e grave o PDF das etiquetas de produtos antes.'],'red'); return; }
       meta=ecomFullMeta(ped);
       var _prevCx=(meta.caixas||[]).slice(), _prevPath=meta.master_pdf||'';   // v1.0.1174: volumes em mais de um arquivo
