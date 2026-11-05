@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1295 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1296 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1295';
+const APP_VERSION='v1.0.1296';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -47896,9 +47896,15 @@ function wmsConfPerguntarModo(){
 // v1.0.1290: abre o checkout pela CAPA do pedido (código de barras da OS); aceita também o número do pedido
 async function wmsCkvCapa(raw){
   var c=String(raw||'').trim(), d=c.replace(/\D/g,''); if(!c) return;
-  var cid=company?.id, cand=(wmsPedidos||[]).filter(function(p){ if(p.company_id!==cid) return false; var cl=(clientes||[]).find(function(x){return x.id===p.cliente_id;}); return cl&&cl.wms_checkout_volumes===true; });
-  var p=cand.find(function(x){ return String(x.numero_curto||'')===c||(d&&String(x.numero_curto||'').replace(/\D/g,'')===d)||String(x.numero_pedido||'')===c||String(x.id)===c; });
-  if(!p){ showToast('Nenhum pedido de checkout com a capa '+c,'amber'); return; }
+  // v1.0.1296: procura em TODOS os pedidos da empresa (numero curto, numero do pedido, OS antiga no nome, id); depois confere o checkout do depositante
+  var cid=company?.id, todos=(wmsPedidos||[]).filter(function(p){ return !p.company_id||p.company_id===cid; });
+  var bate=function(x){ var nc=String(x.numero_curto||''), np=String(x.numero_pedido||'');
+    return nc===c||(d&&nc.replace(/\D/g,'')===d)||np===c||(d&&d.length>=4&&new RegExp('(^|\\D)'+d+'(\\D|$)').test(np))||String(x.id)===c; };
+  var achados=todos.filter(bate).filter(function(x){ return ['cancelado','excluido'].indexOf(x.status)<0; });
+  if(!achados.length){ showToast('Nenhum pedido com a capa '+c+' (procurei em '+todos.length+' pedidos carregados)','amber'); return; }
+  var p=achados.find(function(x){ return ['conferido','em_romaneio','expedido'].indexOf(x.status)<0; })||achados[0];
+  var clP=(clientes||[]).find(function(x){return x.id===p.cliente_id;});
+  if(!clP||clP.wms_checkout_volumes!==true){ showToast('Pedido '+wmsNumeroCurto(p)+' é de '+((clP&&clP.nome)||'depositante sem cadastro na tela')+', que não está com o checkout de volumes ligado (Depositante › Conferências). Dê F5 se acabou de ligar.','amber'); return; }
   if(['conferido','em_romaneio','expedido','cancelado','excluido'].indexOf(p.status)>=0){ showToast('Pedido '+wmsNumeroCurto(p)+' já está '+p.status.replace('_',' ')+'.','amber'); return; }
   if(!wmsSeparacaoConcluidaPedido(p.id)){
     // a lista pode ter sido concluída em outro computador: relê as tarefas antes de recusar
