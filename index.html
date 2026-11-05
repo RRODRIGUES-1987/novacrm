@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1297 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1299 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1297';
+const APP_VERSION='v1.0.1299';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -44906,7 +44906,7 @@ async function wmsReZebra(){
       volNum:v.pl.vol_num, volTotal:v.N,
       codigo:v.pl.etiqueta_codigo, itens:itens, numCurto:wmsNumeroCurto(v.ped)
     });
-    return wmsCliEtqModelo(cli)==='casco_10x10'?(_mk+'\n'+wmsZplCascoDoPallet(v.pl,itens,{pedidoId:v.ped.id,numCurto:wmsNumeroCurto(v.ped),N:v.N})):_mk;
+    return wmsCliEtqModelo(cli)==='casco_10x10'?wmsZplCascoDoPallet(v.pl,itens,{pedidoId:v.ped.id,numCurto:wmsNumeroCurto(v.ped),N:v.N}):_mk;   // v1.0.1299: CASCO = só a etiqueta do cliente
   }).join('\n');
   zebraImprimirOuBaixar(zpl,'reimp_emb_'+String(_reLista.numero||'rom')+'_'+vols.length+'vol.zpl');
   // registro por pedido afetado
@@ -47869,12 +47869,18 @@ function wmsCkvRender(){
     +'<input id="ckv-in" autocomplete="off" placeholder="bipe aqui" style="width:100%;box-sizing:border-box;padding:16px;font-size:20px;border:2px solid var(--blue-text);border-radius:12px" onkeydown="if(event.key===\'Enter\'){var v=this.value;this.value=\'\';wmsCkvBipe(v);}">'
     +mh+'<div style="margin-top:6px">'+lin+'</div>'
     +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+(ab?'<button class="btn btn-p" style="flex:1;padding:13px" onclick="wmsCkvFecharVolume()">Fechar volume · imprimir etiqueta</button>':'')
-    +'<button class="btn" style="padding:13px" onclick="wmsReimprimirEtiquetas(\''+p.id+'\')">Reimprimir</button></div></div>';
+    +'<button class="btn" style="padding:13px" onclick="wmsReimprimirEtiquetas(\''+p.id+'\')">Reimprimir</button></div>'
+    +(function(){ var vs=(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id===p.id;}).sort(function(a,b){return (a.vol_num||0)-(b.vol_num||0);}); if(!vs.length) return '';
+        return '<div style="margin-top:14px;font-size:11px;color:var(--text3);letter-spacing:.4px">VOLUMES FECHADOS</div>'+vs.map(function(v){ var its=(wmsPalletItens||[]).filter(function(x){return x.pallet_id===v.id;});
+          return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><b>Vol. '+e(v.vol_num)+'</b><span style="flex:1">'+its.map(function(x){return e(x.sku)+' · '+Number(x.quantidade).toLocaleString('pt-BR')+' pç';}).join(' + ')+'</span>'
+            +'<button class="btn btn-sm" onclick="wmsCkvDesfazerVolume(\''+v.id+'\')" title="Desfazer este volume (bipe de novo)">↩ Desfazer</button></div>'; }).join(''); })()
+    +'</div>';   // v1.0.1299: volumes fechados com desfazer
   setTimeout(function(){ var i=ge('ckv-in'); if(i) i.focus(); },50);
 }
 // v1.0.1295: na Conferência em modo checkout, o que o leitor digitar vai para o campo da capa mesmo sem foco
 document.addEventListener('keydown',function(ev){
   try{
+    if(_ckv){ var ci=ge('ckv-in'); if(ci&&document.activeElement!==ci&&ev.key&&ev.key.length===1){ var a0=document.activeElement; if(!(a0&&(a0.tagName==='INPUT'||a0.tagName==='TEXTAREA')&&a0!==ci)) ci.focus(); } return; }   // v1.0.1298: dentro do checkout o leitor sempre cai no campo
     if(typeof curPage==='undefined'||curPage!=='wms-conferencia'||window._confModo!=='checkout'||_ckv) return;
     var i=ge('ckv-capa'); if(!i) return; var a=document.activeElement;
     if(a===i||(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'||a.isContentEditable))) return;
@@ -47946,6 +47952,12 @@ async function wmsCkvBipe(raw){
   var cod=wmsNorm(raw);
   Object.keys(pl.itens).forEach(function(x){ var it=pl.itens[x]; if(!k&&(wmsNorm(x)===cod||(it.ean&&wmsNorm(it.ean)===cod))) k=x; });
   // v1.0.1295: sem direção — qualquer ordem; o que importa é todos os volumes serem bipados
+  // v1.0.1298: a etiqueta da CAIXA também tem o código do produto; se para este SKU só restam caixas inteiras, o bipe do código é na caixa → pedir o RG
+  if(k&&_ckv.passos){
+    var _pacRest=0,_cxRest=0; _ckv.passos.forEach(function(ps){ if(ps.sku!==k) return; if(ps.tipo==='caixa'){ if(!(_ckv.rgsUsados&&ps.pallet_id&&_ckv.rgsUsados[ps.pallet_id])) _cxRest+=ps.qtd; } else _pacRest+=ps.qtd; });
+    var _gK=pl.itens[k], _feitoPac=Math.max(0,(_gK.qtd-wmsCkvRestante(_gK))-( _gK.caixasQtd||0 ));
+    if(_cxRest>0 && _pacRest-_feitoPac<=0){ _ckv.msg={t:'erro',x:'Para '+ecomEsc(k)+' a separação foi em CAIXA inteira: bipe o RG da caixa, não o código do produto na etiqueta dela.'}; wmsBeep(true); return wmsCkvRender(); }
+  }
   if(k){ g=pl.itens[k];
     if(_ckv.aberto&&_ckv.aberto.sku!==k){ _ckv.msg={t:'erro',x:'O volume aberto é de '+ecomEsc(_ckv.aberto.sku)+' (sem caixa mista). Feche o volume antes de começar '+ecomEsc(k)+'.'}; wmsBeep(true); return wmsCkvRender(); }
     var rest=wmsCkvRestante(g); if(rest<=0){ _ckv.msg={t:'erro',x:ecomEsc(k)+' já está completo neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
@@ -47965,13 +47977,14 @@ async function wmsCkvBipe(raw){
   if(qc>rest2){ _ckv.msg={t:'erro',x:'A caixa tem '+qc.toLocaleString('pt-BR')+' pç e faltam só '+rest2.toLocaleString('pt-BR')+' de '+ecomEsc(k)+': confira na tarefa se esta caixa foi aberta (bipe os pacotes).'}; wmsBeep(true); return wmsCkvRender(); }
   if(_ckv.rgsUsados&&(_ckv.rgsUsados[cx.id]||_ckv.rgsUsados[cx.pallet_id])){ _ckv.msg={t:'erro',x:'Esta caixa já foi bipada neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
   (_ckv.rgsUsados=_ckv.rgsUsados||{})[cx.id]=1; if(cx.pallet_id) _ckv.rgsUsados[cx.pallet_id]=1;
-  await wmsCkvCriarVolume(k,qc,'caixa',[{q:qc}]);
+  g.caixasQtd=(g.caixasQtd||0)+qc;   // v1.0.1298: peças que entraram por caixa inteira
+  await wmsCkvCriarVolume(k,qc,'caixa',[{q:qc}],cx);
 }
 async function wmsCkvFecharVolume(){
   if(!_ckv||!_ckv.aberto||!_ckv.aberto.qtd){ return; }
   var ab=_ckv.aberto; await wmsCkvCriarVolume(ab.sku,ab.qtd,'saco',ab.bipes); _ckv.aberto=null; wmsCkvSalvarAberto(); wmsCkvRender();
 }
-async function wmsCkvCriarVolume(sku,qtd,tipo,bipes){
+async function wmsCkvCriarVolume(sku,qtd,tipo,bipes,cxInfo){
   var pl=_ckv.plano, p=pl.p, g=pl.itens[sku], cid=company.id;
   try{
     var numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'PLT'});
@@ -47981,6 +47994,7 @@ async function wmsCkvCriarVolume(sku,qtd,tipo,bipes){
       montado_por_nome:profile?.full_name||cu?.email||null,montado_em:new Date().toISOString()};
     var r=await dbInsert('wms_pallets_embarque',obj), pal=Array.isArray(r)?r[0]:r;
     wmsPalletsEmbarque=[pal].concat(wmsPalletsEmbarque||[]);
+    (_ckv.volInfo=_ckv.volInfo||{})[pal.id]={sku:sku,qtd:qtd,tipo:tipo,cx:cxInfo?{id:cxInfo.id,pallet_id:cxInfo.pallet_id}:null};   // v1.0.1299: para desfazer
     var it=await dbInsert('wms_pallet_itens',{company_id:cid,pallet_id:pal.id,produto_id:g.produto_id||null,sku:sku,descricao:g.desc||null,quantidade:qtd,pedido_id:p.id});
     wmsPalletItens=[Array.isArray(it)?it[0]:it].concat(wmsPalletItens||[]);
     g.feito+=qtd;
@@ -47995,8 +48009,27 @@ async function wmsCkvCriarVolume(sku,qtd,tipo,bipes){
   }catch(e){ _ckv.msg={t:'erro',x:'Não consegui fechar o volume: '+ecomEsc(e.message||e)}; wmsBeep(true); }
   wmsCkvRender();
 }
+// v1.0.1299: desfaz um volume fechado por engano (ex.: caixa inteira bipada pelo código do produto): apaga o volume e devolve as peças ao saldo do checkout
+async function wmsCkvDesfazerVolume(palId){
+  if(!_ckv) return; var pl=_ckv.plano, p=pl.p;
+  var pal=(wmsPalletsEmbarque||[]).find(function(x){return x.id===palId;}); if(!pal) return;
+  var its=(wmsPalletItens||[]).filter(function(x){return x.pallet_id===palId;}), info=(_ckv.volInfo||{})[palId];
+  var resumo=its.map(function(x){return x.sku+' '+Number(x.quantidade).toLocaleString('pt-BR');}).join(', ');
+  if(!confirm('Desfazer o volume '+pal.vol_num+'/'+pl.N+' ('+resumo+')? A etiqueta impressa dele deve ser descartada.')) return;
+  try{
+    for(var i=0;i<its.length;i++){ await dbDelete('wms_pallet_itens',its[i].id); var g=pl.itens[its[i].sku]; if(g){ g.feito=Math.max(0,g.feito-(+its[i].quantidade||0)); if(info&&info.tipo==='caixa') g.caixasQtd=Math.max(0,(g.caixasQtd||0)-(+its[i].quantidade||0)); } }
+    await dbDelete('wms_pallets_embarque',palId);
+    wmsPalletItens=(wmsPalletItens||[]).filter(function(x){return x.pallet_id!==palId;}); wmsPalletsEmbarque=(wmsPalletsEmbarque||[]).filter(function(x){return x.id!==palId;});
+    if(info&&info.cx&&_ckv.rgsUsados){ delete _ckv.rgsUsados[info.cx.id]; if(info.cx.pallet_id) delete _ckv.rgsUsados[info.cx.pallet_id]; }
+    if(_ckv.volInfo) delete _ckv.volInfo[palId];
+    try{ safeLocal.setItem('ckv_'+p.id,JSON.stringify(_ckv.aberto||null)); }catch(_e){}
+    _ckv.msg={t:'ok',x:'Volume '+pal.vol_num+' desfeito. Bipe de novo: caixa inteira pelo RG, pacotes pelo código do produto.'};
+  }catch(e){ _ckv.msg={t:'erro',x:'Não consegui desfazer: '+ecomEsc(e.message||e)}; }
+  wmsCkvRender();
+}
 async function wmsCkvFinalizar(){
   var pl=_ckv.plano, p=pl.p, cid=company.id, vols=(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id===p.id;}), N=vols.length;
+  if(pl.N&&N!==pl.N){ _ckv.msg={t:'erro',x:'O checkout fechou '+N+' volume(s), mas a capa e a nota fiscal têm '+pl.N+'. Os volumes precisam ser iguais: desfaça os volumes errados (botão ↩ no volume) e bipe de novo — caixa inteira pelo RG, pacotes pelo código do produto.'}; wmsBeep(true); return wmsCkvRender(); }   // v1.0.1299: volumes = capa = NF, sem exceção
   try{
     for(var i=0;i<vols.length;i++){ if(vols[i].vol_total!==N){ await dbUpdate('wms_pallets_embarque',vols[i].id,{vol_total:N}); vols[i].vol_total=N; } }
     var c=await dbInsert('wms_conferencias',{company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
@@ -53645,7 +53678,7 @@ function wmsEmbarqueZplLista(pallets,ctx){
       pedido:ctx.numCurto,pallet:pl.numero,volNum:pl.vol_num,volTotal:ctx.N,
       codigo:pl.etiqueta_codigo,itens:itens,numCurto:ctx.numCurto
     });
-    return wmsCliEtqModelo(ctx.cli)==='casco_10x10'?(_mk+'\n'+wmsZplCascoDoPallet(pl,itens,ctx)):_mk;   // v1.0.1243: CASCO = etiqueta MK do volume + etiqueta CASCO por produto
+    return wmsCliEtqModelo(ctx.cli)==='casco_10x10'?wmsZplCascoDoPallet(pl,itens,ctx):_mk;   // v1.0.1299: CASCO = só a etiqueta do cliente (uma por volume), sem a etiqueta MK
   }).join('\n');
 }
 
