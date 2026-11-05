@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1293 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1294 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1293';
+const APP_VERSION='v1.0.1294';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36712,7 +36712,17 @@ async function zebraResolve(force){
 }
 async function zebraEnviarZpl(zpl){
   const ok=await zebraResolve();
-  if(!ok)throw new Error('browserprint_indisponivel');
+  // v1.0.1294: sem o Zebra Browser Print, usa o QZ Tray (o mesmo das bancadas do e-commerce) com a impressora salva na bancada
+  if(!ok){
+    try{
+      await ecomQzConnect(true).catch(async function(){ await ecomQzConnect(false); });
+      if(window.qz&&qz.websocket&&qz.websocket.isActive()){
+        var pr=await ecomQzResolvePrinter(); if(!pr) throw new Error('qz_sem_impressora');
+        await ecomQzPrintZpl(pr,zpl); return String(pr);
+      }
+    }catch(_q){ /* sem QZ também: cai no .zpl */ }
+    throw new Error('browserprint_indisponivel');
+  }
   const r=await fetch(_zebraBase+'write',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({device:_zebraDefault,data:zpl})});
   if(!r.ok)throw new Error('falha_envio_'+r.status);
@@ -36730,7 +36740,7 @@ async function zebraImprimirOuBaixar(zpl,fname){
     const blob=new Blob([zpl],{type:'text/plain;charset=utf-8'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname||'etiquetas.zpl';
     document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    if(typeof showToast==='function')showToast('Zebra Browser Print nao encontrado — baixei o .zpl. Instale o utilitario para imprimir direto.','amber');
+    if(typeof showToast==='function')showToast('Nenhuma impressora de etiquetas nesta máquina (QZ Tray ou Zebra Browser Print): baixei o .zpl. Instale o QZ Tray, o mesmo das bancadas do e-commerce.','amber');
     return false;
   }
 }
