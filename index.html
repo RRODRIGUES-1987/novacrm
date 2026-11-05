@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1284 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1285 | Gerado: 2026-11-04 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1284';
+const APP_VERSION='v1.0.1285';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -26910,13 +26910,18 @@ async function confirmarBaixaCR(crId){
   const impR=(fatR&&String(cr.documento_tipo||'nf')!=='nd')?Number(fatR.iss_valor||0):0;   // ND nao tem imposto · v1.0.1250: retenção só do ISS
   const retemR=!!(cliR&&cliR.cr_retem_imposto===true&&impR>0);
   let valorRetido=null;
-  if(retemR){
-    const bruto=Number(cr.valor||0), liq=Math.round((bruto-impR)*100)/100;
+  // v1.0.1285: o título já nasce com o que o cliente paga (líquido quando ele retém o ISS, com o retido em valor_retido)
+  const _retT=Number(cr.valor_retido||0), _tit=Number(cr.valor||0);
+  if(_retT>0){
+    if(Math.abs(valorPago-_tit)<0.05) valorRetido=_retT;                       // pagou o líquido, como esperado
+    else if(Math.abs(valorPago-(_tit+_retT))<0.05) valorRetido=0;            // pagou o bruto: não reteve desta vez
+    else if(!confirm('O valor recebido ('+fmtV(valorPago)+') não bate com o título ('+fmtV(_tit)+', líquido) nem com o bruto ('+fmtV(_tit+_retT)+').\n\nConfirma a baixa assim mesmo?')) return;
+  } else if(retemR){
+    // título antigo, ainda no bruto, de cliente que retém
+    const bruto=_tit, liq=Math.round((bruto-impR)*100)/100;
     if(Math.abs(valorPago-liq)<0.05)valorRetido=impR;
     else if(Math.abs(valorPago-bruto)<0.05)valorRetido=0;
-    else{
-      if(!confirm('O valor recebido ('+fmtV(valorPago)+') não bate nem com o BRUTO ('+fmtV(bruto)+') nem com o LÍQUIDO ('+fmtV(liq)+') desta NF.\n\nConfirma a baixa assim mesmo?'))return;
-    }
+    else if(!confirm('O valor recebido ('+fmtV(valorPago)+') não bate nem com o BRUTO ('+fmtV(bruto)+') nem com o LÍQUIDO ('+fmtV(liq)+') desta NF.\n\nConfirma a baixa assim mesmo?'))return;
   }
 
   const venc=new Date(cr.vencimento+'T00:00');
@@ -27150,6 +27155,13 @@ async function criarTitulosFatura(faturaId){
     _nfs.forEach(function(x){ const v=Math.round(Number(x.total||0)*100)/100; if(v>0) docs.push({tipo:'nf',valor:v,numero:x.nfse_numero||null,seq:Number(x.seq),tot:_nfs.length,pedido:x.pedido||null}); });
   } else if(nf>0) docs.push({tipo:'nf',valor:nf,numero:f.nfse_numero||null});
   if(nd>0) docs.push({tipo:'nd',valor:nd,numero:f.nd_numero||null});
+  // v1.0.1285: a FATURA é sempre valores + impostos; o TÍTULO é o que o cliente paga — se ele retém o ISS na fonte, a NF nasce líquida
+  //            (o ISS retido fica registrado no título em valor_retido; a ND nunca tem imposto)
+  const _cliT=(clientes||[]).find(c=>c.id===f.cliente_id), _issT=Math.round(Number(f.iss_valor||0)*100)/100;
+  if(_cliT&&_cliT.cr_retem_imposto===true&&_issT>0){
+    const _nfs2=docs.filter(d=>d.tipo==='nf'), _somaNf=_nfs2.reduce((a,d)=>a+d.valor,0); let _resto=_issT;
+    _nfs2.forEach(function(d,ix){ const r=ix===_nfs2.length-1?_resto:Math.round(_issT*d.valor/_somaNf*100)/100; _resto=Math.round((_resto-r)*100)/100; d.retido=r; d.valor=Math.round((d.valor-r)*100)/100; });
+  }
   let n=0;
   for(const d of docs){
     const ja=exist.find(x=>String(x.documento_tipo||'nf')===d.tipo&&(!d.seq||Number(x.documento_seq||1)===d.seq));
@@ -27160,6 +27172,7 @@ async function criarTitulosFatura(faturaId){
       fatura_id:faturaId, cliente_id:f.cliente_id||null, cliente_nome:f.cliente_nome||'',
       valor:d.valor, vencimento:f.vencimento, status:'a_vencer',
       documento_tipo:d.tipo, documento_numero:d.numero, competencia:comp?comp+'-01':null},
+      d.retido?{valor_retido:d.retido}:{},   // v1.0.1285
       d.seq?{documento_seq:d.seq,documento_total:d.tot,pedido_compra:d.pedido}:{});
     const res=await dbInsert('contas_receber',obj);
     if(res){ contasReceber.push(res); n++; }
