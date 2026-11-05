@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1288 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1290 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1288';
+const APP_VERSION='v1.0.1290';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -43976,9 +43976,12 @@ async function wmsImpProcessar(input){
       const mOs=String(f.name||'').match(/(\d{4,})/);
       // a mesma OV pode vir em mais de uma planilha (a CASCO divide): a referência leva também a OS anterior ou o nome do arquivo
       const base=String(f.name||'').replace(/\.[^.]+$/,'').replace(/^separa[cç][aã]o de carga\s*-\s*/i,'').slice(0,40);
-      const doc='OV '+(ovs.join('/')||'?')+(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
+      // v1.0.1289: UM PEDIDO POR OV — a planilha é de um cliente, mas cada OV da linha é um pedido; o mesmo SKU em OVs diferentes
+      //            (ou em linhas diferentes da mesma OV, com OC/linha próprias) nunca é agrupado
+      const sufixo=(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
       const out=[];
       for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
+        const ovL=String(r[cOv]||'').trim().split('-')[0]; const doc='OV '+(/^\d+$/.test(ovL)?ovL:(ovs.join('/')||'?'))+sufixo;
         out.push({documento:doc,sku,descricao:'',qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0,um:'PC',
                   destinatario:cCli>=0?String(r[cCli]||'').trim():'',pn:cPn>=0?String(r[cPn]||'').trim():'',ov:cOv>=0?String(r[cOv]||'').trim():'',arquivo:f.name,
                   oc:(function(){ var v=cOc>=0?String(r[cOc]||'').trim():''; var m=v.match(/^(.*?)[-\/\s]+(\d+)$/); return m?m[1].trim():v; })(),
@@ -47156,6 +47159,13 @@ function wmsConfSaidaBody(){
   const _temDiv=p=>{ const _ix=wmsIxConfPedido(); return (_ix?(_ix.get(p.id)||[]):wmsConferencias).some(cf=>cf.pedido_id===p.id&&cf.auditoria_status==='pendente'); };   // v1.0.1150
   const _stOf=p=>{if(_temDiv(p))return 'div';const px=_proxOf(p);return px?String(px):'ok';};
   const view=_fc.st?base.filter(p=>_stOf(p)===_fc.st):base;
+  // v1.0.1290: CHECKOUT de bancada (estilo PE) para os depositantes com "checkout de volumes": bipe a capa do pedido para começar
+  const _ckvClis=(clientes||[]).filter(c=>c.company_id===cid&&c.wms_checkout_volumes===true);
+  const _ckvPanel=_ckvClis.length?`<div style="border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:16px;background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-size:15px;font-weight:800">Checkout</div><span style="font-size:12px;color:var(--text3)">${_ckvClis.map(c=>ecomEsc(c.nome)).join(' · ')} · caixa inteira = bipe o RG · pacotes = bipe o código do produto · etiqueta de volume sai a cada volume fechado</span></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px 14px"><span style="font-size:12px;font-weight:700;color:var(--text3)">Capa</span><span style="color:var(--text3)">—</span>
+        <input id="ckv-capa" autocomplete="off" placeholder="bipe a capa do pedido (OS) para começar" style="flex:1;border:0;outline:0;font-size:15px;background:transparent" onkeydown="if(event.key==='Enter'){var v=this.value;this.value='';wmsCkvCapa(v);}"></div>
+      <div style="margin:14px auto 4px;max-width:560px;border:2px dashed var(--border);border-radius:14px;padding:34px 16px;text-align:center;font-size:20px;color:var(--text3)">Bipe a <b>capa</b> do pedido para começar</div></div>`:'';
   const _srcC=_wmsSel.conf.size?base.filter(p=>_wmsSel.conf.has(p.id)):view;
   const _ag=t=>_srcC.filter(p=>_stOf(p)===String(t)).length;
   const _cCard=(v,l,cor)=>`<div style="flex:1;min-width:80px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:11px 13px"><div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${v}</div><div style="font-size:10px;color:var(--text3);margin-top:3px">${l}</div></div>`;
@@ -47202,7 +47212,7 @@ function wmsConfSaidaBody(){
     </div>`;
   }).join('');
 
-  return `${_cards}${wmsSelHint('conf')}${wmsTFBar('conf',WMS_CHIPS_CONF,'Buscar nº do pedido...')}<div class="sechdr" style="display:flex;justify-content:space-between;align-items:center"><div class="swrap" style="font-weight:700">Conferência dos pedidos separados</div>
+  return `${_ckvPanel}${_cards}${wmsSelHint('conf')}${wmsTFBar('conf',WMS_CHIPS_CONF,'Buscar nº do pedido...')}<div class="sechdr" style="display:flex;justify-content:space-between;align-items:center"><div class="swrap" style="font-weight:700">Conferência dos pedidos separados</div>
     ${(()=>{const pend=wmsConferencias.filter(cf=>cf.company_id===company?.id&&cf.auditoria_status==='pendente').length;return pend>0?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber-text);font-weight:700" onclick="wmsAprovacoesModal()">⏳ Aprovações (${pend})</button>`:`<button class="btn btn-sm" onclick="wmsAprovacoesModal()">Aprovações</button>`;})()}
     </div>
     <div id="wms-conf-count" style="font-size:12px;color:var(--text3);margin-bottom:10px">${view.length} pedido(s) aguardando conferência</div>
@@ -47819,7 +47829,21 @@ function wmsCkvRender(){
     +'<button class="btn" style="padding:13px" onclick="wmsReimprimirEtiquetas(\''+p.id+'\')">Reimprimir</button></div></div>';
   setTimeout(function(){ var i=ge('ckv-in'); if(i) i.focus(); },50);
 }
-function wmsCkvSair(){ var d=document.getElementById('ckv'); if(d) d.remove(); _ckv=null; if(typeof render==='function') render(); }
+// v1.0.1290: abre o checkout pela CAPA do pedido (código de barras da OS); aceita também o número do pedido
+async function wmsCkvCapa(raw){
+  var c=String(raw||'').trim(), d=c.replace(/\D/g,''); if(!c) return;
+  var cid=company?.id, cand=(wmsPedidos||[]).filter(function(p){ if(p.company_id!==cid) return false; var cl=(clientes||[]).find(function(x){return x.id===p.cliente_id;}); return cl&&cl.wms_checkout_volumes===true; });
+  var p=cand.find(function(x){ return String(x.numero_curto||'')===c||(d&&String(x.numero_curto||'').replace(/\D/g,'')===d)||String(x.numero_pedido||'')===c||String(x.id)===c; });
+  if(!p){ showToast('Nenhum pedido de checkout com a capa '+c,'amber'); return; }
+  if(['conferido','em_romaneio','expedido','cancelado','excluido'].indexOf(p.status)>=0){ showToast('Pedido '+wmsNumeroCurto(p)+' já está '+p.status.replace('_',' ')+'.','amber'); return; }
+  if(!wmsSeparacaoConcluidaPedido(p.id)){
+    // a lista pode ter sido concluída em outro computador: relê as tarefas antes de recusar
+    try{ var t=await dbSelect('wms_tarefas_separacao','pedido_id=eq.'+p.id+'&select=id,status'); if(t&&t.length&&!t.some(function(x){return x.status!=='concluida'&&x.status!=='cancelada';})){ await loadWmsData(cid); } }catch(_e){}
+    if(!wmsSeparacaoConcluidaPedido(p.id)){ showToast('Pedido '+wmsNumeroCurto(p)+' ainda está em separação: termine a lista no coletor antes do checkout.','amber'); return; }
+  }
+  wmsCkvAbrir(p.id);
+}
+function wmsCkvSair(){ var d=document.getElementById('ckv'); if(d) d.remove(); _ckv=null; if(typeof render==='function') render(); setTimeout(function(){ var i=ge('ckv-capa'); if(i) i.focus(); },80); }   // v1.0.1290: volta com o campo da capa em foco
 async function wmsCkvAcharCaixa(raw){
   var cs=colRgCands(raw);
   for(var i=0;i<cs.length;i++){ var c=cs[i].replace(/^0+/,''); if(!c) continue;
