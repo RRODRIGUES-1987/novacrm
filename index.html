@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1308 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1309 | Gerado: 2026-11-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1308';
+const APP_VERSION='v1.0.1309';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3003,10 +3003,11 @@ function ecomFullMeta(p){ var m=p&&p.full_meta; if(typeof m==='string'){ try{ m=
 window._ecomCells=window._ecomCells||{};
 async function ecomFullCellsGarantir(p){
   if(!p) return; var m=ecomFullMeta(p); if(!m.ml||m.unid_cells) return;
-  try{ var r=await dbSelect('ecom_full_cells','id=eq.'+p.id+'&select=cells'); if(r&&r[0]&&r[0].cells){ window._ecomCells[p.id]=r[0].cells; m.unid_cells=r[0].cells; p.full_meta=m; } }catch(_e){}
+  try{ var r=await dbSelect('ecom_full_cells','id=eq.'+p.id+'&select=cells'); if(r&&r[0]&&r[0].cells){ window._ecomCells[p.id]=r[0].cells; m.unid_cells=r[0].cells; p.full_meta=m; if(m.unidades_pdf){ (window._ecomCellsPdf=window._ecomCellsPdf||{})[m.unidades_pdf]=r[0].cells; } } }catch(_e){}
 }
 async function ecomFullCellsGravar(pid,cells){
   if(!pid||!cells) return; window._ecomCells[pid]=cells;
+  try{ var _pp=(ecomPedidos||[]).find(function(x){return x.id===pid;}), _mm=_pp&&_pp.full_meta; if(typeof _mm==='string') _mm=JSON.parse(_mm); if(_mm&&_mm.unidades_pdf) (window._ecomCellsPdf=window._ecomCellsPdf||{})[_mm.unidades_pdf]=cells; }catch(_e){}
   try{ await dbInsert('ecom_full_cells',{id:pid,company_id:company?.id||null,cells:cells}); }
   catch(_e){ try{ await dbUpdate('ecom_full_cells',pid,{cells:cells,updated_at:new Date().toISOString()}); }catch(_e2){ console.warn('mapa das etiquetas não gravado',_e2); } }
 }
@@ -3577,6 +3578,9 @@ function ecomFullSkuDoCodigo(meta,code,un){
   return sk;
 }
 function ecomFullPaginasUnid(meta,sk,ini,qtd){
+  // v1.0.1309: o mapa pode estar só no cache (v1.0.1304): procura pelo PDF; Full ML SEM mapa não imprime folha inteira reduzida
+  if(meta.ml&&!meta.unid_cells&&meta.unidades_pdf&&window._ecomCellsPdf&&window._ecomCellsPdf[meta.unidades_pdf]) meta.unid_cells=window._ecomCellsPdf[meta.unidades_pdf];
+  if(meta.ml&&!meta.unid_cells&&meta.unidades_pdf){ console.warn('Full ML sem o mapa das etiquetas carregado'); return []; }
   if(meta.ml&&meta.unid_cells){ var it=ecomMlItensImpressao(meta,sk)||[]; return it.slice(ini,ini+qtd); }
   return ((meta.unidades_paginas||{})[sk]||[]).slice(ini,ini+qtd);
 }
@@ -3644,8 +3648,8 @@ async function ecomFullProdImprimirCaixa(pid,auto){
   if(r){ pend.cx_impressa=true; c.impressa_em=new Date().toISOString(); p.full_meta=meta; try{ await dbUpdate('ecom_pedidos',pid,{full_meta:meta}); }catch(_e){}
     ecomCxFlash('Caixa '+pend.n+' · '+pend.sku+' × '+pend.qtd+' · cole as etiquetas, feche a caixa e BIPE O QR DA CAIXA','green'); ecomCxRender(); }
 }
-function ecomFullProdReimpUnid(pid){
-  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
+async function ecomFullProdReimpUnid(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;   // v1.0.1309
   return ecomFullImprimirPaginas(meta.unidades_pdf,ecomFullPaginasUnid(meta,pend.sku,pend.ini,pend.qtd));
 }
 async function ecomFullProdCancelar(pid){
@@ -3805,6 +3809,7 @@ async function ecomFullProdBipML(p,its,meta,code){
 }
 // v1.0.1223: abre a próxima caixa livre para o SKU, imprime as etiquetas de unidade e espera os bipes
 async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
+  if(meta&&meta.ml&&!meta.unid_cells){ await ecomFullCellsGarantir(p); var _m2=ecomFullMeta(p); if(_m2.unid_cells) meta.unid_cells=_m2.unid_cells; }   // v1.0.1309
   var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), conf=ecomFullConf(p,sk), resta=ecomN(un[sk])-conf;
   if(resta<=0) return false;
   var qtd=Math.min(upc,resta);
