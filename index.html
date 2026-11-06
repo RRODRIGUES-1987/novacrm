@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1307 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1308 | Gerado: 2026-11-05 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1307';
+const APP_VERSION='v1.0.1308';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36961,10 +36961,39 @@ async function wmsCapaRomaneioPdf(rom){
 }
 
 // ═══ v1.0.1270 · CAPA DO PEDIDO (resumo + código de barras) — impressa sozinha, para o checkout saber de quem é cada caixa ═══
+
+// ═══ v1.0.1308 · PARTICULARIDADES DE EMBARQUE — exigências do CLIENTE DO DEPOSITANTE (destinatário), na capa e no checkout ═══
+var wmsParticularidades=[];
+async function wmsPartCarregar(){ try{ wmsParticularidades=await dbSelect('wms_particularidades_embarque','company_id=eq.'+company.id+'&ativo=eq.true&order=destinatario_nome.asc')||[]; }catch(_e){ wmsParticularidades=[]; } return wmsParticularidades; }
+function wmsPartDoPedido(p){
+  if(!p) return null; var nf=(_wmsNfPed[p.id]||[])[0]||{}, cnpj=String(nf.dest_cnpj||'').replace(/\D/g,''), nome=String(nf.dest_nome||p.destinatario_nome||'').trim().toUpperCase();
+  var L=(wmsParticularidades||[]).filter(function(r){ return r.ativo!==false&&r.depositante_id===p.cliente_id; });
+  return L.find(function(r){ var rc=String(r.destinatario_cnpj||'').replace(/\D/g,''); return rc&&cnpj&&rc===cnpj; })
+      || L.find(function(r){ var rn=String(r.destinatario_nome||'').trim().toUpperCase(); return rn&&nome&&(nome===rn||nome.indexOf(rn)>=0||rn.indexOf(nome)>=0); }) || null;
+}
+function wmsCliTabParticularidades(c){
+  if(!window._partCarregado){ window._partCarregado=true; wmsPartCarregar().then(function(){ var b=ge('wms-cli-tab-content'); if(b&&wmsCliTab==='particularidades') b.innerHTML=wmsCliTabBody(c.id); }); }
+  var L=(wmsParticularidades||[]).filter(function(r){return r.depositante_id===c.id;}), e=ecomEsc;
+  return '<div style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:4px">Particularidades de embarque</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:11px">Exigências de clientes de '+e(c.nome)+' (os destinatários) no embarque. Saem em letras grandes na capa do pedido e no topo do checkout. A regra é achada pelo CNPJ do destinatário da NF do pedido; sem NF, pelo nome.</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12.5px"><tr style="color:var(--text3);font-size:11px;text-align:left"><th style="padding:6px">Cliente (destinatário)</th><th>CNPJ</th><th>Exigência no embarque</th><th></th></tr>'
+    +L.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 6px"><b>'+e(r.destinatario_nome||'')+'</b></td><td>'+e(r.destinatario_cnpj||'—')+'</td><td>'+e(r.exigencia||'')+'</td><td style="text-align:right"><button class="btn btn-sm" onclick="wmsPartRemover(\''+r.id+'\',\''+c.id+'\')">Remover</button></td></tr>'; }).join('')
+    +(L.length?'':'<tr><td colspan="4" style="padding:10px 6px;color:var(--text3)">Nenhuma particularidade cadastrada.</td></tr>')+'</table>'
+    +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><input id="part-nome" class="fi" placeholder="cliente (nome do destinatário)" style="flex:1;min-width:180px"><input id="part-cnpj" class="fi" placeholder="CNPJ (opcional)" style="width:170px"><input id="part-exig" class="fi" placeholder="exigência (ex.: paletizar · filme stretch · etiqueta em 2 lados)" style="flex:1.6;min-width:240px"><button class="btn btn-p" onclick="wmsPartAdicionar(\''+c.id+'\')">+ Adicionar</button></div></div>';
+}
+async function wmsPartAdicionar(depId){
+  var nome=(ge('part-nome')||{}).value||'', cnpj=(ge('part-cnpj')||{}).value||'', ex=(ge('part-exig')||{}).value||'';
+  if(!nome.trim()||!ex.trim()){ showToast('Informe o cliente e a exigência','amber'); return; }
+  try{ await dbInsert('wms_particularidades_embarque',{company_id:company.id,depositante_id:depId,destinatario_nome:nome.trim().toUpperCase(),destinatario_cnpj:cnpj.replace(/\D/g,'')||null,exigencia:ex.trim().toUpperCase(),ativo:true}); await wmsPartCarregar(); showToast('Particularidade cadastrada','green'); var b=ge('wms-cli-tab-content'); if(b) b.innerHTML=wmsCliTabBody(depId); }
+  catch(err){ showToast('Não consegui salvar: '+(err.message||err),'red'); }
+}
+async function wmsPartRemover(id,depId){ if(!confirm('Remover esta particularidade?')) return; try{ await dbUpdate('wms_particularidades_embarque',id,{ativo:false}); await wmsPartCarregar(); var b=ge('wms-cli-tab-content'); if(b) b.innerHTML=wmsCliTabBody(depId); }catch(err){ showToast('Não consegui remover: '+(err.message||err),'red'); } }
 async function wmsCapaPedidosPrint(pedidoIds){
   pedidoIds=(pedidoIds||[]).filter(Boolean); if(!pedidoIds.length){ showToast('Nenhum pedido','amber'); return; }
   try{ await ecomLoadLabelLibs(); }catch(e){ showToast('Não consegui carregar o gerador de código de barras','red'); return; }
   showToast('Gerando capa(s)…','blue');
+  try{ await wmsNfPreload(); await wmsPartCarregar(); }catch(_e){}   // v1.0.1308
   const e=ecomEsc, n=v=>Number(v||0).toLocaleString('pt-BR');
   let pags='';
   for(const pid of pedidoIds){
@@ -36981,31 +37010,34 @@ async function wmsCapaPedidosPrint(pedidoIds){
     const cheias=L.reduce((a,o)=>a+o.cx,0), abertas=L.filter(o=>o.fr).length, vols=cheias+abertas;
     const cod=String(p.numero_curto||p.numero_pedido||p.id).replace(/\s+/g,'');
     const bc=ecomBcSvg(cod);
+    const nfs=(_wmsNfPed[pid]||[]).map(x=>x.numero).join(', '), part=wmsPartDoPedido(p);
+    const pesoTxt=p.volumes_peso_kg?(Number(p.volumes_peso_kg).toLocaleString('pt-BR',{maximumFractionDigits:1})+' kg'):'';
     pags+=`<section class="pg">
-      <div class="top"><div><div class="k">CAPA DO PEDIDO · SEPARAÇÃO E CHECKOUT</div><div class="ped">${e(p.numero_pedido||'')}</div>
-        <div class="sub">OS ${e(p.numero_curto||'—')}${lst?' · '+e(lst.numero_lista||''):''}</div></div>
-        <div class="dir"><b>${e(cli.nome||'')}</b><br>${new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>
-      <div class="grid">
-        <div><div class="l">DESTINATÁRIO</div><b>${e(p.destinatario_nome||'—')}</b></div>
-        <div><div class="l">TRANSPORTADORA</div><b>${e(p.transportadora||'—')}</b></div>
-        <div><div class="l">ITENS · TAREFAS</div><b>${L.length} SKU(s) · ${tar.length} bipe(s)</b></div>
-        <div><div class="l">VOLUMES PREVISTOS</div><b class="big">${vols||'—'}</b>${vols?` <span class="sm">(${cheias} caixa(s) fechada(s)${abertas?' + '+abertas+' aberta(s)':''})</span>`:''}</div>
-      </div>
+      <div class="hdr"><span>MK LOG · CAPA DO PEDIDO · SEPARAÇÃO E CHECKOUT</span><span>${e(cli.nome||'')} · ${new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span></div>
+      <div class="dest">${e(p.destinatario_nome||'—')}</div>
+      <div class="vol"><div><div class="l">TOTAL DE VOLUMES</div><div class="vn">${vols||'—'}</div></div>
+        <div class="info">${e(String(p.numero_pedido||'').split(' · ')[0])} · OS <b>${e(p.numero_curto||'—')}</b>${lst?' · '+e(lst.numero_lista||''):''}<br>${nfs?'NF <b>'+e(nfs)+'</b>':'sem NF ligada'}${pesoTxt?' · '+pesoTxt:''}${p.transportadora?' · '+e(p.transportadora):''}<br>${cheias} caixa(s) fechada(s)${abertas?' + '+abertas+' com pacotes':''} · ${L.length} SKU(s)</div></div>
+      ${part?`<div class="part"><div class="pk">PARTICULARIDADE DE EMBARQUE · ${e(part.destinatario_nome||'')}</div><div class="pt">${e(part.exigencia||'')}</div></div>`:''}
       <table><tr><th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">Volumes</th></tr>
-        ${L.map(o=>`<tr><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,40))}</td><td class="r">${n(o.qtd)}</td><td class="r">${o.cx+(o.fr?1:0)||'—'}</td></tr>`).join('')}</table>
-      <div class="bcbox">${bc||''}<div class="code">${e(cod)}</div><div class="hint">Bipe a capa no checkout para abrir o pedido · cada volume fechado recebe a etiqueta MK deste pedido</div></div>
+        ${L.map(o=>`<tr><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,44))}</td><td class="r">${n(o.qtd)}</td><td class="r">${o.cx?o.cx+' cx':''}${o.cx&&o.fr?' + ':''}${o.fr?'pct':''}${!o.cx&&!o.fr?'—':''}</td></tr>`).join('')}</table>
+      <div class="bcbox">${bc||''}<div class="code">${e(cod)}</div></div>
     </section>`;
   }
   if(!pags){ showToast('Pedido não encontrado na tela — atualize (F5)','amber'); return; }
   const html=`<!doctype html><html><head><meta charset="utf-8"><title>Capa do pedido</title><style>
-    @page{size:A4;margin:14mm} body{font-family:Arial,sans-serif;color:#111;margin:0}
-    .pg{page-break-after:always;border:1px solid #999;border-radius:6px;padding:18px 22px}
+    @page{size:A4;margin:8mm} body{font-family:Arial,sans-serif;color:#111;margin:0}
+    .pg{page-break-after:always;min-height:279mm;box-sizing:border-box;display:flex;flex-direction:column;padding:4mm 6mm}
+    .hdr{display:flex;justify-content:space-between;font-size:11px;color:#555}
+    .dest{font-size:46px;font-weight:900;line-height:1.05;margin-top:10px;border-bottom:4px solid #111;padding-bottom:10px}
+    .vol{display:flex;align-items:flex-end;gap:24px;margin-top:10px} .vn{font-size:96px;font-weight:900;line-height:.95} .info{font-size:16px;line-height:1.55;padding-bottom:10px}
+    .part{margin-top:14px;background:#111;color:#fff;padding:14px 16px;text-align:center;border-radius:4px} .pk{font-size:12px;letter-spacing:1.5px;opacity:.8} .pt{font-size:38px;font-weight:900;line-height:1.1;margin-top:4px}
+    .pg table{margin-top:14px;flex:1}
     .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px}
     .k{font-size:11px;letter-spacing:1px;color:#555}.ped{font-size:26px;font-weight:700;margin-top:2px}.sub{font-size:13px}
     .dir{text-align:right;font-size:12px;line-height:1.5}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;font-size:13px}.l{font-size:10px;color:#666}.big{font-size:22px}.sm{font-size:11px}
     table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px} th{background:#eee;text-align:left;padding:5px 6px} td{padding:5px 6px;border-bottom:1px solid #ddd} .r{text-align:right}
-    .bcbox{text-align:center;border-top:1px dashed #999;padding-top:12px} .bcbox svg{width:330px;height:70px} .code{font-family:monospace;font-size:14px;margin-top:4px} .hint{font-size:11px;color:#444;margin-top:4px}
+    .bcbox{text-align:center;border-top:1px dashed #999;padding-top:10px;margin-top:auto} .bcbox svg{width:380px;height:80px} .code{font-family:monospace;font-size:16px;margin-top:4px}
   </style></head><body>${pags}</body></html>`;
   const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;width:0;height:0;border:0;left:-9999px'; document.body.appendChild(fr);
   fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
@@ -45908,7 +45940,7 @@ function wmsAbrirCliente(clienteId){
     `wmsSalvarParamCliente('${clienteId}')`,{saveLabel:'Salvar parâmetros',width:'1100px'});
 }
 let wmsCliAtual=null, wmsCliTab='geral';
-const WMS_CLI_TABS=[['geral','Geral'],['produtos','Produtos'],['entrada','Entrada'],['saida','Saída'],['janelas','Janelas de operação'],['notificacoes','Notificações'],['automacao','Automação'],['fiscal','Fiscal'],['portal','Portal']];   // v1.0.1215: Notificações · v1.0.1219: Automação   // v1.0.1131: Portal · v1.0.1206: Janelas de operação
+const WMS_CLI_TABS=[['geral','Geral'],['produtos','Produtos'],['entrada','Entrada'],['saida','Saída'],['janelas','Janelas de operação'],['notificacoes','Notificações'],['automacao','Automação'],['particularidades','Particularidades de embarque'],['fiscal','Fiscal'],['portal','Portal']];   // v1.0.1308: Particularidades · v1.0.1215: Notificações · v1.0.1219: Automação   // v1.0.1131: Portal · v1.0.1206: Janelas de operação
 // ═══════════════════════════════════════════════════════════════════
 //  v1.0.1131 · CONFIGURAR DEPOSITANTE → ABA PORTAL (acessos do portal do cliente)
 //  Cria o login (signup com senha temporária, como o cadastro de usuários do VERUS), grava o vínculo
@@ -46608,6 +46640,7 @@ function wmsCliTabBody(clienteId){
   if(wmsCliTab==='janelas') return wmsCliTabJanelas(c);   // v1.0.1206
   if(wmsCliTab==='notificacoes') return wmsCliTabNotif(c);   // v1.0.1215
   if(wmsCliTab==='automacao') return wmsCliTabAutomacao(c);   // v1.0.1219
+  if(wmsCliTab==='particularidades') return wmsCliTabParticularidades(c);   // v1.0.1308
   const titulos={geral:'Geral',entrada:'Entrada (recebimento)',fiscal:'Fiscal'};
   if(wmsCliTab==='geral'){
     const nd=c.wms_digitos_pedido||5;
@@ -47843,8 +47876,8 @@ async function wmsCkvAbrir(pedId){
   _ckv={pedId:pedId,plano:pl,aberto:abertoSalvo||null,msg:null,passos:null};
   var d=document.getElementById('ckv'); if(!d){ d=document.createElement('div'); d.id='ckv'; document.body.appendChild(d); }
   d.style.cssText='position:fixed;inset:0;z-index:9500;background:var(--bg,#fff)';
-  wmsNfPreload(); wmsCkvRender();
-  wmsCkvCarregarPassos(pedId);   // v1.0.1293
+  wmsNfPreload().then(function(){ return wmsPartCarregar(); }).then(function(){ if(_ckv&&_ckv.pedId===pedId) wmsCkvRender(); }); wmsCkvRender();
+  wmsCkvCarregarPassos(pedId);   // v1.0.1293 · v1.0.1308: particularidades
 }
 // v1.0.1293: os PASSOS do checkout vêm das tarefas da separação — caixa inteira (RG) ou pacotes — para a tela dizer exatamente o que bipar
 async function wmsCkvCarregarPassos(pedId){
@@ -47933,6 +47966,7 @@ function wmsCkvRender(){
     '<div style="display:grid;grid-template-columns:minmax(0,0.95fr) minmax(0,1.25fr);gap:14px;height:100%" class="ckv-grid">'
     +'<div style="border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;min-height:0">'
       +'<div style="padding:12px 14px;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:26px">'+e(wmsNumeroCurto(p))+'</b><span style="font-size:13px;color:var(--text3)">'+e(String(p.numero_pedido||'').split(' · ')[0])+'</span><span style="margin-left:auto;font-size:13px;color:var(--text3)">'+(nfs?'NF '+e(nfs):'sem NF')+'</span></div><div style="font-size:13px;color:var(--text2)">'+e(p.destinatario_nome||'')+' · '+e(cli.nome||'')+'</div></div>'
+      +(function(){ var pt=wmsPartDoPedido(p); return pt?'<div style="background:#111;color:#fff;padding:10px 14px;text-align:center"><div style="font-size:10px;letter-spacing:1.5px;opacity:.8">PARTICULARIDADE DE EMBARQUE</div><div style="font-size:22px;font-weight:900;line-height:1.15">'+e(pt.exigencia||'')+'</div></div>':''; })()   // v1.0.1308
       +'<div style="flex:1;overflow:auto">'+linhas+'</div>'
       +'<div style="border-top:1px solid var(--border);padding:12px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'
         +'<div><div style="font-size:11px;color:var(--text3)">Volumes</div><div style="font-size:28px;font-weight:800">'+feitos+' / '+pl.N+'</div></div>'
@@ -53719,7 +53753,7 @@ function zplEtiquetaEmbarque(o){
 // v1.0.1243: notas de venda ligadas aos pedidos (para a etiqueta do cliente e o detalhe do pedido)
 var _wmsNfPed={};
 async function wmsNfPreload(){
-  try{ var L=(await dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,status,divergencias'))||[];
+  try{ var L=(await dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,dest_cnpj,status,divergencias').catch(function(){ return dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,status,divergencias'); }))||[];   // v1.0.1308: dest_cnpj se a coluna existir
     var m={}; L.forEach(function(n){ if(!n.pedido_id) return; (m[n.pedido_id]=m[n.pedido_id]||[]).push(n); }); _wmsNfPed=m; }catch(e){}
 }
 function wmsCliEtqModelo(cli){ var p=(cli&&cli.parametros)||{}; return (p.etiquetas&&p.etiquetas.modelo_embarque)||'padrao_mk'; }
