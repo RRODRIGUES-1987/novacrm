@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1311 | Gerado: 2026-11-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1312 | Gerado: 2026-11-06 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1311';
+const APP_VERSION='v1.0.1312';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3315,7 +3315,11 @@ var _ecomFullPdfCache={};
 async function ecomFullPdfLib(){ if(window.PDFLib) return window.PDFLib; await new Promise(function(ok,err){ var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; s.onload=ok; s.onerror=err; document.head.appendChild(s); }); return window.PDFLib; }
 var _ecomUnidTeste=0;   // v1.0.1163: "teste: só 3" — a próxima impressão de unidade sai só com as 3 primeiras etiquetas
 function ecomUnidTesteArmar(){ _ecomUnidTeste=3; showToast('Teste armado: clique em qualquer "Imprimir" — sai só 3 etiquetas.','blue'); }
-async function ecomFullImprimirPaginas(path,paginas,formato){
+async function ecomFullImprimirPaginas(path,paginas,formato,copias){
+  window._etqCopias=Math.max(1,parseInt(copias||1,10));   // v1.0.1312: N cópias da 1ª etiqueta (unidades do Full ML são todas iguais)
+  try{ return await ecomFullImprimirPaginasInt(path,paginas,formato); } finally { window._etqCopias=1; }
+}
+async function ecomFullImprimirPaginasInt(path,paginas,formato){
   if(_ecomUnidTeste&&formato!=='master'&&paginas&&paginas.length){ paginas=paginas.slice(0,_ecomUnidTeste); _ecomUnidTeste=0; }
   // v1.0.1065: desenha cada página como imagem e imprime com @page no tamanho EXATO da etiqueta.
   //   unidade (padrão): v1.0.1156 → bobina 60x30 (ECOM_UNID_MM), Shopee e Mercado Livre.
@@ -3427,7 +3431,8 @@ async function ecomFullImprimirPaginas(path,paginas,formato){
     // não aceita (caía no 100×150, esticando). Com PDF, o papel "Unidade 60x30" escolhido no driver é respeitado.
     try{
       var PL=await ecomFullPdfLib(), doc=await PL.PDFDocument.create(), pw=wmm*72/25.4, ph=hmm*72/25.4;
-      for(var _pi=0;_pi<imgs.length;_pi++){
+      if(imgs.length===1&&window._etqCopias>1){ var _png1=await doc.embedPng(imgs[0]); for(var _ci=0;_ci<window._etqCopias;_ci++){ doc.addPage([pw,ph]).drawImage(_png1,{x:0,y:0,width:pw,height:ph}); } }   // v1.0.1312
+      else for(var _pi=0;_pi<imgs.length;_pi++){
         var _png=await doc.embedPng(imgs[_pi]), _pg=doc.addPage([pw,ph]);
         _pg.drawImage(_png,{x:0,y:0,width:pw,height:ph});
       }
@@ -3772,6 +3777,26 @@ async function ecomFullProdBipML(p,its,meta,code){
   var salvar=async function(){ p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); };
   var sk=ecomFullSkuDoCodigo(meta,code,un);
   var _cxl=!sk?ecomFullCaixaDoCodigo(meta,code):null;   // v1.0.1223: etiqueta de caixa bipada (confirmação), sem erro
+  // v1.0.1312: modo lote — caixa completa espera a MASTER: tem de ser uma etiqueta reservada para o produto e ainda não usada
+  if(pend&&pend.lote&&pend.aguarda_master){
+    if(!_cxl){ ecomBeep(); ecomCxFlash(sk?('A caixa já tem as '+pend.qtd+' unidades de '+pend.sku+': agora cole e BIPE a etiqueta da caixa (master)'):('Código não reconhecido: '+code+' · bipe a etiqueta da caixa (master)'),'red'); ecomCxRender(); return; }
+    if(_cxl.fechada_em){ ecomBeep(); ecomCxFlash('Esta etiqueta de caixa ('+_cxl.n+') já foi usada em outra caixa','red'); ecomCxRender(); return; }
+    if(_cxl.reservada&&_cxl.reservada!==pend.sku){ ecomBeep(); ecomCxFlash('Esta etiqueta de caixa ('+_cxl.n+') é do produto '+_cxl.reservada+', não do '+pend.sku,'red'); ecomCxRender(); return; }
+    var _ag=new Date().toISOString();
+    if(+_cxl.n!==+pend.n){ var _ph=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;}); if(_ph&&!_ph.fechada_em&&!(meta.lote&&meta.lote.caixas.indexOf(+_ph.n)>=0)) delete _ph.reservada; }
+    _cxl.itens={}; _cxl.itens[pend.sku]=pend.qtd; _cxl.qtd=pend.qtd; _cxl.fechada_em=_ag; _cxl.sku=pend.sku; _cxl.impressa_em=_cxl.impressa_em||_ag; delete _cxl.reservada;
+    var _skL=pend.sku, _nL=_cxl.n; meta.cx_pend=null; meta.cx_atual=(_nL||0)+1;
+    var _comp=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+    if(ecomN(un[_skL])-ecomFullConf(p,_skL)<=0&&meta.lote&&meta.lote.sku===_skL){ (meta.caixas||[]).forEach(function(c){ if(!c.fechada_em&&c.reservada===_skL) delete c.reservada; }); meta.lote=null; }
+    p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta});
+    if(_comp){
+      var _u2={status:'conferido',data_conferencia:_ag}; if(!p.data_separacao){ _u2.data_separacao=_ag; p.data_separacao=_ag; }
+      await dbUpdate('ecom_pedidos',p.id,_u2); p.status='conferido'; ecomCxAutoConcluiOS(p.id); ecomCx.pendingLabel=null;
+      ecomCxFlash('Caixa '+_nL+' fechada · Full '+(p.numero_pedido||'')+' CONFERIDO · '+(meta.caixas||[]).filter(function(x){return x.fechada_em;}).length+' caixa(s)','green'); ecomCxRender(); return;
+    }
+    if(ecomN(un[_skL])-ecomFullConf(p,_skL)>0){ var _r2=await ecomFullMlAbrirCaixa(p,meta,_skL,'Caixa '+_nL+' fechada · '+_skL+' × '+(_cxl.qtd||0)+' · '); if(_r2) return; }
+    ecomCxFlash('Caixa '+_nL+' fechada · '+_skL+' COMPLETO · escolha o próximo produto','green'); ecomCxRender(); return;
+  }
   if(_cxl){ ecomCxFlash('Etiqueta da caixa '+_cxl.n+' conferida'+(pend?' · continue bipando as etiquetas de '+pend.sku+' ('+(pend.bip||0)+'/'+pend.qtd+')':' · bipe o EAN do próximo produto'),'green'); ecomCxRender(); return; }
   // ── caixa aberta: bipando as etiquetas de unidade, uma a uma ──
   if(pend){
@@ -3784,6 +3809,7 @@ async function ecomFullProdBipML(p,its,meta,code){
     pend.bip=(pend.bip||0)+1;
     if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
     if(pend.bip<pend.qtd){ await salvar(); ecomCxFlash(sk+' · '+pend.bip+'/'+pend.qtd+' na caixa '+pend.n,'green'); ecomCxRender(); return; }
+    if(pend.lote){ pend.aguarda_master=true; await salvar(); ecomCxFlash('Caixa completa: '+pend.qtd+' × '+sk+' · cole e BIPE uma etiqueta de caixa (master) deste produto','green'); ecomCxRender(); return; }   // v1.0.1312
     // última etiqueta: fecha a caixa e imprime a etiqueta da caixa
     var agora=new Date().toISOString(), c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;});
     if(c){ c.itens={}; c.itens[sk]=pend.qtd; c.qtd=pend.qtd; c.fechada_em=agora; c.sku=sk; delete c.reservada; }
@@ -3815,6 +3841,31 @@ async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
   var un=ecomFullUnid(p), upc=ecomFullUpc48(meta), conf=ecomFullConf(p,sk), resta=ecomN(un[sk])-conf;
   if(resta<=0) return false;
   var qtd=Math.min(upc,resta);
+  // v1.0.1312: MODO LOTE — no 1º acesso ao produto, imprime todas as etiquetas de unidade (1 etiqueta × quantidade) e todas as masters
+  //            dele; depois é bipar unidade por unidade e, a cada caixa completa, bipar UMA master (reservada para o produto)
+  if(!(meta.lote&&meta.lote.sku===sk)){
+    var nCx=Math.ceil(resta/upc), livres=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;});
+    if(livres.length<nCx){ ecomBeep(); ecomCxFlash(prefixo+sk+' precisa de '+nCx+' caixa(s) e só há '+livres.length+' etiqueta(s) de caixa livre(s). Importe as etiquetas de volume que faltam.','red'); ecomCxRender(); return true; }
+    var um=ecomFullPaginasUnid(meta,sk,conf,1);
+    if(!um.length){ ecomBeep(); ecomCxFlash(prefixo+'Não achei a etiqueta de unidade de '+sk+' no PDF de produtos. Importe o PDF de produtos.','red'); ecomCxRender(); return true; }
+    var res=livres.slice(0,nCx); res.forEach(function(c){ c.reservada=sk; });
+    meta.lote={sku:sk,caixas:res.map(function(c){return c.n;}),unidades:resta,em:new Date().toISOString()};
+    meta.cx_pend={n:res[0].n,sku:sk,qtd:qtd,ini:conf,bip:0,lote:true,em:new Date().toISOString()};
+    p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); _ecomCxMl={code:'',ts:0};
+    ecomCxFlash(prefixo+sk+' · imprimindo '+resta.toLocaleString('pt-BR')+' etiquetas de unidade e '+nCx+' etiqueta(s) de caixa. Cole e bipe cada unidade; a cada '+upc+' bipe uma etiqueta de caixa.','green'); ecomCxRender();
+    await ecomFullImprimirPaginas(meta.unidades_pdf,um,undefined,resta);
+    await ecomFullImprimirPaginas(meta.master_pdf,res.map(function(c){return ecomFullItemCaixa(meta,c);}),'master');
+    return true;
+  }
+  if(meta.lote&&meta.lote.sku===sk){
+    var prox=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&c.reservada===sk&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0]
+           ||(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0];
+    if(!prox){ ecomBeep(); ecomCxFlash(prefixo+'Não há etiqueta de caixa livre para '+sk+'.','red'); ecomCxRender(); return true; }
+    prox.reservada=sk; meta.cx_pend={n:prox.n,sku:sk,qtd:qtd,ini:conf,bip:0,lote:true,em:new Date().toISOString()};
+    p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta}); _ecomCxMl={code:'',ts:0};
+    ecomCxFlash(prefixo+'Próxima caixa de '+sk+' · '+qtd+' unidade(s): bipe as etiquetas de unidade','green'); ecomCxRender();
+    return true;
+  }
   var livre=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;})[0];
   if(!livre){ ecomBeep(); ecomCxFlash(prefixo+'Não há etiqueta de caixa livre neste Full. Importe as etiquetas de volume.','red'); ecomCxRender(); return true; }
   var pags=ecomFullPaginasUnid(meta,sk,conf,qtd);
@@ -3825,6 +3876,20 @@ async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
   ecomCxFlash(prefixo+(qtd<upc?'CAIXA PARCIAL: ':'')+'Caixa '+livre.n+' · '+sk+' × '+qtd+' · imprimindo as etiquetas de unidade: cole e bipe uma a uma','green'); ecomCxRender();
   await ecomFullImprimirPaginas(meta.unidades_pdf,pags);
   return true;
+}
+// v1.0.1312: escolher o produto clicando na lista do checkout
+async function ecomFullMlEscolher(pid,sk){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p);
+  if(meta.cx_pend){ ecomBeep(); ecomCxFlash('Termine a caixa '+meta.cx_pend.n+' ('+meta.cx_pend.sku+') antes de trocar de produto','red'); ecomCxRender(); return; }
+  await ecomFullMlAbrirCaixa(p,meta,String(sk).toUpperCase(),'');
+}
+// v1.0.1312: reimpressão (função restrita) — escolhe o produto e a quantidade de etiquetas de unidade
+async function ecomFullReimpUnidQtd(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p);
+  var sk=String((ge('reimp-unid-sku')||{}).value||'').toUpperCase(), q=parseInt((ge('reimp-unid-qtd')||{}).value||'0',10);
+  if(!sk||!(q>0)){ showToast('Escolha o produto e a quantidade','amber'); return; }
+  var um=ecomFullPaginasUnid(meta,sk,0,1); if(!um.length){ showToast('Etiqueta de unidade de '+sk+' não encontrada no PDF de produtos','red'); return; }
+  showToast('Imprimindo '+q+' etiqueta(s) de unidade de '+sk+'…','blue'); await ecomFullImprimirPaginas(meta.unidades_pdf,um,undefined,q);
 }
 async function ecomFullProdCancelarML(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
@@ -3851,16 +3916,16 @@ function ecomFullProdPainelML(p){
       +'<div style="font-size:24px;font-weight:800">'+ecomEsc(pend.sku)+' · '+(pend.bip||0)+' de '+pend.qtd+(pend.qtd<upc?' <span style="font-size:13px">(caixa parcial)</span>':'')+'</div>'
       +'<div style="font-size:12.5px;color:var(--text2)">'+ecomEsc(ecomFullDesc(p,pend.sku)||'')+'</div>'
       +'<div style="height:8px;background:var(--bg3);border-radius:99px;margin:8px 0;overflow:hidden"><div style="width:'+pc+'%;height:8px;background:var(--blue-text)"></div></div>'
-      +'<div style="font-size:12px;color:var(--text2)">Na última etiqueta, a caixa fecha e a etiqueta da caixa sai sozinha.</div>'
+      +'<div style="font-size:'+(pend.aguarda_master?'18px;font-weight:800;color:var(--green-text)':'12px;color:var(--text2)')+'">'+(pend.aguarda_master?'✓ Caixa completa · cole e BIPE uma etiqueta de caixa (master) de '+ecomEsc(pend.sku):(pend.lote?'Cole a etiqueta em cada item e bipe. Completou a caixa, bipe uma etiqueta de caixa deste produto.':'Na última etiqueta, a caixa fecha e a etiqueta da caixa sai sozinha.'))+'</div>'
       +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomFullProdReimpUnid(\''+p.id+'\')">Reimprimir etiquetas de unidade</button>'
       +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomFullProdCancelarML(\''+p.id+'\')">Cancelar caixa</button></div></div>'
     : '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">FULL MERCADO LIVRE '+ecomEsc(p.numero_pedido||'')+' · CHECKOUT POR PRODUTO</div>'
-      +'<div style="font-size:20px;font-weight:800">Bipe o EAN do próximo produto</div>'
+      +'<div style="font-size:20px;font-weight:800">Escolha o produto na lista (ou bipe o EAN)</div><div style="font-size:12px;color:var(--text3)">No 1º acesso ao produto saem todas as etiquetas de unidade e de caixa dele.</div>'
       +'<div style="font-size:12.5px;color:var(--text3)">Caixas '+fechadas.length+' de '+tot+' · unidades por caixa <input type="number" min="1" value="'+upc+'" onchange="ecomFullSetUpc(\''+p.id+'\',this.value)" style="width:56px"></div></div>';
   var alerta=semMaster.length?'<div style="border:2px solid #f59e0b;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:10px 12px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--amber-text,#92400e);margin-bottom:6px">🖨 '+semMaster.length+' caixa(s) fechada(s) sem a etiqueta da caixa impressa</div>'
       +semMaster.map(function(c){ return '<button class="btn btn-p" style="margin:3px 6px 3px 0" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')">🖨 Imprimir etiqueta da caixa '+c.n+'</button>'; }).join('')+'</div>':'';
-  var lin=ks.map(function(k){ var t=ecomN(un[k]), c=ecomFullConf(p,k), ok=c>=t;
-    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+' <small style="color:var(--text3)">'+ecomEsc(ecomFullDesc(p,k)||'')+'</small></span><span>'+c+'/'+t+' un</span></div>'; }).join('');
+  var lin=ks.map(function(k){ var t=ecomN(un[k]), c=ecomFullConf(p,k), ok=c>=t, cxK=(meta.caixas||[]).filter(function(x){return x.sku===k&&x.fechada_em;}).length, nK=Math.ceil(t/upc);
+    return '<div '+(!ok&&!pend?'onclick="ecomFullMlEscolher(\''+p.id+'\',\''+ecomEsc(k)+'\')" title="Começar este produto"':'')+' style="display:flex;justify-content:space-between;gap:8px;padding:6px 4px;border-radius:6px;'+(!ok&&!pend?'cursor:pointer;':'')+(ok?'color:var(--green-text)':'')+(pend&&pend.sku===k?';background:var(--blue-bg)':'')+'"><span><b>'+ecomEsc(k)+'</b> <small style="color:var(--text3)">'+ecomEsc(ecomFullDesc(p,k)||'')+'</small></span><span>'+c+'/'+t+' un · '+cxK+'/'+nK+' cx'+(ok?' ✓':'')+'</span></div>'; }).join('');   // v1.0.1312: clicar escolhe o produto
   var ult=fechadas.slice(-3).reverse().map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>Caixa '+c.n+' · '+ecomEsc(c.sku||'')+' × '+(c.qtd||0)+'</span><button class="btn btn-sm" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')">Reimprimir caixa</button></div>'; }).join('');
   return topo+alerta+'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">PRODUTOS · UNIDADES CONFERIDAS</div>'+lin
     +(ult?'<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin:10px 0 4px">ÚLTIMAS CAIXAS FECHADAS</div>'+ult:'')+'</div>';
@@ -5025,7 +5090,9 @@ function ecomFullReimpEscolher(pid){
     +'<div style="display:flex;align-items:center;margin-bottom:6px"><h3 style="margin:0;font-size:17px">Reimprimir etiqueta de caixa · Full '+ecomEsc(p.numero_pedido||'')+'</h3><button class="btn btn-sm" style="margin-left:auto" onclick="ge(\'ecom-full-reimp\').remove()">Fechar</button></div>'
     +'<div style="font-size:12.5px;color:var(--text3);margin-bottom:10px">Bobina 100 × 150 · etiqueta deitada. Escolha a caixa:</div>'
     +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+cx.map(function(c){ return '<button class="btn" style="'+b+'" onclick="ecomFullImprimirCaixa(\''+p.id+'\','+c.n+')" title="'+ecomEsc(c.spx||'')+'">'+c.n+'</button>'; }).join('')+'</div>'
-    +'<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-p" onclick="ecomFullImprimirCaixasTodas(\''+p.id+'\')">🖨 Todas ('+cx.length+')</button></div></div></div>');
+    +'<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-p" onclick="ecomFullImprimirCaixasTodas(\''+p.id+'\')">🖨 Todas ('+cx.length+')</button></div>'
+    +(meta.ml&&meta.unidades_pdf?'<div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px"><div style="font-size:14px;font-weight:700;margin-bottom:6px">Reimprimir etiquetas de unidade</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="reimp-unid-sku" class="fi" style="flex:1;min-width:200px">'+Object.keys(ecomFullUnid(p)).map(function(k){ return '<option value="'+ecomEsc(k)+'">'+ecomEsc(k)+' · '+ecomEsc(ecomFullDesc(p,k)||'')+'</option>'; }).join('')+'</select><input id="reimp-unid-qtd" class="fi" type="number" min="1" value="1" style="width:90px"><button class="btn btn-p" onclick="ecomFullReimpUnidQtd(\''+p.id+'\')">🖨 Imprimir</button></div></div>':'')   // v1.0.1312
+    +'</div></div>');
 }
 // ══════════════ CR · BAIXA INTEGRAL EM LOTE (v1.0.1068) ══════════════
 var crLisSel={};
@@ -61292,7 +61359,7 @@ async function ecomZplDeImagem(dataUrl,wDots,hDots){
     }
   }
   var total=rowBytes*hDots;
-  return '^XA^MNY^PW'+wDots+'^LL'+hDots+'^LH0,0^FO0,0^GFA,'+total+','+total+','+rowBytes+','+hex.join('')+'^PQ1^XZ';
+  return '^XA^MNY^PW'+wDots+'^LL'+hDots+'^LH0,0^FO0,0^GFA,'+total+','+total+','+rowBytes+','+hex.join('')+'^PQ'+Math.max(1,parseInt(window._etqCopias||1,10))+'^XZ';   // v1.0.1312: N cópias da mesma etiqueta num comando só
 }
 // v1.0.1158: o envio CRU (ZPL) virou arquivo na pasta no PC de teste — a fila da Xprinter no Windows não repassa
 // comando cru. Padrão agora: mesma rota do checkout (QZ em modo imagem, que já imprime nessa Xprinter), com o
@@ -61317,7 +61384,7 @@ async function ecomFullImprimirZpl(imgs,wmm,hmm){
   var enviar=async function(nome){
     modo=ecomQzUnidModo(nome); modoZpl=(modo==='zpl');
     try{
-      showToast('Enviando '+imgs.length+' etiqueta(s) para '+nome+' em '+modo.toUpperCase()+'…','blue');
+      showToast('Enviando '+(window._etqCopias>1?window._etqCopias+' cópias da etiqueta':imgs.length+' etiqueta(s)')+' para '+nome+' em '+modo.toUpperCase()+'…','blue');
       if(modo==='tspl'){
         var dpiT=(typeof ECOM_UNID_MM!=='undefined'&&ECOM_UNID_MM.dpi)||203, WT=Math.round(wmm/25.4*dpiT), HT=Math.round(hmm/25.4*dpiT);
         // v1.0.1162: UM trabalho só — cabeçalho uma vez e as etiquetas em sequência. Antes ia um trabalho por etiqueta,
@@ -61334,7 +61401,7 @@ async function ecomFullImprimirZpl(imgs,wmm,hmm){
         var pw=rot?hmm:wmm, ph=rot?wmm:hmm, dados=[];
         for(var j=0;j<imgs.length;j++){ var im=rot?await ecomImgGirada(imgs[j]):imgs[j];
           dados.push({ type:'pixel', format:'image', flavor:'base64', data:String(im).replace(/^data:image\/\w+;base64,/,''), options:{ pageWidth:pw, pageHeight:ph, units:'mm', scaleContent:true } }); }
-        var cfg=qz.configs.create(nome,{ units:'mm', size:{ width:pw, height:ph }, margins:0, colorType:'blackwhite', rasterize:true, scaleContent:true, rotation:0, copies:1 });
+        var cfg=qz.configs.create(nome,{ units:'mm', size:{ width:pw, height:ph }, margins:0, colorType:'blackwhite', rasterize:true, scaleContent:true, rotation:0, copies:Math.max(1,parseInt(window._etqCopias||1,10)) });   // v1.0.1312
         await qz.print(cfg,dados);
       }
       showToast(imgs.length+' etiqueta(s) enviada(s) para '+nome+' ('+wmm+'×'+hmm+' · '+modo.toUpperCase()+(rot&&modo==='imagem'?', girada 90°':'')+')','green');
@@ -61369,7 +61436,7 @@ async function ecomTsplDeImagem(dataUrl,wDots,hDots,wmm,hmm){
       if(px[o+3]>127 && lum<150) v&=~(0x80>>k); }
     bits[y*rb+b]=v; }
   // v1.0.1162: só a etiqueta (CLS + BITMAP + PRINT); o cabeçalho (SIZE/GAP) vai UMA vez no início do lote
-  var enc=new TextEncoder(), cab=enc.encode('CLS\r\nBITMAP 0,0,'+rb+','+hDots+',0,'), fim=enc.encode('\r\nPRINT 1,1\r\n');
+  var enc=new TextEncoder(), cab=enc.encode('CLS\r\nBITMAP 0,0,'+rb+','+hDots+',0,'), fim=enc.encode('\r\nPRINT 1,'+Math.max(1,parseInt(window._etqCopias||1,10))+'\r\n');   // v1.0.1312
   var out=new Uint8Array(cab.length+bits.length+fim.length); out.set(cab,0); out.set(bits,cab.length); out.set(fim,cab.length+bits.length);
   return out;
 }
