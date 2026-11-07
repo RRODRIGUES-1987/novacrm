@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.7';   // v1.8.7: situação do pedido mostra CONFERIDO e EM ROMANEIO
+const PORTAL_VERSION = 'v1.8.8';   // v1.8.8: detalhe do pedido com a RASTREABILIDADE (leituras por etapa, intervalos da bancada e do embarque, relatório em PDF)
+// v1.8.7: situação do pedido mostra CONFERIDO e EM ROMANEIO
 // v1.8.6: planilha de pedidos → UM pedido por OV (o mesmo SKU em OVs diferentes nunca é agrupado)
 // v1.8.5: aba Faturas real (estilo fatura de cartão): faturas aprovadas, situação, lançamentos, bruto e líquido
 // v1.8.4: a planilha de pedidos avisa quando a quantidade não fecha o pacote do produto
@@ -4707,7 +4708,7 @@ window.renderVolFat = function(){
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${SIT[1]};color:${SIT[2]};white-space:nowrap">${SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
-      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''}</td></tr>`; }).join('')}
+      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button></td></tr>`; }).join('')}
     </tbody></table></div></div>`;
 };
 window.volFatDet = function(i){
@@ -4719,7 +4720,39 @@ window.volFatDet = function(i){
     <div class="modal-b"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Caixas inteiras</th><th class="num">Em pacotes</th><th class="num">Volumes</th><th></th></tr></thead><tbody>
       ${d.map(x=>`<tr><td>${esc(x.sku)}</td><td class="num">${n(x.qtd)}</td><td class="num">${n(x.caixas)}</td><td class="num">${n(x.sobra)}</td><td class="num"><b>${n(x.volumes)}</b></td><td class="hint">${x.modo==='empenho'?'confirmado':'estimado'}</td></tr>`).join('')}
     </tbody></table></div><p class="hint" style="margin-top:10px">Cada caixa inteira do estoque sai como 1 volume; o que sai de caixa aberta vai em pacotes, numa caixa de embarque por produto (sem caixa mista). "Estimado" usa o estoque disponível no momento; "confirmado" usa as caixas já reservadas para o pedido.</p></div>
-    <div class="modal-f"><button class="btn btn-primary" onclick="$('mVolFat').remove()">Fechar</button></div></div></div>`);
+    <div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="rastAbrir(${i})">🔍 Rastreabilidade</button><button class="btn btn-primary" onclick="$('mVolFat').remove()">Fechar</button></div></div></div>`);
+};
+// v1.8.8: rastreabilidade do pedido — todas as leituras por etapa, com os intervalos da bancada e do embarque (para resgate de vídeo em até 30 dias)
+function rastHora(d){ return d?new Date(d).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—'; }
+function rastIntervalo(L,et){ const t=L.filter(x=>x.etapa===et).map(x=>new Date(x.momento).getTime()).filter(x=>!isNaN(x)); if(!t.length) return null; const a=Math.min(...t), b=Math.max(...t); return {ini:new Date(a),fim:new Date(b),min:Math.max(1,Math.round((b-a)/60000))}; }
+function rastHtml(r,L,imprimir){
+  const ETAPAS=['Separação','Conferência','Nota fiscal','Embarque','Portaria','Saída','Estorno'];
+  const resumo=ETAPAS.filter(e=>L.some(x=>x.etapa===e)).map(e=>{ const xs=L.filter(x=>x.etapa===e), ult=xs[xs.length-1], ruim=xs.some(x=>x.ok===false);
+    return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;min-width:110px"><div style="font-size:10px;color:#64748b;letter-spacing:.4px">${esc(e.toUpperCase())}</div><b style="font-size:12.5px">${rastHora(ult.momento).slice(0,14)}</b><div style="font-size:11px;color:${ruim?'#b45309':'#166534'}">${xs.length} registro(s)${ruim?' · com ocorrência':' ✓'}</div></div>`; }).join('');
+  const bc=rastIntervalo(L,'Conferência'), em=rastIntervalo(L,'Embarque');
+  const fx=(t,iv)=>iv?`<div style="background:#eff6ff;border-radius:8px;padding:6px 9px;font-size:12px">🎥 <b>${t}</b> · ${rastHora(iv.ini)} → ${rastHora(iv.fim)} (${iv.min} min)</div>`:'';
+  const blocos=ETAPAS.filter(e=>L.some(x=>x.etapa===e)).map(e=>`<div style="font-size:11px;color:#64748b;letter-spacing:.4px;margin:12px 0 4px">${esc(e.toUpperCase())}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:#64748b;font-size:10.5px;text-align:left"><th style="padding:4px 6px">Data/hora</th><th>Operador</th><th>Leitura</th><th>Código lido</th><th>Resultado</th><th>Local</th></tr>
+    ${L.filter(x=>x.etapa===e).map(x=>`<tr style="border-top:1px solid #eef2f7"><td style="padding:4px 6px;white-space:nowrap">${rastHora(x.momento)}</td><td>${esc(x.operador||'—')}</td><td>${esc(x.leitura||'')}</td><td style="font-family:monospace">${esc(x.codigo||'')}</td><td style="color:${x.ok===false?'#b91c1c':'#166534'}">${x.ok===false?'✕ ':'✓ '}${esc(x.resultado||'')}</td><td>${esc(x.local||'')}</td></tr>`).join('')}</table>`).join('');
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${resumo}</div>
+    <div style="display:grid;gap:5px;margin-bottom:6px">${fx('Bancada de checkout',bc)}${fx('Embarque',em)}</div>
+    ${(bc||em)?'<div style="font-size:11px;color:#64748b">Com esses intervalos a MK Logística resgata o vídeo das câmeras do checkout e do embarque, se solicitado em até 30 dias corridos da operação.</div>':''}
+    ${blocos||'<div style="color:#64748b;padding:10px 0">Ainda não há leituras registradas para este pedido.</div>'}`;
+}
+window.rastAbrir = async function(i){
+  const r=(state.volFat||[])[i]; if(!r) return; const old=$('mRast'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend',`<div id="mRast" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:980px;width:96vw"><div class="modal-h"><h3>Rastreabilidade · ${esc(r.pedido||'')}</h3></div><div class="modal-b" id="mRastB"><div class="hint">Carregando as leituras…</div></div><div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="rastPdf(${i})">⤓ Baixar relatório (PDF)</button><button class="btn btn-primary" onclick="$('mRast').remove()">Fechar</button></div></div></div>`);
+  try{ const q=await sb.rpc('portal_rastreabilidade_pedido',{p_pedido:r.id}); if(q.error) throw q.error; state._rast={id:r.id,L:q.data||[]}; $('mRastB').innerHTML=rastHtml(r,state._rast.L,false); }
+  catch(e){ $('mRastB').innerHTML='<div class="hint" style="color:#b91c1c">Não consegui carregar a rastreabilidade: '+esc(e.message||e)+'</div>'; }
+};
+window.rastPdf = function(i){
+  const r=(state.volFat||[])[i]; if(!r||!state._rast||state._rast.id!==r.id) return;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Rastreabilidade ${esc(r.pedido||'')}</title><style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;font-size:11px}h1{font-size:18px;margin:0}</style></head><body>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0f3d5e;padding-bottom:6px;margin-bottom:10px"><div><h1>Relatório de rastreabilidade</h1><div>${esc(r.pedido||'')} · ${esc(r.destinatario||'')}${r.nf?' · NF '+esc(r.nf):''}</div></div><div style="text-align:right;font-size:10px;color:#555">MK Logística · VERUS<br>emitido em ${new Date().toLocaleString('pt-BR')}</div></div>
+    ${rastHtml(r,state._rast.L,true)}</body></html>`;
+  const fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'; document.body.appendChild(fr);
+  const d=fr.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(()=>{ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(e){} setTimeout(()=>fr.remove(),60000); },400);
 };
 function agdTipo(t){ agd.tipo=t; agd.janela=null; $('agdEnt').classList.toggle('on',t==='entrada'); $('agdSai').classList.toggle('on',t==='saida'); agdOpsMontar(); renderDias(); renderSlots(); agdPedsRender(); }
 if(typeof window.toast!=='function'){ window.toast=function(m){ const d=document.createElement('div'); d.textContent=m; d.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99999;background:#0A2540;color:#fff;border-radius:10px;padding:10px 16px;font-size:13px;max-width:90vw;box-shadow:0 6px 24px rgba(0,0,0,.25)'; document.body.appendChild(d); setTimeout(()=>d.remove(),5000); }; }
