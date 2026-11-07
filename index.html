@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1312 | Gerado: 2026-11-06 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1316 | Gerado: 2026-11-07 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1312';
+const APP_VERSION='v1.0.1316';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3196,12 +3196,63 @@ async function ecomFullEtiqImportar(file,det){
         }
         if(ped){ var _mE=ecomFullMeta(ped); _mE.envio=vol.envio; try{ await dbUpdate('ecom_pedidos',ped.id,{full_meta:_mE, numero_pedido:'ML-'+vol.envio}); ped.full_meta=_mE; ped.numero_pedido='ML-'+vol.envio; }catch(_eE){ console.warn('envio não gravado',_eE); } }
       }
+      // v1.0.1313: TROCA DE ENVIO — o ML cancelou/reprogramou a coleta e gerou um envio novo para um Full já em operação:
+      //            as etiquetas de caixa novas substituem as antigas, caixa a caixa, mantendo o que já foi conferido
+      var _troca=false, _envAnt='';
+      if(!ped && vol.envio){
+        var _ops=cands.filter(function(p){ var m=ecomFullMeta(p); return m.master_pdf&&String(m.envio||'').trim()&&m.envio!==vol.envio; });
+        if(false&&_ops.length){   // v1.0.1315: a troca agora é pelo botão "Substituir envio" no pedido
+          var _txt=_ops.map(function(p,i){ var m=ecomFullMeta(p), fx=(m.caixas||[]).filter(function(c){return c.fechada_em;}).length; return (i+1)+') E-'+String(p.numero_interno||0).padStart(6,'0')+' · envio atual '+m.envio+' · '+(m.caixas||[]).length+' caixa(s), '+fx+' fechada(s) · '+(p.status||''); }).join('\n');
+          var _e2=prompt('O envio '+vol.envio+' ('+vol.caixas.length+' caixa(s)) não pertence a nenhum Full.\nSe a coleta foi CANCELADA/REPROGRAMADA e o ML gerou um envio novo, escolha o Full que troca de envio:\n\n'+_txt+'\n\nDigite o número da opção (ou deixe em branco para cancelar):','');
+          var _i2=parseInt(_e2,10);
+          if(_i2>=1&&_i2<=_ops.length){
+            ped=_ops[_i2-1]; var _mT=ecomFullMeta(ped); _envAnt=_mT.envio;
+            var _fx=(_mT.caixas||[]).filter(function(c){return c.fechada_em;}).length;
+            if(vol.caixas.length<_fx&&!confirm('O envio novo tem '+vol.caixas.length+' etiqueta(s) de caixa, mas o Full já tem '+_fx+' caixa(s) fechada(s). Continuar assim mesmo?')){ ped=null; }
+            // v1.0.1314: o envio novo pode vir SEM algum produto (ex.: CH-0059, sem o PE005) — sai do Full, e as caixas dele voltam ao estoque
+            if(ped){
+              var _skAll=Object.keys(ecomFullUnid(ped));
+              var _rm=prompt('Algum produto SAIU no envio novo? Digite os SKUs separados por vírgula (ex.: PE005) ou deixe em branco se o envio novo tem os mesmos produtos.\n\nProdutos do Full: '+_skAll.join(', '),'');
+              var _sair=String(_rm||'').toUpperCase().split(/[\s,;]+/).filter(function(x){return x&&_skAll.map(function(y){return y.toUpperCase();}).indexOf(x)>=0;});
+              _mT._sair=_sair;
+            }
+            if(ped){
+              _mT.envios_anteriores=(_mT.envios_anteriores||[]).concat([{envio:_envAnt,master_pdf:_mT.master_pdf||null,trocado_em:new Date().toISOString(),por:(typeof currentUser!=='undefined'&&currentUser&&(currentUser.full_name||currentUser.email))||null}]);
+              _mT.envio=vol.envio; _mT.troca_envio_em=new Date().toISOString(); _mT.nf_pendente_troca=true; _troca=true;
+              try{ await dbUpdate('ecom_pedidos',ped.id,{full_meta:_mT, numero_pedido:'ML-'+vol.envio}); ped.full_meta=_mT; ped.numero_pedido='ML-'+vol.envio; }catch(_eT){ ecomProgResultado('Erro na troca de envio',null,[ecomEsc(String(_eT&&_eT.message||_eT))],'red'); return; }
+            }
+          }
+        }
+      }
+      if(!ped&&typeof _ops!=='undefined'&&_ops.length){ ecomProgResultado('Envio novo de um Full em operação?',null,['Etiquetas do envio <b>'+ecomEsc(vol.envio)+'</b>, que não pertence a nenhum Full.','Se o Mercado Livre cancelou ou reprogramou a coleta e gerou um envio novo, abra o pedido Full e use o botão <b>⇄ Substituir envio</b>: lá você sobe estas etiquetas e a NF nova, escolhe os produtos que continuam e confere a prévia.'],'amber'); return; }
       if(!ped){ ecomProgResultado('Pedido Full ML não encontrado',null,['Etiquetas dos volumes do envio <b>'+ecomEsc(vol.envio)+'</b>, mas não há pedido Full ML com esse envio aguardando etiqueta.','Importe e grave o PDF das etiquetas de produtos antes.'],'red'); return; }
       meta=ecomFullMeta(ped);
       var _prevCx=(meta.caixas||[]).slice(), _prevPath=meta.master_pdf||'';   // v1.0.1174: volumes em mais de um arquivo
+      var _devolvidas=[];
+      if(typeof _troca!=='undefined'&&_troca){
+        _prevCx=[]; _prevPath='';
+        var _sair=(meta._sair||[]); delete meta._sair;
+        var _resto=[];
+        (meta.caixas||[]).slice().sort(function(a,b){return a.n-b.n;}).forEach(function(c){
+          var ks=Object.keys(c.itens||{}), so=ks.length&&ks.every(function(k){return _sair.indexOf(String(k).toUpperCase())>=0;});
+          if(so) _devolvidas.push({n:c.n,itens:c.itens,qtd:c.qtd}); else { var x=Object.assign({},c); delete x.impressa_em; _resto.push(x); }
+        });
+        // v1.0.1314: as caixas que ficam ocupam as etiquetas novas EM ORDEM (1ª caixa que fica → 1ª etiqueta nova…)
+        var _novasOrd=vol.caixas.slice().sort(function(a,b){return a.n-b.n;});
+        meta.caixas=_resto.map(function(c,i){ var nv=_novasOrd[i]; return nv?Object.assign({},c,{n:nv.n,spx:nv.spx,pagina:nv.pagina,slot:nv.slot,de:nv.de,n_anterior:c.n}):Object.assign({},c,{sem_etiqueta_nova:true}); });
+        vol={envio:vol.envio,caixas:meta.caixas.filter(function(c){return !c.sem_etiqueta_nova;}).concat(_novasOrd.slice(_resto.length)),};
+        if(meta.cx_pend){ var _cp=meta.caixas.find(function(c){return +c.n_anterior===+meta.cx_pend.n;}); if(_cp) meta.cx_pend.n=_cp.n; }   // v1.0.1314: a caixa aberta segue para a etiqueta nova
+        if(_sair.length){
+          _sair.forEach(function(k){ if(meta.unidades) { Object.keys(meta.unidades).forEach(function(u){ if(u.toUpperCase()===k) delete meta.unidades[u]; }); } });
+          meta.total=Object.keys(meta.unidades||{}).reduce(function(a,k){return a+ecomN(meta.unidades[k]);},0);
+          meta.devolvidas=(meta.devolvidas||[]).concat(_devolvidas.map(function(d){ return Object.assign({},d,{em:new Date().toISOString(),motivo:'troca de envio '+_envAnt+' → '+meta.envio}); }));
+          try{ var _its=ecomItensDo(ped.id).filter(function(i){ return _sair.indexOf(String(i.sku||'').toUpperCase())>=0; }); for(var _q=0;_q<_its.length;_q++){ await dbDelete('ecom_pedido_itens',_its[_q].id); } ecomPedidoItens=(ecomPedidoItens||[]).filter(function(i){ return !_its.some(function(z){return z.id===i.id;}); }); }catch(_ei){ console.warn('itens do produto que saiu',_ei); }
+        }
+      }   // v1.0.1313: troca de envio substitui (não soma) e as etiquetas novas precisam ser reimpressas
       // v1.0.1128: se o checkout já começou, preserva o progresso de cada caixa (itens, quantidade, fechamento)
       var _ant={}; (meta.caixas||[]).forEach(function(c){ _ant[c.n]=c; });
-      meta.caixas=vol.caixas.map(function(c){ var a=_ant[c.n]; return a?Object.assign({},a,{spx:c.spx,pagina:c.pagina,slot:c.slot,de:c.de}):c; });
+      if(!(typeof _troca!=='undefined'&&_troca)) meta.caixas=vol.caixas.map(function(c){ var a=_ant[c.n]; return a?Object.assign({},a,{spx:c.spx,pagina:c.pagina,slot:c.slot,de:c.de}):c; });
+      else meta.caixas=vol.caixas.map(function(c){ return c.itens?c:Object.assign({itens:{},qtd:0,fechada_em:null},c); });   // v1.0.1314
       meta.caixas_total=vol.caixas.length;
     } else {
       var lido=ecomMlLerProdutos(pags), envN=((det.nome||'').match(/Envio-(\d+)/i)||[])[1]||'';
@@ -3304,6 +3355,7 @@ async function ecomFullEtiqImportar(file,det){
   }
   await dbUpdate('ecom_pedidos',ped.id,upd); Object.assign(ped,upd);
   if(_somou) showToast(_somou+' caixa(s) nova(s) somada(s) às etiquetas de volume já importadas ('+meta.caixas_total+' no total)','green');   // v1.0.1174
+  if(typeof _troca!=='undefined'&&_troca){ ecomProgResultado('Troca de envio concluída',null,['Full <b>'+ecomEsc(ped.numero_pedido||'')+'</b>: envio <b>'+ecomEsc(_envAnt)+'</b> → <b>'+ecomEsc(meta.envio)+'</b>.','<b>'+meta.caixas_total+'</b> etiqueta(s) de caixa novas ligadas, mantendo o conteúdo já conferido de cada caixa (as caixas que ficam ocupam as etiquetas novas em ordem: a etiqueta mostra o número novo).'].concat(_devolvidas.length?['<b style="color:var(--red-text)">Retire do Full '+_devolvidas.length+' caixa(s) do produto que saiu</b> ('+_devolvidas.map(function(d){return 'caixa '+d.n+': '+Object.keys(d.itens||{}).map(function(k){return k+' × '+d.itens[k];}).join(', ');}).join(' · ')+') e devolva as unidades ao endereço do produto.']:[]).concat(['Agora: (1) reimprima TODAS as etiquetas de caixa (funções restritas → Reimprimir etiquetas de caixa → Todas) e cole por cima das antigas; (2) importe a NF nova da remessa: ela será ligada a este Full.']),'amber'); ecomRenderBody(); return; }
   var _lin=[(det.tipo==='master'?'<b>'+meta.caixas_total+'</b> etiqueta(s) de caixa \u00b7 coleta '+ecomEsc(meta.data_coleta||'?'):'<b>'+pags.length+'</b> etiqueta(s) de unidade')+' ligada(s) ao Full <b>'+ecomEsc(ped.numero_pedido||'')+'</b>'];
   if(typeof _divTxt!=='undefined'&&_divTxt) _lin.push(_divTxt);
   _lin.push(upd.status==='importado'?'<span style="color:var(--green-text,#059669)">\u2714</span> Liberado para a separa\u00e7\u00e3o.':('Falta: '+[!meta.unidades_pdf?'etiquetas de unidade':'',!meta.master_pdf?'etiquetas de caixa':''].filter(Boolean).join(' e ')+(ecomTemNf(ped.id)?'':' \u00b7 NF (XML)')));
@@ -3797,6 +3849,22 @@ async function ecomFullProdBipML(p,its,meta,code){
     if(ecomN(un[_skL])-ecomFullConf(p,_skL)>0){ var _r2=await ecomFullMlAbrirCaixa(p,meta,_skL,'Caixa '+_nL+' fechada · '+_skL+' × '+(_cxl.qtd||0)+' · '); if(_r2) return; }
     ecomCxFlash('Caixa '+_nL+' fechada · '+_skL+' COMPLETO · escolha o próximo produto','green'); ecomCxRender(); return;
   }
+  if(!_cxl&&!sk&&meta.retirada&&meta.retirada.status==='pendente'){   // v1.0.1316: bipe da etiqueta ANTIGA de uma caixa da ordem de retirada
+    var _cn=ecomFullNormQr(code), _rc=meta.retirada.caixas.find(function(c){ return !c.retirada_em&&c.spx&&(ecomFullNormQr(c.spx)===_cn||_cn.indexOf(ecomFullNormQr(c.spx))>=0); });
+    if(_rc){ _rc.retirada_em=new Date().toISOString(); var _rf=meta.retirada.caixas.filter(function(c){return !c.retirada_em;}).length; if(!_rf){ meta.retirada.status='concluida'; meta.retirada.concluida_em=_rc.retirada_em; }
+      var _upX={full_meta:meta}, _compX=!_rf&&!(meta.caixas||[]).some(function(c){return c.reetiq;})&&!meta.cx_pend&&Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+      if(_compX){ _upX.status='conferido'; _upX.data_conferencia=_rc.retirada_em; }
+      p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,_upX); if(_compX) p.status='conferido';
+      ecomCxFlash('Retirada · caixa '+_rc.n+' ('+Object.keys(_rc.itens||{}).join(', ')+') retirada'+(_rf?' · faltam '+_rf+' caixa(s) da '+meta.retirada.numero:' · ordem '+meta.retirada.numero+' CONCLUÍDA'+(_compX?' · Full CONFERIDO':'')),'green'); ecomCxRender(); return; }
+  }
+  if(_cxl&&_cxl.reetiq){   // v1.0.1315: caixa reetiquetada após a substituição do envio
+    delete _cxl.reetiq; p.full_meta=meta;
+    var _faltR=(meta.caixas||[]).filter(function(c){return c.reetiq;}).length, _agR=new Date().toISOString(), _upR={full_meta:meta};
+    var _compR=!_faltR&&!meta.cx_pend&&!(meta.retirada&&meta.retirada.status==='pendente')&&Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });   // v1.0.1316: retirada pendente segura o conferido
+    if(_compR){ _upR.status='conferido'; _upR.data_conferencia=_agR; }
+    await dbUpdate('ecom_pedidos',p.id,_upR); if(_compR) p.status='conferido';
+    ecomCxFlash('Caixa '+_cxl.n+' reetiquetada'+(_faltR?' · faltam '+_faltR+' caixa(s) para reetiquetar':' · todas reetiquetadas'+(_compR?' · Full CONFERIDO':'')),'green'); ecomCxRender(); return;
+  }
   if(_cxl){ ecomCxFlash('Etiqueta da caixa '+_cxl.n+' conferida'+(pend?' · continue bipando as etiquetas de '+pend.sku+' ('+(pend.bip||0)+'/'+pend.qtd+')':' · bipe o EAN do próximo produto'),'green'); ecomCxRender(); return; }
   // ── caixa aberta: bipando as etiquetas de unidade, uma a uma ──
   if(pend){
@@ -3891,6 +3959,105 @@ async function ecomFullReimpUnidQtd(pid){
   var um=ecomFullPaginasUnid(meta,sk,0,1); if(!um.length){ showToast('Etiqueta de unidade de '+sk+' não encontrada no PDF de produtos','red'); return; }
   showToast('Imprimindo '+q+' etiqueta(s) de unidade de '+sk+'…','blue'); await ecomFullImprimirPaginas(meta.unidades_pdf,um,undefined,q);
 }
+// v1.0.1316: ORDEM DE RETIRADA (A4) — caixas que saem do Full por mudança no pedido do Mercado Livre
+function ecomFullRetiradaImprimir(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var m=ecomFullMeta(p), r=m.retirada; if(!r) return; var e=ecomEsc;
+  var tot=r.caixas.reduce(function(a,c){return a+ecomN(c.qtd);},0);
+  var html='<!doctype html><html><head><meta charset="utf-8"><title>'+e(r.numero)+'</title><style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;font-size:12px}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #999;padding:7px;text-align:left}th{background:#eee}</style></head><body>'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #111;padding-bottom:6px"><div><div style="font-size:11px;color:#555">MK LOG · ORDEM DE RETIRADA DE CAIXAS DO FULL</div><h1>'+e(r.numero)+'</h1></div><div style="text-align:right;font-size:11px">E-'+String(p.numero_interno||0).padStart(6,'0')+' · Full ML · envio atual '+e(m.envio||'')+'<br>emitida em '+new Date(r.criada_em).toLocaleString('pt-BR')+'</div></div>'
+    +'<p style="font-size:13px"><b>Motivo:</b> '+e(r.motivo||'')+'</p><p style="font-size:13px">Retire do Full as caixas abaixo, <b>bipe a etiqueta antiga de cada uma</b> no checkout do pedido e devolva as unidades ao endereço do produto.</p>'
+    +'<table><tr><th>Caixa</th><th>Etiqueta antiga</th><th>Conteúdo</th><th>Unidades</th><th>Retirada (visto)</th></tr>'+r.caixas.map(function(c){ return '<tr><td style="font-size:16px;font-weight:700">'+e(c.n)+'</td><td style="font-family:monospace">'+e(c.spx||'—')+'</td><td>'+Object.keys(c.itens||{}).map(function(k){return e(k)+' × '+c.itens[k];}).join('<br>')+'</td><td>'+ecomN(c.qtd)+'</td><td></td></tr>'; }).join('')
+    +'<tr><td colspan="3"><b>Total</b></td><td><b>'+tot+'</b></td><td></td></tr></table>'
+    +'<div style="margin-top:28px;display:flex;gap:40px;font-size:12px"><div>Retirado por: ______________________</div><div>Devolvido ao estoque em: ____/____ ____:____</div></div></body></html>';
+  var fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'; document.body.appendChild(fr);
+  var d=fr.contentWindow.document; d.open(); d.write(html); d.close(); setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(function(){ fr.remove(); },60000); },400);
+}
+// ═══ v1.0.1315 · SUBSTITUIR ENVIO DO FULL ML (coleta cancelada/reprogramada): etiquetas de caixa novas + NF nova + produtos que saem ═══
+var _subst=null;
+function ecomFullSubstAbrir(pid){
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), un=ecomFullUnid(p);
+  _subst={pid:pid,vol:null,buf:null,nfFile:null,nfTot:null,nfNum:'',fica:{}}; Object.keys(un).forEach(function(k){ _subst.fica[k]=true; });
+  var d=document.createElement('div'); d.id='m-subst'; d.className='modal-overlay';
+  d.innerHTML='<div class="modal" style="max-width:980px;width:96%"><div class="modal-hdr"><span>⇄ Substituir envio · E-'+String(p.numero_interno||0).padStart(6,'0')+' · envio atual '+ecomEsc(meta.envio||'—')+'</span></div><div style="padding:16px" id="m-subst-b"></div></div>';
+  document.body.appendChild(d); ecomFullSubstRender();
+}
+function ecomFullSubstCalc(){
+  var S=_subst, p=(ecomPedidos||[]).find(function(x){return x.id===S.pid;}), meta=ecomFullMeta(p), un=ecomFullUnid(p);
+  var sair=Object.keys(S.fica).filter(function(k){return !S.fica[k];}).map(function(k){return k.toUpperCase();});
+  var cx=(meta.caixas||[]).slice().sort(function(a,b){return a.n-b.n;}), resto=[], sai=[];
+  cx.forEach(function(c){ var ks=Object.keys(c.itens||{}); if(ks.length&&ks.every(function(k){return sair.indexOf(String(k).toUpperCase())>=0;})) sai.push(c); else if(ks.length||c.fechada_em) resto.push(c); });
+  var totAnt=Object.keys(un).reduce(function(a,k){return a+ecomN(un[k]);},0), totNovo=Object.keys(un).filter(function(k){return sair.indexOf(k.toUpperCase())<0;}).reduce(function(a,k){return a+ecomN(un[k]);},0);
+  var novas=S.vol?S.vol.caixas.slice().sort(function(a,b){return a.n-b.n;}):[];
+  var erro=!S.vol?'Suba o PDF das etiquetas de caixa do envio novo.':(S.vol.envio===meta.envio?'Este PDF é do envio atual ('+meta.envio+'), não de um envio novo.':(novas.length<resto.length?'O envio novo tem '+novas.length+' etiqueta(s), mas ficam '+resto.length+' caixa(s) com produto: confira os produtos que continuam.':''));
+  return {p:p,meta:meta,un:un,sair:sair,resto:resto,sai:sai,novas:novas,totAnt:totAnt,totNovo:totNovo,erro:erro};
+}
+function ecomFullSubstRender(){
+  var S=_subst, C=ecomFullSubstCalc(), e=ecomEsc, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var cxPor=function(k){ return (C.meta.caixas||[]).filter(function(c){ return Object.keys(c.itens||{}).some(function(x){return x.toUpperCase()===k.toUpperCase();}); }).length; };
+  var b='<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px"><div style="display:flex;flex-direction:column;gap:10px">'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">1 · ETIQUETAS DE CAIXA DO ENVIO NOVO (PDF)</div><input type="file" accept=".pdf" onchange="ecomFullSubstPdf(this)" style="margin-top:6px">'
+      +(S.vol?'<div style="font-size:12.5px;margin-top:4px;color:var(--green-text)">✓ envio <b>'+e(S.vol.envio)+'</b> · '+S.vol.caixas.length+' etiqueta(s) de caixa</div>':'')+'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">2 · PRODUTOS QUE CONTINUAM NO ENVIO</div>'
+      +Object.keys(C.un).map(function(k){ var on=S.fica[k]; return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px;'+(on?'':'color:var(--red-text)')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="_subst.fica[\''+e(k)+'\']=this.checked;ecomFullSubstRender()"><b>'+e(k)+'</b> · '+nb(C.un[k])+' un · '+cxPor(k)+' cx'+(on?'':' · sai do envio')+'</label>'; }).join('')+'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">3 · NF DA REMESSA NOVA (XML ou DANFE) · opcional agora</div><input type="file" accept=".xml,.pdf" onchange="ecomFullSubstNf(this)" style="margin-top:6px">'
+      +(S.nfFile?'<div style="font-size:12.5px;margin-top:4px;color:'+(S.nfTot===C.totNovo?'var(--green-text)':'var(--amber-text)')+'">'+(S.nfTot!=null?('NF '+e(S.nfNum||'')+' · '+nb(S.nfTot)+' un'+(S.nfTot===C.totNovo?' ✓ bate com o envio novo':' · o envio novo tem '+nb(C.totNovo)+' un')):'NF selecionada')+'</div>':'')+'</div>'
+    +'</div><div style="border:1.5px solid #1e3a8a;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">'
+    +'<div style="font-size:11px;color:var(--text3)">4 · PRÉVIA DA SUBSTITUIÇÃO</div>'
+    +(C.erro?'<div style="color:var(--amber-text);font-size:13px">'+e(C.erro)+'</div>':
+      '<div style="font-size:13px"><b>'+C.resto.length+' caixa(s) ficam</b> e recebem as etiquetas novas, em ordem<div style="font-size:11px;color:var(--text2);font-family:monospace;max-height:90px;overflow:auto">'+C.resto.map(function(c,i){ return 'cx '+c.n+'→'+C.novas[i].n+(c.fechada_em?'':' (aberta)'); }).join(' · ')+'</div></div>'
+      +(C.sai.length?'<div style="font-size:13px;color:var(--red-text)"><b>'+C.sai.length+' caixa(s) saem</b> e voltam ao estoque<div style="font-size:11px;font-family:monospace">'+C.sai.map(function(c){ return 'cx '+c.n+': '+Object.keys(c.itens||{}).map(function(k){return k+' × '+c.itens[k];}).join(', '); }).join(' · ')+'</div></div>':'')
+      +'<div style="font-size:13px"><b>Unidades:</b> '+nb(C.totAnt)+' → <b>'+nb(C.totNovo)+'</b>'+(S.nfFile?' · NF nova '+e(S.nfNum||''):' · NF nova: importar depois')+'</div>'
+      +'<div style="font-size:12px;color:var(--text2)">Ao confirmar: o pedido volta para <b>conferindo</b> até cada caixa receber a etiqueta nova (cole e bipe a etiqueta nova de cada caixa no checkout); as etiquetas novas já saem impressas.</div>')
+    +'<div style="display:flex;gap:8px;margin-top:auto"><button class="btn" onclick="var d=ge(\'m-subst\');if(d)d.remove()">Cancelar</button><button class="btn btn-p" style="flex:1" '+(C.erro?'disabled':'')+' onclick="ecomFullSubstConfirmar()">Confirmar substituição e imprimir as etiquetas novas</button></div>'
+    +'</div></div><div style="font-size:11px;color:var(--text3);margin-top:10px">Fica no histórico do pedido: envio e NF anteriores, caixas renumeradas e devolvidas, quem fez e quando.</div>';
+  var el=ge('m-subst-b'); if(el) el.innerHTML=b;
+}
+async function ecomFullSubstPdf(input){
+  var f=input.files&&input.files[0]; if(!f) return;
+  try{ await ecomLoadPdfjs(); var buf=await f.arrayBuffer(), pdf=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise, pags=[];
+    for(var pg=1;pg<=pdf.numPages;pg++) pags.push(await ecomFullPdfTexto(pdf,pg));
+    var vol=ecomMlLerVolumes(pags); if(!vol||!vol.envio||!(vol.caixas||[]).length){ showToast('Não reconheci as etiquetas de caixa do Mercado Livre neste PDF','red'); return; }
+    _subst.vol=vol; _subst.buf=buf; ecomFullSubstRender();
+  }catch(e){ showToast('Erro ao ler o PDF: '+(e.message||e),'red'); }
+}
+async function ecomFullSubstNf(input){
+  var f=input.files&&input.files[0]; if(!f) return; _subst.nfFile=f; _subst.nfTot=null; _subst.nfNum='';
+  try{ var nf=/\.pdf$/i.test(f.name||'')?await ecomNfeDoDanfe(f):ecomNfeParse(await f.text()); if(nf){ _subst.nfTot=(nf.itens||[]).reduce(function(a,y){return a+ecomN(y.qtd);},0); _subst.nfNum=nf.numero||''; } }catch(e){}
+  ecomFullSubstRender();
+}
+async function ecomFullSubstConfirmar(){
+  var S=_subst, C=ecomFullSubstCalc(); if(C.erro){ showToast(C.erro,'amber'); return; }
+  var p=C.p, meta=C.meta, cid=ecomCid(), envAnt=meta.envio, ag=new Date().toISOString();
+  try{
+    var path=cid+'/full/ML-'+String(S.vol.envio).replace(/[^A-Za-z0-9_-]/g,'_')+'/master.pdf';
+    var up=await window.supabase.storage.from('ecom-etiquetas').upload(path,new Blob([S.buf],{type:'application/pdf'}),{contentType:'application/pdf',upsert:true});
+    if(up&&up.error) throw new Error('não consegui guardar o PDF: '+up.error.message);
+    meta.envios_anteriores=(meta.envios_anteriores||[]).concat([{envio:envAnt,master_pdf:meta.master_pdf||null,trocado_em:ag,por:(typeof currentUser!=='undefined'&&currentUser&&(currentUser.full_name||currentUser.email))||null,saiu:C.sair}]);
+    var novas=C.novas, kept=C.resto.map(function(c,i){ var nv=novas[i], x=Object.assign({},c,{n:nv.n,spx:nv.spx,pagina:nv.pagina,slot:nv.slot,de:nv.de,n_anterior:c.n}); delete x.impressa_em; if(x.fechada_em) x.reetiq=true; return x; });
+    var vazias=novas.slice(C.resto.length).map(function(nv){ return {n:nv.n,spx:nv.spx,pagina:nv.pagina,slot:nv.slot,de:nv.de,itens:{},qtd:0,fechada_em:null}; });
+    if(meta.cx_pend){ var cp=kept.find(function(c){return +c.n_anterior===+meta.cx_pend.n;}); if(cp) meta.cx_pend.n=cp.n; }
+    meta.caixas=kept.concat(vazias).sort(function(a,b){return a.n-b.n;}); meta.caixas_total=meta.caixas.length;
+    meta.devolvidas=(meta.devolvidas||[]).concat(C.sai.map(function(c){ return {n:c.n,itens:c.itens,qtd:c.qtd,em:ag,motivo:'troca de envio '+envAnt+' → '+S.vol.envio}; }));
+    // v1.0.1316: o pedido mudou → ORDEM DE RETIRADA das caixas do produto que saiu (baixa caixa a caixa pelo bipe da etiqueta antiga)
+    if(C.sai.length) meta.retirada={numero:'OR-'+String(p.numero_interno||0).padStart(6,'0')+'-'+(((meta.envios_anteriores||[]).length)||1),criada_em:ag,motivo:'troca de envio '+envAnt+' → '+S.vol.envio+' · saiu '+C.sair.join(', '),
+      caixas:C.sai.map(function(c){ return {n:c.n,spx:c.spx||null,itens:c.itens,qtd:c.qtd,retirada_em:null}; }),status:'pendente'};
+    if(C.sair.length){ Object.keys(meta.unidades||{}).forEach(function(u){ if(C.sair.indexOf(u.toUpperCase())>=0) delete meta.unidades[u]; }); meta.total=C.totNovo;
+      var its=ecomItensDo(p.id).filter(function(i){ return C.sair.indexOf(String(i.sku||'').toUpperCase())>=0; }); for(var q=0;q<its.length;q++){ try{ await dbDelete('ecom_pedido_itens',its[q].id); }catch(_e){} }
+      ecomPedidoItens=(ecomPedidoItens||[]).filter(function(i){ return !its.some(function(z){return z.id===i.id;}); }); }
+    meta.envio=S.vol.envio; meta.master_pdf=path; meta.troca_envio_em=ag; meta.nf_pendente_troca=true;
+    var upd={full_meta:meta, numero_pedido:'ML-'+S.vol.envio};
+    if(kept.some(function(c){return c.reetiq;})&&['conferido','separado'].indexOf(p.status)>=0) upd.status='conferindo';   // volta para trás até reetiquetar
+    await dbUpdate('ecom_pedidos',p.id,upd); Object.assign(p,upd); delete _ecomFullPdfCache[path];
+    try{ var et=(ecomEtiquetas||[]).find(function(x){return x.pedido_id===p.id;}); if(et){ await dbUpdate('ecom_etiquetas',et.id,{arquivo_path:path,order_id:'ML-'+S.vol.envio}); et.arquivo_path=path; et.order_id='ML-'+S.vol.envio; } }catch(_e){}
+    var dlg=ge('m-subst'); if(dlg) dlg.remove();
+    if(meta.retirada&&meta.retirada.status==='pendente') ecomFullRetiradaImprimir(p.id);   // v1.0.1316
+    if(S.nfFile){ try{ await ecomNfeImportFiles({files:[S.nfFile],value:''}); }catch(_n){ showToast('Envio trocado; a NF não foi importada: '+(_n.message||_n),'amber'); } }
+    await ecomFullImprimirPaginas(path,kept.map(function(c){return ecomFullItemCaixa(meta,c);}),'master');
+    ecomProgAbrir('Substituição de envio',1,false);
+    ecomProgResultado('Envio substituído',null,['E-'+String(p.numero_interno||0).padStart(6,'0')+': envio <b>'+ecomEsc(envAnt)+'</b> → <b>'+ecomEsc(S.vol.envio)+'</b>. '+kept.length+' caixa(s) com etiqueta nova impressa.'].concat(C.sai.length?['<b style="color:var(--red-text)">Ordem de retirada '+ecomEsc((meta.retirada||{}).numero||'')+' gerada e impressa: retire do Full '+C.sai.length+' caixa(s)</b>, bipe a etiqueta antiga de cada uma no checkout e devolva ao estoque: '+C.sai.map(function(c){return 'cx '+c.n+' ('+Object.keys(c.itens||{}).map(function(k){return k+' × '+c.itens[k];}).join(', ')+')';}).join(' · ')]:[]).concat(['No checkout, cole e <b>bipe a etiqueta nova de cada caixa</b>: com todas reetiquetadas, o Full volta para conferido.'].concat(S.nfFile?[]:['Falta importar a NF nova da remessa.'])),'amber');
+    ecomRenderBody();
+  }catch(e){ showToast('Não consegui substituir o envio: '+(e.message||e),'red'); }
+}
 async function ecomFullProdCancelarML(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
   if(!confirm('Cancelar a caixa '+pend.n+' ('+pend.sku+', '+(pend.bip||0)+' de '+pend.qtd+' bipadas)? As unidades já bipadas voltam a pendentes e as etiquetas impressas devem ser descartadas.')) return;
@@ -3920,6 +4087,8 @@ function ecomFullProdPainelML(p){
       +'<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="ecomFullProdReimpUnid(\''+p.id+'\')">Reimprimir etiquetas de unidade</button>'
       +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="ecomFullProdCancelarML(\''+p.id+'\')">Cancelar caixa</button></div></div>'
     : '<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px">FULL MERCADO LIVRE '+ecomEsc(p.numero_pedido||'')+' · CHECKOUT POR PRODUTO</div>'
+      +((meta.retirada&&meta.retirada.status==='pendente')?'<div style="background:var(--red-bg);color:var(--red-text);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-weight:700">Ordem de retirada '+ecomEsc(meta.retirada.numero)+': retire e bipe a etiqueta antiga de '+meta.retirada.caixas.filter(function(c){return !c.retirada_em;}).length+' caixa(s) · '+meta.retirada.caixas.filter(function(c){return !c.retirada_em;}).map(function(c){return 'cx '+c.n;}).join(', ')+' <a style="margin-left:8px;cursor:pointer;text-decoration:underline" onclick="ecomFullRetiradaImprimir(\''+p.id+'\')">reimprimir a ordem</a></div>':'')   // v1.0.1316
+      +((meta.caixas||[]).some(function(c){return c.reetiq;})?'<div style="background:var(--amber-bg);color:var(--amber-text);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-weight:700">⇄ Envio substituído: cole e bipe a etiqueta nova de cada caixa · faltam '+(meta.caixas||[]).filter(function(c){return c.reetiq;}).length+'</div>':'')   // v1.0.1315
       +'<div style="font-size:20px;font-weight:800">Escolha o produto na lista (ou bipe o EAN)</div><div style="font-size:12px;color:var(--text3)">No 1º acesso ao produto saem todas as etiquetas de unidade e de caixa dele.</div>'
       +'<div style="font-size:12.5px;color:var(--text3)">Caixas '+fechadas.length+' de '+tot+' · unidades por caixa <input type="number" min="1" value="'+upc+'" onchange="ecomFullSetUpc(\''+p.id+'\',this.value)" style="width:56px"></div></div>';
   var alerta=semMaster.length?'<div style="border:2px solid #f59e0b;background:var(--amber-bg,#fef3c7);border-radius:10px;padding:10px 12px;margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--amber-text,#92400e);margin-bottom:6px">🖨 '+semMaster.length+' caixa(s) fechada(s) sem a etiqueta da caixa impressa</div>'
@@ -57333,6 +57502,7 @@ function ecomDetRender(){
           +(p.numero_pedido?(' &middot; <span style="font-family:monospace">'+ecomEsc(p.numero_pedido)+'</span>'):'')+'</div>'
         +'</div>'
         +ecomBadge(p.status)+ecomSeloNaoColetado(p)
+        +((ecomEhFull(p)&&ecomFullMeta(p).ml&&['cancelado','expedido','enviado','entregue'].indexOf(p.status)<0)?'<button class="btn btn-sm" style="background:#1e3a8a;color:#fff;border-color:#1e3a8a" onclick="ecomFullSubstAbrir(\''+p.id+'\')" title="Coleta cancelada ou reprogramada pelo Mercado Livre: troca o envio, as etiquetas de caixa e a NF">⇄ Substituir envio</button>':'')   // v1.0.1315
         +'<button class="btn btn-sm" onclick="ecomDetFechar()">Fechar</button>'
       +'</div>'
       +'<div style="display:flex;gap:2px;margin-top:12px;border-bottom:1px solid var(--border)">'
@@ -61774,7 +61944,14 @@ async function ecomNfeImportFiles(input){
       if(!ped && /EBAZAR|MERCADO\s*LIVRE/i.test(String(nf.destinatario||''))){
         var _totNf=nf.itens.reduce(function(a,y){return a+ecomN(y.qtd);},0);
         var _fulls=ecomPedidos.filter(function(p){ return ecomEhFull(p)&&ecomFullMeta(p).ml&&['aguardando_etiqueta','importado'].indexOf(p.status)>=0; });
-        ped=_fulls.find(function(p){ var u=ecomFullUnid(p); return Object.keys(u).reduce(function(a,k){return a+ecomN(u[k]);},0)===_totNf; })||(_fulls.length===1?_fulls[0]:null);
+        // v1.0.1313: Full em troca de envio (coleta cancelada/reprogramada) recebe a NF nova mesmo já conferido
+        var _trocas=ecomPedidos.filter(function(p){ return ecomEhFull(p)&&ecomFullMeta(p).ml&&ecomFullMeta(p).nf_pendente_troca&&['cancelado','expedido','enviado','entregue'].indexOf(p.status)<0; });
+        var _tot=function(p){ var u=ecomFullUnid(p); return Object.keys(u).reduce(function(a,k){return a+ecomN(u[k]);},0); };
+        ped=_trocas.find(function(p){ return _tot(p)===_totNf; })||_fulls.find(function(p){ return _tot(p)===_totNf; })||(_fulls.length===1&&!_trocas.length?_fulls[0]:null);
+        if(ped&&ecomFullMeta(ped).nf_pendente_troca){
+          try{ var _velhas=await dbSelect('ecom_nfe','pedido_id=eq.'+ped.id+'&select=id,chave'); for(var _v=0;_v<(_velhas||[]).length;_v++){ if(_velhas[_v].chave!==nf.chave) await dbUpdate('ecom_nfe',_velhas[_v].id,{pedido_id:null}); } }catch(_ev){}
+          var _mN=ecomFullMeta(ped); _mN.nf_pendente_troca=false; _mN.nf_troca_em=new Date().toISOString(); try{ await dbUpdate('ecom_pedidos',ped.id,{full_meta:_mN}); ped.full_meta=_mN; }catch(_en){}
+        }
         if(!ped){ erros.push('NF '+nf.numero+': remessa para o Full ML, mas nenhum pedido Full ML pendente com '+_totNf+' unidade(s) — importe primeiro o PDF das etiquetas de produtos'); continue; }
       }
       if(!ped){
