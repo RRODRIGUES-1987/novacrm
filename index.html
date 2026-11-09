@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1319 | Gerado: 2026-11-07 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1320 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1462,7 +1462,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1319';
+const APP_VERSION='v1.0.1320';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38873,10 +38873,39 @@ function wmsGerarListasModal(){
   setTimeout(()=>{const b=ge('port-modal-save');if(b)b.style.display='none';},10);
 }
 
-async function wmsGerarListas(tipo){
-  const ids=[...wmsPedSelecionados];
+// ═══ v1.0.1320 · OS AUTOMÁTICA — depositante com clientes.parametros.os_automatica=true (CASCO): pedido importado e sem lista
+//     → empenha e gera a lista pedido a pedido (que vai direto para o coletor). Faltou saldo → "aguardando saldo" (regra de sempre).
+//     Roda em qualquer sessão da Torre com o WMS carregado; a trava no banco (wms_os_auto_claim) impede duas telas de gerar a mesma OS.
+var _osAutoRodando=false;
+function wmsOsAutoClientes(){ return (clientes||[]).filter(function(c){ var pr=c.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr.os_automatica===true; }).map(function(c){return c.id;}); }
+async function wmsOsAutoTick(){
+  if(_osAutoRodando||!company||!cu||document.hidden) return;
+  if(['admin','gestor','adm'].indexOf(String(profile&&profile.role||''))<0) return;
+  if(!Array.isArray(wmsPedidos)||!wmsPedidos.length) return;
+  var cl=wmsOsAutoClientes(); if(!cl.length) return;
+  var alvo=wmsPedidos.filter(function(p){ return cl.indexOf(p.cliente_id)>=0&&String(p.status||'')==='importado'&&String(p.tipo||p.movimento||'saida')!=='entrada'&&!wmsListaPedidos.some(function(v){return v.pedido_id===p.id;}); }).slice(0,5);
+  if(!alvo.length) return;
+  _osAutoRodando=true;
+  try{
+    for(var i=0;i<alvo.length;i++){
+      var p=alvo[i], ok=false;
+      try{ ok=await dbRpc('wms_os_auto_claim',{p_pedido:p.id}); }catch(_c){ ok=false; }
+      if(ok!==true) continue;
+      var r=null; try{ r=await wmsGerarListas('pedido_a_pedido',{auto:true,ids:[p.id]}); }catch(eG){ console.warn('[OS auto]',p.numero_curto,eG); }
+      if(r&&r.criadas&&r.criadas.length){ var l=(wmsListasSeparacao||[]).find(function(x){return x.id===r.criadas[0];}); showToast('OS automática: '+(l&&l.numero_lista||'lista')+' · pedido '+(p.numero_curto||p.numero_pedido||'')+' liberado para o coletor','green'); }
+      else if(r&&r.pulados&&r.pulados.length) showToast('OS automática não gerada · '+String(r.pulados[0]).slice(0,140),'amber');
+    }
+    if(typeof render==='function'&&/^wms-/.test(String(typeof curPage!=='undefined'?curPage:''))) render();
+  } finally { _osAutoRodando=false; }
+}
+setInterval(function(){ wmsOsAutoTick(); },60000);
+async function wmsGerarListas(tipo,opts){
+  // v1.0.1320: modo automático (OS automática ao importar e empenhar) — sem tela, sem mexer na seleção nem no modal do usuário
+  const _auto=!!(opts&&opts.auto);
+  const portSaving=_auto?function(){}:window.portSaving, portProgress=_auto?function(){}:window.portProgress, portClose=_auto?function(){}:window.portClose, portModal=_auto?function(){}:window.portModal, portErr=_auto?function(m){ console.warn('[OS auto]',m); }:window.portErr;
+  const ids=_auto?(opts.ids||[]):[...wmsPedSelecionados];
   const peds=wmsPedidos.filter(p=>ids.includes(p.id));
-  if(!peds.length){portClose();return;}
+  if(!peds.length){portClose();return {criadas:[],pulados:[]};}
   const cid=company?.id;
   // v1.0.1257: nenhum item pode virar mais de WMS_MAX_BIPES_ITEM bipes — resolve-se no cadastro, não gerando
   if(tipo!=='consolidada'){
@@ -38885,7 +38914,7 @@ async function wmsGerarListas(tipo){
     if(_bloq.length){ portErr('Lista não gerada: '+_bloq.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes. Cadastre un. por caixa no produto. '+_bloq.slice(0,4).join(' | ')+(_bloq.length>4?' | +'+(_bloq.length-4):'')); return; }
   }
   portSaving();
-  document.querySelectorAll('.wms-tipo-opt').forEach(b=>{b.disabled=true;b.style.opacity='.35';b.style.pointerEvents='none';});
+  if(!_auto) document.querySelectorAll('.wms-tipo-opt').forEach(b=>{b.disabled=true;b.style.opacity='.35';b.style.pointerEvents='none';});
   const criadas=[];const pulados=[];const empenhos=[];   // v1.0.1110
   let nPed=0;
   try{
@@ -39046,6 +39075,7 @@ async function wmsGerarListas(tipo){
       }
     }
     portProgress(peds.length,peds.length,'Concluído','');
+    if(_auto) return {criadas:criadas,pulados:pulados};   // v1.0.1320
     wmsPedSelecionados.clear();
     wmsUltimasListasGeradas=criadas;
     const nums=criadas.map(id=>wmsListasSeparacao.find(l=>l.id===id)?.numero_lista).filter(Boolean).sort();
