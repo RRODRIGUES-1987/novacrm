@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1322 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1323 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -608,6 +608,7 @@ body:has(#col-acao-btn) #col-bigbtn{display:none!important}   /* v1.0.1279: um b
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M8 18h.01M12 18h.01"/></svg>
           <span>Programação</span>
         </button>
+        <button class="navitem sub" id="nav-fat-previa" onclick="pg('fat-previa')"><span style="width:14px;display:inline-block;text-align:center">💲</span><span>Prévia de faturamento</span></button>
         <button class="navitem sub" id="nav-fat-armazenagem" onclick="pg('fat-armazenagem')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-6h10v6"/></svg>
           <span>Armazenagem</span>
@@ -1338,6 +1339,7 @@ const TELAS=[
   {id:'fat-programacao',       label:'Financeiro · Programação de Faturamento', modulo:'Financeiro'},
   {id:'fat-capas-digitar',     label:'Financeiro · Capas de processo (digitação)', modulo:'Financeiro'},
   {id:'fat-armazenagem',       label:'Financeiro · Armazenagem (extrato)',        modulo:'Financeiro'},   // v1.0.1071
+  {id:'fat-previa',            label:'Financeiro · Prévia de faturamento (ensaio)', modulo:'Financeiro'},   // v1.0.1323
   {id:'fat-capas-conferir',    label:'Financeiro · Capas de processo (conferência)', modulo:'Financeiro'},   // v1.0.1066
   {id:'fat-relatorios',        label:'Controladoria · Receita e faturamento',   modulo:'Controladoria'},
   {id:'tabelas-tarifarias',    label:'Financeiro · Tabelas Tarifárias',         modulo:'Financeiro'},
@@ -1462,7 +1464,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1322';
+const APP_VERSION='v1.0.1323';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6520,6 +6522,7 @@ function render_i(){
   else if(curPage==='fat-capas')c.innerHTML=rCapasProcesso();
   else if(curPage==='fat-capas-digitar')c.innerHTML=rFatCapasDigitar();
   else if(curPage==='fat-armazenagem')c.innerHTML=rFatArmazenagem();   // v1.0.1071
+  else if(curPage==='fat-previa'){ c.innerHTML=wmsFatPrevView(); setTimeout(wmsFatPrevInit,30); }   // v1.0.1323
   else if(curPage==='wms-relatorios'){wmsRelView='hub';c.innerHTML=rWmsRelatorios();}
   else if(curPage==='wms-clientes')c.innerHTML=rWmsClientes();
   else if(curPage==='wms-operadores')c.innerHTML=rWmsOperadores();
@@ -44989,7 +44992,7 @@ var _fatPrev={loj:'',mes:'',res:null};
 function wmsFatPrevView(){
   var hoje=new Date(), mesDef=_fatPrev.mes||(new Date(hoje.getFullYear(),hoje.getMonth()-1,1).toISOString().slice(0,7));
   return '<div style="max-width:1150px;margin:0 auto;padding:4px">'
-    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><button class="btn btn-sm" onclick="wmsRelVoltar()">← Relatórios</button><div style="font-size:18px;font-weight:700">Prévia de faturamento <span style="font-size:12px;color:var(--amber-text)">ensaio · apurado pela movimentação</span></div>'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><div style="font-size:18px;font-weight:700">Prévia de faturamento <span style="font-size:12px;color:var(--amber-text)">ensaio · apurado pela movimentação</span></div>'
     +'<div style="margin-left:auto;display:flex;gap:6px;align-items:center"><select id="fp-loj" class="fi" style="min-width:220px"><option value="">carregando…</option></select><input id="fp-mes" class="fi" type="month" value="'+mesDef+'"><button class="btn btn-p" onclick="wmsFatPrevApurar()">Apurar</button></div></div>'
     +'<div id="fp-body" style="color:var(--text3);font-size:13px">Escolha o lojista e o mês e clique em Apurar.</div></div>';
 }
@@ -45012,8 +45015,9 @@ async function wmsFatPrevApurar(){
     var pf=await dbSelectAll('ecom_pedidos','company_id=eq.'+cid+'&lojista_id=eq.'+loj+'&tipo_envio=eq.full&status=neq.cancelado&updated_at=gte.'+new Date(d.getFullYear(),d.getMonth()-1,1).toISOString().slice(0,10)+'&select=id,numero_interno,numero_pedido,full_meta')||[];
     var normais=pc.filter(function(p){return p.tipo_envio!=='full';}), sepCanc=pcs.filter(function(p){return p.tipo_envio!=='full';});
     var ids=normais.concat(sepCanc).map(function(p){return p.id;}), itens=[];
-    for(var k=0;k<ids.length;k+=150){ itens=itens.concat(await dbSelect('ecom_pedido_itens','pedido_id=in.('+ids.slice(k,k+150).join(',')+')&select=pedido_id,sku,quantidade,qtd_conferida')||[]); }
-    var unPorPed={}; itens.forEach(function(i){ var q=+(i.qtd_conferida||0); if(!q) q=+(i.quantidade||0); unPorPed[i.pedido_id]=(unPorPed[i.pedido_id]||0)+q; });   // cancelado sem conferência: a quantidade separada
+    for(var k=0;k<ids.length;k+=150){ itens=itens.concat(await dbSelect('ecom_pedido_itens','pedido_id=in.('+ids.slice(k,k+150).join(',')+')')||[]); }
+    var unPorPed={}; itens.forEach(function(i){ var q=+(i.qtd_conferida||i.conferido||0); if(!q) q=+(i.quantidade||i.qtd||i.quantity||0); unPorPed[i.pedido_id]=(unPorPed[i.pedido_id]||0)+q; });
+    if(normais.length&&!itens.length) console.warn('[prévia] nenhum item encontrado para os pedidos do mês');   // cancelado sem conferência: a quantidade separada
     var cxs=[]; pf.forEach(function(p){ var m=p.full_meta; if(typeof m==='string'){ try{ m=JSON.parse(m); }catch(_e){ m={}; } } ((m&&m.caixas)||[]).forEach(function(c){ if(c.fechada_em&&c.fechada_em>=ini&&c.fechada_em<fim) cxs.push({p:p,n:c.n,qtd:+c.qtd||Object.keys(c.itens||{}).reduce(function(a,k){return a+(+c.itens[k]||0);},0),em:c.fechada_em}); }); });
     // tabela tarifária
     var tab=null; try{ var T=await dbSelect('tabelas_tarifarias','company_id=eq.'+cid+'&or=(status.is.null,status.neq.historico)')||[];
@@ -45029,7 +45033,10 @@ async function wmsFatPrevApurar(){
     ];
     S.forEach(function(x){ var pr=_fpPreco(tar,x.re); x.preco=pr?pr.preco:0; x.servTab=pr?pr.servico:null; x.apurado=Math.round(x.qtd*x.preco*100)/100; x.faturado=0; });
     // faturado no período (competência do mês)
-    var fats=[]; if(lj.cliente_id||tab&&tab.cliente_id){ try{ fats=await dbSelect('faturamento','company_id=eq.'+cid+'&cliente_id=eq.'+(lj.cliente_id||tab.cliente_id)+'&periodo_inicio=gte.'+ini+'&periodo_inicio=lt.'+fim+'&status=neq.cancelado&select=numero_fatura,linhas,total')||[]; }catch(_f){} }
+    var fats=[]; if(lj.cliente_id||tab&&tab.cliente_id){ try{ var _f2=new Date(d.getFullYear(),d.getMonth()+2,1).toISOString().slice(0,10);
+      fats=(await dbSelect('faturamento','company_id=eq.'+cid+'&cliente_id=eq.'+(lj.cliente_id||tab.cliente_id)+'&status=neq.cancelado&select=numero_fatura,linhas,total,periodo_inicio,data_emissao,created_at&order=created_at.desc&limit=60')||[])
+        .filter(function(f){ var pi=String(f.periodo_inicio||''), de=String(f.data_emissao||f.created_at||'').slice(0,10); return pi?(pi>=ini&&pi<fim):(de>=fim&&de<_f2); });   // competência do mês: período no mês, ou (sem período) emitida no mês seguinte
+    }catch(_f){} }
     var fatTot=0; fats.forEach(function(f){ var L=f.linhas; if(typeof L==='string'){ try{ L=JSON.parse(L); }catch(_e){ L=[]; } } (Array.isArray(L)?L:[]).forEach(function(l){ var sv=String(l.servico||''), v=+l.subtotal||0; fatTot+=v; var x=S.find(function(y){return y.re.test(sv);}); if(x) x.faturado+=v; }); });
     // v1.0.1322: EXTRATO — cada pedido/caixa/coleta que gerou movimentação, por dia (como uma fatura de cartão)
     var P=function(k){ var x=S.find(function(y){return y.k===k;}); return x?x.preco:0; }, ev=[];
@@ -45054,9 +45061,10 @@ async function wmsFatPrevApurar(){
       +card('Faturamento mínimo',minimo?fmtV(minimo):'—',null,minimo?(tot>=minimo?'atingido ✓':'abaixo do mínimo'):'')
       +card('Pedidos cancelados com movimentação',canc.length,canc.length?'var(--amber-text)':null,canc.length?fmtV(canc.reduce(function(a,e){return a+e.valor;},0))+' já incluídos no apurado':'nenhum no mês')+'</div>'
       +(!tab?'<div style="background:var(--amber-bg);color:var(--amber-text);border-radius:8px;padding:8px 12px;margin-bottom:10px">Não achei a tabela tarifária deste lojista: os preços aparecem zerados.</div>':'')
-      +'<table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:10px"><tr style="color:var(--text3);font-size:11px;text-align:left"><th style="padding:7px 8px">Serviço (tabela)</th><th>De onde sai</th><th style="text-align:right">Qtd</th><th style="text-align:right">Preço</th><th style="text-align:right">Apurado</th><th style="text-align:right">Faturado</th><th style="text-align:right;padding-right:8px">Dif.</th><th></th></tr>'
-      +S.map(function(x,i){ var df=x.apurado-x.faturado; return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 8px"><b>'+ecomEsc(x.nome)+'</b>'+(x.servTab?'':' <span style="color:var(--amber-text);font-size:11px">· sem preço na tabela</span>')+'</td><td style="color:var(--text2);font-size:12px">'+ecomEsc(x.origem)+'</td><td style="text-align:right">'+Number(x.qtd).toLocaleString('pt-BR')+'</td><td style="text-align:right">'+fmtV(x.preco)+'</td><td style="text-align:right;font-weight:600">'+fmtV(x.apurado)+'</td><td style="text-align:right">'+fmtV(x.faturado)+'</td><td style="text-align:right;padding-right:8px;color:'+(Math.abs(df)<1?'var(--green-text)':'var(--amber-text)')+'">'+fmtV(df)+'</td><td><button class="btn btn-sm" onclick="wmsFatPrevDet('+i+')">🔍</button></td></tr>'; }).join('')
-      +'<tr style="border-top:2px solid var(--border);font-weight:700"><td style="padding:7px 8px" colspan="4">Total apurado pela movimentação</td><td style="text-align:right">'+fmtV(tot)+'</td><td style="text-align:right">'+fmtV(totFatS)+'</td><td style="text-align:right;padding-right:8px">'+fmtV(dif)+'</td><td></td></tr></table>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:10px"><tr style="color:var(--text3);font-size:11px;text-align:left"><th style="padding:7px 8px">Serviço (tabela)</th><th>De onde sai</th><th style="text-align:right;white-space:nowrap">Qtd</th><th style="text-align:right;white-space:nowrap">Preço</th><th style="text-align:right;white-space:nowrap">Apurado</th><th style="text-align:right;white-space:nowrap">Faturado</th><th style="text-align:right;padding-right:8px;white-space:nowrap">Dif.</th><th></th></tr>'
+      +S.map(function(x,i){ var df=x.apurado-x.faturado; return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 8px"><b>'+ecomEsc(x.nome)+'</b>'+(x.servTab?'':' <span style="color:var(--amber-text);font-size:11px">· sem preço na tabela</span>')+'</td><td style="color:var(--text2);font-size:12px">'+ecomEsc(x.origem)+'</td><td style="text-align:right;white-space:nowrap;padding:0 6px">'+Number(x.qtd).toLocaleString('pt-BR')+'</td><td style="text-align:right;white-space:nowrap;padding:0 6px">'+fmtV(x.preco)+'</td><td style="text-align:right;font-weight:600;white-space:nowrap;padding:0 6px">'+fmtV(x.apurado)+'</td><td style="text-align:right;white-space:nowrap;padding:0 6px">'+fmtV(x.faturado)+'</td><td style="text-align:right;white-space:nowrap;padding-right:8px;color:'+(Math.abs(df)<1?'var(--green-text)':'var(--amber-text)')+'">'+fmtV(df)+'</td><td><button class="btn btn-sm" onclick="wmsFatPrevDet('+i+')">🔍</button></td></tr>'; }).join('')
+      +'<tr style="border-top:2px solid var(--border);font-weight:700"><td style="padding:7px 8px" colspan="4">Total apurado pela movimentação</td><td style="text-align:right;white-space:nowrap;padding:0 6px">'+fmtV(tot)+'</td><td style="text-align:right;white-space:nowrap;padding:0 6px">'+fmtV(totFatS)+'</td><td style="text-align:right;white-space:nowrap;padding-right:8px">'+fmtV(dif)+'</td><td></td></tr></table>'
+      +(fats.length?'<div style="font-size:12px;color:var(--text3);margin-top:6px">Faturas consideradas: '+fats.map(function(f){return ecomEsc(f.numero_fatura||'');}).join(', ')+'</div>':'')
       +'<div style="font-size:12px;color:var(--text3);margin-top:8px">Pedidos cancelados entram pelo serviço que chegou a ser feito: separados e conferidos cobram picking, packing e etiqueta; separados e cancelados antes do checkout cobram só o picking · Entrada, armazenagem, advalorem e devoluções: fase 2 · serviços eventuais (palletização, pallet, filme, impressão, sala) seguem lançados à mão · '+(tab?'tabela '+ecomEsc(tab.nome||'')+' · vigência '+(tab.vigencia_inicio||'')+' a '+(tab.vigencia_fim||''):'')+'</div>';
     _fatPrev.resumoHtml=b.innerHTML; wmsFatPrevMostrar();
   }catch(e){ b.innerHTML='<div style="color:var(--red-text)">Erro ao apurar: '+ecomEsc(e.message||String(e))+'</div>'; }
@@ -45064,17 +45072,17 @@ async function wmsFatPrevApurar(){
 function wmsFatPrevMostrar(){
   var b=ge('fp-body'), R=_fatPrev.res; if(!b||!R) return;
   if(R.aba!=='extrato'){ b.innerHTML=_fatPrev.abasFn()+(_fatPrev.resumoHtml||''); return; }
+  // v1.0.1323: extrato = a lista de pedidos por dia que geraram movimentação (nº do pedido, sem valor e sem hora)
   var dias={}; R.ev.forEach(function(e){ (dias[e.dia]=dias[e.dia]||[]).push(e); });
-  var acum=0, html=Object.keys(dias).sort().map(function(d){ var L=dias[d], tdia=L.reduce(function(a,e){return a+e.valor;},0); acum+=tdia;
-    var dt=new Date(d+'T12:00:00');
-    return '<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--border);padding-bottom:3px"><b>'+dt.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'})+'</b><span style="font-size:12px;color:var(--text3)">'+L.length+' lançamento(s) · dia <b style="color:var(--text)">'+fmtV(tdia)+'</b> · acumulado '+fmtV(acum)+'</span></div>'
-      +L.map(function(e){ var p=e.ped; return '<div style="display:grid;grid-template-columns:60px 120px 1fr 1.6fr 100px;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border);font-size:12.5px'+(e.canc?';background:var(--amber-bg)':'')+'"><span style="color:var(--text3)">'+(e.em?new Date(e.em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'')+'</span><span><b>E-'+String(p.numero_interno||0).padStart(6,'0')+'</b></span><span>'+ecomEsc(e.tipo)+(e.canc?' <span style="color:var(--amber-text);font-weight:700">· CANCELADO</span>':'')+'<div style="font-size:11px;color:var(--text3)">'+ecomEsc(p.numero_pedido||'')+(e.obs?' · '+ecomEsc(e.obs):'')+'</div></span><span style="color:var(--text2)">'+e.sv.map(function(x){return ecomEsc(x[0]);}).join(' · ')+'</span><span style="text-align:right;font-weight:600">'+fmtV(e.valor)+'</span></div>'; }).join(''); }).join('');
+  var html=Object.keys(dias).sort().map(function(d){ var L=dias[d], dt=new Date(d+'T12:00:00');
+    return '<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--border);padding-bottom:3px"><b>'+dt.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit'})+'</b><span style="font-size:12px;color:var(--text3)">'+L.length+' pedido(s)</span></div>'
+      +L.map(function(e){ var p=e.ped; return '<div style="display:grid;grid-template-columns:minmax(160px,1fr) minmax(140px,1fr) 2fr;gap:10px;padding:5px 2px;border-bottom:1px solid var(--border);font-size:12.5px'+(e.canc?';background:var(--amber-bg)':'')+'"><b style="font-family:monospace">'+ecomEsc(p.numero_pedido||('E-'+String(p.numero_interno||0).padStart(6,'0')))+'</b><span>'+ecomEsc(e.tipo)+(e.canc?' <span style="color:var(--amber-text);font-weight:700">· CANCELADO</span>':'')+'</span><span style="color:var(--text2)">'+e.sv.map(function(x){return ecomEsc(x[0]);}).join(' · ')+(e.obs?' · '+ecomEsc(e.obs):'')+'</span></div>'; }).join(''); }).join('');
   b.innerHTML=_fatPrev.abasFn()+'<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:6px 12px 12px">'+(html||'<div style="padding:14px;color:var(--text3)">Nenhuma movimentação no mês.</div>')
-    +'<div style="display:flex;justify-content:space-between;margin-top:12px;font-weight:700;font-size:14px"><span>Total do extrato</span><span>'+fmtV(acum)+'</span></div></div>';
+    +'<div style="display:flex;justify-content:space-between;margin-top:12px;font-weight:700;font-size:13px"><span>Total de pedidos e caixas</span><span>'+R.ev.length.toLocaleString('pt-BR')+'</span></div></div>';
 }
 function wmsFatPrevCsv(){
   var R=_fatPrev.res; if(!R) return; var q=function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; };
-  var linhas=[['data','hora','pedido','marketplace','tipo','cancelado','servicos','valor'].join(';')].concat(R.ev.map(function(e){ return [e.dia,e.em?new Date(e.em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'','E-'+String(e.ped.numero_interno||0).padStart(6,'0'),q(e.ped.numero_pedido||''),q(e.tipo),e.canc?'sim':'',q(e.sv.map(function(x){return x[0];}).join(' · ')),String(e.valor.toFixed(2)).replace('.',',')].join(';'); }));
+  var linhas=[['data','pedido','tipo','cancelado','servicos'].join(';')].concat(R.ev.map(function(e){ return [e.dia,q(e.ped.numero_pedido||('E-'+String(e.ped.numero_interno||0).padStart(6,'0'))),q(e.tipo),e.canc?'sim':'',q(e.sv.map(function(x){return x[0];}).join(' · '))].join(';'); }));
   var blob=new Blob(['\ufeff'+linhas.join('\n')],{type:'text/csv;charset=utf-8'}), a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='extrato_movimentacao_'+(_fatPrev.mes||'')+'.csv'; a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); },3000);
 }
 function wmsFatPrevDet(i){
@@ -45096,11 +45104,6 @@ function rWmsRelatorios(){
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'
-      +'<div onclick="wmsRelAbrir(\'fat-prev\');setTimeout(wmsFatPrevInit,30)" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
-        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px;font-size:18px">💲</div>'
-        +'<div style="font-weight:700;font-size:15px">Prévia de faturamento <span style="font-size:11px;color:var(--amber-text)">ensaio</span></div>'
-        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Serviços apurados pela movimentação (picking, packing, etiquetas, caixas master, coletas) com o preço da tabela, comparados com o faturado.</div>'
-        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div></div>'
       +'<div onclick="wmsRelAbrir(\'litragem\');setTimeout(wmsLitCarregar,30)" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2.7C12 2.7 5 10 5 15a7 7 0 0 0 14 0c0-5-7-12.3-7-12.3z"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Litragem e perfil de expedição</div>'
