@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.8';   // v1.8.8: detalhe do pedido com a RASTREABILIDADE (leituras por etapa, intervalos da bancada e do embarque, relatório em PDF)
+const PORTAL_VERSION = 'v1.8.9';   // v1.8.9: editar agendamento, incluir/retirar pedidos (no agendamento e pelo quadro de pedidos)
+// v1.8.8: detalhe do pedido com a RASTREABILIDADE (leituras por etapa, intervalos da bancada e do embarque, relatório em PDF)
 // v1.8.7: situação do pedido mostra CONFERIDO e EM ROMANEIO
 // v1.8.6: planilha de pedidos → UM pedido por OV (o mesmo SKU em OVs diferentes nunca é agrupado)
 // v1.8.5: aba Faturas real (estilo fatura de cartão): faturas aprovadas, situação, lançamentos, bruto e líquido
@@ -4692,7 +4693,7 @@ window.renderVolFat = function(){
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
     <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
     ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
@@ -4704,12 +4705,13 @@ window.renderVolFat = function(){
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
       else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
-      return `<tr><td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
+      const apto=r.nf&&r.nf_status!=='divergente'&&['conferido','separado','em_separacao'].includes(sit);
+      return `<tr>${podeVer('agd')?`<td>${apto?`<input type="checkbox" ${_qSel.has(r.id)?'checked':''} onchange="qSelToggle('${r.id}',this.checked)" title="Marcar para agendar">`:''}</td>`:''}<td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${SIT[1]};color:${SIT[2]};white-space:nowrap">${SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
       <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button></td></tr>`; }).join('')}
-    </tbody></table></div></div>`;
+    </tbody></table></div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9
 };
 window.volFatDet = function(i){
   const r = (state.volFat||[])[i]; if(!r) return;
@@ -4909,6 +4911,8 @@ function openDetalhe(kind, id){
       <div><div class="k">Veículo</div><div class="v">${o.tipo_veiculo||'—'} ${o.placa?'· '+o.placa:''}<br>${o.motorista_nome||''}</div></div>
       <div><div class="k">Pedido vinculado</div><div class="v proto" style="font-size:13px">${pv}</div></div>
     </div>
+    ${(!DEMO&&o.tipo==='saida')?`<div id="agdDetPeds" data-agd="${o.id}" style="margin:0 0 14px"><div class="hint">Carregando os pedidos desta coleta…</div></div>`:''}
+    ${!DEMO?`<div style="display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn btn-ghost" style="width:auto" onclick="agdEditarAbrir('${o.id}')">✎ Editar agendamento</button><button class="btn btn-ghost" style="width:auto;color:#b91c1c" onclick="agdCancelar('${o.id}')">Cancelar agendamento</button></div>`:''}
     <div style="margin:-4px 0 14px">${cartaoPode(o)?`<button class="btn btn-primary" style="width:auto" onclick="openCartao('${o.id}')">Cartão do motorista</button>`:`<span class="hint">O cartão do motorista fica disponível quando a MKLOG confirmar o agendamento.</span>`}</div>`;
   }
   const anexHtml = (o.anexos && o.anexos.length)
@@ -4924,7 +4928,92 @@ function openDetalhe(kind, id){
     : '<div class="hint">Sem eventos registrados ainda.</div>';
   $('detBody').innerHTML = grid + tl;
   openModal('mDet');
+  if(kind!=='ped' && !DEMO && o.tipo==='saida') agdDetPedidos(o.id);   // v1.8.9
 }
+// ── v1.8.9: pedidos do agendamento · editar · cancelar · incluir/retirar ──
+async function agdEditavel(id){ try{ const r=await sb.rpc('portal_agd_editavel',{p_agendamento:id}); return !r.error&&r.data===true; }catch(_e){ return false; } }
+async function agdDetPedidos(id){
+  const box=$('agdDetPeds'); if(!box) return;
+  let L=[], ed=false; try{ const r=await sb.rpc('portal_agd_pedidos',{p_agendamento:id}); if(r.error) throw r.error; L=r.data||[]; ed=await agdEditavel(id); }
+  catch(e){ box.innerHTML='<div class="hint" style="color:#b91c1c">Não consegui carregar os pedidos: '+esc(e.message||e)+'</div>'; return; }
+  const n=v=>Number(v||0).toLocaleString('pt-BR'), vol=L.reduce((a,x)=>a+(+x.volumes||0),0), peso=L.reduce((a,x)=>a+(+x.peso_kg||0),0);
+  box.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><label style="margin:0">Pedidos desta coleta</label><span class="hint">${L.length} pedido(s) · ${n(vol)} volume(s)${peso?' · '+n(peso)+' kg':''}</span><button class="btn btn-ghost" style="width:auto;margin-left:auto;padding:4px 10px" onclick="agdIncluirAbrir('${id}',${ed})">+ Incluir pedidos</button></div>`
+    +(L.length?`<table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th class="num">Vol.</th><th>NF</th><th></th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(String(x.pedido||'').split(' · ')[0])}</td><td>${esc(x.destinatario||'—')}</td><td class="num">${n(x.volumes)}</td><td>${esc(x.nf||'—')}</td><td style="text-align:right"><button class="btn btn-ghost" style="width:auto;padding:3px 10px;color:#b91c1c" onclick="agdRetirar('${id}','${x.id}',${ed})">${ed?'retirar':'solicitar retirada'}</button></td></tr>`).join('')}</tbody></table>`:'<div class="hint">Nenhum pedido vinculado ainda.</div>')
+    +`<div class="hint" style="font-size:11.5px;margin-top:6px">${ed?'Você pode incluir e retirar pedidos até a chegada do veículo; a transportadora recebe o cartão revisado por e-mail.':'O veículo já está na unidade: retirar e incluir viram solicitação à MK Logística (a inclusão depende da Torre de Controle e pode atrasar o carregamento).'}</div>`;
+}
+async function agdAvisarTransp(id,assunto){
+  try{ const r=await sb.rpc('portal_meus_agendamentos'); const a=(r.data||[]).find(x=>x.id===id); if(!a||!/@/.test(String(a.transp_contato||''))) return;
+    const url=a.transp_token?agdLinkTransp(a):'', p=await sb.rpc('portal_agd_pedidos',{p_agendamento:id}), L=(p&&p.data)||[];
+    const html=`<p>Olá,</p><p>O agendamento <b>${esc(a.protocolo||'')}</b> de <b>${esc(state.depositante||'')}</b> na MK Logística foi <b>${esc(assunto)}</b>.</p><p><b>${esc(fmtDataLonga(a.data))}, ${esc(fmtHora(a.hora_inicio))}${a.hora_fim?'–'+esc(fmtHora(a.hora_fim)):''}</b> · ${esc(cdNome(a.cd))}${a.placa?' · placa '+esc(a.placa):''}</p>`
+      +(L.length?`<p>Carga: ${L.length} pedido(s), ${L.reduce((s,x)=>s+(+x.volumes||0),0)} volume(s): ${L.map(x=>esc(String(x.pedido||'').split(' · ')[0])).join(', ')}.</p>`:'<p>Sem pedidos vinculados.</p>')
+      +(url?`<p>Dados do motorista e cartão: <a href="${url}">${url}</a></p>`:'');
+    await sb.functions.invoke('send-email',{body:{from:'MK Logística · Agendamentos <noreply@mklogistica.com>',to:[String(a.transp_contato).trim()],subject:`Agendamento ${a.protocolo} · ${assunto}`,html}});
+  }catch(_e){}
+}
+window.agdRetirar=async function(id,ped,ed){
+  if(!confirm(ed?'Retirar este pedido da coleta?':'O veículo já está na unidade. Enviar à MK Logística a solicitação para retirar este pedido (a doca desembarca os volumes)?')) return;
+  try{ const r=await sb.rpc('portal_agd_alterar_pedidos',{p_agendamento:id,p_incluir:[],p_retirar:[ped],p_ciente:false,p_autor:state.user&&state.user.nome||null}); if(r.error) throw r.error;
+    if(r.data&&r.data.modo==='solicitado') toast('Solicitação enviada à MK Logística.'); else { toast('Pedido retirado da coleta.'); agdAvisarTransp(id,'alterado (pedido retirado)'); }
+    agdDetPedidos(id); loadDados().then(render).catch(()=>{});
+  }catch(e){ toast('Não foi possível: '+(e.message||e)); }
+};
+window.agdIncluirAbrir=async function(id,ed,preSel){
+  const old=$('mAgdInc'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend',`<div id="mAgdInc" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:640px"><div class="modal-h"><h3>Incluir pedidos na coleta</h3></div><div class="modal-b" id="mAgdIncB"><div class="hint">Carregando os pedidos aptos…</div></div><div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="$('mAgdInc').remove()">Cancelar</button><button class="btn btn-primary" id="mAgdIncOk" style="width:auto" disabled>Incluir</button></div></div></div>`);
+  let L=[]; try{ const r=await sb.rpc('portal_pedidos_aptos'); if(r.error) throw r.error; L=r.data||[]; }catch(e){ $('mAgdIncB').innerHTML='<div class="hint" style="color:#b91c1c">'+esc(e.message||e)+'</div>'; return; }
+  let ja=[]; try{ const p=await sb.rpc('portal_agd_pedidos',{p_agendamento:id}); ja=((p&&p.data)||[]).map(x=>x.id); }catch(_e){}
+  const livres=L.filter(x=>!ja.includes(x.id)), n=v=>Number(v||0).toLocaleString('pt-BR');
+  $('mAgdIncB').innerHTML=(livres.length?livres.map(x=>`<label style="display:flex;gap:8px;align-items:center;padding:5px 0;${x.agendado_em?'color:var(--muted)':''}"><input type="checkbox" class="agdIncCk" value="${x.id}" ${x.agendado_em?'disabled':''} ${(preSel||[]).includes(x.id)&&!x.agendado_em?'checked':''}> <b>${esc(String(x.pedido||'').split(' · ')[0])}</b> · ${esc(x.destinatario||'')} · ${n(x.volumes)} vol${x.nf?' · NF '+esc(x.nf):''}${x.agendado_em?' · em outro agendamento ('+esc(x.agendado_em)+')':''}</label>`).join(''):'<div class="hint">Nenhum pedido apto (conferido e com nota ligada) disponível.</div>')
+    +(ed?'':`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;padding:8px;border-radius:8px;background:#fef3c7"><input type="checkbox" id="agdIncCiente"> <span>Estou ciente de que, com o veículo na unidade, a inclusão depende da autorização da Torre de Controle e <b>poderá haver atraso no carregamento</b>.</span></label>`);
+  const ok=$('mAgdIncOk'); const upd=()=>{ const k=[...document.querySelectorAll('.agdIncCk:checked')].length; ok.disabled=!k||(!ed&&!($('agdIncCiente')||{}).checked); ok.textContent=(ed?'Incluir ':'Solicitar inclusão de ')+k+' pedido(s)'; };
+  document.querySelectorAll('.agdIncCk').forEach(c=>c.onchange=upd); if($('agdIncCiente')) $('agdIncCiente').onchange=upd; upd();
+  ok.onclick=async function(){ const sel=[...document.querySelectorAll('.agdIncCk:checked')].map(c=>c.value); this.disabled=true;
+    try{ const r=await sb.rpc('portal_agd_alterar_pedidos',{p_agendamento:id,p_incluir:sel,p_retirar:[],p_ciente:!ed,p_autor:state.user&&state.user.nome||null}); if(r.error) throw r.error;
+      $('mAgdInc').remove();
+      if(r.data&&r.data.modo==='solicitado') toast('Solicitação de inclusão enviada à Torre de Controle.');
+      else { toast((r.data&&r.data.recusados)?'Não entraram: '+r.data.recusados:'Pedidos incluídos na coleta.'); agdAvisarTransp(id,'alterado (pedidos incluídos)'); }
+      if($('agdDetPeds')) agdDetPedidos(id); loadDados().then(render).catch(()=>{});
+    }catch(e){ toast('Não foi possível: '+(e.message||e)); this.disabled=false; } };
+};
+window.agdEditarAbrir=async function(id){
+  if(!(await agdEditavel(id))){ toast('O veículo já está na unidade ou o agendamento foi encerrado: fale com a MK Logística para alterar.'); return; }
+  const r=await sb.rpc('portal_meus_agendamentos'); const a=((r&&r.data)||[]).find(x=>x.id===id); if(!a) return;
+  const old=$('mAgdEd'); if(old) old.remove(); const v=k=>esc(a[k]==null?'':String(a[k]));
+  document.body.insertAdjacentHTML('beforeend',`<div id="mAgdEd" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:560px"><div class="modal-h"><h3>Editar agendamento ${esc(a.protocolo||'')}</h3></div><div class="modal-b">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Data</label><input class="inp" id="edData" type="date" value="${v('data')}"></div>
+      <div><label>Janela</label><div style="display:flex;gap:6px"><input class="inp" id="edHi" type="time" value="${esc(String(a.hora_inicio||'').slice(0,5))}"><input class="inp" id="edHf" type="time" value="${esc(String(a.hora_fim||'').slice(0,5))}"></div></div>
+      <div><label>Tipo de veículo</label><input class="inp" id="edVeic" value="${v('tipo_veiculo')}"></div>
+      <div><label>Transportadora</label><input class="inp" id="edTr" value="${v('transportadora')}"></div>
+      <div><label>E-mail da transportadora</label><input class="inp" id="edTrCt" value="${v('transp_contato')}"></div>
+      <div><label>Placa</label><input class="inp" id="edPlaca" value="${v('placa')}"></div>
+      <div><label>Motorista</label><input class="inp" id="edMot" value="${v('motorista_nome')}"></div>
+      <div><label>Documento do motorista</label><input class="inp" id="edDoc" value="${v('motorista_doc')}"></div>
+    </div><div class="hint" style="margin-top:8px">A nova data e janela ficam sujeitas à disponibilidade da MK Logística.</div><div id="edErr" style="color:#b91c1c;font-size:13px;margin-top:6px"></div></div>
+    <div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="$('mAgdEd').remove()">Cancelar</button><button class="btn btn-primary" style="width:auto" id="edOk">Salvar alterações</button></div></div></div>`);
+  $('edOk').onclick=async function(){ this.disabled=true;
+    const p={data:$('edData').value,hora_inicio:$('edHi').value||null,hora_fim:$('edHf').value||null,tipo_veiculo:$('edVeic').value,transportadora:$('edTr').value,transp_contato:$('edTrCt').value,placa:$('edPlaca').value.toUpperCase(),motorista_nome:$('edMot').value,motorista_doc:$('edDoc').value};
+    try{ const q=await sb.rpc('portal_agd_editar',{p_agendamento:id,p}); if(q.error) throw q.error; $('mAgdEd').remove(); toast('Agendamento atualizado.'); agdAvisarTransp(id,'alterado');
+      await loadDados(); render(); if(!$('mDet').classList.contains('hide')) openDetalhe('agd',id); }
+    catch(e){ $('edErr').textContent=e.message||String(e); this.disabled=false; } };
+};
+window.agdCancelar=async function(id){
+  if(!confirm('Cancelar este agendamento? Os pedidos voltam a ficar disponíveis para outra coleta.')) return;
+  try{ const r=await sb.rpc('portal_agd_cancelar',{p_agendamento:id}); if(r.error) throw r.error; toast('Agendamento cancelado.'); agdAvisarTransp(id,'cancelado'); closeModal('mDet'); await loadDados(); render(); }
+  catch(e){ toast('Não foi possível: '+(e.message||e)); }
+};
+// pelo quadro de pedidos: marcar e agendar coleta / adicionar a um agendamento
+window._qSel=window._qSel||new Set();
+window.qSelToggle=function(id,on){ if(on) _qSel.add(id); else _qSel.delete(id); const b=$('qSelBar'); if(b) b.innerHTML=qSelBarHtml(); };
+function qSelBarHtml(){ const k=_qSel.size; if(!k||!podeVer('agd')) return ''; return `<div style="display:flex;gap:8px;align-items:center;padding:8px 14px;background:#eff6ff;border-top:1px solid var(--border,#e5e5e5);flex-wrap:wrap"><b>${k} pedido(s) marcado(s)</b><button class="btn btn-primary" style="width:auto;padding:5px 12px" onclick="qAgendarNovo()">📅 Agendar coleta</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px" onclick="qAdicionarAgd()">➕ Adicionar a um agendamento</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px;margin-left:auto" onclick="_qSel.clear();renderVolFat()">limpar</button></div>`; }
+window.qAgendarNovo=function(){ const sel=[..._qSel]; openAgd(); agdTipo('saida'); agd.peds=sel; agdPedsRender(); };
+window.qAdicionarAgd=async function(){
+  const r=await sb.rpc('portal_meus_agendamentos'); const L=((r&&r.data)||[]).filter(a=>a.tipo==='saida'&&['solicitado','confirmado','reagendar'].includes(a.status)&&String(a.data||'')>=hoje()).sort((a,b)=>String(a.data).localeCompare(String(b.data)));
+  if(!L.length){ toast('Não há agendamento de saída em aberto: use "Agendar coleta".'); return; }
+  const old=$('mQAdd'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend',`<div id="mQAdd" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:480px"><div class="modal-h"><h3>Adicionar a um agendamento</h3></div><div class="modal-b">${L.map(a=>`<button class="btn btn-ghost" style="width:100%;text-align:left;margin-bottom:6px" onclick="qAdicionarEm('${a.id}')"><b>${esc(a.protocolo||'')}</b> · ${esc(fmtDataLonga(a.data))} ${esc(fmtHora(a.hora_inicio))} · ${esc(cdNome(a.cd))}${a.transportadora?' · '+esc(a.transportadora):''}</button>`).join('')}</div><div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="$('mQAdd').remove()">Cancelar</button></div></div></div>`);
+};
+window.qAdicionarEm=async function(id){ const m=$('mQAdd'); if(m) m.remove(); const ed=await agdEditavel(id); agdIncluirAbrir(id,ed,[..._qSel]); _qSel.clear(); renderVolFat(); };
 
 /* ============================ MODAIS / SUCESSO ============================ */
 function openModal(id){ $(id).classList.remove('hide'); document.body.style.overflow='hidden'; }
