@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1325 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1326 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1464,7 +1464,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1325';
+const APP_VERSION='v1.0.1326';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38897,22 +38897,31 @@ var _osAutoRodando=false;
 // v1.0.1325: o pedido do portal chega já EMPENHADO (não só 'importado'): entra qualquer pedido ainda sem lista e fora destas situações
 var WMS_OS_AUTO_FORA=['em_separacao','separado','conferido','em_conferencia','em_romaneio','expedido','embarcado','carregado','faturado','concluido','cancelado','excluido','aguardando_saldo'];
 function wmsOsAutoClientes(){ return (clientes||[]).filter(function(c){ var pr=c.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr.os_automatica===true; }).map(function(c){return c.id;}); }
-async function wmsOsAutoTick(){
-  if(_osAutoRodando||!company||!cu||document.hidden) return;
-  if(['admin','gestor','adm'].indexOf(String(profile&&profile.role||''))<0) return;
-  if(!Array.isArray(wmsPedidos)||!wmsPedidos.length) return;
-  var cl=wmsOsAutoClientes(); if(!cl.length) return;
-  var alvo=wmsPedidos.filter(function(p){ return cl.indexOf(p.cliente_id)>=0&&WMS_OS_AUTO_FORA.indexOf(String(p.status||''))<0&&String(p.tipo||p.movimento||'saida')!=='entrada'&&!wmsListaPedidos.some(function(v){return v.pedido_id===p.id;}); }).slice(0,5);
-  if(!alvo.length) return;
+async function wmsOsAutoTick(manual){
+  // v1.0.1326: busca os candidatos NO BANCO (o pedido que chega pelo portal ainda não está na memória da tela),
+  //            roda em qualquer sessão logada (a trava no banco evita duplicidade) e mesmo com a aba em segundo plano
+  if(_osAutoRodando||!company||!cu) return;
+  var cl=wmsOsAutoClientes(); if(!cl.length){ if(manual) showToast('Nenhum depositante com OS automática ligada (Automação do depositante)','amber'); return; }
+  var cand=[]; try{
+    cand=await dbSelect('wms_pedidos','company_id=eq.'+company.id+'&cliente_id=in.('+cl.join(',')+')&created_at=gte.'+new Date(Date.now()-15*86400000).toISOString()+'&order=created_at.asc&limit=50')||[];
+  }catch(_q){ cand=[]; }
+  cand=cand.filter(function(p){ return WMS_OS_AUTO_FORA.indexOf(String(p.status||''))<0&&String(p.tipo||p.movimento||'saida')!=='entrada'; });
+  if(cand.length){ var vinc=[]; try{ vinc=await dbSelect('wms_lista_pedidos','pedido_id=in.('+cand.map(function(p){return p.id;}).join(',')+')&select=pedido_id')||[]; }catch(_v){}
+    cand=cand.filter(function(p){ return !vinc.some(function(v){return v.pedido_id===p.id;}); }); }
+  if(!cand.length){ if(manual) showToast('Nenhum pedido aguardando OS','green'); return; }
   _osAutoRodando=true;
   try{
-    for(var i=0;i<alvo.length;i++){
-      var p=alvo[i], ok=false;
-      try{ ok=await dbRpc('wms_os_auto_claim',{p_pedido:p.id}); }catch(_c){ ok=false; }
+    // garante os pedidos e itens na memória para a geração da lista
+    cand.forEach(function(p){ if(!wmsPedidos.some(function(x){return x.id===p.id;})) wmsPedidos.push(p); else wmsPedidos=wmsPedidos.map(function(x){return x.id===p.id?Object.assign({},x,p):x;}); });
+    try{ var its=await dbSelect('wms_pedido_itens','pedido_id=in.('+cand.map(function(p){return p.id;}).join(',')+')')||[]; its.forEach(function(it){ if(!wmsPedidoItens.some(function(x){return x.id===it.id;})) wmsPedidoItens.push(it); }); }catch(_i){}
+    for(var i=0;i<Math.min(cand.length,10);i++){
+      var p=cand[i], ok=false;
+      try{ ok=await dbRpc('wms_os_auto_claim',{p_pedido:p.id}); }catch(_c){ ok=false; console.warn('[OS auto] trava',_c); }
       if(ok!==true) continue;
-      var r=null; try{ r=await wmsGerarListas('pedido_a_pedido',{auto:true,ids:[p.id]}); }catch(eG){ console.warn('[OS auto]',p.numero_curto,eG); }
+      window._osAutoErro=null;
+      var r=null; try{ r=await wmsGerarListas('pedido_a_pedido',{auto:true,ids:[p.id]}); }catch(eG){ console.warn('[OS auto]',p.numero_curto,eG); window._osAutoErro=eG&&eG.message||String(eG); }
       if(r&&r.criadas&&r.criadas.length){ var l=(wmsListasSeparacao||[]).find(function(x){return x.id===r.criadas[0];}); showToast('OS automática: '+(l&&l.numero_lista||'lista')+' · pedido '+(p.numero_curto||p.numero_pedido||'')+' liberado para o coletor','green'); }
-      else if(r&&r.pulados&&r.pulados.length) showToast('OS automática não gerada · '+String(r.pulados[0]).slice(0,140),'amber');
+      else showToast('OS automática não gerada · '+(p.numero_curto||p.numero_pedido||'')+' · '+String((r&&r.pulados&&r.pulados[0])||window._osAutoErro||'veja o pedido').slice(0,160),'amber');
     }
     if(typeof render==='function'&&/^wms-/.test(String(typeof curPage!=='undefined'?curPage:''))) render();
   } finally { _osAutoRodando=false; }
@@ -38921,7 +38930,7 @@ setInterval(function(){ wmsOsAutoTick(); },60000);
 async function wmsGerarListas(tipo,opts){
   // v1.0.1320: modo automático (OS automática ao importar e empenhar) — sem tela, sem mexer na seleção nem no modal do usuário
   const _auto=!!(opts&&opts.auto);
-  const portSaving=_auto?function(){}:window.portSaving, portProgress=_auto?function(){}:window.portProgress, portClose=_auto?function(){}:window.portClose, portModal=_auto?function(){}:window.portModal, portErr=_auto?function(m){ console.warn('[OS auto]',m); }:window.portErr;
+  const portSaving=_auto?function(){}:window.portSaving, portProgress=_auto?function(){}:window.portProgress, portClose=_auto?function(){}:window.portClose, portModal=_auto?function(){}:window.portModal, portErr=_auto?function(m){ console.warn('[OS auto]',m); window._osAutoErro=String(m||''); }:window.portErr;
   const ids=_auto?(opts.ids||[]):[...wmsPedSelecionados];
   const peds=wmsPedidos.filter(p=>ids.includes(p.id));
   if(!peds.length){portClose();return {criadas:[],pulados:[]};}
