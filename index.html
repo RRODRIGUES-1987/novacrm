@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1327 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1328 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1464,7 +1464,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1327';
+const APP_VERSION='v1.0.1328';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45127,7 +45127,7 @@ function wmsSaiView(){
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data inicial</div><input type="date" id="wsai-ini" value="'+ecomRelFmtISO(ini)+'"></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Data final</div><input type="date" id="wsai-fim" value="'+ecomRelFmtISO(hoje)+'"></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px"><b>OS</b> (uma ou várias)</div><input id="wsai-os" placeholder="ex.: 364, 365" style="width:140px"></div>'
-      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Tipo</div><select id="wsai-tipo"><option value="sintetico">Sintético (por produto)</option><option value="analitico">Analítico (por pedido)</option></select></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Tipo</div><select id="wsai-tipo"><option value="sintetico">Sintético (por produto)</option><option value="analitico">Analítico (por pedido e RG)</option></select></div>'
       +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Base</div><select id="wsai-base"><option value="importado">Importados (entrada)</option><option value="expedido">Embarcados (saída)</option></select></div>'
       +'<button class="btn btn-p btn-sm" onclick="wmsSaiGerar()">Gerar</button>'
     +'</div><div id="wsai-res"><div class="empty" style="padding:30px;text-align:center;color:var(--text3)">Defina o período e clique em Gerar.</div></div></div>';
@@ -45150,14 +45150,21 @@ async function wmsSaiGerar(){
       if(nums.length) return nums.indexOf(parseInt(String(p.numero_curto||'').replace(/\D/g,''),10))>=0;   // OS passa por cima do período
       var d=dataDe(p); return d&&(!ini||d>=ini)&&(!fim||d<=fim); });
     if(nums.length&&peds.length){ var ds=peds.map(dataDe).filter(Boolean).sort(); ini=ds[0]||ini; fim=ds[ds.length-1]||fim; }
-    var itens=[]; for(var k=0;k<peds.length;k+=150){ itens=itens.concat(await dbSelect('wms_pedido_itens','pedido_id=in.('+peds.slice(k,k+150).map(function(p){return p.id;}).join(',')+')&select=pedido_id,sku,descricao,quantidade,status')||[]); }
+    var itens=[]; for(var k=0;k<peds.length;k+=150){ itens=itens.concat(await dbSelect('wms_pedido_itens','pedido_id=in.('+peds.slice(k,k+150).map(function(p){return p.id;}).join(',')+')&select=id,pedido_id,sku,descricao,quantidade,status')||[]); }
+    // v1.0.1328: RG de cada saída (pelas reservas da caixa: uma linha por RG no analítico)
+    var resv=[], palRg={};
+    for(var k2=0;k2<peds.length;k2+=150){ resv=resv.concat(await dbSelect('wms_reservas','pedido_id=in.('+peds.slice(k2,k2+150).map(function(p){return p.id;}).join(',')+')&status=neq.cancelada&select=pedido_id,pedido_item_id,pallet_id,qtd')||[]); }
+    var pids=Array.from(new Set(resv.map(function(r){return r.pallet_id;}).filter(Boolean)));
+    for(var k3=0;k3<pids.length;k3+=150){ ((await dbSelect('wms_pallets','id=in.('+pids.slice(k3,k3+150).join(',')+')&select=id,rg'))||[]).forEach(function(x){ palRg[x.id]=x.rg; }); }
     var gran=ecomRelGran(ini,fim), cols=ecomRelCols(ini,fim,gran), colTotals={}, grand=0, agg={}, ord=[], ana=[];
     peds.forEach(function(p){ var dt=dataDe(p), bk=ecomRelBucket(dt,gran).key;
       itens.filter(function(i){ return i.pedido_id===p.id&&String(i.status||'')!=='cancelado'; }).forEach(function(i){
         var sku=String(i.sku||'').trim(), q=Number(i.quantidade)||0, kk=sku.toUpperCase(); if(!kk) return;
         if(!agg[kk]){ agg[kk]={sku:sku,descricao:String(i.descricao||'').trim(),cells:{},total:0}; ord.push(kk); }
         agg[kk].cells[bk]=(agg[kk].cells[bk]||0)+q; agg[kk].total+=q; colTotals[bk]=(colTotals[bk]||0)+q; grand+=q;
-        ana.push({data:dt,os:p.numero_curto||'',pedido:p.numero_pedido||'',dest:p.destinatario_nome||'',sku:sku,descricao:String(i.descricao||'').trim(),qtd:q}); }); });
+        var rs=resv.filter(function(r){ return r.pedido_item_id===i.id; }), base0={data:dt,os:p.numero_curto||'',pedido:p.numero_pedido||'',dest:p.destinatario_nome||'',sku:sku,descricao:String(i.descricao||'').trim()};
+        if(rs.length) rs.forEach(function(r){ ana.push(Object.assign({},base0,{rg:palRg[r.pallet_id]||'',qtd:Number(r.qtd)||0})); });
+        else ana.push(Object.assign({},base0,{rg:'',qtd:q})); }); });
     var pivot=ord.map(function(k){ return agg[k]; }).sort(function(a,b){ return b.total-a.total; });
     ana.sort(function(a,b){ return a.data<b.data?-1:a.data>b.data?1:(String(a.os).localeCompare(String(b.os))||a.sku.localeCompare(b.sku)); });
     var depNome=((clientes||[]).find(function(c){return c.id===dep;})||{}).nome||'';
@@ -45173,9 +45180,9 @@ function wmsSaiRender(){ var el=ge('wsai-res'), d=wmsSaiData; if(!el||!d) return
       +d.pivot.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 9px;position:sticky;left:0;background:var(--bg)"><b style="font-family:monospace">'+esc(r.sku)+'</b> '+esc(r.descricao)+'</td>'+d.cols.map(function(c){ return '<td style="padding:6px 9px;text-align:center">'+(r.cells[c.key]?n(r.cells[c.key]):'<span style="color:var(--text3)">·</span>')+'</td>'; }).join('')+'<td style="padding:6px 9px;text-align:center;font-weight:700">'+n(r.total)+'</td></tr>'; }).join('')
       +'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800"><td style="padding:8px 9px;position:sticky;left:0;background:var(--bg)">TOTAL</td>'+d.cols.map(function(c){ return '<td style="padding:8px 9px;text-align:center">'+n(d.colTotals[c.key])+'</td>'; }).join('')+'<td style="padding:8px 9px;text-align:center">'+n(d.grand)+'</td></tr></tfoot></table></div>';
   } else {
-    body='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px"><thead><tr style="background:var(--bg2);text-align:left"><th style="padding:7px 8px">Data</th><th style="padding:7px 8px">OS</th><th style="padding:7px 8px">Pedido</th><th style="padding:7px 8px">Destinatário</th><th style="padding:7px 8px">SKU</th><th style="padding:7px 8px">Produto</th><th style="padding:7px 8px;text-align:right">Qtd</th></tr></thead><tbody>'
-      +d.ana.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px">'+ecomRelDataBr(r.data)+'</td><td style="padding:5px 8px;font-family:monospace;font-weight:700">'+esc(r.os)+'</td><td style="padding:5px 8px">'+esc(r.pedido)+'</td><td style="padding:5px 8px">'+esc(r.dest)+'</td><td style="padding:5px 8px;font-family:monospace">'+esc(r.sku)+'</td><td style="padding:5px 8px">'+esc(r.descricao)+'</td><td style="padding:5px 8px;text-align:right">'+n(r.qtd)+'</td></tr>'; }).join('')
-      +'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800"><td style="padding:7px 8px" colspan="6">TOTAL</td><td style="padding:7px 8px;text-align:right">'+n(d.grand)+'</td></tr></tfoot></table></div>';
+    body='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px"><thead><tr style="background:var(--bg2);text-align:left"><th style="padding:7px 8px">Data</th><th style="padding:7px 8px">OS</th><th style="padding:7px 8px">Pedido</th><th style="padding:7px 8px">Destinatário</th><th style="padding:7px 8px">SKU</th><th style="padding:7px 8px">Produto</th><th style="padding:7px 8px">RG</th><th style="padding:7px 8px;text-align:right">Qtd</th></tr></thead><tbody>'
+      +d.ana.map(function(r){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 8px">'+ecomRelDataBr(r.data)+'</td><td style="padding:5px 8px;font-family:monospace;font-weight:700">'+esc(r.os)+'</td><td style="padding:5px 8px">'+esc(r.pedido)+'</td><td style="padding:5px 8px">'+esc(r.dest)+'</td><td style="padding:5px 8px;font-family:monospace">'+esc(r.sku)+'</td><td style="padding:5px 8px">'+esc(r.descricao)+'</td><td style="padding:5px 8px;font-family:monospace;font-weight:700">'+esc(r.rg||'—')+'</td><td style="padding:5px 8px;text-align:right">'+n(r.qtd)+'</td></tr>'; }).join('')
+      +'</tbody><tfoot><tr style="border-top:2px solid var(--accent);font-weight:800"><td style="padding:7px 8px" colspan="7">TOTAL</td><td style="padding:7px 8px;text-align:right">'+n(d.grand)+'</td></tr></tfoot></table></div>';
   }
   el.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:12px;color:var(--text3);margin-right:auto">'+esc(d.dep)+(d.os.length?' · OS '+d.os.join(', '):'')+' · '+d.nped+' pedido(s) · '+n(d.grand)+' peças · coluna '+ecomRelGranLbl(d.gran)+'</span><button class="btn btn-sm" onclick="wmsSaiPdf()">&#8595; PDF</button><button class="btn btn-sm" onclick="wmsSaiExcel()">&#8595; Excel</button></div>'+body; }
 function wmsSaiPdf(){ var d=wmsSaiData; if(!d) return; var n=function(v){ return Number(v||0).toLocaleString('pt-BR'); };
@@ -45183,7 +45190,7 @@ function wmsSaiPdf(){ var d=wmsSaiData; if(!d) return; var n=function(v){ return
   var sub=esc(d.dep)+' · Base: '+(d.base==='expedido'?'embarcados (data de saída)':'importados (data de entrada)')+(d.os.length?' · OS '+d.os.join(', '):'')+' · Período '+ecomRelDataBr(d.ini)+' a '+ecomRelDataBr(d.fim)+' · '+d.nped+' pedido(s) · '+n(d.grand)+' peças';
   var tbl=d.tipo==='sintetico'
     ?'<table><thead><tr><th>SKU / Produto</th>'+d.cols.map(function(c){ return '<th class="c">'+c.label+'</th>'; }).join('')+'<th class="c">Total</th></tr></thead><tbody>'+d.pivot.map(function(r){ return '<tr><td>'+esc(r.sku)+' '+esc(r.descricao)+'</td>'+d.cols.map(function(c){ return '<td class="c">'+(r.cells[c.key]?n(r.cells[c.key]):'')+'</td>'; }).join('')+'<td class="c"><b>'+n(r.total)+'</b></td></tr>'; }).join('')+'</tbody><tfoot><tr><td><b>TOTAL</b></td>'+d.cols.map(function(c){ return '<td class="c"><b>'+n(d.colTotals[c.key])+'</b></td>'; }).join('')+'<td class="c"><b>'+n(d.grand)+'</b></td></tr></tfoot></table>'
-    :'<table><thead><tr><th>Data</th><th>OS</th><th>Pedido</th><th>Destinatário</th><th>SKU</th><th>Produto</th><th class="c">Qtd</th></tr></thead><tbody>'+d.ana.map(function(r){ return '<tr><td>'+ecomRelDataBr(r.data)+'</td><td>'+esc(r.os)+'</td><td>'+esc(r.pedido)+'</td><td>'+esc(r.dest)+'</td><td>'+esc(r.sku)+'</td><td>'+esc(r.descricao)+'</td><td class="c">'+n(r.qtd)+'</td></tr>'; }).join('')+'</tbody><tfoot><tr><td colspan="6"><b>TOTAL</b></td><td class="c"><b>'+n(d.grand)+'</b></td></tr></tfoot></table>';
+    :'<table><thead><tr><th>Data</th><th>OS</th><th>Pedido</th><th>Destinatário</th><th>SKU</th><th>Produto</th><th>RG</th><th class="c">Qtd</th></tr></thead><tbody>'+d.ana.map(function(r){ return '<tr><td>'+ecomRelDataBr(r.data)+'</td><td>'+esc(r.os)+'</td><td>'+esc(r.pedido)+'</td><td>'+esc(r.dest)+'</td><td>'+esc(r.sku)+'</td><td>'+esc(r.descricao)+'</td><td>'+esc(r.rg||'')+'</td><td class="c">'+n(r.qtd)+'</td></tr>'; }).join('')+'</tbody><tfoot><tr><td colspan="7"><b>TOTAL</b></td><td class="c"><b>'+n(d.grand)+'</b></td></tr></tfoot></table>';
   var land=(d.tipo==='sintetico'&&d.cols.length>6)||d.tipo==='analitico';
   var html='<html><head><meta charset="utf-8"><title>'+titulo+'</title><style>@page{size:A4 '+(land?'landscape':'portrait')+';margin:10mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:10.5px}h1{font-size:16px;margin:0 0 2px}p{margin:0 0 8px;color:#444}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:3px 5px;text-align:left}th{background:#e8ebee}.c{text-align:center}tfoot td{background:#f2f4f6}</style></head><body><h1>'+titulo+'</h1><p>'+sub+'</p>'+tbl+'<p style="margin-top:8px;font-size:9px;color:#666">VERUS ERP · emitido em '+new Date().toLocaleString('pt-BR')+'</p></body></html>';
   var ifr=document.createElement('iframe'); ifr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(ifr);
@@ -45192,7 +45199,7 @@ function wmsSaiPdf(){ var d=wmsSaiData; if(!d) return; var n=function(v){ return
 async function wmsSaiExcel(){ var d=wmsSaiData; if(!d) return;
   try{ var XLSX=await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs'), aoa;
     if(d.tipo==='sintetico'){ aoa=[['SKU','Produto'].concat(d.cols.map(function(c){return c.label;})).concat(['Total'])].concat(d.pivot.map(function(r){ return [r.sku,r.descricao].concat(d.cols.map(function(c){return r.cells[c.key]||0;})).concat([r.total]); })); aoa.push(['TOTAL',''].concat(d.cols.map(function(c){return d.colTotals[c.key]||0;})).concat([d.grand])); }
-    else { aoa=[['Data','OS','Pedido','Destinatário','SKU','Produto','Qtd']].concat(d.ana.map(function(r){ return [ecomRelDataBr(r.data),r.os,r.pedido,r.dest,r.sku,r.descricao,r.qtd]; })); aoa.push(['','','','','','TOTAL',d.grand]); }
+    else { aoa=[['Data','OS','Pedido','Destinatário','SKU','Produto','RG','Qtd']].concat(d.ana.map(function(r){ return [ecomRelDataBr(r.data),r.os,r.pedido,r.dest,r.sku,r.descricao,r.rg||'',r.qtd]; })); aoa.push(['','','','','','','TOTAL',d.grand]); }
     var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),'Saída por item');
     XLSX.writeFile(wb,'saida_por_item_'+(d.dep||'wms').replace(/[^A-Za-z0-9]+/g,'_').slice(0,20)+'_'+d.ini+'_'+d.fim+'.xlsx');
   }catch(e){ showToast('Não consegui gerar o Excel: '+(e.message||e),'red'); } }
