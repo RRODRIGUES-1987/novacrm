@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1330 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1331 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1464,7 +1464,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1330';
+const APP_VERSION='v1.0.1331';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37725,7 +37725,8 @@ const COLETOR_FUNCS={
   embarcar:{key:'embarcar',label:'Embarcar',icon:'🚚',desc:'Conferência de embarque — bipar pallets na doca',abrir:'coletorEmbListas'},
   receber:{key:'receber',label:'Receber',icon:'📥',desc:'Receber por caixa: QR, código, RG',abrir:'coletorRecListas'},   // v1.0.1284
   armazenar:{key:'armazenar',label:'Armazenar',icon:'🏷',desc:'Guardar a caixa: RG e endereço',abrir:'coletorArmAbrir'},   // v1.0.1284
-  inventario:{key:'inventario',label:'Inventário',icon:'📋',desc:'Contar bipando endereço e produto',abrir:'coletorInvListas'}
+  inventario:{key:'inventario',label:'Inventário',icon:'📋',desc:'Contar bipando endereço e produto',abrir:'coletorInvListas'},
+  aprovar:{key:'aprovar',label:'Aprovações',icon:'🛡',desc:'Tratar conferências travadas (gestor)',abrir:'coletorAprovacoes'}   // v1.0.1331
   // futuro: mover/enderecar (empilhadeira):{...}
 };
 const COLETOR_ROLES={
@@ -37737,7 +37738,7 @@ const COLETOR_ROLES={
   // futuro: empilhadeira:['mover','enderecar']
 };
 function coletorRole(role){return !!COLETOR_ROLES[role];}
-function coletorFuncs(role){return (COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean);}
+function coletorFuncs(role){var L=(COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean); try{ if(L.length&&typeof wmsPodeAprovarConf==='function'&&wmsPodeAprovarConf()) L.push(COLETOR_FUNCS.aprovar); }catch(_p){} return L;}
 function coletorAbrirFunc(key){var f=COLETOR_FUNCS[key];if(f&&window[f.abrir])window[f.abrir]();}
 
 let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null,_colOperador=null,_colZxing=null,_colZxingLoading=null,_colSepDep='todos',_colSepFrente='todas';
@@ -38655,7 +38656,13 @@ async function sepDlgBipe(listaId,code){
 }
 
 // ── CONFERIR (reusa o fluxo de conferência/unitização existente) ──
-function coletorConfListas(){
+function coletorConfListas(){   // v1.0.1331: atualiza do banco e mostra com pesquisa
+  _colScanHandler=null;
+  coletorShow('Conferir',coletorFuncs(profile?.role).length>1?'coletorHome()':null,'<div style="padding:30px;text-align:center;color:var(--text3)">Buscando os pedidos…</div>');
+  coletorConfAtualizar().then(coletorConfListasRender);
+}
+function coletorConfFiltrar(v){ var q=String(v||'').toUpperCase().trim(); document.querySelectorAll('#col-content .col-conf-card').forEach(function(b){ b.style.display=(!q||String(b.dataset.busca||'').indexOf(q)>=0)?'':'none'; }); window._colConfBusca=v; }
+function coletorConfListasRender(){
   _colScanHandler=null;
   const cid=company?.id;
   const candidatos=wmsPedidos.filter(function(p){return p.company_id===cid&&['em_separacao','separado','em_conferencia','conferido'].includes(p.status)&&wmsConfsDoCliente(p.cliente_id).length>0&&wmsSeparacaoConcluidaPedido(p.id);});
@@ -38670,17 +38677,19 @@ function coletorConfListas(){
     html=lista.map(function(o){
       const cli=clientes.find(function(c){return c.id===o.p.cliente_id;});
       const badges=o.passos.map(function(t){const f=wmsConfsFeitas(o.p.id,t).length>0;return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:'+(f?'var(--green-bg)':'var(--bg2)')+';color:'+(f?'var(--green-text)':'var(--text3)')+'">'+(f?'✓':'○')+' '+t+'ª</span>';}).join(' ');
-      return '<button onclick="coletorConfAbrir(&apos;'+o.p.id+'&apos;,'+o.proxima+')" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
+      return '<button class="col-conf-card" data-busca="'+esc((wmsNumeroCurto(o.p)+' '+(o.p.numero_pedido||'')+' '+(o.p.destinatario_nome||'')+' '+((cli&&cli.nome)||'')).toUpperCase())+'" onclick="coletorConfAbrir(&apos;'+o.p.id+'&apos;,'+o.proxima+')" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
         +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:800">'+wmsNumeroCurto(o.p)+'</div><span style="font-size:11px;font-weight:700;color:var(--blue-text)">Conferir '+o.proxima+'ª</span></div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+((cli&&cli.nome)||'—')+'</div>'
         +'<div style="display:flex;gap:5px;margin-top:7px">'+badges+'</div></button>';
     }).join('');
   }
   const back=coletorFuncs(profile?.role).length>1?'coletorHome()':null;
-  coletorShow('Conferir',back,'<div style="font-size:13px;color:var(--text3);margin-bottom:12px">Selecione o pedido para conferir:</div>'+html);
+  coletorShow('Conferir',back,'<input id="col-conf-busca" placeholder="🔍 pedido, OS, cliente ou destinatário" value="'+esc(window._colConfBusca||'')+'" oninput="coletorConfFiltrar(this.value)" style="width:100%;padding:12px;font-size:15px;border:1px solid var(--border);border-radius:12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:13px;color:var(--text3)">Selecione o pedido para conferir:</span><button onclick="coletorConfListas()" style="border:1px solid var(--border);background:var(--bg);border-radius:8px;padding:5px 10px;font-size:12px">↻ atualizar</button></div>'+html);
+  if(window._colConfBusca) coletorConfFiltrar(window._colConfBusca);
 }
 function coletorConfScan(c){if(ge('conf-bipe'))wmsConfBipe(c);else if(ge('pal-bipe'))wmsPalletBipe(c);}
 function coletorConfAbrir(pedidoId,tipo){
+  var _pp=(wmsPedidos||[]).find(function(x){return x.id===pedidoId;}); if(_pp&&tipo<=2&&wmsConfPorPallet(_pp.cliente_id)){ coletorCP(pedidoId,tipo); return; }   // v1.0.1331
   wmsAbrirConferencia(pedidoId,tipo); // modal existente (z-index 200, acima do coletor)
   setTimeout(coletorConfInjetarCamera,120);
 }
@@ -54503,6 +54512,179 @@ function wmsPrismasPdfRender(lista,qrMap,unNome){
 // ══════════════════════════════════════════════════════════════════
 //  WMS · APROVAÇÕES DE CONFERÊNCIA (auditoria de divergências)
 // ══════════════════════════════════════════════════════════════════
+
+// ═══ v1.0.1331 · CONFERÊNCIA CEGA POR PALLET (1ª e 2ª) · trava na hora · liberação pelo gestor em Aprovações
+//   depositante com parametros.conf_por_pallet=true (Usiquímica). Bipa a etiqueta unitária do produto, informa a quantidade
+//   do pallet e segue para o próximo. Produto fora do pedido ou soma acima do pedido TRAVA (falta não trava: pode vir em outro pallet).
+//   Encerrar: previsto × realizado → ok libera; falta vira divergência pendente em Aprovações. Carga fechada (todos os pallets
+//   completos, sem picking) → já gera a unitização (3ª) e as etiquetas de embarque.
+var _cp={sessao:null,pedido:null,tipo:1,leituras:[],esperado:[],pend:null};
+function wmsCliParam(cliId,k){ var c=(clientes||[]).find(function(x){return x.id===cliId;}); var pr=c&&c.parametros; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr?pr[k]:undefined; }
+function wmsConfPorPallet(cliId){ return wmsCliParam(cliId,'conf_por_pallet')===true; }
+async function coletorCP(pedidoId,tipo){
+  var p=(wmsPedidos||[]).find(function(x){return x.id===pedidoId;}); if(!p){ showToast('Pedido não encontrado','red'); return; }
+  coletorShow('Conferência '+tipo+'ª · '+wmsNumeroCurto(p),'coletorConfListas()','<div style="padding:30px;text-align:center;color:var(--text3)">Abrindo a conferência…</div>');
+  try{
+    var its=await dbSelect('wms_pedido_itens','pedido_id=eq.'+p.id)||[]; wmsPedidoItens=(wmsPedidoItens||[]).filter(function(i){return i.pedido_id!==p.id;}).concat(its);
+    var S=await dbSelect('wms_conf_sessoes','pedido_id=eq.'+p.id+'&tipo=eq.'+tipo+'&status=in.(aberta,travada)&order=criado_em.desc&limit=1')||[];
+    var s=S[0];
+    if(tipo===2){ var c1=(await dbSelect('wms_conferencias','pedido_id=eq.'+p.id+'&tipo=eq.1&select=conferente_id,conferente_nome&order=created_at.desc&limit=1')||[])[0];
+      if(c1&&((c1.conferente_id&&c1.conferente_id===cu?.id&&!_colOperador)||(c1.conferente_nome&&c1.conferente_nome===coletorAutor()))){ showToast('A 2ª conferência precisa de outro conferente (a 1ª foi de '+c1.conferente_nome+')','red'); coletorConfListas(); return; } }
+    if(!s){ var r=await dbInsert('wms_conf_sessoes',{company_id:company.id,unit_id:p.unit_id||null,pedido_id:p.id,cliente_id:p.cliente_id,tipo:tipo,conferente_id:cu?.id||null,conferente_nome:coletorAutor()}); s=Array.isArray(r)?r[0]:r; }
+    var L=await dbSelect('wms_conf_pallet_leituras','sessao_id=eq.'+s.id+'&order=seq.asc,lido_em.asc')||[];
+    _cp={sessao:s,pedido:p,tipo:tipo,leituras:L,esperado:wmsItensEsperadosPedido(p.id),pend:null};
+    coletorCPRender();
+  }catch(e){ showToast('Não consegui abrir a conferência: '+(e.message||e),'red'); coletorConfListas(); }
+}
+function cpRealizado(){ var r={}; _cp.leituras.forEach(function(l){ if(l.status==='estornada') return; var k=String(l.sku||'').trim().toUpperCase(); r[k]=(r[k]||0)+(Number(l.quantidade)||0); }); return r; }
+function cpProxSeq(){ return _cp.leituras.reduce(function(a,l){ return Math.max(a,l.seq||0); },0)+1; }
+function cpProdutoDoCodigo(raw){
+  var cod=wmsNorm(wmsLeituraLimpa(raw)), p=_cp.pedido;
+  for(var i=0;i<_cp.esperado.length;i++){ var e=_cp.esperado[i], pr=wmsProdutoDe(e.produto_id,e.sku,p.cliente_id)||{};
+    if(wmsNorm(e.sku)===cod||(pr.ean&&wmsNorm(pr.ean)===cod)||(pr.ean_unitario&&wmsNorm(pr.ean_unitario)===cod)||(pr.codigo_barras&&wmsNorm(pr.codigo_barras)===cod)) return e;
+    try{ if(typeof wmsEtiquetaTipoCasa==='function'&&pr.id&&wmsEtiquetaTipoCasa(wmsLeituraLimpa(raw),pr)) return e; }catch(_t){} }
+  return null; }
+function coletorCPRender(){
+  var s=_cp.sessao, p=_cp.pedido, n=function(v){ return Number(v||0).toLocaleString('pt-BR'); };
+  if(s.status==='travada') return coletorCPTravada();
+  var seq=cpProxSeq(), pend=_cp.pend, lidos=_cp.leituras.filter(function(l){return l.status!=='estornada';});
+  var lista=lidos.length?lidos.slice().reverse().map(function(l){ return '<div style="display:flex;justify-content:space-between;padding:7px 2px;border-bottom:1px solid var(--border);font-size:13px"><span><b>Pallet '+l.seq+'</b> · <span style="font-family:monospace">'+esc(l.sku)+'</span></span><span style="font-weight:700">'+n(l.quantidade)+'</span></div>'; }).join(''):'<div style="color:var(--text3);font-size:12px;padding:8px 0">Nenhum pallet lido ainda.</div>';
+  var corpo=pend
+    ?'<div style="border:2px solid var(--blue-text);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--blue-bg)"><div style="font-size:11px;color:var(--text3)">PALLET '+seq+'</div><div style="font-size:18px;font-weight:800;font-family:monospace">'+esc(pend.sku)+'</div><div style="font-size:12px;color:var(--text2);margin-bottom:10px">'+esc(pend.descricao||'')+'</div>'
+      +'<div style="font-size:12px;font-weight:700;margin-bottom:4px">Quantidade neste pallet</div><input id="cp-qtd" type="number" inputmode="numeric" min="1" style="width:100%;font-size:28px;font-weight:800;text-align:center;padding:10px;border:2px solid var(--blue-text);border-radius:12px" onkeydown="if(event.key===&apos;Enter&apos;){event.preventDefault();coletorCPConfirmar();}">'
+      +'<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_cp.pend=null;coletorCPRender()" style="flex:1;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-weight:700">Cancelar</button><button onclick="coletorCPConfirmar()" style="flex:2;padding:14px;border:0;border-radius:12px;background:#1e3a8a;color:#fff;font-weight:800;font-size:15px">✓ Confirmar pallet '+seq+'</button></div></div>'
+    :coletorScanBox()+'<div style="font-size:14px;font-weight:800;margin:4px 0 10px;text-align:center">Pallet '+seq+' · bipe a etiqueta unitária do produto</div>';
+  coletorShow('Conferência '+_cp.tipo+'ª · '+wmsNumeroCurto(p),'coletorConfListas()',
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">'+esc(((clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}).nome||'')+(p.destinatario_nome?' · '+esc(p.destinatario_nome):'')+' · conferência cega</div>'
+    +corpo
+    +'<div style="font-size:12px;font-weight:700;color:var(--text2);margin:12px 0 4px">Lidos ('+lidos.length+' pallet'+(lidos.length===1?'':'s')+')</div>'+lista
+    +(!pend?'<button onclick="coletorCPEncerrar()" style="display:block;width:100%;margin-top:16px;padding:15px;border:2px solid #1e3a8a;border-radius:12px;background:var(--bg);color:#1e3a8a;font-weight:800;font-size:15px">Encerrar a carga</button>':''));
+  if(pend){ setTimeout(function(){ var q=ge('cp-qtd'); if(q) q.focus(); },60); _colScanHandler=null; }
+  else _colScanHandler=coletorCPBipe;
+}
+async function coletorCPBipe(raw){
+  var e=cpProdutoDoCodigo(raw);
+  if(!e){ try{ wmsBeep(true); }catch(_b){} if(navigator.vibrate) navigator.vibrate([200,80,200]); await coletorCPTravar('fora_pedido',{codigo:String(raw).trim()}); return; }
+  try{ wmsBeep(false); }catch(_b){}
+  _cp.pend={sku:e.sku,descricao:e.descricao,produto_id:e.produto_id,codigo:String(raw).trim()}; coletorCPRender();
+}
+async function coletorCPConfirmar(){
+  var pend=_cp.pend; if(!pend) return; var q=parseFloat(String(ge('cp-qtd')&&ge('cp-qtd').value||'').replace(',','.'));
+  if(!(q>0)){ showToast('Informe a quantidade do pallet','amber'); return; }
+  var k=String(pend.sku).trim().toUpperCase(), esp=(_cp.esperado.find(function(x){return String(x.sku).trim().toUpperCase()===k;})||{}).qtd||0, ja=cpRealizado()[k]||0, acima=(ja+q)>esp;
+  try{
+    var r=await dbInsert('wms_conf_pallet_leituras',{company_id:company.id,sessao_id:_cp.sessao.id,pedido_id:_cp.pedido.id,seq:cpProxSeq(),sku:pend.sku,produto_id:pend.produto_id||null,codigo_lido:pend.codigo,quantidade:q,status:acima?'excedente':'ok',lido_por:coletorAutor()});
+    _cp.leituras.push(Array.isArray(r)?r[0]:r); _cp.pend=null;
+    if(acima){ try{ wmsBeep(true); }catch(_b){} if(navigator.vibrate) navigator.vibrate([200,80,200]); await coletorCPTravar('acima_pedido',{sku:pend.sku,lido_pallet:q,seq:cpProxSeq()-1}); return; }
+    try{ wmsBeep(false); }catch(_b){} if(navigator.vibrate) navigator.vibrate(40); coletorCPRender();
+  }catch(e){ showToast('Não consegui gravar o pallet: '+(e.message||e),'red'); }
+}
+async function coletorCPTravar(motivo,det){
+  try{ await dbUpdate('wms_conf_sessoes',_cp.sessao.id,{status:'travada',trava_motivo:motivo,trava_detalhe:det,atualizado_em:new Date().toISOString()});
+    _cp.sessao.status='travada'; _cp.sessao.trava_motivo=motivo; _cp.sessao.trava_detalhe=det; }catch(e){ showToast('Erro ao travar: '+(e.message||e),'red'); }
+  coletorCPTravada(); }
+function coletorCPTravada(){
+  var s=_cp.sessao, d=s.trava_detalhe||{}; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(_e){ d={}; } }
+  var msg=s.trava_motivo==='fora_pedido'?'Produto NÃO é deste pedido'+(d.codigo?' · código lido '+esc(d.codigo):''):'Quantidade ACIMA do pedido · '+esc(d.sku||'')+(d.seq?' (pallet '+d.seq+')':'');
+  _colScanHandler=null;
+  coletorShow('Conferência travada','coletorConfListas()','<div style="border:2px solid var(--red-text);border-radius:14px;padding:16px;background:var(--red-bg);color:var(--red-text)"><div style="font-size:30px;line-height:1">⛔</div><div style="font-size:18px;font-weight:800;margin-top:6px">'+msg+'</div><div style="font-size:13px;margin-top:8px;color:var(--text)">Separe o que está sobrando e chame o gestor. Ele trata em <b>Aprovações</b> (no VERUS ou no coletor dele), informando que retirou a sobra da carga.</div></div>'
+    +(wmsPodeAprovarConf()?'<button onclick="wmsCpTratar(&apos;'+s.id+'&apos;,true)" style="display:block;width:100%;margin-top:14px;padding:15px;border:0;border-radius:12px;background:#1e3a8a;color:#fff;font-weight:800">Sou gestor · tratar agora</button>':'')
+    +'<button onclick="coletorCP(&apos;'+_cp.pedido.id+'&apos;,'+_cp.tipo+')" style="display:block;width:100%;margin-top:10px;padding:13px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-weight:700">↻ Verificar se já foi liberada</button>'); }
+async function coletorCPEncerrar(){
+  var p=_cp.pedido, real=cpRealizado(), linhas=[], falta=false, sobra=false;
+  _cp.esperado.forEach(function(e){ var k=String(e.sku).trim().toUpperCase(), r=real[k]||0; linhas.push({sku:e.sku,descricao:e.descricao,esperado:e.qtd,conferido:r}); if(r<e.qtd) falta=true; if(r>e.qtd) sobra=true; });
+  if(sobra){ showToast('Há quantidade acima do pedido: a conferência deve estar travada. Atualize.','red'); return; }
+  var resumo=linhas.map(function(l){ return l.sku+' · '+l.conferido+'/'+l.esperado+(l.conferido===l.esperado?' ✓':' FALTA '+(l.esperado-l.conferido)); }).join('\n');
+  if(!confirm('Encerrar a carga?\n\nPrevisto × realizado:\n'+resumo+(falta?'\n\nCom FALTA: o pedido fica bloqueado e vai para Aprovações.':'\n\nTudo certo: o pedido segue para a próxima etapa.'))) return;
+  try{
+    var divs=linhas.filter(function(l){return l.conferido!==l.esperado;}), qc=linhas.reduce(function(a,l){return a+l.conferido;},0), qe=linhas.reduce(function(a,l){return a+l.esperado;},0);
+    var cr=await dbInsert('wms_conferencias',{company_id:company.id,unit_id:p.unit_id||null,tipo:_cp.tipo,pedido_id:p.id,cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:coletorAutor(),
+      modo:'pallet_cega',resultado:falta?'divergencia':'ok',qtd_conferida:qc,qtd_esperada:qe,divergencias:falta?JSON.stringify(divs):null,auditoria_status:falta?'pendente':'ok',
+      observacao:_cp.leituras.filter(function(l){return l.status!=='estornada';}).length+' pallet(s) lido(s) · conferência cega por pallet'});
+    var conf=Array.isArray(cr)?cr[0]:cr; if(conf) wmsConferencias=[conf].concat(wmsConferencias||[]);
+    await dbUpdate('wms_conf_sessoes',_cp.sessao.id,{status:'encerrada',conferencia_id:conf&&conf.id||null,atualizado_em:new Date().toISOString()});
+    var confsCli=wmsConfsDoCliente(p.cliente_id), exig=confsCli.filter(function(t){return t<=2;});
+    var todas=!falta&&exig.every(function(t){ return t===_cp.tipo||wmsConfsFeitas(p.id,t).some(function(cf){return cf.auditoria_status!=='pendente'&&cf.resultado!=='divergencia';}); });
+    await dbUpdate('wms_pedidos',p.id,{status:todas?'conferido':'em_conferencia'}); p.status=todas?'conferido':'em_conferencia';
+    if(falta){ showToast('Carga com falta: pedido bloqueado e enviado para Aprovações.','amber'); coletorConfListas(); return; }
+    // carga fechada: todos os pallets lidos completos (qtd do pallet) → a conferência já vale como a 3ª
+    var lidos=_cp.leituras.filter(function(l){return l.status!=='estornada';});
+    var fechada=lidos.length>0&&lidos.every(function(l){ var pr=wmsProdutoDe(l.produto_id,l.sku,p.cliente_id), qp=wmsQtdPallet(pr); return qp&&Number(l.quantidade)===qp; });
+    if(todas&&fechada&&confsCli.indexOf(3)>=0&&!wmsConfsFeitas(p.id,3).length){ await cpUnitizarCargaFechada(p,lidos); return; }
+    showToast(todas?'Conferência OK · pedido conferido.':'Conferência OK · falta a '+(exig.find(function(t){return t!==_cp.tipo&&!wmsConfsFeitas(p.id,t).length;})||2)+'ª conferência.','green');
+    coletorConfListas();
+  }catch(e){ showToast('Não consegui encerrar: '+(e.message||e),'red'); }
+}
+async function cpUnitizarCargaFechada(p,lidos){
+  var cid=company.id, N=lidos.length, pallets=[];
+  for(var i=0;i<lidos.length;i++){ var l=lidos[i];
+    var numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'PLT'});
+    var pr=await dbInsert('wms_pallets_embarque',{company_id:cid,unit_id:p.unit_id||null,numero:numero,cliente_id:p.cliente_id,pedido_id:p.id,consolidado:false,status:'montado',tot_volumes:1,vol_num:i+1,vol_total:N,encerrado:true,etiqueta_codigo:'PLT|'+numero+'|'+p.id,owner_id:cu?.id||null,montado_por_nome:coletorAutor(),montado_em:new Date().toISOString()});
+    var pl=Array.isArray(pr)?pr[0]:pr; if(!pl) continue; pallets.push(pl); wmsPalletsEmbarque=[pl].concat(wmsPalletsEmbarque||[]);
+    var it=await dbInsert('wms_pallet_itens',{company_id:cid,pallet_id:pl.id,produto_id:l.produto_id||null,sku:l.sku,descricao:(_cp.esperado.find(function(e){return e.sku===l.sku;})||{}).descricao||null,quantidade:Number(l.quantidade),pedido_id:p.id});
+    if(it) wmsPalletItens=[Array.isArray(it)?it[0]:it].concat(wmsPalletItens||[]);
+    await dbInsert('wms_etiquetas',{company_id:cid,unit_id:p.unit_id||null,tipo:'embarque',codigo:pl.etiqueta_codigo,pallet_id:pl.id,pedido_id:p.id,cliente_id:p.cliente_id,
+      dados:JSON.stringify({pallet:pl.numero,vol:(i+1)+'/'+N,pedido:wmsNumeroCurto(p),cliente:((clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}).nome||'',itens:[{sku:l.sku,qtd:Number(l.quantidade)}]}),gerada_por:cu?.id||null,gerada_por_nome:coletorAutor()});
+  }
+  var c3=await dbInsert('wms_conferencias',{company_id:cid,unit_id:p.unit_id||null,tipo:3,pedido_id:p.id,cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:coletorAutor(),resultado:'ok',auditoria_status:'ok',observacao:'Carga fechada: '+N+' pallet(s) da conferência por pallet já unitizados (sem 3ª conferência)'});
+  if(c3) wmsConferencias=[Array.isArray(c3)?c3[0]:c3].concat(wmsConferencias||[]);
+  await dbUpdate('wms_pedidos',p.id,{unitizado:true}); p.unitizado=true;
+  showToast('Carga fechada: '+N+' etiqueta(s) de embarque geradas · cole uma em cada pallet','green');
+  try{ gerarEtiquetasEmbarquePedido(p.id); }catch(_g){}
+  coletorConfListas();
+}
+// ── Aprovações: conferências travadas (tratadas pelo gestor no VERUS ou no coletor) ──
+var _wmsTravadas=[];
+async function wmsAprovTravadasCarregar(){
+  var box=ge('wms-aprov-travadas'); if(!box) return;
+  try{ _wmsTravadas=await dbSelect('wms_conf_sessoes','company_id=eq.'+company.id+'&status=eq.travada&order=atualizado_em.asc')||[]; }catch(e){ box.innerHTML='<div style="color:var(--red-text);font-size:12px">Erro ao buscar as conferências travadas: '+esc(e.message||e)+'</div>'; return; }
+  if(!_wmsTravadas.length){ box.innerHTML=''; return; }
+  var pode=wmsPodeAprovarConf();
+  box.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--red-text);margin:4px 0 8px">⛔ Conferências travadas ('+_wmsTravadas.length+')</div>'+_wmsTravadas.map(function(s){
+    var p=(wmsPedidos||[]).find(function(x){return x.id===s.pedido_id;}), d=s.trava_detalhe||{}; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(_e){ d={}; } }
+    var cli=((clientes||[]).find(function(c){return c.id===s.cliente_id;})||{}).nome||'';
+    var msg=s.trava_motivo==='fora_pedido'?'Produto fora do pedido'+(d.codigo?' · código '+esc(d.codigo):''):'Quantidade acima do pedido · '+esc(d.sku||'')+(d.seq?' · pallet '+d.seq:'');
+    return '<div style="border:1px solid var(--red-text);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:var(--bg)"><div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-weight:700;font-size:14px">'+(p?wmsNumeroCurto(p):'pedido')+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+esc(cli)+'</span></div><div style="font-size:11px;color:var(--text3)">'+s.tipo+'ª conferência por pallet · '+esc(s.conferente_nome||'')+' · '+new Date(s.atualizado_em).toLocaleString('pt-BR')+'</div></div><span style="background:var(--red-bg);color:var(--red-text);font-size:10px;font-weight:700;padding:3px 10px;border-radius:99px;height:fit-content">travada</span></div>'
+      +'<div style="margin-top:8px;font-size:13px;font-weight:700;color:var(--red-text)">'+msg+'</div>'
+      +(pode?'<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-sm btn-primary" onclick="wmsCpTratar(&apos;'+s.id+'&apos;)">Tratar · retirei a sobra</button></div>':'<div style="margin-top:8px;font-size:11px;color:var(--text3)">Somente usuários com permissão de aprovação tratam.</div>')+'</div>'; }).join(''); }
+async function wmsCpTratar(sessaoId,doColetor){
+  if(!wmsPodeAprovarConf()){ showToast('Sem permissão para aprovar','red'); return; }
+  var S=await dbSelect('wms_conf_sessoes','id=eq.'+sessaoId)||[], s=S[0]; if(!s||s.status!=='travada'){ showToast('Esta conferência já foi liberada.','green'); if(doColetor) coletorCP(s?s.pedido_id:_cp.pedido.id,s?s.tipo:_cp.tipo); else wmsAprovTravadasCarregar(); return; }
+  var d=s.trava_detalhe||{}; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(_e){ d={}; } }
+  var retirada=0, L=[], leit=null;
+  if(s.trava_motivo==='acima_pedido'){
+    L=await dbSelect('wms_conf_pallet_leituras','sessao_id=eq.'+s.id+'&status=neq.estornada')||[];
+    var its=await dbSelect('wms_pedido_itens','pedido_id=eq.'+s.pedido_id+'&select=sku,quantidade')||[];
+    var k=String(d.sku||'').trim().toUpperCase(), esp=its.filter(function(i){return String(i.sku).trim().toUpperCase()===k;}).reduce(function(a,i){return a+(Number(i.quantidade)||0);},0);
+    var lido=L.filter(function(l){return String(l.sku).trim().toUpperCase()===k;}).reduce(function(a,l){return a+(Number(l.quantidade)||0);},0), sobra=Math.max(0,lido-esp);
+    leit=L.filter(function(l){return l.status==='excedente';}).sort(function(a,b){return (b.seq||0)-(a.seq||0);})[0];
+    var resp=prompt('Quantidade ACIMA do pedido em '+d.sku+'.\nPedido: '+esp+' · lido: '+lido+' · sobra: '+sobra+'\n\nInforme quanto foi RETIRADO da carga (a leitura do pallet '+(leit?leit.seq:'')+' é reduzida nessa quantidade):',String(sobra));
+    if(resp==null) return; retirada=parseFloat(String(resp).replace(',','.'))||0;
+    if(retirada<sobra&&!confirm('A retirada ('+retirada+') é menor que a sobra ('+sobra+'): a conferência vai travar de novo no encerramento. Continuar?')) return;
+  } else if(!confirm('Produto fora do pedido (código '+(d.codigo||'')+').\n\nConfirma que o produto foi RETIRADO da carga? A conferência é liberada para continuar.')) return;
+  try{
+    if(leit&&retirada>0){ var nq=Math.max(0,(Number(leit.quantidade)||0)-retirada); await dbUpdate('wms_conf_pallet_leituras',leit.id,{quantidade:nq,status:nq>0?'ok':'estornada',obs:'retirados '+retirada+' pelo gestor '+(profile?.full_name||cu?.email||'')}); }
+    var lib=(Array.isArray(s.liberacoes)?s.liberacoes:[]).concat([{em:new Date().toISOString(),por:profile?.full_name||cu?.email||'',motivo:s.trava_motivo,detalhe:d,retirado:retirada}]);
+    await dbUpdate('wms_conf_sessoes',s.id,{status:'aberta',trava_motivo:null,trava_detalhe:null,liberacoes:lib,atualizado_em:new Date().toISOString()});
+    showToast('Conferência liberada · o conferente continua de onde parou','green');
+    if(doColetor) coletorCP(s.pedido_id,s.tipo); else wmsAprovTravadasCarregar();
+  }catch(e){ showToast('Não consegui liberar: '+(e.message||e),'red'); }
+}
+function coletorAprovacoes(){
+  coletorShow('Aprovações',coletorFuncs(profile?.role).length>1?'coletorHome()':null,'<div id="wms-aprov-travadas"><div style="color:var(--text3);padding:20px;text-align:center">Buscando…</div></div><div style="font-size:12px;color:var(--text3);margin-top:10px">As divergências de encerramento (faltas) são aprovadas no VERUS, em WMS › Aprovações de conferência.</div>');
+  wmsAprovTravadasCarregar().then(function(){ var b=ge('wms-aprov-travadas'); if(b&&!b.innerHTML.trim()) b.innerHTML='<div style="text-align:center;color:var(--text3);padding:30px">Nenhuma conferência travada. ✓</div>'; }); }
+// lista "Conferir" com pesquisa e dados frescos do banco
+async function coletorConfAtualizar(){
+  try{ var cid=company.id;
+    var P=await dbSelect('wms_pedidos','company_id=eq.'+cid+'&status=in.(em_separacao,separado,em_conferencia,conferido)&order=updated_at.desc&limit=300')||[];
+    P.forEach(function(p){ var i=(wmsPedidos||[]).findIndex(function(x){return x.id===p.id;}); if(i>=0) wmsPedidos[i]=Object.assign({},wmsPedidos[i],p); else wmsPedidos.push(p); });
+    var ids=P.map(function(p){return p.id;});
+    for(var k=0;k<ids.length;k+=120){ var sl=ids.slice(k,k+120).join(',');
+      var T=await dbSelect('wms_tarefas_separacao','pedido_id=in.('+sl+')')||[]; T.forEach(function(t){ var j=(wmsTarefasSeparacao||[]).findIndex(function(x){return x.id===t.id;}); if(j>=0) wmsTarefasSeparacao[j]=t; else wmsTarefasSeparacao.push(t); });
+      var C=await dbSelect('wms_conferencias','pedido_id=in.('+sl+')')||[]; C.forEach(function(c){ if(!(wmsConferencias||[]).some(function(x){return x.id===c.id;})) wmsConferencias.push(c); }); }
+    window._wmsIxCache=null; try{ if(typeof wmsIxReset==='function') wmsIxReset(); }catch(_r){}
+  }catch(_e){}
+}
 function wmsPodeAprovarConf(){
   // permissão é camada de tela: admin sempre; demais precisam de pode_ver em wms-aprovacoes
   if((profile?.role||'')==='admin')return true;
@@ -54541,7 +54723,8 @@ function wmsAprovacoesConteudo(){
       </div>`:`<div style="margin-top:9px;font-size:11px;color:var(--text3)">Você não tem permissão para auditar. Solicite a um responsável.</div>`}
     </div>`;
   }).join('');
-  return `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
+  setTimeout(wmsAprovTravadasCarregar,30);   // v1.0.1331: conferências por pallet travadas
+  return `<div id="wms-aprov-travadas"></div><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
     ${rows||`<div class="empty"><p>Nenhuma conferência pendente de auditoria. ✓</p></div>`}`;
 }
 // Card de divergência de conferência de ENTRADA
