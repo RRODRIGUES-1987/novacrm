@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1331 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1332 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1450,6 +1450,10 @@ const ROLE_PRESETS={
   qualidade:['qual-documentos','rh-avaliacoes','rh-performance','rh-experiencia'],
   operacao:['wms-visao','wms-estoque','wms-enderecamento','wms-inventario','wms-clientes','wms-prismas','wms-produtos','wms-pedidos','wms-importar-pedidos','wms-separacao','wms-conferencia','wms-romaneio','wms-expedicao','wms-armazem','wms-operadores','wms-patio','wms-entradas','wms-romaneios-entrada','wms-aprovacoes','wms-tracking','ecom-torre','ecom-pedidos','ecom-produtos','ecom-checkout','ecom-romaneio','ecom-relatorios','rh-avaliacoes','rh-performance','rh-experiencia'],
   ecommerce:['ecom-checkout','ecom-romaneio'],
+  // v1.0.1332: Supervisor de operações — o WMS operacional inteiro + aprovações (travas, divergências) e funções restritas do checkout
+  supervisor_operacoes:['wms-visao','wms-estoque','wms-enderecamento','wms-inventario','wms-clientes','wms-prismas','wms-produtos','wms-pedidos','wms-importar-pedidos','wms-separacao','wms-conferencia','wms-romaneio','wms-expedicao','wms-armazem','wms-operadores','wms-patio','wms-entradas','wms-romaneios-entrada','wms-aprovacoes','wms-tracking','wms-relatorios','ecom-torre','ecom-pedidos','ecom-produtos','ecom-checkout','ecom-checkout-super','ecom-romaneio','ecom-relatorios','rh-avaliacoes','rh-performance','rh-experiencia'],
+  // v1.0.1332: Liderança de operações — trabalha no coletor (todas as funções) e trata as travas em Aprovações
+  lider_operacoes:['wms-aprovacoes','wms-conferencia','wms-separacao','ecom-checkout-super'],
   vendedor:['crm-dashboard','contatos','pipeline','tarefas','performance','propostas','aprovar-propostas','tarifario-padrao','representantes','renovacoes'],
   gestor:['financeiro-dashboard','faturamento','fat-programacao','fat-capas-digitar','fat-armazenagem','tabelas-tarifarias','contas-receber','contas-pagar','fin-relatorios','clientes','fornecedores','rh-avaliacoes','rh-performance','manut-preventivas','manut-apontamentos','manut-chamados','manut-abrir-chamado'], // legado
 };
@@ -1464,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1331';
+const APP_VERSION='v1.0.1332';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3613,7 +3617,7 @@ async function arLiberar(ctx){
     if(!r.ok||!j.access_token){ if(er) er.textContent='E-mail ou senha inválidos.'; return; }
     var pr=await fetch(SB_URL+'/rest/v1/profiles?id=eq.'+encodeURIComponent(j.user&&j.user.id)+'&select=role,full_name',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+j.access_token}});
     var pj=await pr.json().catch(function(){return [];}); var role=pj&&pj[0]&&pj[0].role;
-    if(['admin','gestor','adm'].indexOf(role)<0){ if(er) er.textContent='Este usuário não é supervisor (admin/gestor).'; return; }
+    if(['admin','gestor','adm','supervisor_operacoes','lider_operacoes'].indexOf(role)<0){ if(er) er.textContent='Este usuário não é supervisor nem liderança de operações.'; return; }
     var st=_ar[ctx]; if(st){ st.bloq=false; st.rec=[]; st.ult=''; }
     arRegistrar(ctx,null,'liberado',(pj[0].full_name||em));
     ge('ar-sup').remove(); showToast('Bipe liberado por '+(pj[0].full_name||em),'green');
@@ -28495,6 +28499,8 @@ function openModal(mode,id=null){
           <option value="portaria">Portaria</option>
           <option value="customer_service">Customer Service (portal, portaria, pátio e docas)</option>
           <option value="operacao">Operação</option>
+          <option value="supervisor_operacoes">Supervisor de operações</option>
+          <option value="lider_operacoes">Liderança de operações (coletor)</option>
           <option value="ecommerce">E-commerce (checkout/embarque)</option>
           <option value="separador">Separador (coletor)</option>
           <option value="conferente">Conferente (coletor)</option>
@@ -36339,8 +36345,8 @@ function wmsSelHint(sc){
   return '<div style="font-size:11px;font-weight:700;color:var(--blue-text);background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:7px 12px;margin-bottom:10px">Cards mostrando a sele\u00e7\u00e3o ('+n+' marcada(s)) \u00b7 <a href="javascript:void(0)" onclick="wmsSelClear(&apos;'+sc+'&apos;)" style="color:var(--blue-text);font-weight:800">limpar sele\u00e7\u00e3o</a></div>';
 }
 // v1.0.1044: separação do WMS — concluir e excluir várias listas de uma vez
-function wmsSepPodeConcluir(){ return podeFazer('wms-separacao','pode_editar',['admin','adm','gestor','operacao']); }
-function wmsSepPodeExcluir(){ return podeFazer('wms-separacao','pode_excluir',['admin','gestor']); }
+function wmsSepPodeConcluir(){ return podeFazer('wms-separacao','pode_editar',['admin','adm','gestor','operacao','supervisor_operacoes']); }
+function wmsSepPodeExcluir(){ return podeFazer('wms-separacao','pode_excluir',['admin','gestor','supervisor_operacoes']); }
 function wmsListasConcluirLote(){
   if(!wmsSepPodeConcluir()){ showToast('Sem permiss\u00e3o para concluir listas (WMS \u00b7 Separa\u00e7\u00e3o \u2192 Editar).','red'); return; }
   var ls=[..._wmsSel.sep].map(function(id){return wmsListasSeparacao.find(function(l){return l.id===id;});}).filter(Boolean);
@@ -37734,11 +37740,12 @@ const COLETOR_ROLES={
   recebedor:['receber','armazenar'],   // v1.0.1284
   separador:['separar'],
   conferente:['conferir','embarcar'],
-  inventariante:['inventario']          // só conta; não separa nem confere
+  inventariante:['inventario'],         // só conta; não separa nem confere
+  lider_operacoes:['separar','conferir','embarcar','receber','armazenar','inventario','aprovar']   // v1.0.1332
   // futuro: empilhadeira:['mover','enderecar']
 };
 function coletorRole(role){return !!COLETOR_ROLES[role];}
-function coletorFuncs(role){var L=(COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean); try{ if(L.length&&typeof wmsPodeAprovarConf==='function'&&wmsPodeAprovarConf()) L.push(COLETOR_FUNCS.aprovar); }catch(_p){} return L;}
+function coletorFuncs(role){var L=(COLETOR_ROLES[role]||[]).map(function(f){return COLETOR_FUNCS[f];}).filter(Boolean); try{ if(L.length&&L.indexOf(COLETOR_FUNCS.aprovar)<0&&typeof wmsPodeAprovarConf==='function'&&wmsPodeAprovarConf()) L.push(COLETOR_FUNCS.aprovar); }catch(_p){} return L;}
 function coletorAbrirFunc(key){var f=COLETOR_FUNCS[key];if(f&&window[f.abrir])window[f.abrir]();}
 
 let _colCamStream=null,_colCamRAF=null,_colCamOn=false,_colScanHandler=null,_colOperador=null,_colZxing=null,_colZxingLoading=null,_colSepDep='todos',_colSepFrente='todas';
@@ -43885,7 +43892,7 @@ async function wmsPedLiberarEmpenho(pedidoId){
 
 // ═══ v1.0.1171 · EXCLUSÃO LÓGICA DO PEDIDO WMS + CONTRA-ORDEM DE DEVOLUÇÃO AO ENDEREÇO ═══
 const WMS_PED_SEM_EXCLUSAO=['carregado','expedido','embarcado','faturado','faturada','finalizado','concluido','concluida'];
-function wmsPedPodeExcluirPerfil(){ return podeFazer('wms-pedidos','pode_excluir',['admin','gestor']); }
+function wmsPedPodeExcluirPerfil(){ return podeFazer('wms-pedidos','pode_excluir',['admin','gestor','supervisor_operacoes']); }
 function wmsPedBloqueioExclusao(p){
   if(!p) return 'pedido não encontrado';
   if(p.status==='excluido') return 'já excluído';
@@ -54588,7 +54595,8 @@ function coletorCPTravada(){
   var msg=s.trava_motivo==='fora_pedido'?'Produto NÃO é deste pedido'+(d.codigo?' · código lido '+esc(d.codigo):''):'Quantidade ACIMA do pedido · '+esc(d.sku||'')+(d.seq?' (pallet '+d.seq+')':'');
   _colScanHandler=null;
   coletorShow('Conferência travada','coletorConfListas()','<div style="border:2px solid var(--red-text);border-radius:14px;padding:16px;background:var(--red-bg);color:var(--red-text)"><div style="font-size:30px;line-height:1">⛔</div><div style="font-size:18px;font-weight:800;margin-top:6px">'+msg+'</div><div style="font-size:13px;margin-top:8px;color:var(--text)">Separe o que está sobrando e chame o gestor. Ele trata em <b>Aprovações</b> (no VERUS ou no coletor dele), informando que retirou a sobra da carga.</div></div>'
-    +(wmsPodeAprovarConf()?'<button onclick="wmsCpTratar(&apos;'+s.id+'&apos;,true)" style="display:block;width:100%;margin-top:14px;padding:15px;border:0;border-radius:12px;background:#1e3a8a;color:#fff;font-weight:800">Sou gestor · tratar agora</button>':'')
+    +(wmsPodeAprovarConf()?'<button onclick="wmsCpTratar(&apos;'+s.id+'&apos;,true)" style="display:block;width:100%;margin-top:14px;padding:15px;border:0;border-radius:12px;background:#1e3a8a;color:#fff;font-weight:800">Sou líder/supervisor · tratar agora</button>'
+      :'<button onclick="cpAutorizarSenha(&apos;'+s.id+'&apos;)" style="display:block;width:100%;margin-top:14px;padding:15px;border:0;border-radius:12px;background:#1e3a8a;color:#fff;font-weight:800">🔑 Liberar com a senha do líder</button>')
     +'<button onclick="coletorCP(&apos;'+_cp.pedido.id+'&apos;,'+_cp.tipo+')" style="display:block;width:100%;margin-top:10px;padding:13px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-weight:700">↻ Verificar se já foi liberada</button>'); }
 async function coletorCPEncerrar(){
   var p=_cp.pedido, real=cpRealizado(), linhas=[], falta=false, sobra=false;
@@ -54647,8 +54655,20 @@ async function wmsAprovTravadasCarregar(){
     return '<div style="border:1px solid var(--red-text);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:var(--bg)"><div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-weight:700;font-size:14px">'+(p?wmsNumeroCurto(p):'pedido')+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+esc(cli)+'</span></div><div style="font-size:11px;color:var(--text3)">'+s.tipo+'ª conferência por pallet · '+esc(s.conferente_nome||'')+' · '+new Date(s.atualizado_em).toLocaleString('pt-BR')+'</div></div><span style="background:var(--red-bg);color:var(--red-text);font-size:10px;font-weight:700;padding:3px 10px;border-radius:99px;height:fit-content">travada</span></div>'
       +'<div style="margin-top:8px;font-size:13px;font-weight:700;color:var(--red-text)">'+msg+'</div>'
       +(pode?'<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-sm btn-primary" onclick="wmsCpTratar(&apos;'+s.id+'&apos;)">Tratar · retirei a sobra</button></div>':'<div style="margin-top:8px;font-size:11px;color:var(--text3)">Somente usuários com permissão de aprovação tratam.</div>')+'</div>'; }).join(''); }
-async function wmsCpTratar(sessaoId,doColetor){
-  if(!wmsPodeAprovarConf()){ showToast('Sem permissão para aprovar','red'); return; }
+// v1.0.1332: o líder/supervisor libera no coletor do conferente com o e-mail e a senha dele (sem trocar a sessão)
+function cpAutorizarSenha(sessaoId){
+  portModal('Liberação pelo líder','<div style="font-size:13px;color:var(--text2);margin-bottom:8px">Líder ou supervisor de operações: entre com o seu usuário para tratar a trava.</div><input class="fi" id="cpa-em" type="email" placeholder="e-mail" style="margin-bottom:8px"><input class="fi" id="cpa-pw" type="password" placeholder="senha"><div id="cpa-er" style="color:var(--red-text);font-size:12px;margin-top:6px"></div>','cpAutorizarSenhaOk(&apos;'+sessaoId+'&apos;)',{saveLabel:'Validar',width:'380px'}); }
+async function cpAutorizarSenhaOk(sessaoId){
+  var em=(ge('cpa-em')||{}).value||'', pw=(ge('cpa-pw')||{}).value||'', er=ge('cpa-er'); if(!em||!pw){ if(er) er.textContent='Informe e-mail e senha.'; return; }
+  try{ var r=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify({email:em,password:pw})});
+    var j=await r.json().catch(function(){return {};}); if(!r.ok||!j.access_token){ if(er) er.textContent='E-mail ou senha inválidos.'; return; }
+    var pr=await fetch(SB_URL+'/rest/v1/profiles?id=eq.'+encodeURIComponent(j.user&&j.user.id)+'&select=role,full_name',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+j.access_token}});
+    var pj=await pr.json().catch(function(){return [];}), role=pj&&pj[0]&&pj[0].role;
+    if(['admin','supervisor_operacoes','lider_operacoes','gestor'].indexOf(role)<0){ if(er) er.textContent='Este usuário não é líder nem supervisor de operações.'; return; }
+    portClose(); wmsCpTratar(sessaoId,true,{nome:(pj[0].full_name||em)});
+  }catch(e){ if(er) er.textContent='Não consegui validar: '+(e.message||e); } }
+async function wmsCpTratar(sessaoId,doColetor,aut){
+  if(!aut&&!wmsPodeAprovarConf()){ showToast('Sem permissão para aprovar','red'); return; }
   var S=await dbSelect('wms_conf_sessoes','id=eq.'+sessaoId)||[], s=S[0]; if(!s||s.status!=='travada'){ showToast('Esta conferência já foi liberada.','green'); if(doColetor) coletorCP(s?s.pedido_id:_cp.pedido.id,s?s.tipo:_cp.tipo); else wmsAprovTravadasCarregar(); return; }
   var d=s.trava_detalhe||{}; if(typeof d==='string'){ try{ d=JSON.parse(d); }catch(_e){ d={}; } }
   var retirada=0, L=[], leit=null;
@@ -54663,8 +54683,8 @@ async function wmsCpTratar(sessaoId,doColetor){
     if(retirada<sobra&&!confirm('A retirada ('+retirada+') é menor que a sobra ('+sobra+'): a conferência vai travar de novo no encerramento. Continuar?')) return;
   } else if(!confirm('Produto fora do pedido (código '+(d.codigo||'')+').\n\nConfirma que o produto foi RETIRADO da carga? A conferência é liberada para continuar.')) return;
   try{
-    if(leit&&retirada>0){ var nq=Math.max(0,(Number(leit.quantidade)||0)-retirada); await dbUpdate('wms_conf_pallet_leituras',leit.id,{quantidade:nq,status:nq>0?'ok':'estornada',obs:'retirados '+retirada+' pelo gestor '+(profile?.full_name||cu?.email||'')}); }
-    var lib=(Array.isArray(s.liberacoes)?s.liberacoes:[]).concat([{em:new Date().toISOString(),por:profile?.full_name||cu?.email||'',motivo:s.trava_motivo,detalhe:d,retirado:retirada}]);
+    if(leit&&retirada>0){ var nq=Math.max(0,(Number(leit.quantidade)||0)-retirada); await dbUpdate('wms_conf_pallet_leituras',leit.id,{quantidade:nq,status:nq>0?'ok':'estornada',obs:'retirados '+retirada+' · liberado por '+((aut&&aut.nome)||profile?.full_name||cu?.email||'')}); }
+    var lib=(Array.isArray(s.liberacoes)?s.liberacoes:[]).concat([{em:new Date().toISOString(),por:(aut&&aut.nome)||profile?.full_name||cu?.email||'',no_coletor_de:aut?coletorAutor():null,motivo:s.trava_motivo,detalhe:d,retirado:retirada}]);
     await dbUpdate('wms_conf_sessoes',s.id,{status:'aberta',trava_motivo:null,trava_detalhe:null,liberacoes:lib,atualizado_em:new Date().toISOString()});
     showToast('Conferência liberada · o conferente continua de onde parou','green');
     if(doColetor) coletorCP(s.pedido_id,s.tipo); else wmsAprovTravadasCarregar();
