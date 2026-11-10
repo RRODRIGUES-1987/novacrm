@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1329 | Gerado: 2026-11-09 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1330 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1464,7 +1464,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1329';
+const APP_VERSION='v1.0.1330';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -39003,6 +39003,13 @@ async function wmsGerarListas(tipo,opts){
           // v1.0.1272: RG = UMA CAIXA. Agrupa as reservas do pedido por RG (a mesma caixa pode atender mais de uma linha da OC):
           //   reservas do pedido somam a caixa inteira → 1 tarefa CAIXA (1 bipe do RG) com a quantidade total;
           //   retirada parcial → pacotes (o fator do produto é o tamanho do PACOTE dentro da caixa).
+          // v1.0.1330: peças por pacote lidas do BANCO na hora (a tela da OS automática pode não ter o cadastro atualizado na memória):
+          //            sem isso, a retirada parcial virava UMA tarefa com tudo e o coletor baixava os dois pacotes num bipe só
+          const _fat={};
+          try{ const _pids=[...new Set(itens.map(x=>x.produto_id).filter(Boolean))], _skus=[...new Set(itens.map(x=>String(x.sku||'').trim()).filter(Boolean))];
+            let _pr=[]; if(_pids.length) _pr=_pr.concat(await dbSelect('wms_produtos','id=in.('+_pids.join(',')+')&select=id,sku,fator_conversao')||[]);
+            if(_skus.length) _pr=_pr.concat(await dbSelect('wms_produtos','cliente_id=eq.'+p.cliente_id+'&sku=in.('+_skus.map(x=>'"'+x.replace(/"/g,'')+'"').join(',')+')&select=id,sku,fator_conversao')||[]);
+            _pr.forEach(x=>{ if(x.id) _fat['id:'+x.id]=Number(x.fator_conversao)||0; if(x.sku) _fat['sku:'+String(x.sku).trim().toUpperCase()]=Number(x.fator_conversao)||0; }); }catch(_f){}
           const porCont={};
           res.forEach(r=>{ const k=r.conteudo_id||('pal-'+r.pallet_id); (porCont[k]=porCont[k]||[]).push(r); });
           Object.keys(porCont).forEach(k=>{
@@ -39013,7 +39020,7 @@ async function wmsGerarListas(tipo,opts){
             if(c.qtd_fiscal!=null && tot>=Number(c.qtd_fiscal)){ tarefas.push({it:it0,end,frente:null,pallet_id:r0.pallet_id,reserva_id:r0.id,tipo_volume:'pallet',quantidade:tot,ordem:tarefas.length+1}); return; }   // caixa fechada = 1 bipe do RG
             rr.forEach(r=>{
               const itR=itens.find(x=>x.id===r.pedido_item_id)||it0;
-              const prodIt=wmsProdutoDe(itR.produto_id,itR.sku,p.cliente_id), pac=Number(prodIt&&prodIt.fator_conversao)||0;   // peças por pacote
+              const prodIt=wmsProdutoDe(itR.produto_id,itR.sku,p.cliente_id), pac=_fat['id:'+itR.produto_id]||_fat['sku:'+String(itR.sku||'').trim().toUpperCase()]||Number(prodIt&&prodIt.fator_conversao)||0;   // peças por pacote (banco primeiro)
               const base={it:itR,end,frente:null,pallet_id:r.pallet_id,reserva_id:r.id};
               if(pac>1 && Number(r.qtd)>=pac){ const n=Math.floor(Number(r.qtd)/pac), resto=+(Number(r.qtd)-n*pac).toFixed(4);
                 for(let m=0;m<n;m++) tarefas.push({...base,tipo_volume:'fracao',quantidade:pac,ordem:tarefas.length+1});
