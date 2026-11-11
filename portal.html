@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.11';   // v1.8.11: ver a DANFE enviada · unidade de armazenagem do depositante (caixas/pallets)
+const PORTAL_VERSION = 'v1.8.12';   // v1.8.12: pedidos carregados no quadro · DANFE casada pelo XML do mesmo envio · rastreabilidade por caixa/pacote
+// v1.8.11: ver a DANFE enviada · unidade de armazenagem do depositante (caixas/pallets)
 // v1.8.10: planilha da CASCO → UM pedido por número de separação (não quebra mais por OV)
 // v1.8.9: editar agendamento, incluir/retirar pedidos (no agendamento e pelo quadro de pedidos)
 // v1.8.8: detalhe do pedido com a RASTREABILIDADE (leituras por etapa, intervalos da bancada e do embarque, relatório em PDF)
@@ -4605,13 +4606,17 @@ window.nfEnviar = async function(files, pedidoId){
   }
   for(const f of pdfs){
     try{
-      let ch = await nfChaveDoPdf(f); const porNome = !ch && chavePorBase[nfBase(f.name)];
-      if(!ch) ch = porNome || null;
+      let ch = await nfChaveDoPdf(f);
+      const _xmls = Object.values(chavePorBase), _nome = chavePorBase[nfBase(f.name)];
+      if(_nome) ch = _nome;                                                     // v1.8.12: o XML de mesmo nome manda
+      else if(_xmls.length===1 && pdfs.length===1) ch = _xmls[0];               // um XML e um PDF no mesmo envio: são da mesma nota
+      else if(ch && _xmls.length && _xmls.indexOf(ch)<0 && _xmls.length===1) ch = _xmls[0];
       if(!ch) throw new Error('não encontrei a chave de acesso no PDF — envie junto com o XML da mesma nota (mesmo nome de arquivo)');
       const path = `${state.depositanteId}/danfe/${ch}.pdf`;
       const { error:eU } = await sb.storage.from('portal-anexos').upload(path, f, { upsert:true, contentType:'application/pdf' });
       if(eU) throw new Error('falha ao guardar o PDF: '+eU.message);
-      const { data, error } = await sb.rpc('portal_nf_danfe', { p_chave: ch, p_path: path }); if(error) throw error;
+      let { data, error } = await sb.rpc('portal_nf_danfe', { p_chave: ch, p_path: path }); if(error) throw error;
+      if(data && !data.ligada && pedidoId){ const r2 = await sb.rpc('portal_nf_danfe_pedido', { p_pedido: pedidoId, p_path: path }); if(!r2.error && r2.data) data = r2.data; }   // v1.8.12
       out.push(`DANFE ${esc(data && data.numero || ch.slice(25,34).replace(/^0+/,''))}: ${data && data.ligada ? '<span style="color:#4d7a1a">guardada no pedido '+esc(data.pedido||'')+'</span>' : '<span class="hint">guardada — fica no pedido assim que a nota for ligada</span>'}`);
     }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
@@ -4686,17 +4691,22 @@ if(typeof window.esc!=='function') window.esc = s => String(s==null?'':s).replac
   document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') portalVerCheck(false); });
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ini); else ini();
 })();
+window.portalVerCarregados = async function(on){   // v1.8.12
+  state.verCarregados = !!on;
+  if(on){ try{ const r = await sb.rpc('portal_pedidos_carregados'); state.volSaidos = (r && !r.error && r.data) || []; if(r&&r.error) toast('Não consegui buscar os carregados: '+r.error.message); }catch(e){ state.volSaidos = []; } }
+  renderVolFat();
+};
 window.renderVolFat = function(){
   // v1.7.9: no portal real, some com os filtros do demo (Recentes, Matéria-prima, Acabado, OTIF…) e com a lista vazia de pedidos digitados
   if(!DEMO){ const ch=$('pedChips'); if(ch) ch.classList.add('hide'); const lp=$('listaPed'); if(lp) lp.classList.toggle('hide', !(state.pedidos||[]).length); }
   const box = $('volFat'); if(!box) return;
-  const L = state.volFat || []; if(!L.length){ box.classList.add('hide'); return; }
+  const L = (state.volFat || []).concat(state.verCarregados ? (state.volSaidos||[]) : []); if(!L.length && !state.verCarregados){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
-    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span></div>
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span><label style="margin-left:auto;font-weight:500;font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${state.verCarregados?'checked':''} onchange="portalVerCarregados(this.checked)"> mostrar carregados (60 dias)</label></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
-    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
+    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={carregado:['carregado','#e5e7eb','#374151'],em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
       const dt = new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
