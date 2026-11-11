@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1332 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1334 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1332';
+const APP_VERSION='v1.0.1334';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38675,15 +38675,15 @@ function coletorConfListasRender(){
   const candidatos=wmsPedidos.filter(function(p){return p.company_id===cid&&['em_separacao','separado','em_conferencia','conferido'].includes(p.status)&&wmsConfsDoCliente(p.cliente_id).length>0&&wmsSeparacaoConcluidaPedido(p.id);});
   const lista=candidatos.map(function(p){
     const passos=wmsConfsDoCliente(p.cliente_id).filter(function(t){return t<=3;});
-    const proxima=passos.find(function(t){return wmsConfsFeitas(p.id,t).length===0;});
+    const proxima=passos.find(function(t){return wmsConfsFeitas(p.id,t).filter(function(c){return c.auditoria_status!=='rejeitada';}).length===0;});   // v1.0.1333: rejeitada = refazer
     return {p:p,proxima:proxima,passos:passos};
-  }).filter(function(o){return o.proxima;});
+  }).filter(function(o){ return o.proxima&&!(wmsConferencias||[]).some(function(c){ return c.pedido_id===o.p.id&&c.tipo<=2&&c.auditoria_status==='pendente'; }); });   // v1.0.1333: divergência pendente bloqueia a próxima
   let html;
   if(!lista.length){html='<div style="text-align:center;color:var(--text3);padding:40px 16px">Nenhum pedido aguardando conferência.</div>';}
   else{
     html=lista.map(function(o){
       const cli=clientes.find(function(c){return c.id===o.p.cliente_id;});
-      const badges=o.passos.map(function(t){const f=wmsConfsFeitas(o.p.id,t).length>0;return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:'+(f?'var(--green-bg)':'var(--bg2)')+';color:'+(f?'var(--green-text)':'var(--text3)')+'">'+(f?'✓':'○')+' '+t+'ª</span>';}).join(' ');
+      const badges=o.passos.map(function(t){const f=wmsConfsFeitas(o.p.id,t).filter(function(c){return c.auditoria_status!=='rejeitada';}).length>0;return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;background:'+(f?'var(--green-bg)':'var(--bg2)')+';color:'+(f?'var(--green-text)':'var(--text3)')+'">'+(f?'✓':'○')+' '+t+'ª</span>';}).join(' ');
       return '<button class="col-conf-card" data-busca="'+esc((wmsNumeroCurto(o.p)+' '+(o.p.numero_pedido||'')+' '+(o.p.destinatario_nome||'')+' '+((cli&&cli.nome)||'')).toUpperCase())+'" onclick="coletorConfAbrir(&apos;'+o.p.id+'&apos;,'+o.proxima+')" style="display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer">'
         +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:15px;font-weight:800">'+wmsNumeroCurto(o.p)+'</div><span style="font-size:11px;font-weight:700;color:var(--blue-text)">Conferir '+o.proxima+'ª</span></div>'
         +'<div style="font-size:12px;color:var(--text3);margin-top:2px">'+((cli&&cli.nome)||'—')+'</div>'
@@ -38919,7 +38919,7 @@ function wmsGerarListasModal(){
 //     Roda em qualquer sessão da Torre com o WMS carregado; a trava no banco (wms_os_auto_claim) impede duas telas de gerar a mesma OS.
 var _osAutoRodando=false;
 // v1.0.1325: o pedido do portal chega já EMPENHADO (não só 'importado'): entra qualquer pedido ainda sem lista e fora destas situações
-var WMS_OS_AUTO_FORA=['em_separacao','separado','conferido','em_conferencia','em_romaneio','expedido','embarcado','carregado','faturado','concluido','cancelado','excluido','aguardando_saldo'];
+var WMS_OS_AUTO_FORA=['aguardando_aprovacao','ajustado','ajuste_recusado','em_separacao','separado','conferido','em_conferencia','em_romaneio','expedido','embarcado','carregado','faturado','concluido','cancelado','excluido','aguardando_saldo'];
 function wmsOsAutoClientes(){ return (clientes||[]).filter(function(c){ var pr=c.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr.os_automatica===true; }).map(function(c){return c.id;}); }
 async function wmsOsAutoTick(manual){
   // v1.0.1326: busca os candidatos NO BANCO (o pedido que chega pelo portal ainda não está na memória da tela),
@@ -39165,6 +39165,9 @@ const WMS_PED_STATUS={
   em_romaneio:{l:'Em Romaneio',c:'#ec4899',bg:'rgba(236,72,153,.12)'},
   expedido:{l:'Expedido',c:'#22c55e',bg:'rgba(34,197,94,.12)'},
   cancelado:{l:'Cancelado',c:'#ef4444',bg:'rgba(239,68,68,.12)'},
+  aguardando_aprovacao:{l:'Ajuste · aguardando aprovação',c:'#b45309',bg:'rgba(180,83,9,.12)'},   // v1.0.1334
+  ajustado:{l:'Ajuste · baixado',c:'#475569',bg:'rgba(71,85,105,.12)'},
+  ajuste_recusado:{l:'Ajuste · recusado',c:'#9f1239',bg:'rgba(159,18,57,.12)'},
 };
 let wmsPedFiltroStatus='', wmsPedFiltroCliente='', wmsPedFiltroDe='', wmsPedFiltroAte='';
 
@@ -43650,7 +43653,7 @@ function rWmsPedidos_i(){
     return `<button onclick="wmsPedFiltroStatus='${st}';render()" style="border:1.5px solid ${ativo?'var(--text)':'var(--border)'};background:${ativo?'var(--text)':'transparent'};color:${ativo?'#fff':'var(--text2)'};font-size:11px;font-weight:600;padding:5px 12px;border-radius:99px;cursor:pointer;white-space:nowrap">${lbl}</button>`;
   }).join('');
 
-  return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm" onclick="wmsImportarPedidosModal()">\u{1F4E5} Importar pedidos</button></div>${cards}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
+  return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm" onclick="wmsNovoPedidoModal()">＋ Novo pedido</button><button class="btn btn-sm" onclick="wmsImportarPedidosModal()">\u{1F4E5} Importar pedidos</button></div>${cards}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
   <div class="sechdr" style="gap:10px">
     <select class="fi" id="wms-ped-cli" onchange="wmsPedFiltroCliente=this.value;render()" style="height:36px;width:auto;min-width:200px">
       <option value="">Todos os depositantes</option>${optCli}
@@ -54612,14 +54615,14 @@ async function coletorCPEncerrar(){
     var conf=Array.isArray(cr)?cr[0]:cr; if(conf) wmsConferencias=[conf].concat(wmsConferencias||[]);
     await dbUpdate('wms_conf_sessoes',_cp.sessao.id,{status:'encerrada',conferencia_id:conf&&conf.id||null,atualizado_em:new Date().toISOString()});
     var confsCli=wmsConfsDoCliente(p.cliente_id), exig=confsCli.filter(function(t){return t<=2;});
-    var todas=!falta&&exig.every(function(t){ return t===_cp.tipo||wmsConfsFeitas(p.id,t).some(function(cf){return cf.auditoria_status!=='pendente'&&cf.resultado!=='divergencia';}); });
+    var todas=!falta&&exig.every(function(t){ return t===_cp.tipo||wmsConfsFeitas(p.id,t).some(function(cf){return cf.auditoria_status!=='pendente'&&cf.auditoria_status!=='rejeitada';}); });
     await dbUpdate('wms_pedidos',p.id,{status:todas?'conferido':'em_conferencia'}); p.status=todas?'conferido':'em_conferencia';
     if(falta){ showToast('Carga com falta: pedido bloqueado e enviado para Aprovações.','amber'); coletorConfListas(); return; }
     // carga fechada: todos os pallets lidos completos (qtd do pallet) → a conferência já vale como a 3ª
     var lidos=_cp.leituras.filter(function(l){return l.status!=='estornada';});
     var fechada=lidos.length>0&&lidos.every(function(l){ var pr=wmsProdutoDe(l.produto_id,l.sku,p.cliente_id), qp=wmsQtdPallet(pr); return qp&&Number(l.quantidade)===qp; });
     if(todas&&fechada&&confsCli.indexOf(3)>=0&&!wmsConfsFeitas(p.id,3).length){ await cpUnitizarCargaFechada(p,lidos); return; }
-    showToast(todas?'Conferência OK · pedido conferido.':'Conferência OK · falta a '+(exig.find(function(t){return t!==_cp.tipo&&!wmsConfsFeitas(p.id,t).length;})||2)+'ª conferência.','green');
+    showToast(todas?'Conferência OK · pedido conferido.':'Conferência OK · falta a '+(exig.find(function(t){return t!==_cp.tipo&&!wmsConfsFeitas(p.id,t).filter(function(c){return c.auditoria_status!=='rejeitada';}).length;})||2)+'ª conferência.','green');
     coletorConfListas();
   }catch(e){ showToast('Não consegui encerrar: '+(e.message||e),'red'); }
 }
@@ -54705,6 +54708,92 @@ async function coletorConfAtualizar(){
     window._wmsIxCache=null; try{ if(typeof wmsIxReset==='function') wmsIxReset(); }catch(_r){}
   }catch(_e){}
 }
+
+// ═══ v1.0.1334 · NOVO PEDIDO MANUAL · tipo AJUSTE DE SALDO (baixa direta por RG, aprovação só do diretor, sem portal e sem cobrança)
+var WMS_DIRETOR_EMAIL='robson.rodrigues@mklogistica.com';
+function wmsEhDiretor(){ return String(cu&&cu.email||'').toLowerCase()===WMS_DIRETOR_EMAIL; }
+var _aj={linhas:[]};
+function wmsNovoPedidoModal(){
+  var cid=company.id, optCli=(clientes||[]).filter(function(c){return c.company_id===cid;}).sort(function(a,b){return String(a.nome).localeCompare(String(b.nome));}).map(function(c){ return '<option value="'+c.id+'"'+(wmsPedFiltroCliente===c.id?' selected':'')+'>'+esc(c.nome||'')+'</option>'; }).join('');
+  _aj={linhas:[]};
+  portModal('Novo pedido','<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div><label class="fl">Tipo</label><select class="fi" id="aj-tipo"><option value="ajuste">Ajuste de saldo (saída direta)</option><option value="saida" disabled>Saída manual (em breve)</option></select></div>'
+    +'<div><label class="fl">Depositante</label><select class="fi" id="aj-dep" onchange="_aj.linhas=[];wmsAjRender()"><option value="">Selecione</option>'+optCli+'</select></div>'
+    +'<div><label class="fl">Motivo</label><select class="fi" id="aj-mot"><option>Embarque errado (saiu a mais)</option><option>Avaria / descarte</option><option>Acerto de inventário</option><option>Outro</option></select></div>'
+    +'<div><label class="fl">Referência (OS, NF, pedido)</label><input class="fi" id="aj-ref" placeholder="ex.: OS 00365 · NF 12345"></div>'
+    +'<div><label class="fl">Data do fato</label><input class="fi" id="aj-data" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+    +'<div></div><div style="grid-column:1/-1"><label class="fl">Explicação (obrigatória)</label><textarea class="fi" id="aj-obs" rows="2" placeholder="o que aconteceu e por que a baixa"></textarea></div></div>'
+    +'<div style="margin-top:12px;font-weight:700;font-size:13px">Caixas e pallets a baixar</div>'
+    +'<div style="display:flex;gap:6px;margin:6px 0"><input class="fi" id="aj-rg" placeholder="RG do pallet ou da caixa" style="flex:1" onkeydown="if(event.key===&apos;Enter&apos;){event.preventDefault();wmsAjAddRg();}"><button class="btn btn-sm" onclick="wmsAjAddRg()">+ Adicionar RG</button></div>'
+    +'<div id="aj-linhas"></div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:8px">O ajuste vai para Aprovações e só baixa o estoque depois da aprovação do diretor. Não gera OS, conferência, embarque nem cobrança, e não aparece no portal.</div>',
+    'wmsAjSalvar()',{saveLabel:'Enviar para aprovação',width:'720px'});
+  wmsAjRender();
+}
+async function wmsAjAddRg(){
+  var dep=(ge('aj-dep')||{}).value, rg=String((ge('aj-rg')||{}).value||'').trim().replace(/^RG/i,'');
+  if(!dep){ showToast('Escolha o depositante primeiro','amber'); return; } if(!rg) return;
+  if(_aj.linhas.some(function(l){return String(l.rg)===rg;})){ showToast('RG já está no ajuste','amber'); return; }
+  try{
+    var P=await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+encodeURIComponent(rg)+'&select=id,rg,depositante_id,status,endereco_codigo')||[]; var pal=P[0];
+    if(!pal){ showToast('RG '+rg+' não encontrado','red'); return; }
+    if(pal.depositante_id!==dep){ showToast('O RG '+rg+' é de outro depositante','red'); return; }
+    var C=await dbSelect('wms_pallet_conteudo','pallet_id=eq.'+pal.id+'&status=eq.ativo&select=id,produto_id,sku,descricao,qtd_fiscal,un_fiscal')||[];
+    if(!C.length){ showToast('O RG '+rg+' não tem saldo ativo','red'); return; }
+    var R=await dbSelect('wms_reservas','conteudo_id=in.('+C.map(function(c){return c.id;}).join(',')+')&status=eq.reservada&select=conteudo_id,qtd')||[];
+    C.forEach(function(c){ var res=R.filter(function(r){return r.conteudo_id===c.id;}).reduce(function(a,r){return a+(Number(r.qtd)||0);},0);
+      _aj.linhas.push({pallet_id:pal.id,rg:pal.rg,endereco:pal.endereco_codigo||'',conteudo_id:c.id,produto_id:c.produto_id,sku:c.sku,descricao:c.descricao,saldo:Number(c.qtd_fiscal)||0,reservado:res,un:c.un_fiscal||'',qtd:''}); });
+    ge('aj-rg').value=''; wmsAjRender();
+  }catch(e){ showToast('Erro ao buscar o RG: '+(e.message||e),'red'); }
+}
+function wmsAjRender(){ var el=ge('aj-linhas'); if(!el) return; var n=function(v){ return Number(v||0).toLocaleString('pt-BR'); };
+  el.innerHTML=_aj.linhas.length?'<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--text3);text-align:left"><th style="padding:4px">RG</th><th>Endereço</th><th>Produto</th><th style="text-align:right">Saldo livre</th><th style="text-align:right">Baixar</th><th></th></tr>'
+    +_aj.linhas.map(function(l,i){ var livre=l.saldo-l.reservado; return '<tr style="border-top:1px solid var(--border)"><td style="padding:5px 4px;font-family:monospace;font-weight:700">'+esc(l.rg)+'</td><td>'+esc(l.endereco)+'</td><td><b>'+esc(l.sku)+'</b> '+esc(String(l.descricao||'').slice(0,34))+'</td><td style="text-align:right">'+n(livre)+(l.reservado?' <span style="color:var(--amber-text);font-size:10px">('+n(l.reservado)+' reservado)</span>':'')+'</td>'
+      +'<td style="text-align:right"><input class="fi" type="number" min="0" max="'+livre+'" value="'+(l.qtd===''?'':l.qtd)+'" style="width:90px;text-align:right;height:30px" oninput="_aj.linhas['+i+'].qtd=this.value"> <a href="#" onclick="event.preventDefault();_aj.linhas['+i+'].qtd='+livre+';wmsAjRender()" style="font-size:10px">tudo</a></td>'
+      +'<td><button class="btn btn-sm" style="color:var(--red-text)" onclick="_aj.linhas.splice('+i+',1);wmsAjRender()">×</button></td></tr>'; }).join('')+'</table>'
+    :'<div style="font-size:12px;color:var(--text3);padding:8px 0">Nenhum RG adicionado.</div>'; }
+async function wmsAjSalvar(){
+  var dep=ge('aj-dep').value, obs=String(ge('aj-obs').value||'').trim(), mot=ge('aj-mot').value, ref=String(ge('aj-ref').value||'').trim(), dt=ge('aj-data').value||null;
+  if(!dep){ portErr('Escolha o depositante.'); return; } if(!obs){ portErr('Escreva a explicação do ajuste.'); return; }
+  var L=_aj.linhas.map(function(l){ return Object.assign({},l,{q:parseFloat(String(l.qtd).replace(',','.'))||0}); }).filter(function(l){return l.q>0;});
+  if(!L.length){ portErr('Informe a quantidade a baixar em ao menos um RG.'); return; }
+  var acima=L.find(function(l){ return l.q>(l.saldo-l.reservado)+1e-9; }); if(acima){ portErr('RG '+acima.rg+' · '+acima.sku+': o ajuste passa do saldo livre.'); return; }
+  portSaving();
+  try{
+    var cid=company.id, num=await dbRpc('next_numero',{p_company:cid,p_prefixo:'AJ'}), numTxt='AJ-'+String(num).padStart(5,'0');
+    var pr=await dbInsert('wms_pedidos',{company_id:cid,unit_id:activeUnit||null,cliente_id:dep,numero_pedido:numTxt+' · '+mot,numero_curto:numTxt,tipo:'ajuste',status:'aguardando_aprovacao',origem:'manual',
+      ajuste_motivo:mot,ajuste_referencia:ref||null,ajuste_data_fato:dt,ajuste_obs:obs,destinatario_nome:'AJUSTE DE SALDO'});
+    var ped=Array.isArray(pr)?pr[0]:pr; if(!ped) throw new Error('não consegui criar o pedido');
+    var porSku={}; L.forEach(function(l){ var k=l.sku; if(!porSku[k]) porSku[k]={sku:l.sku,descricao:l.descricao,produto_id:l.produto_id,q:0}; porSku[k].q+=l.q; });
+    for(var k in porSku){ var o=porSku[k]; await dbInsert('wms_pedido_itens',{company_id:cid,pedido_id:ped.id,produto_id:o.produto_id||null,sku:o.sku,descricao:o.descricao,quantidade:o.q}); }
+    for(var i=0;i<L.length;i++){ var l=L[i]; await dbInsert('wms_ajuste_itens',{company_id:cid,pedido_id:ped.id,pallet_id:l.pallet_id,rg:String(l.rg),conteudo_id:l.conteudo_id,produto_id:l.produto_id||null,sku:l.sku,descricao:l.descricao,quantidade:l.q,saldo_antes:l.saldo}); }
+    wmsPedidos=[ped].concat(wmsPedidos||[]);
+    portClose(); showToast('Ajuste '+numTxt+' enviado para aprovação','green'); render();
+  }catch(e){ portErr('Não consegui salvar: '+(e.message||e)); }
+}
+// Aprovações: ajustes de saldo aguardando o diretor
+async function wmsAprovAjustesCarregar(){
+  var box=ge('wms-aprov-ajustes'); if(!box) return;
+  var P=[]; try{ P=await dbSelect('wms_pedidos','company_id=eq.'+company.id+'&tipo=eq.ajuste&status=eq.aguardando_aprovacao&order=created_at.asc')||[]; }catch(e){ box.innerHTML=''; return; }
+  if(!P.length){ box.innerHTML=''; return; }
+  var I=await dbSelect('wms_ajuste_itens','pedido_id=in.('+P.map(function(p){return p.id;}).join(',')+')&order=rg.asc')||[], dir=wmsEhDiretor(), n=function(v){ return Number(v||0).toLocaleString('pt-BR'); };
+  box.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--amber-text);margin:4px 0 8px">Ajustes de saldo aguardando aprovação ('+P.length+')</div>'+P.map(function(p){
+    var it=I.filter(function(x){return x.pedido_id===p.id;}), cli=((clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}).nome||'';
+    return '<div style="border:1px solid var(--amber-text);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:var(--bg)"><div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-weight:700;font-size:14px">'+esc(p.numero_curto||'')+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+esc(cli)+'</span></div><div style="font-size:11px;color:var(--text3)">'+esc(p.ajuste_motivo||'')+(p.ajuste_referencia?' · ref. '+esc(p.ajuste_referencia):'')+(p.ajuste_data_fato?' · fato em '+new Date(p.ajuste_data_fato+'T12:00:00').toLocaleDateString('pt-BR'):'')+' · criado em '+new Date(p.created_at).toLocaleString('pt-BR')+'</div></div><span style="background:var(--amber-bg);color:var(--amber-text);font-size:10px;font-weight:700;padding:3px 10px;border-radius:99px;height:fit-content">ajuste</span></div>'
+      +'<div style="margin-top:6px;font-size:12px;color:var(--text2)">'+esc(p.ajuste_obs||'')+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">'+it.map(function(x){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:4px;font-family:monospace;font-weight:700">RG '+esc(x.rg)+'</td><td>'+esc(x.sku)+' '+esc(String(x.descricao||'').slice(0,30))+'</td><td style="text-align:right;color:var(--red-text);font-weight:700">−'+n(x.quantidade)+'</td><td style="text-align:right;color:var(--text3)">de '+n(x.saldo_antes)+'</td></tr>'; }).join('')+'</table>'
+      +(dir?'<div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsAjDecidir(&apos;'+p.id+'&apos;,&apos;recusar&apos;)">Recusar</button><button class="btn btn-sm btn-primary" onclick="wmsAjDecidir(&apos;'+p.id+'&apos;,&apos;aprovar&apos;)">✓ Aprovar e baixar</button></div>'
+          :'<div style="margin-top:8px;font-size:11px;color:var(--text3)">Aguardando a aprovação do diretor.</div>')+'</div>'; }).join(''); }
+async function wmsAjDecidir(pid,decisao){
+  if(!wmsEhDiretor()){ showToast('Somente o diretor aprova ajuste de saldo','red'); return; }
+  var obs=decisao==='recusar'?prompt('Motivo da recusa:'):''; if(decisao==='recusar'&&obs==null) return;
+  if(decisao==='aprovar'&&!confirm('Aprovar o ajuste e BAIXAR o estoque das caixas listadas? Não há como desfazer pelo sistema.')) return;
+  try{ var r=await dbRpc('wms_ajuste_decidir',{p_pedido:pid,p_decisao:decisao,p_obs:obs||null});
+    showToast(decisao==='aprovar'?'Ajuste aprovado · '+((r&&r.caixas)||0)+' linha(s) baixada(s)':'Ajuste recusado',decisao==='aprovar'?'green':'amber');
+    var P=await dbSelect('wms_pedidos','id=eq.'+pid)||[]; if(P[0]) wmsPedidos=(wmsPedidos||[]).map(function(x){return x.id===pid?P[0]:x;});
+    wmsAprovAjustesCarregar();
+  }catch(e){ showToast('Não foi possível: '+(e.message||e),'red'); } }
+
 function wmsPodeAprovarConf(){
   // permissão é camada de tela: admin sempre; demais precisam de pode_ver em wms-aprovacoes
   if((profile?.role||'')==='admin')return true;
@@ -54744,7 +54833,8 @@ function wmsAprovacoesConteudo(){
     </div>`;
   }).join('');
   setTimeout(wmsAprovTravadasCarregar,30);   // v1.0.1331: conferências por pallet travadas
-  return `<div id="wms-aprov-travadas"></div><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
+  setTimeout(wmsAprovAjustesCarregar,40);   // v1.0.1334: ajustes de saldo
+  return `<div id="wms-aprov-ajustes"></div><div id="wms-aprov-travadas"></div><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
     ${rows||`<div class="empty"><p>Nenhuma conferência pendente de auditoria. ✓</p></div>`}`;
 }
 // Card de divergência de conferência de ENTRADA
