@@ -525,7 +525,7 @@
 
       <div class="summary">
         <div class="sum-card"><div class="n" id="sumPed">0</div><div class="t">Pedidos em andamento</div><div class="d" id="sumPedD"></div></div>
-        <div class="sum-card"><div class="n" id="sumPallets">—</div><div class="t">Pallets armazenados</div><div class="d up" id="sumPalD"></div></div>
+        <div class="sum-card"><div class="n" id="sumPallets">—</div><div class="t"><span class="un-arm">Pallets</span> armazenados</div><div class="d up" id="sumPalD"></div></div>
         <div class="sum-card"><div class="n" id="sumHoje">0</div><div class="t">Operações agendadas hoje</div><div class="d" id="sumHojeD"></div></div>
         <button class="sum-card sum-click" onclick="showScreen('op')"><div class="n" id="sumPatio">0 <span class="live-dot"></span></div><div class="t">No CD agora</div><div class="d" id="sumPatioD"></div></button>
       </div>
@@ -603,7 +603,7 @@
       </div>
       <div class="est-kpis" id="estKpis"></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>Código</th><th>Descrição</th><th>Classificação</th><th>Linha</th><th>CD</th><th>Lote</th><th class="num">Quantidade</th><th class="num">Pallets</th><th class="num">Mínimo</th><th>Última movimentação</th><th>Situação</th>
+        <th>Código</th><th>Descrição</th><th>Classificação</th><th>Linha</th><th>CD</th><th>Lote</th><th class="num">Quantidade</th><th class="num"><span class="un-arm">Pallets</span></th><th class="num">Mínimo</th><th>Última movimentação</th><th>Situação</th>
       </tr></thead><tbody id="estRows"></tbody></table></div>
     </section>
 
@@ -676,7 +676,7 @@
 
         <div class="rel-r" data-rel="mov">
           <div class="chart-card">
-            <div class="chart-t">Movimentação mensal (pallets)</div>
+            <div class="chart-t">Movimentação mensal (<span class="un-arm-min">pallets</span>)</div>
             <div class="chart-legend"><span><i class="lg" style="background:var(--green)"></i>Entradas</span><span><i class="lg" style="background:#F2A73B"></i>Saídas</span></div>
             <div id="chartMov"></div>
           </div>
@@ -685,7 +685,7 @@
 
         <div class="rel-r" data-rel="arm">
           <div class="chart-card">
-            <div class="chart-t">Evolução de armazenagem (pallets)</div>
+            <div class="chart-t">Evolução de armazenagem (<span class="un-arm-min">pallets</span>)</div>
             <div class="chart-legend"><span>Posição no fim de cada mês</span></div>
             <div id="chartArm"></div>
           </div>
@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.10';   // v1.8.10: planilha da CASCO → UM pedido por número de separação (não quebra mais por OV)
+const PORTAL_VERSION = 'v1.8.11';   // v1.8.11: ver a DANFE enviada · unidade de armazenagem do depositante (caixas/pallets)
+// v1.8.10: planilha da CASCO → UM pedido por número de separação (não quebra mais por OV)
 // v1.8.9: editar agendamento, incluir/retirar pedidos (no agendamento e pelo quadro de pedidos)
 // v1.8.8: detalhe do pedido com a RASTREABILIDADE (leituras por etapa, intervalos da bancada e do embarque, relatório em PDF)
 // v1.8.7: situação do pedido mostra CONFERIDO e EM ROMANEIO
@@ -4702,7 +4703,7 @@ window.renderVolFat = function(){
       let nf = '';
       if(r.nf){ const div = r.nf_status==='divergente', cor = div ? '#b91c1c' : (r.danfe===false ? '#b45309' : '#4d7a1a');
         const sub = div ? esc(r.nf_divergencias||'divergente') : (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''));
-        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}</div>`; }
+        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}</div>`; }
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
       else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
@@ -5194,6 +5195,7 @@ function showDone(kind, protocolo, msg){
       await loadDados();
       enterApp();
       portalEmpresaSeletor();
+      portalUnidadeAplicar();   // v1.8.11
       portalAutoAtualizar();   // v1.7.7
   }
 
@@ -5231,6 +5233,18 @@ function showDone(kind, protocolo, msg){
       if(data && data.depositante_id){ state.depositanteId = data.depositante_id; state.depositante = data.depositante || state.depositante; } }
     catch(_e){ state.acesso = null; }
   }
+  // v1.8.11: abre o PDF da DANFE enviada (link temporário do armazenamento)
+  window.portalVerDanfe = async function(pedidoId){
+    try{ const { data, error } = await sb.rpc('portal_pedido_danfes', { p_pedido: pedidoId }); if(error) throw error;
+      const L = (data||[]).filter(x=>x.danfe_path); if(!L.length){ toast('Nenhuma DANFE guardada neste pedido.'); return; }
+      for(const d of L){ const { data:u, error:eU } = await sb.storage.from('portal-anexos').createSignedUrl(d.danfe_path, 600); if(eU) throw eU; window.open(u.signedUrl, '_blank'); }
+    }catch(err){ toast('Não consegui abrir a DANFE: '+(err.message||err)); }
+  };
+  // v1.8.11: unidade de armazenagem do depositante (CASCO = caixas)
+  window.portalUnidadeAplicar = async function(){
+    let un = 'Pallets'; try{ const { data } = await sb.rpc('portal_unidade_armazenagem'); if(data) un = String(data); }catch(_e){}
+    document.querySelectorAll('.un-arm').forEach(el=>el.textContent=un); document.querySelectorAll('.un-arm-min').forEach(el=>el.textContent=un.toLowerCase());
+  };
   window.portalEmpresaSeletor = function(){
     const a = state.acesso, el = $('hdrDep'); if(!el) return;
     const emps = (a && a.master && Array.isArray(a.empresas)) ? a.empresas : [];
@@ -5245,6 +5259,7 @@ function showDone(kind, protocolo, msg){
       state.acesso = data; state.depositanteId = data.depositante_id; state.depositante = data.depositante;
       await loadDados();
       $('whoDep').textContent = state.depositante;
+      portalUnidadeAplicar();   // v1.8.11
       if(typeof renderRelatorios==='function') renderRelatorios();
       const _on=document.querySelector('#topnav button.on'); showScreen((_on&&_on.dataset.scr)||'home');
       portalEmpresaSeletor();
