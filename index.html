@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1334 | Gerado: 2026-11-10 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1335 | Gerado: 2026-11-11 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1334';
+const APP_VERSION='v1.0.1335';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5160,8 +5160,16 @@ function capaEditarDados(id){
     +(podeTipo?'<div id="capa-e-tipo-av" style="display:none;font-size:12px;color:var(--amber-text);margin-top:4px">⚠ Trocar o tipo gera um <b>número novo</b> na sequência do tipo certo; o número atual fica como "número anterior" (o papel continua bipando). Os <b>serviços passam a ser os do novo tipo</b>, conforme a tabela do cliente, e as quantidades já digitadas dos serviços são zeradas. Depois, reimprima a capa.</div>'
       :'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">O tipo só pode ser trocado em capa aberta ou devolvida (sem digitação conferida).</div>')
     +'</div>';
+  // v1.0.1335: tipos de produto (material) da capa — ajustáveis antes da digitação (capa aberta ou devolvida)
+  var _tiposCli=wmsTiposProduto(c.cliente_id), matHtml='';
+  if(_tiposCli.length){
+    matHtml='<div style="grid-column:1/-1;border:1px solid var(--border);border-radius:10px;padding:2px 12px 10px;background:var(--bg2)">'
+      +(podeTipo?capaTiposHtml('capa-e',c.cliente_id,c.tipos_produto)
+               :'<div style="margin-top:10px"><span class="fl">Tipos de produto</span><div style="font-size:13px;margin-top:4px">'+((Array.isArray(c.tipos_produto)?c.tipos_produto:[]).map(function(id){ var t=_tiposCli.find(function(x){return x.id===id;}); return t?ecomEsc(t.nome):''; }).filter(Boolean).join(' · ')||'—')+'</div></div>')
+      +'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+(podeTipo?'Com mais de um tipo marcado, a digitação é quebrada por tipo (cada um com sua NF, valor, pallets e serviços), na mesma capa.':'Os tipos só podem ser alterados em capa aberta ou devolvida (antes da digitação conferida).')+'</div></div>';
+  }
   portModal('Editar dados da capa · '+ecomEsc(c.numero),
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+tipoHtml
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+tipoHtml+matHtml
     +'<div><label class="fl">Data da operação *</label><input class="fi" id="capa-e-data_operacao" type="date" value="'+v('data_operacao')+'"></div>'
     +'<div><label class="fl">DOC</label><input class="fi" id="capa-e-doc" value="'+v('doc')+'"></div>'
     +'<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="capa-e-nf_numero" value="'+v('nf_numero')+'"></div>'
@@ -5192,6 +5200,17 @@ async function capaSalvarDados(id){
   // v1.0.1196: troca do tipo da capa
   var _tipoEl=document.querySelector('input[name="capa-e-tipo"]:checked'), novoTipo=_tipoEl?_tipoEl.value:c.tipo, trocaTipo=novoTipo!==c.tipo;
   if(trocaTipo&&!(c.status==='aberta'||c.status==='devolvida')){ portErr('O tipo só pode ser trocado em capa aberta ou devolvida.'); return; }
+  // v1.0.1335: troca dos tipos de produto (material)
+  var _tiposCli=wmsTiposProduto(c.cliente_id), trocaMat=false;
+  if(_tiposCli.length&&document.querySelector('.capa-e-tp')){
+    var novosT=capaTiposLer('capa-e'), antT=Array.isArray(c.tipos_produto)?c.tipos_produto:[];
+    if(!novosT.length){ portErr('Marque ao menos um tipo de produto.'); return; }
+    var nomeT=function(L){ return L.map(function(id){ var t=_tiposCli.find(function(x){return x.id===id;}); return t?t.nome:id; }).join(', ')||'(nenhum)'; };
+    if(novosT.slice().sort().join('|')!==antT.slice().sort().join('|')){
+      if(!(c.status==='aberta'||c.status==='devolvida')){ portErr('Os tipos só podem ser alterados em capa aberta ou devolvida.'); return; }
+      novo.tipos_produto=novosT; trocaMat=true; mud.push('Tipos de produto de '+nomeT(antT)+' para '+nomeT(novosT));
+    }
+  }
   if(!mud.length&&!trocaTipo){ portClose(); return; }
   portSaving();
   try{
@@ -5216,6 +5235,7 @@ async function capaSalvarDados(id){
       for(var si=0;si<servNovos.length;si++){ await dbInsert('processo_capa_servicos',servNovos[si]); }
       if(typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;   // a digitação recomeça com os serviços novos
     }
+    if(trocaMat&&typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;   // v1.0.1335: digitação recomeça com os blocos dos tipos novos
     Object.assign(c,novo);
     portClose();
     if(trocaTipo) showToast('Capa agora é '+(novoTipo==='expedicao'?'Expedição':'Recebimento')+': '+c.numero+' (antes '+numAntigo+'). Reimprima a capa (📄 PDF).','green');
