@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1336 | Gerado: 2026-11-11 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1337 | Gerado: 2026-11-11 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1336';
+const APP_VERSION='v1.0.1337';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3429,7 +3429,8 @@ async function ecomFullImprimirPaginasInt(path,paginas,formato){
     var _corte=(paginas[k]&&typeof paginas[k]==='object')?paginas[k]:null;   // v1.0.1118: {p,slot,de} = uma etiqueta de uma folha com várias
     var pg=await pdf.getPage(_corte?_corte.p:paginas[k]), v1=pg.getViewport({scale:1});
     wmm=Math.round(v1.width*25.4/72*10)/10; hmm=Math.round(v1.height*25.4/72*10)/10;
-    var vp=pg.getViewport({scale:(formato==='master'?600:300)/72}), cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+    var _dpi=(formato==='master'?Math.min(600,Math.max(300,Math.floor(Math.sqrt(30e6/Math.max(1,v1.width*v1.height))*72))):300);   // v1.0.1337: teto de ~30 MP por página
+    var vp=pg.getViewport({scale:_dpi/72}), cv=document.createElement('canvas'); cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
     var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);
     await pg.render({canvasContext:cx,viewport:vp}).promise;
     if(_corte){   // recorta a etiqueta (folha com 3 lado a lado) e imprime em pé no 100x150
@@ -3483,6 +3484,16 @@ async function ecomFullImprimirPaginasInt(path,paginas,formato){
       +imgs.map(function(s){return '<div class="et"><img src="'+s+'"></div>';}).join('')+'</body></html>';
   }
   var old=ge('ecom-full-print'); if(old) old.remove();
+  if(formato==='master'){   // v1.0.1337: caixas do Full saem como PDF de páginas 100x150 (pré-visualização estável mesmo com muitas caixas)
+    try{
+      var PLm=await ecomFullPdfLib(), docm=await PLm.PDFDocument.create(), pwm=wmm*72/25.4, phm=hmm*72/25.4;
+      for(var _mi=0;_mi<imgs.length;_mi++){ var _pm=await docm.embedPng(imgs[_mi]); docm.addPage([pwm,phm]).drawImage(_pm,{x:0,y:0,width:pwm,height:phm}); }
+      var _bm=await docm.save(), _um=URL.createObjectURL(new Blob([_bm],{type:'application/pdf'}));
+      var frm=document.createElement('iframe'); frm.id='ecom-full-print'; frm.style.cssText='position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0';
+      frm.onload=function(){ setTimeout(function(){ try{ frm.contentWindow.focus(); frm.contentWindow.print(); }catch(e){ window.open(_um,'_blank'); } },400); };
+      frm.src=_um; document.body.appendChild(frm); return true;
+    }catch(_me){ console.warn('[caixa] PDF falhou, usando HTML',_me); }
+  }
   if(_temCel){
     // v1.0.1166: etiqueta de unidade vai como PDF de páginas 60×30 (igual ao teste que saiu certo na Xprinter).
     // A página HTML com @page de tamanho próprio fazia o Chrome mandar um tamanho "personalizado" que o driver
@@ -4896,7 +4907,9 @@ async function capaDigIniciar(id,modo){
     });
     perg=perg.concat(fim);
   } else {
-    servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
+    var _pre1=split.length===1?(split[0].nome+' — '):'';   // v1.0.1337: com um tipo só, o tipo também aparece nas perguntas
+    if(_pre1) perg=perg.map(function(q){ return ['valor_nf','nf_numero','pallets_movimentados','pallets_pbr'].indexOf(q.k)>=0?Object.assign({},q,{t:_pre1+q.t}):q; });
+    servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:_pre1+s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
   }
   perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
   var resp={}; if(c.tem_nf_pallet!=null) resp.tem_nf_pallet=c.tem_nf_pallet?'Sim':'Não';   // v1.0.1143
@@ -46612,6 +46625,8 @@ function wmsPortalAlcanceHtml(px,u){
   var c=(clientes||[]).find(function(x){return x.id===_wmsPortal.cid;})||{}, raiz=String(c.cpf_cnpj||'').replace(/\D/g,'').slice(0,8);
   var grupo=raiz?(clientes||[]).filter(function(x){ return x.ativo!==false&&String(x.cpf_cnpj||'').replace(/\D/g,'').slice(0,8)===raiz; }):[];
   return '<div style="margin-top:10px;padding-top:9px;border-top:1px dashed var(--border)">'
+    // v1.0.1337: atendimento interno da MK — vê TODOS os depositantes com portal e troca de empresa no topo; pode usar o e-mail do VERUS
+    +'<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="'+px+'-mastermk"'+(u.master_mk?' checked':'')+'> <span><b>Atendimento MK (interno)</b> · vê todos os depositantes com portal e troca de empresa no topo. Pode usar o e-mail de um usuário do VERUS (entra com a mesma senha).</span></label>'
     +'<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;cursor:pointer"><input type="checkbox" id="'+px+'-master"'+(u.master?' checked':'')+' onchange="var b=ge(\''+px+'-opsbox\'); if(b) b.style.opacity=this.checked?.4:1"> <span><b>Master do grupo</b> · vê todas as empresas do grupo e troca de empresa no portal'
     +(grupo.length>1?'<span style="display:block;color:var(--text3);font-size:11px">'+grupo.map(function(g){return esc(g.nome);}).join(' · ')+'</span>':'<span style="display:block;color:var(--text3);font-size:11px">(este cliente não tem outras empresas com a mesma raiz de CNPJ)</span>')+'</span></label>'
     +'<div id="'+px+'-opsbox" style="margin-top:8px;'+(u.master?'opacity:.4':'')+'"><span class="fl" style="margin:0">Tipos de operação que este acesso enxerga <span style="font-weight:400;color:var(--text3)">(nenhum marcado = todos)</span></span>'
@@ -46619,8 +46634,8 @@ function wmsPortalAlcanceHtml(px,u){
       :'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Este cliente não tem tipos de operação no cadastro (aba Contatos). Sem eles, o acesso enxerga tudo.</div>')+'</div></div>';
 }
 function wmsPortalLerAlcance(px){
-  var m=!!(ge(px+'-master')||{}).checked, ops=[]; if(!m) document.querySelectorAll('.'+px+'-op').forEach(function(c){ if(c.checked) ops.push(c.value); });
-  return {master:m,operacoes:ops};
+  var mk=!!(ge(px+'-mastermk')||{}).checked, m=mk||!!(ge(px+'-master')||{}).checked, ops=[]; if(!m) document.querySelectorAll('.'+px+'-op').forEach(function(c){ if(c.checked) ops.push(c.value); });
+  return {master:m,master_mk:mk,operacoes:ops};
 }
 
 async function wmsVolFatParam(cid,on){
@@ -47168,8 +47183,20 @@ async function wmsPortalCriar(){
   var nome=(ge('wpt-nome')?.value||'').trim(), email=(ge('wpt-email')?.value||'').trim().toLowerCase(), mail=!!ge('wpt-mail')?.checked;
   if(!nome||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ _wmsPortal.msg={t:'erro',x:'Informe o nome e um e-mail válido.'}; wmsPortalRender(); return; }
   var _perms=wmsPortalLerPerms('wpt'); if(!_perms.length){ _wmsPortal.msg={t:'erro',x:'Marque pelo menos uma função que este acesso pode ver.'}; wmsPortalRender(); return; }   // v1.0.1199
-  if((profiles||[]).some(function(p){return String(p.email||'').toLowerCase()===email;})){ _wmsPortal.msg={t:'erro',x:'Este e-mail é de um usuário interno do VERUS. Use outro e-mail para o acesso do portal.'}; wmsPortalRender(); return; }
+  var _mk=!!(ge('wpt-mastermk')||{}).checked, _interno=(profiles||[]).find(function(p){return String(p.email||'').toLowerCase()===email;});
+  if(_interno&&!_mk){ _wmsPortal.msg={t:'erro',x:'Este e-mail é de um usuário interno do VERUS. Use outro e-mail para o acesso do portal, ou marque "Atendimento MK (interno)".'}; wmsPortalRender(); return; }
   var bt=ge('wpt-criar'); if(bt){ bt.disabled=true; bt.innerHTML='<span class="spin"></span>'; }
+  if(_interno&&_mk){   // v1.0.1337: usuário do VERUS vira também acesso de atendimento no portal (mesmo login e senha)
+    try{
+      var _ja=await dbSelect('portal_usuarios','auth_user_id=eq.'+_interno.id+'&select=id')||[];
+      if(_ja.length){ await dbUpdate('portal_usuarios',_ja[0].id,{ativo:true,master:true,master_mk:true,permissoes:['ped','est','agd','fin','nc','chat'],nome:nome,depositante_id:_wmsPortal.cid}); }
+      else await dbInsert('portal_usuarios',{company_id:company.id,depositante_id:_wmsPortal.cid,auth_user_id:_interno.id,nome:nome,email:email,ativo:true,trocar_senha:false,criado_por:cu?.id||null,permissoes:['ped','est','agd','fin','nc','chat'],master:true,master_mk:true,operacoes:[]});
+      _wmsPortal.novo=false;
+      _wmsPortal.msg={t:'ok',x:'Acesso de <b>atendimento MK</b> liberado para <b>'+nome+'</b> ('+email+'). Ele entra no portal com o mesmo e-mail e senha do VERUS e escolhe o depositante no topo.'};
+      await wmsPortalCarregar(_wmsPortal.cid);
+    }catch(e){ _wmsPortal.msg={t:'erro',x:/master_mk/i.test(String(e.message||e))?'Rode antes o SQL da v1.0.1337 (perfil de atendimento MK).':String(e.message||e)}; wmsPortalRender(); }
+    return;
+  }
   var senha=wmsPortalSenha();
   try{
     var res=await sbAuth('signup',{email:email,password:senha,data:{full_name:nome,portal_cliente:true}});
