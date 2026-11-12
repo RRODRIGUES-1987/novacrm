@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.13';   // v1.8.13: situação "itens fora do múltiplo" separada de "aguardando saldo"
+const PORTAL_VERSION = 'v1.8.14';   // v1.8.14: filtro por coluna (estilo Excel) no quadro de pedidos; sai o "mostrar carregados"
+// v1.8.13: situação "itens fora do múltiplo" separada de "aguardando saldo"
 // v1.8.12: pedidos carregados no quadro · DANFE casada pelo XML do mesmo envio · rastreabilidade por caixa/pacote
 // v1.8.11: ver a DANFE enviada · unidade de armazenagem do depositante (caixas/pallets)
 // v1.8.10: planilha da CASCO → UM pedido por número de separação (não quebra mais por OV)
@@ -4692,6 +4693,52 @@ if(typeof window.esc!=='function') window.esc = s => String(s==null?'':s).replac
   document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') portalVerCheck(false); });
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ini); else ini();
 })();
+// v1.8.14 · filtro por coluna, estilo Excel (lista de valores + busca por texto), no quadro de pedidos
+window.volSitLabel = function(r){ const sit=r.situacao||'aguardando_separacao'; if(sit==='aguardando_saldo'&&/não fecha pacote/.test(r.faltas||'')) return 'itens fora do múltiplo';
+  return ({carregado:'carregado',em_separacao:'em separação',separado:'separado',conferido:'conferido',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',aguardando_separacao:'aguardando separação'})[sit]||sit; };
+window.volCol = function(r,k){
+  if(k==='ped') return String(r.pedido||'').split(' · ')[0]||'—';
+  if(k==='dest') return r.destinatario||'—';
+  if(k==='sit') return volSitLabel(r);
+  if(k==='vol') return r.volumes!=null?String(r.volumes):((r.situacao==='aguardando_saldo')?'—':'a calcular');
+  if(k==='peso') return r.peso_kg?Number(r.peso_kg).toLocaleString('pt-BR')+' kg':'—';
+  if(k==='nf') return r.nf?('NF '+r.nf):'sem NF';
+  return ''; };
+window.volPasa = function(r){
+  const F=state.volF||{};
+  for(const k of ['ped','dest','sit','vol','peso','nf']){ const f=F[k]; if(!f) continue; const v=volCol(r,k), txt=(k==='ped'?String(r.pedido||''):v).toLowerCase();
+    if(f.q && txt.indexOf(f.q.toLowerCase())<0) return false; if(f.sel && !f.sel.has(v)) return false; }
+  if(r.situacao==='carregado' && !(F.sit&&F.sit.sel&&F.sit.sel.has('carregado'))) return false;   // carregados só aparecem se marcados na coluna Situação
+  return true; };
+window.volFiltBtn = function(k){ const on=!!(state.volF&&state.volF[k]); return `<span onclick="volFiltAbrir('${k}',event)" title="Filtrar" style="cursor:pointer;margin-left:5px;font-size:11px;padding:1px 5px;border-radius:4px;${on?'background:#1e3a5f;color:#fff':'color:#94a3b8;border:1px solid #e2e8f0'}">▾</span>`; };
+window.volFiltFechar = function(){ const p=$('vfPop'); if(p) p.remove(); state._vfPop=null; };
+document.addEventListener('click', e => { const p=$('vfPop'); if(p && !p.contains(e.target)) volFiltFechar(); });
+window.volFiltAbrir = function(k, ev){
+  ev.stopPropagation(); volFiltFechar();
+  const map=new Map(); (state._vfAll||[]).forEach(r=>{ if(r.situacao==='carregado'&&k!=='sit') return; const v=volCol(r,k); map.set(v,(map.get(v)||0)+1); });
+  if(k==='sit' && !state.verCarregados) map.set('carregado',0);   // carregados são buscados só quando marcados
+  const vals=[...map.keys()].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
+  const f=(state.volF||{})[k]||{q:'',sel:null}, padrao=v=>!(k==='sit'&&v==='carregado');
+  state._vfPop={k,vals,map,sel:new Set(f.sel?[...f.sel]:vals.filter(padrao))};
+  const r=ev.target.getBoundingClientRect(), x=Math.max(8,Math.min(window.innerWidth-270,r.left-120));
+  document.body.insertAdjacentHTML('beforeend',`<div id="vfPop" style="position:fixed;z-index:9999;left:${x}px;top:${r.bottom+6}px;width:260px;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:10px;font-size:13px">
+    <input id="vfQ" placeholder="Buscar / contém…" value="${esc(f.q||'')}" oninput="volFiltLista()" style="width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:7px;margin-bottom:8px;box-sizing:border-box">
+    <label style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-weight:600;cursor:pointer"><input type="checkbox" id="vfAll" onchange="volFiltTodos(this.checked)"> (Selecionar tudo)</label>
+    <div id="vfL" style="max-height:220px;overflow:auto;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-ghost" style="width:auto;padding:5px 12px" onclick="volFiltLimparCol()">Limpar</button><button class="btn" style="width:auto;padding:5px 14px" onclick="volFiltAplicar()">Aplicar</button></div></div>`);
+  volFiltLista(); setTimeout(()=>{ const q=$('vfQ'); if(q) q.focus(); },30); };
+window.volFiltLista = function(){ const p=state._vfPop; if(!p) return; const q=String(($('vfQ')||{}).value||'').toLowerCase(), box=$('vfL');
+  box.innerHTML=p.vals.map((v,i)=>({v,i})).filter(o=>!q||o.v.toLowerCase().indexOf(q)>=0).map(o=>`<label style="display:flex;gap:7px;align-items:center;padding:3px 2px;cursor:pointer"><input type="checkbox" ${p.sel.has(o.v)?'checked':''} onchange="volFiltTog(${o.i},this.checked)"> <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.v)}">${esc(o.v)}</span><span style="color:#94a3b8;font-size:11px">${p.map.get(o.v)||''}</span></label>`).join('')||'<div style="color:#94a3b8;padding:6px 2px">Nada encontrado</div>';
+  const a=$('vfAll'); if(a) a.checked=p.vals.length>0&&p.vals.every(v=>p.sel.has(v)); };
+window.volFiltTog = function(i,on){ const p=state._vfPop; if(!p) return; on?p.sel.add(p.vals[i]):p.sel.delete(p.vals[i]); const a=$('vfAll'); if(a) a.checked=p.vals.every(v=>p.sel.has(v)); };
+window.volFiltTodos = function(on){ const p=state._vfPop; if(!p) return; const q=String(($('vfQ')||{}).value||'').toLowerCase(); p.vals.forEach(v=>{ if(!q||v.toLowerCase().indexOf(q)>=0) on?p.sel.add(v):p.sel.delete(v); }); volFiltLista(); };
+window.volFiltAplicar = async function(){ const p=state._vfPop; if(!p) return; const k=p.k, q=String(($('vfQ')||{}).value||'').trim();
+  const padrao=v=>!(k==='sit'&&v==='carregado'), isPad=p.vals.every(v=>p.sel.has(v)===padrao(v));
+  state.volF=state.volF||{}; if(isPad&&!q) delete state.volF[k]; else state.volF[k]={q,sel:isPad?null:new Set(p.sel)};
+  const querCarregados = k==='sit' && p.sel.has('carregado'); volFiltFechar();
+  if(querCarregados && !state.verCarregados) await portalVerCarregados(true); else renderVolFat(); };
+window.volFiltLimparCol = function(){ const p=state._vfPop; if(!p) return; if(state.volF) delete state.volF[p.k]; volFiltFechar(); renderVolFat(); };
+window.volFiltLimpar = function(){ state.volF={}; renderVolFat(); };
 window.portalVerCarregados = async function(on){   // v1.8.12
   state.verCarregados = !!on;
   if(on){ try{ const r = await sb.rpc('portal_pedidos_carregados'); state.volSaidos = (r && !r.error && r.data) || []; if(r&&r.error) toast('Não consegui buscar os carregados: '+r.error.message); }catch(e){ state.volSaidos = []; } }
@@ -4701,13 +4748,13 @@ window.renderVolFat = function(){
   // v1.7.9: no portal real, some com os filtros do demo (Recentes, Matéria-prima, Acabado, OTIF…) e com a lista vazia de pedidos digitados
   if(!DEMO){ const ch=$('pedChips'); if(ch) ch.classList.add('hide'); const lp=$('listaPed'); if(lp) lp.classList.toggle('hide', !(state.pedidos||[]).length); }
   const box = $('volFat'); if(!box) return;
-  const L = (state.volFat || []).concat(state.verCarregados ? (state.volSaidos||[]) : []); if(!L.length && !state.verCarregados){ box.classList.add('hide'); return; }
+  const L = (state.volFat || []).concat(state.verCarregados ? (state.volSaidos||[]) : []); state._vfAll = L; if(!L.length){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
-    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span><label style="margin-left:auto;font-weight:500;font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ${state.verCarregados?'checked':''} onchange="portalVerCarregados(this.checked)"> mostrar carregados (60 dias)</label></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
-    ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={carregado:['carregado','#e5e7eb','#374151'],em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
+    <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span><span style="margin-left:auto;font-size:12.5px;font-weight:500;color:#64748b">${L.filter(volPasa).length} pedido(s)${Object.keys(state.volF||{}).length?` · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a>`:''}</span></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido${volFiltBtn('ped')}</th><th>Destinatário${volFiltBtn('dest')}</th><th>Situação${volFiltBtn('sit')}</th><th class="num">Volumes${volFiltBtn('vol')}</th><th class="num">Peso${volFiltBtn('peso')}</th><th>Nota fiscal${volFiltBtn('nf')}</th><th></th></tr></thead><tbody>
+    ${L.map((r,i)=>{ if(!volPasa(r)) return ''; const sit=r.situacao||'aguardando_separacao', SIT={carregado:['carregado','#e5e7eb','#374151'],em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
       const foraMult = semSaldo && /não fecha pacote/.test(r.faltas||'');   // v1.8.13
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
@@ -4726,10 +4773,11 @@ window.renderVolFat = function(){
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
       <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button></td></tr>`; }).join('')}
+    ${L.some(volPasa)?'':'<tr><td colspan="9" style="text-align:center;padding:18px;color:#64748b">Nenhum pedido com esses filtros · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a></td></tr>'}
     </tbody></table></div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9
 };
 window.volFatDet = function(i){
-  const r = (state.volFat||[])[i]; if(!r) return;
+  const r = (state._vfAll||state.volFat||[])[i]; if(!r) return;
   const d = Array.isArray(r.detalhe) ? r.detalhe : [], n = v => Number(v||0).toLocaleString('pt-BR');
   const old = $('mVolFat'); if(old) old.remove();
   document.body.insertAdjacentHTML('beforeend', `<div id="mVolFat" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:620px">
@@ -4757,13 +4805,13 @@ function rastHtml(r,L,imprimir){
     ${blocos||'<div style="color:#64748b;padding:10px 0">Ainda não há leituras registradas para este pedido.</div>'}`;
 }
 window.rastAbrir = async function(i){
-  const r=(state.volFat||[])[i]; if(!r) return; const old=$('mRast'); if(old) old.remove();
+  const r=(state._vfAll||state.volFat||[])[i]; if(!r) return; const old=$('mRast'); if(old) old.remove();
   document.body.insertAdjacentHTML('beforeend',`<div id="mRast" class="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)this.remove()"><div class="modal" style="max-width:980px;width:96vw"><div class="modal-h"><h3>Rastreabilidade · ${esc(r.pedido||'')}</h3></div><div class="modal-b" id="mRastB"><div class="hint">Carregando as leituras…</div></div><div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="rastPdf(${i})">⤓ Baixar relatório (PDF)</button><button class="btn btn-primary" onclick="$('mRast').remove()">Fechar</button></div></div></div>`);
   try{ const q=await sb.rpc('portal_rastreabilidade_pedido',{p_pedido:r.id}); if(q.error) throw q.error; state._rast={id:r.id,L:q.data||[]}; $('mRastB').innerHTML=rastHtml(r,state._rast.L,false); }
   catch(e){ $('mRastB').innerHTML='<div class="hint" style="color:#b91c1c">Não consegui carregar a rastreabilidade: '+esc(e.message||e)+'</div>'; }
 };
 window.rastPdf = function(i){
-  const r=(state.volFat||[])[i]; if(!r||!state._rast||state._rast.id!==r.id) return;
+  const r=(state._vfAll||state.volFat||[])[i]; if(!r||!state._rast||state._rast.id!==r.id) return;
   const html=`<!doctype html><html><head><meta charset="utf-8"><title>Rastreabilidade ${esc(r.pedido||'')}</title><style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;font-size:11px}h1{font-size:18px;margin:0}</style></head><body>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0f3d5e;padding-bottom:6px;margin-bottom:10px"><div><h1>Relatório de rastreabilidade</h1><div>${esc(r.pedido||'')} · ${esc(r.destinatario||'')}${r.nf?' · NF '+esc(r.nf):''}</div></div><div style="text-align:right;font-size:10px;color:#555">MK Logística · VERUS<br>emitido em ${new Date().toLocaleString('pt-BR')}</div></div>
     ${rastHtml(r,state._rast.L,true)}</body></html>`;
