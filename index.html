@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1344 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1345 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1344';
+const APP_VERSION='v1.0.1345';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -39197,7 +39197,7 @@ let wmsUltimasListasGeradas=[];
 // ── WMS · PEDIDOS (lista por status + detalhe) ──
 const WMS_PED_STATUS={
   importado:{l:'Importado',c:'#3b82f6',bg:'rgba(59,130,246,.12)'},
-  aguardando_saldo:{l:'Travado · sem saldo',c:'#dc2626',bg:'rgba(220,38,38,.12)'},   // v1.0.1215: pedido do SAP sem saldo completo
+  aguardando_saldo:{l:'Travado · falta ou fora do múltiplo',c:'#dc2626',bg:'rgba(220,38,38,.12)'},   // v1.0.1345: o detalhe diz qual   // v1.0.1215: pedido do SAP sem saldo completo
   em_separacao:{l:'Em Separação',c:'#f59e0b',bg:'rgba(245,158,11,.12)'},
   separado:{l:'Separado',c:'#8b5cf6',bg:'rgba(139,92,246,.12)'},
   conferido:{l:'Conferido',c:'#06b6d4',bg:'rgba(6,182,212,.12)'},
@@ -43904,14 +43904,28 @@ async function wmsPedEmpenhoCarregar(pedidoId){
       (await dbSelect('wms_pallet_conteudo','pallet_id=in.('+pids.join(',')+')&select=id,pallet_id,qtd_fiscal,controles')||[]).forEach(function(x){conts[x.id]=x;});
     }
     var itens=(wmsPedidoItens||[]).filter(function(it){return it.pedido_id===pedidoId;});
+    // v1.0.1345: motivo da falta por item — fora do múltiplo do pacote (pacote fechado) × sem saldo
+    var _pacOn=(function(){ var c=(clientes||[]).find(function(x){return x.id===p.cliente_id;}), pr=(c&&c.parametros)||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr.pacote_fechado===true||pr.pacote_fechado==='true'; })();
+    var _totSku={}; itens.forEach(function(it){ if(it.status==='cancelado') return; var k=String(it.sku||'').trim().toUpperCase(); _totSku[k]=(_totSku[k]||0)+Number(it.quantidade||0); });
+    var _fora=[], _semSaldo=[], _ok=0;
     var esc=ecomEsc, rows=itens.map(function(it){
       var rs=res.filter(function(r){return r.pedido_item_id===it.id;}), emp=rs.reduce(function(a,r){return a+Number(r.qtd||0);},0), ped=Number(it.quantidade||0);
       var rgs=rs.map(function(r){ var pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{}, ant=c.controles&&(c.controles['RG anterior']||c.controles.rg_anterior);
         return '<span title="'+esc(pl.endereco_codigo||'')+'" style="white-space:nowrap">'+esc(ant||wmsRgFmt(pl.rg))+' <span style="color:var(--text3)">('+Number(r.qtd).toLocaleString('pt-BR')+(c.qtd_fiscal&&Number(r.qtd)<Number(c.qtd_fiscal)?' de '+Number(c.qtd_fiscal).toLocaleString('pt-BR'):'')+(r.status==='consumida'?' · baixado':'')+')</span></span>'; }).join(' · ');
-      var tag=emp>=ped?'<span style="font-size:10px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px">completo</span>':(emp>0?'<span style="font-size:10px;background:var(--amber-bg);color:var(--amber-text);padding:2px 8px;border-radius:99px">parcial</span>':'<span style="font-size:10px;background:var(--red-bg);color:var(--red-text);padding:2px 8px;border-radius:99px">sem saldo</span>');
+      var _k=String(it.sku||'').trim().toUpperCase(), _pr=wmsProdutoDe(it.produto_id,it.sku,p.cliente_id)||{}, _pac=Number(_pr.fator_conversao)||0;
+      var _foraMult=emp<ped&&_pacOn&&_pac>1&&(_totSku[_k]%_pac)!==0;
+      if(emp>=ped) _ok++; else if(_foraMult){ if(_fora.indexOf(_k)<0) _fora.push(_k+': '+_totSku[_k].toLocaleString('pt-BR')+' não fecha pacote de '+_pac.toLocaleString('pt-BR')); } else _semSaldo.push(_k);
+      var tag=emp>=ped?'<span style="font-size:10px;background:var(--green-bg);color:var(--green-text);padding:2px 8px;border-radius:99px">completo</span>'
+        :(_foraMult?'<span title="O total do produto no pedido ('+_totSku[_k].toLocaleString('pt-BR')+') não fecha pacote de '+_pac.toLocaleString('pt-BR')+': ajuste o pedido para múltiplo do pacote" style="font-size:10px;background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:99px;white-space:nowrap">fora do múltiplo · pct '+_pac.toLocaleString('pt-BR')+'</span>'
+        :(emp>0?'<span style="font-size:10px;background:var(--amber-bg);color:var(--amber-text);padding:2px 8px;border-radius:99px">parcial</span>':'<span style="font-size:10px;background:var(--red-bg);color:var(--red-text);padding:2px 8px;border-radius:99px">sem saldo</span>'));
       return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-family:monospace;font-size:12px">'+esc(it.sku)+'</td><td style="padding:6px 10px;text-align:right">'+ped.toLocaleString('pt-BR')+'</td><td style="padding:6px 10px;font-size:11.5px">'+(rgs||'<span style="color:var(--text3)">—</span>')+'</td><td style="padding:6px 10px;text-align:right;font-weight:700">'+emp.toLocaleString('pt-BR')+'</td><td style="padding:6px 10px">'+tag+'</td></tr>';
     }).join('');
-    box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px"><div style="font-weight:700;font-size:13px">Empenho de estoque</div>'
+    _fora=_fora.filter(function(v,i,a){return a.indexOf(v)===i;}); _semSaldo=_semSaldo.filter(function(v,i,a){return a.indexOf(v)===i;});
+    var _resumo=(_fora.length||_semSaldo.length)?'<div style="margin:10px 0 0;padding:9px 12px;border-radius:9px;background:var(--bg2);font-size:12px;line-height:1.6">'
+      +'<b>'+_ok+' item(ns) empenhado(s) ok</b>'
+      +(_fora.length?'<div style="color:#9a3412">⚠ <b>Fora do múltiplo do pacote</b> (a CASCO precisa ajustar o pedido): '+_fora.map(esc).join(' · ')+'</div>':'')
+      +(_semSaldo.length?'<div style="color:var(--red-text)">⛔ <b>Sem saldo livre</b>: '+_semSaldo.map(esc).join(' · ')+'</div>':'')+'</div>':'';
+    box.innerHTML=_resumo+'<div style="display:flex;align-items:center;gap:8px;margin:14px 0 6px"><div style="font-weight:700;font-size:13px">Empenho de estoque</div>'
       +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="wmsPedEmpenhar(\''+pedidoId+'\')">'+(res.length?'Empenhar de novo':'Empenhar')+'</button>'+(res.some(function(r){return r.status==='reservada';})?'<button class="btn btn-sm" onclick="wmsPedLiberarEmpenho(\''+pedidoId+'\')">Liberar empenho</button>':'')+'</span></div>'
       +'<div style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:260px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg2)"><th style="padding:6px 10px;text-align:left;font-size:10px">SKU</th><th style="padding:6px 10px;text-align:right;font-size:10px">PEDIDO</th><th style="padding:6px 10px;text-align:left;font-size:10px">RGs EMPENHADOS (RG antigo · qtd)</th><th style="padding:6px 10px;text-align:right;font-size:10px">EMPENHADO</th><th style="padding:6px 10px;font-size:10px"></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="font-size:11px;color:var(--text3);margin-top:5px">Regra: caixas inteiras que cabem no pedido (fabricação mais antiga), depois a caixa que completa (retirada parcial). Passe o mouse no RG para ver o endereço.</div>';
