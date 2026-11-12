@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1339 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1340 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1339';
+const APP_VERSION='v1.0.1340';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48584,6 +48584,12 @@ function wmsCkvTelaInicial(){
   wmsCkvProntosAtualizar();   // v1.0.1336
 }
 // v1.0.1336: pedidos disponíveis para o checkout buscados no banco; quem exige NF só entra como pronto depois de faturado
+// v1.0.1340: NFs ligadas aos pedidos, por uma função do banco (o perfil do coletor/conferente não lê a tabela de NFs direto e recebia "sem NF")
+async function wmsNfsDosPedidos(ids){
+  ids=(ids||[]).filter(Boolean); if(!ids.length) return [];
+  try{ var r=await dbRpc('wms_nfs_dos_pedidos',{p_pedidos:ids}); if(Array.isArray(r)) return r; }catch(_e){}
+  try{ return await dbSelect('wms_pedido_nfs','pedido_id=in.('+ids.join(',')+')&select=pedido_id,numero')||[]; }catch(_e2){ return null; }
+}
 async function wmsCkvProntosAtualizar(){
   var box=document.querySelector('#ckv [data-ckv-prontos]'); if(!box||_ckv) return;
   var cid=company?.id, cliOk=(clientes||[]).filter(function(c){return c.company_id===cid&&c.wms_checkout_volumes===true;}).map(function(c){return c.id;}); if(!cliOk.length) return;
@@ -48594,7 +48600,7 @@ async function wmsCkvProntosAtualizar(){
     var T=await dbSelect('wms_tarefas_separacao','pedido_id=in.('+ids+')&select=id,pedido_id,lista_id,status,endereco_origem')||[];
     T.forEach(function(t){ var j=(wmsTarefasSeparacao||[]).findIndex(function(x){return x.id===t.id;}); if(j>=0) wmsTarefasSeparacao[j]=Object.assign({},wmsTarefasSeparacao[j],t); else wmsTarefasSeparacao.push(t); });
     P.forEach(function(p){ var i=(wmsPedidos||[]).findIndex(function(x){return x.id===p.id;}); if(i>=0) wmsPedidos[i]=Object.assign({},wmsPedidos[i],p); else wmsPedidos.push(p); });
-    var N=await dbSelect('wms_pedido_nfs','pedido_id=in.('+ids+')&select=pedido_id,numero')||[];
+    var N=(await wmsNfsDosPedidos(P.map(function(p){return p.id;})))||[];
     var sep=P.filter(function(p){ return wmsSeparacaoConcluidaPedido(p.id); });
     var exige=function(p){ return wmsCliParam(p.cliente_id,'checkout_exige_nf')===true; }, temNf=function(p){ return N.some(function(n){return n.pedido_id===p.id;}); };
     var prontos=sep.filter(function(p){ return !exige(p)||temNf(p); }), semNf=sep.filter(function(p){ return exige(p)&&!temNf(p); }), e=ecomEsc;
@@ -48700,7 +48706,7 @@ async function wmsCkvCapa(raw){
   // v1.0.1329: depositante com "checkout só faturado" (CASCO): sem NF ligada ao pedido, o checkout não começa
   var _prm=clP.parametros||{}; if(typeof _prm==='string'){ try{ _prm=JSON.parse(_prm); }catch(_j){ _prm={}; } }
   if(_prm.checkout_exige_nf===true){
-    var _nfs=[]; try{ _nfs=await dbSelect('wms_pedido_nfs','pedido_id=eq.'+p.id+'&select=id,numero')||[]; }catch(_n){ _nfs=null; }
+    var _nfs=await wmsNfsDosPedidos([p.id]);   // v1.0.1340: consulta no banco que vale para qualquer perfil (a tabela de NFs é restrita para alguns usuários)
     if(_nfs&&!_nfs.length){ showToast('Pedido '+wmsNumeroCurto(p)+' ainda NÃO FATURADO: o checkout só começa com a nota fiscal ligada ao pedido.','red'); try{ if(typeof wmsBeepErro==='function') wmsBeepErro(); }catch(_b){} return; }
   }
   wmsCkvAbrir(p.id);
