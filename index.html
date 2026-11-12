@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1342 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1343 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1342';
+const APP_VERSION='v1.0.1343';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46782,7 +46782,7 @@ async function pjBloqRemover(id){ if(!confirm('Remover este bloqueio? As vagas d
 // v1.0.1338: agendamentos do portal aguardando confirmação também em Aprovações (todas as unidades)
 async function wmsAprovAgdCarregar(){
   var box=ge('wms-aprov-agd'); if(!box) return;
-  var A=[]; try{ A=await dbSelect('portal_agendamentos','status=eq.solicitado&data=gte.'+new Date(Date.now()-86400000*2).toISOString().slice(0,10)+'&order=data.asc,hora_inicio.asc&limit=200')||[]; }catch(e){ box.innerHTML=''; return; }
+  var A=[]; try{ A=await dbRpc('wms_agendamentos_pendentes',{})||[]; }catch(e){ try{ A=await dbSelect('portal_agendamentos','status=eq.solicitado&order=data.asc,hora_inicio.asc&limit=200')||[]; }catch(e2){ box.innerHTML=''; return; } }   // v1.0.1343
   if(!A.length){ box.innerHTML=''; return; }
   var pode=wmsPortalPode()||(profile&&['admin','gestor','supervisor_operacoes','portaria'].indexOf(profile.role)>=0)||wmsPodeAprovarConf();
   var cli=function(id){ var c=(clientes||[]).find(function(x){return x.id===id;}); return c?c.nome:'—'; };
@@ -46812,7 +46812,8 @@ async function pjAgdDecidir(id,ok){
   var motivo=null;
   if(!ok){ motivo=prompt('Motivo da recusa (o cliente vê no portal):'); if(motivo===null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
   var upd=ok?{status:'confirmado',confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''}:{status:'recusado',motivo_recusa:motivo,confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''};
-  try{ await dbUpdate('portal_agendamentos',id,upd); _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green'); if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
+  try{ try{ await dbRpc('wms_agendamento_decidir',{p_id:id,p_ok:!!ok,p_motivo:motivo||null,p_por:upd.confirmado_por}); }catch(_r){ await dbUpdate('portal_agendamentos',id,upd); }   // v1.0.1343
+    _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green'); if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
   catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 
@@ -48749,6 +48750,14 @@ async function wmsCkvBipe(raw){
     if(_ckv.aberto&&_ckv.aberto.sku!==k){ _ckv.msg={t:'erro',x:'O volume aberto é de '+ecomEsc(_ckv.aberto.sku)+' (sem caixa mista). Feche o volume antes de começar '+ecomEsc(k)+'.'}; wmsBeep(true); return wmsCkvRender(); }
     var rest=wmsCkvRestante(g); if(rest<=0){ _ckv.msg={t:'erro',x:ecomEsc(k)+' já está completo neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
     if(!/^\d{1,5}$/.test(raw)&&wmsCkvQtdPacoteObrigatoria()&&(g.saco||0)>1){ _ckv.aguardaQtd={sku:k}; _ckv.msg={t:'aviso',x:'Código de '+ecomEsc(k)+' lido. Agora bipe a QUANTIDADE da etiqueta do pacote ('+g.saco.toLocaleString('pt-BR')+').'}; if(navigator.vibrate) navigator.vibrate(30); return wmsCkvRender(); }   // v1.0.1302
+    if(!((g.saco||0)>1)){   // v1.0.1343: produto SEM pacote (ex.: 4070200165-00) → parte de caixa aberta: digita a quantidade desta caixa
+      if(_ckv.aberto){ _ckv.msg={t:'erro',x:'Feche o volume aberto antes.'}; wmsBeep(true); return wmsCkvRender(); }
+      var _sug=g.m>0?Math.min(rest,g.m):rest, _r=prompt(k+' não tem pacote cadastrado.\nQuantas peças vão NESTE volume (caixa aberta)?\nFaltam '+rest.toLocaleString('pt-BR')+' pç.',String(_sug));
+      if(_r==null) return; var _q=parseInt(String(_r).replace(/\D/g,''),10)||0;
+      if(_q<=0||_q>rest){ _ckv.msg={t:'erro',x:'Quantidade inválida: informe de 1 a '+rest.toLocaleString('pt-BR')+'.'}; wmsBeep(true); return wmsCkvRender(); }
+      _ckv.msg={t:'ok',x:'✓ Volume de '+_q.toLocaleString('pt-BR')+' pç de '+ecomEsc(k)+' (caixa aberta)'};
+      await wmsCkvCriarVolume(k,_q,'fracao',[{q:_q}],null); return;
+    }
     var q=Math.min(g.saco||1,rest);
     _ckv.aberto=_ckv.aberto||{sku:k,qtd:0,bipes:[]}; _ckv.aberto.qtd+=q; _ckv.aberto.bipes.push({q:q,em:new Date().toISOString()}); wmsCkvSalvarAberto();
     _ckv.msg={t:'ok',x:'✓ Pacote '+_ckv.aberto.bipes.length+' · '+q.toLocaleString('pt-BR')+' pç de '+ecomEsc(k)};
@@ -48762,7 +48771,13 @@ async function wmsCkvBipe(raw){
   if(!g){ _ckv.msg={t:'erro',x:'A caixa '+ecomEsc(raw)+' é de '+ecomEsc(cx.sku)+', que não está neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
   if(_ckv.aberto){ _ckv.msg={t:'erro',x:'Há um volume de pacotes aberto ('+ecomEsc(_ckv.aberto.sku)+'). Feche-o antes de bipar caixa inteira.'}; wmsBeep(true); return wmsCkvRender(); }
   var qc=+cx.qtd_fiscal||0, rest2=wmsCkvRestante(g);
-  if(qc>rest2){ _ckv.msg={t:'erro',x:'A caixa tem '+qc.toLocaleString('pt-BR')+' pç e faltam só '+rest2.toLocaleString('pt-BR')+' de '+ecomEsc(k)+': confira na tarefa se esta caixa foi aberta (bipe os pacotes).'}; wmsBeep(true); return wmsCkvRender(); }
+  if(qc>rest2){
+    if(rest2>0&&!((g.saco||0)>1)&&confirm('A caixa '+raw+' tem '+qc.toLocaleString('pt-BR')+' pç no saldo e faltam '+rest2.toLocaleString('pt-BR')+' de '+k+'.\n\nEste produto não tem pacote: lançar '+rest2.toLocaleString('pt-BR')+' pç desta caixa neste volume?')){   // v1.0.1343
+      if(_ckv.rgsUsados&&(_ckv.rgsUsados[cx.id]||_ckv.rgsUsados[cx.pallet_id])){ _ckv.msg={t:'erro',x:'Esta caixa já foi bipada neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
+      (_ckv.rgsUsados=_ckv.rgsUsados||{})[cx.id]=1; if(cx.pallet_id) _ckv.rgsUsados[cx.pallet_id]=1;
+      await wmsCkvCriarVolume(k,rest2,'fracao',[{q:rest2}],cx); return;
+    }
+    _ckv.msg={t:'erro',x:'A caixa tem '+qc.toLocaleString('pt-BR')+' pç e faltam só '+rest2.toLocaleString('pt-BR')+' de '+ecomEsc(k)+': confira na tarefa se esta caixa foi aberta (bipe os pacotes).'}; wmsBeep(true); return wmsCkvRender(); }
   if(_ckv.rgsUsados&&(_ckv.rgsUsados[cx.id]||_ckv.rgsUsados[cx.pallet_id])){ _ckv.msg={t:'erro',x:'Esta caixa já foi bipada neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
   (_ckv.rgsUsados=_ckv.rgsUsados||{})[cx.id]=1; if(cx.pallet_id) _ckv.rgsUsados[cx.pallet_id]=1;
   g.caixasQtd=(g.caixasQtd||0)+qc;   // v1.0.1298: peças que entraram por caixa inteira
