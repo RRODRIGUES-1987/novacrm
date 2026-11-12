@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1341 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1342 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1341';
+const APP_VERSION='v1.0.1342';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -53268,10 +53268,19 @@ function wmsPadCoord(ax,val){
   var w=WMS_PAD[ax]||0;
   return /^\d+$/.test(String(val))?String(parseInt(val,10)).padStart(w,"0"):String(val);
 }
+// v1.0.1342: galpão aceita letra e o código pode ser COMPACTO (padrão da CASCO: C + B + 001 + 1 = CB0011)
+function wmsGerFmt(){ return _wmsGer.fmt||(/^\d*$/.test(String(_wmsGer.galpao||'').trim())?'pontos':'compacto'); }
+function wmsGerAvisoRua(){ var el=ge('ger-aviso-rua'); if(!el) return; var g=String(_wmsGer.galpao||'').trim().toUpperCase(), r=String((_wmsGer.r.rua||[])[0]||'').trim().toUpperCase();
+  el.textContent=(g&&r.length>1&&r.indexOf(g)===0)?'Atenção: a rua não deve repetir o galpão. Para o endereço CB…, use galpão "C" e rua "B" (com rua "CB" o código vira CCB…).':''; }
 function wmsGerCodigo(coord){
   // Stage tem código próprio, sem galpão no prefixo: "Stage.001"
   if(_wmsGer.tipo==='stage'){
     return 'Stage.'+wmsPadCoord('stage',coord.stage);
+  }
+  if(wmsGerFmt()==='compacto'){
+    var gC=String(_wmsGer.galpao||'').trim().toUpperCase(), pC=/^\d+$/.test(String(coord.posicao||''))?String(parseInt(coord.posicao,10)).padStart(3,'0'):String(coord.posicao||''),
+        nC=coord.nivel!=null&&/^\d+$/.test(String(coord.nivel))?String(parseInt(coord.nivel,10)):String(coord.nivel||'');
+    return gC+String(coord.rua||'').toUpperCase()+pC+nC+(coord.profundidade!=null&&coord.profundidade!==''?'-'+coord.profundidade:'');
   }
   var partes=[wmsPadCoord("galpao",_wmsGer.galpao)];
   wmsGerAxes().forEach(function(ax){partes.push(wmsPadCoord(ax,coord[ax]));});
@@ -53382,7 +53391,11 @@ function rWmsEnderecos(){
   return '<div style="margin-bottom:14px"><button class="btn btn-sm" onclick="wmsEndView(\'lista\')">← Voltar aos endereços</button></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
       '<div><label class="fl">Unidade</label><select class="fi" id="ger-unit" onchange="wmsGerSetUnidade(this.value)">'+unitOpts+'</select></div>'+
-      '<div><label class="fl">Galpão (nº)</label><input type="number" min="1" class="fi" id="ger-galpao" value="'+( _wmsGer.galpao||'').replace(/"/g,'&quot;')+'" placeholder="Ex.: 1" oninput="wmsGerSync()"></div>'+
+      '<div><label class="fl">Galpão (número ou letra)</label><input type="text" maxlength="4" class="fi" id="ger-galpao" style="text-transform:uppercase" value="'+( _wmsGer.galpao||'').replace(/"/g,'&quot;')+'" placeholder="Ex.: 1 ou C" oninput="wmsGerSync();wmsGerAvisoRua()"></div>'+
+      '<div style="grid-column:1/-1"><label class="fl">Formato do código</label><div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px">'
+        +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="radio" name="ger-fmt" value="compacto" '+(wmsGerFmt()==='compacto'?'checked':'')+' onchange="_wmsGer.fmt=this.value;wmsGerPreviewUpd()"> Compacto <span style="color:var(--text3)">(galpão C · rua B · coluna 1 · nível 1 → CB0011)</span></label>'
+        +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="radio" name="ger-fmt" value="pontos" '+(wmsGerFmt()==='pontos'?'checked':'')+' onchange="_wmsGer.fmt=this.value;wmsGerPreviewUpd()"> Com pontos <span style="color:var(--text3)">(01.A.001.01)</span></label></div>'
+        +'<div id="ger-aviso-rua" style="font-size:12px;color:var(--red-text);margin-top:4px"></div></div>'+
     '</div>'+
     '<label class="fl">Tipo de estrutura</label><div style="display:flex;gap:7px;flex-wrap:wrap;margin:4px 0 16px">'+tpBtns+'</div>'+
     '<div style="background:var(--bg2);border-radius:10px;padding:12px 14px;margin-bottom:14px">'+
@@ -53402,6 +53415,8 @@ function wmsGerConfirmar(){
   var axes=wmsGerAxes();
   if(!_wmsGer.unit_id){showToast('Selecione a unidade.','red');return;}
   if(!(_wmsGer.galpao||'').trim()){showToast('Informe o galpão.','red');return;}
+  var _g0=String(_wmsGer.galpao).trim().toUpperCase(), _r0=String((_wmsGer.r.rua||[])[0]||'').trim().toUpperCase();
+  if(_r0.length>1&&_r0.indexOf(_g0)===0&&!confirm('A rua "'+_r0+'" começa com o galpão "'+_g0+'": o código vai ficar '+_g0+_r0+'…\n\nNa CASCO o certo é galpão "C" e rua "B" (CB0011). Gerar mesmo assim?')) return;
   var parts={},combos=1;
   axes.forEach(function(ax){var q=wmsSeq(_wmsGer.r[ax][0],_wmsGer.r[ax][1]);parts[ax]=q;combos*=Math.max(q.length,1);});
   if(!combos){showToast('Intervalos vazios.','red');return;}
@@ -53432,7 +53447,7 @@ async function wmsGerGerar(){
   (function walk(i,acc){if(i>=axes.length){combosArr.push(acc.slice());return;}var arr=parts[axes[i]];for(var j=0;j<arr.length;j++){acc.push([axes[i],arr[j]]);walk(i+1,acc);acc.pop();}})(0,[]);
   portSaving&&portSaving();
   try{
-    var scope='company_id=eq.'+cid+'&unit_id=eq.'+_wmsGer.unit_id+'&galpao=eq.'+encodeURIComponent(_wmsGer.galpao)+'&select=codigo';
+    var scope='company_id=eq.'+cid+'&unit_id=eq.'+_wmsGer.unit_id+'&select=codigo';   // v1.0.1342: confere o código em toda a unidade (evita duplicar com outro formato de galpão)
     var exist=await dbSelect('wms_enderecos',scope).catch(function(){return [];});
     var existSet={};(exist||[]).forEach(function(e){existSet[e.codigo]=1;});
     var pulados=0;
@@ -53444,9 +53459,10 @@ async function wmsGerGerar(){
       var nv=(coord.nivel!=null)?coord.nivel:'_';
       var c=_wmsGer.cap[nv]||{q:{}};
       var eid=uid();
-      enderecos.push({id:eid,company_id:cid,unit_id:_wmsGer.unit_id,galpao:wmsPadCoord('galpao',_wmsGer.galpao),
+      var _cmp=wmsGerFmt()==='compacto';
+      enderecos.push({id:eid,company_id:cid,unit_id:_wmsGer.unit_id,galpao:_cmp?String(_wmsGer.galpao||'').trim().toUpperCase():wmsPadCoord('galpao',_wmsGer.galpao),
         codigo:codigo,tipo_estrutura:_wmsGer.tipo,
-        rua:wmsPadCoord('rua',coord.rua)||null,posicao:wmsPadCoord('posicao',coord.posicao)||null,nivel:wmsPadCoord('nivel',coord.nivel)||null,
+        rua:wmsPadCoord('rua',coord.rua)||null,posicao:wmsPadCoord('posicao',coord.posicao)||null,nivel:(_cmp&&coord.nivel!=null&&/^\d+$/.test(String(coord.nivel))?String(parseInt(coord.nivel,10)):wmsPadCoord('nivel',coord.nivel))||null,
         profundidade:(coord.profundidade!=null&&coord.profundidade!=='')?parseInt(coord.profundidade,10):null,
         peso_max_kg:(c.peso!=null&&c.peso!=='')?parseFloat(c.peso):null,
         altura_max_cm:(c.altura!=null&&c.altura!=='')?parseFloat(c.altura):null,
