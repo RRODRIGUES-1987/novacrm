@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1340 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1341 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1340';
+const APP_VERSION='v1.0.1341';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37376,7 +37376,7 @@ async function wmsCapaPedidosPrint(pedidoIds){
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;font-size:13px}.l{font-size:10px;color:#666}.big{font-size:22px}.sm{font-size:11px}
     table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px} th{background:#eee;text-align:left;padding:5px 6px} td{padding:5px 6px;border-bottom:1px solid #ddd} .r{text-align:right}
     .bcbox{text-align:center;border-top:1px dashed #999;padding-top:10px;margin-top:auto} .bcbox svg{width:380px;height:80px} .code{font-family:monospace;font-size:16px;margin-top:4px}
-    .pg{height:279mm;overflow:hidden} .pg table{flex:0 0 auto}
+    .pg{height:270mm;min-height:0;overflow:hidden} .pg:last-child{page-break-after:auto} .pg table{flex:0 0 auto}
     .d1 .dest{font-size:36px;margin-top:6px;padding-bottom:6px} .d1 .vn{font-size:76px} .d1 .info{font-size:14px} .d1 .pt{font-size:30px} .d1 table{font-size:11px} .d1 td,.d1 th{padding:3px 6px} .d1 .bcbox svg{height:66px}
     .d2 .dest{font-size:30px;margin-top:4px;padding-bottom:5px;border-bottom-width:3px} .d2 .vn{font-size:62px} .d2 .info{font-size:13px;line-height:1.4} .d2 .part{padding:8px 12px;margin-top:8px} .d2 .pt{font-size:24px} .d2 table{font-size:10px;margin-top:8px} .d2 td,.d2 th{padding:2px 5px} .d2 .bcbox{padding-top:6px} .d2 .bcbox svg{width:320px;height:56px} .d2 .code{font-size:13px}
     .d3 .dest{font-size:26px;margin-top:2px;padding-bottom:4px;border-bottom-width:3px} .d3 .vn{font-size:52px} .d3 .info{font-size:12px;line-height:1.35;padding-bottom:4px} .d3 .part{padding:6px 10px;margin-top:6px} .d3 .pk{font-size:10px} .d3 .pt{font-size:20px} .d3 table{font-size:9px;margin-top:6px;margin-bottom:6px} .d3 td,.d3 th{padding:1px 4px} .d3 .bcbox{padding-top:4px} .d3 .bcbox svg{width:280px;height:48px} .d3 .code{font-size:12px}
@@ -49090,10 +49090,27 @@ async function wmsFinalizarUnitizacao(){
 }
 
 // Reimprime as etiquetas de embarque de um pedido (reabre o modal PDF/ZPL)
-function wmsReimprimirEtiquetas(pedidoId){
-  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId);
+function wmsReimprimirEtiquetas(pedidoId){   // v1.0.1341: escolhe quais volumes reimprimir (antes saíam todos da OS)
+  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
   if(!pallets.length){showToast('Este pedido não tem pallets/etiquetas.','amber');return;}
-  gerarEtiquetasEmbarquePedido(pedidoId);
+  const p=wmsPedidos.find(x=>x.id===pedidoId)||{}, N=Math.max(...pallets.map(x=>x.vol_total||0),pallets.length);
+  const lin=pallets.map(pl=>{ const its=(wmsPalletItens||[]).filter(x=>x.pallet_id===pl.id); return '<label style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-top:1px solid var(--border);cursor:pointer;font-size:13px"><input type="checkbox" class="reimp-vol" value="'+pl.id+'" style="width:18px;height:18px"><b style="min-width:70px">vol '+(pl.vol_num||'?')+'/'+N+'</b><span style="font-family:monospace;color:var(--text3);min-width:110px">'+ecomEsc(pl.numero||'')+'</span><span style="color:var(--text2)">'+its.map(x=>ecomEsc(x.sku)+' × '+Number(x.quantidade||0).toLocaleString('pt-BR')).join(', ')+'</span></label>'; }).join('');
+  const old=ge('reimp-ov'); if(old) old.remove();
+  const d=document.createElement('div'); d.id='reimp-ov'; d.style.cssText='position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML='<div style="background:var(--bg,#fff);border-radius:14px;width:min(640px,96vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:14px 16px;border-bottom:1px solid var(--border);font-weight:700">Reimprimir etiquetas · '+ecomEsc(wmsNumeroCurto(p))+' <span style="font-weight:400;font-size:12px;color:var(--text3)">marque só os volumes que precisam de etiqueta nova</span></div>'
+    +'<div style="overflow:auto;padding:4px 12px">'+lin+'</div>'
+    +'<div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" onclick="ge(\'reimp-ov\').remove()">Cancelar</button><button class="btn" onclick="wmsReimprimirVolumes(\''+pedidoId+'\',true)">Todas ('+pallets.length+')</button><button class="btn btn-p" onclick="wmsReimprimirVolumes(\''+pedidoId+'\',false)">Imprimir selecionadas</button></div></div>';
+  document.body.appendChild(d);
+}
+function wmsReimprimirVolumes(pedidoId,todas){
+  const ids=todas?null:Array.prototype.map.call(document.querySelectorAll('.reimp-vol:checked'),c=>c.value);
+  if(!todas&&!ids.length){ showToast('Marque ao menos um volume','amber'); return; }
+  const p=wmsPedidos.find(x=>x.id===pedidoId)||{}, all=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId), sel=todas?all:all.filter(pl=>ids.indexOf(pl.id)>=0);
+  const cli=(clientes||[]).find(c=>c.id===p.cliente_id), N=Math.max(...all.map(x=>x.vol_total||0),all.length);
+  const romNumero=p.romaneio_id?((wmsRomaneios||[]).find(x=>x.id===p.romaneio_id)||{}).numero:null;
+  const o=ge('reimp-ov'); if(o) o.remove();
+  zebraImprimirOuBaixar(wmsEmbarqueZplLista(sel.sort((a,b)=>(a.vol_num||0)-(b.vol_num||0)),{cli:cli,numCurto:wmsNumeroCurto(p),N:N,romNumero:romNumero}),'etiquetas_'+wmsNumeroCurto(p)+'.zpl');
 }
 
 // Estorna a 3ª conferência (unitização): apaga pallets, itens, etiquetas e a conferência tipo 3
@@ -55120,8 +55137,10 @@ function wmsTrackBusca(v){
 }
 // Leituras de unitização de um pallet — fonte: wms_leituras (pallet_id); fallback: reconstrói dos itens (pallets antigos)
 function wmsUnitLeiturasDoPallet(pl,pedido){
-  const stored=wmsLeituras.filter(l=>l.etapa==='unitizacao'&&l.pallet_id===pl.id&&!l.estornada).sort((a,b)=>(a.sequencia||0)-(b.sequencia||0));
+  const stored=wmsLeituras.filter(l=>(l.etapa==='unitizacao'||l.etapa==='conferencia')&&l.pallet_id===pl.id&&!l.estornada).sort((a,b)=>(a.sequencia||0)-(b.sequencia||0));
   if(stored.length)return stored;
+  // v1.0.1341: sem leituras gravadas, mostra o conteúdo do volume por produto (não explode peça a peça)
+  if((wmsPalletItens||[]).some(pi=>pi.pallet_id===pl.id)) return wmsPalletItens.filter(pi=>pi.pallet_id===pl.id).map((pi,i)=>({sku:pi.sku,descricao:pi.descricao,produto_id:pi.produto_id,tipo_volume:'pallet',quantidade:+pi.quantidade||0,sequencia:i+1,modo:null,usuario_nome:pl.montado_por_nome,created_at:pl.montado_em}));
   const linhas=[];let seq=0;
   wmsPalletItens.filter(pi=>pi.pallet_id===pl.id).forEach(pi=>{
     const m=wmsMultiploDe(pi.produto_id,pi.sku,pedido?.cliente_id);
@@ -55253,7 +55272,7 @@ function wmsTrackConteudo(pedidoId){
         +'</tr>';
       }).join('');
       const respM=pl.montado_por_nome?(pl.montado_por_nome+' · '+fmtDt(pl.montado_em)):'<span style="color:var(--text3)">—</span>';
-      const totV=ls.length+' volume'+(ls.length===1?'':'s');
+      const totV=ls.length+' leitura'+(ls.length===1?'':'s')+' · '+ls.reduce((a,l)=>a+(+l.quantidade||0),0).toLocaleString('pt-BR')+' pç';   // v1.0.1341
       const cab='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 11px;background:var(--bg2)">'
         +'<div style="font-size:12px;font-weight:800">'+pl.numero+' <span style="font-size:11px;font-weight:600;color:var(--text2)">· volume '+(pl.vol_num||'?')+'/'+N+' · '+totV+'</span></div>'
         +'<div style="font-size:10px;color:var(--text2)">🏗 '+respM+'</div></div>';
