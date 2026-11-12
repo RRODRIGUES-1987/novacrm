@@ -3170,7 +3170,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.12';   // v1.8.12: pedidos carregados no quadro · DANFE casada pelo XML do mesmo envio · rastreabilidade por caixa/pacote
+const PORTAL_VERSION = 'v1.8.13';   // v1.8.13: situação "itens fora do múltiplo" separada de "aguardando saldo"
+// v1.8.12: pedidos carregados no quadro · DANFE casada pelo XML do mesmo envio · rastreabilidade por caixa/pacote
 // v1.8.11: ver a DANFE enviada · unidade de armazenagem do depositante (caixas/pallets)
 // v1.8.10: planilha da CASCO → UM pedido por número de separação (não quebra mais por OV)
 // v1.8.9: editar agendamento, incluir/retirar pedidos (no agendamento e pelo quadro de pedidos)
@@ -3515,9 +3516,9 @@ function render(){
   // v1.1: menu do topo, detalhes dos indicadores, painel e estoque
   [['nbPed',abertosP.length],['nbAgd',futurosA.length],['nbNc',ncAbertas]].forEach(([id,n])=>{ const e=$(id); if(e){ e.textContent=n; e.classList.toggle('hide',!n); } });
   const emOp = abertosP.filter(p=>p.status==='em_operacao').length;
-  if(_vf){ const c={}; _vf.forEach(r=>{ const k=r.situacao||'aguardando_separacao'; c[k]=(c[k]||0)+1; });
-    const NOM={em_separacao:'em separação',separado:'separado(s)',conferido:'conferido(s)',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',aguardando_separacao:'aguardando separação'};
-    $('sumPedD').textContent = ['em_separacao','separado','aguardando_saldo','aguardando_separacao'].filter(k=>c[k]).map(k=>c[k]+' '+NOM[k]).join(' · '); }
+  if(_vf){ const c={}; _vf.forEach(r=>{ let k=r.situacao||'aguardando_separacao'; if(k==='aguardando_saldo'&&/não fecha pacote/.test(r.faltas||'')) k='fora_multiplo'; c[k]=(c[k]||0)+1; });   // v1.8.13
+    const NOM={em_separacao:'em separação',separado:'separado(s)',conferido:'conferido(s)',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',fora_multiplo:'com itens fora do múltiplo',aguardando_separacao:'aguardando separação'};
+    $('sumPedD').textContent = ['em_separacao','separado','fora_multiplo','aguardando_saldo','aguardando_separacao'].filter(k=>c[k]).map(k=>c[k]+' '+NOM[k]).join(' · '); }
   else $('sumPedD').textContent = emOp ? emOp+' em separação agora' : (abertosP.length?'aguardando operação':'');
   $('sumPalD').textContent = state.palletsDelta ? '▲ '+state.palletsDelta+' no mês' : '';
   const hjList = state.agendamentos.filter(a=>a.data===hoje() && a.status!=='cancelado');
@@ -4708,18 +4709,20 @@ window.renderVolFat = function(){
     <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido</th><th>Destinatário</th><th>Situação</th><th class="num">Volumes</th><th class="num">Peso</th><th>Nota fiscal</th><th></th></tr></thead><tbody>
     ${L.map((r,i)=>{ const sit=r.situacao||'aguardando_separacao', SIT={carregado:['carregado','#e5e7eb','#374151'],em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
+      const foraMult = semSaldo && /não fecha pacote/.test(r.faltas||'');   // v1.8.13
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
       const dt = new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       let nf = '';
       if(r.nf){ const div = r.nf_status==='divergente', cor = div ? '#b91c1c' : (r.danfe===false ? '#b45309' : '#4d7a1a');
         const sub = div ? esc(r.nf_divergencias||'divergente') : (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''));
         nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}</div>`; }
+      else if(foraMult) nf = `<span class="hint" style="color:#9a3412">ajuste as quantidades para múltiplo do pacote e reenvie o pedido</span>`;
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
       else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
       const apto=r.nf&&r.nf_status!=='divergente'&&['conferido','separado','em_separacao'].includes(sit);
       return `<tr>${podeVer('agd')?`<td>${apto?`<input type="checkbox" ${_qSel.has(r.id)?'checked':''} onchange="qSelToggle('${r.id}',this.checked)" title="Marcar para agendar">`:''}</td>`:''}<td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
-      <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${SIT[1]};color:${SIT[2]};white-space:nowrap">${SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
+      <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${foraMult?'#ffedd5':SIT[1]};color:${foraMult?'#9a3412':SIT[2]};white-space:nowrap">${foraMult?'itens fora do múltiplo':SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
       <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button></td></tr>`; }).join('')}
