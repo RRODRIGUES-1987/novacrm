@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1338 | Gerado: 2026-11-11 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1339 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1338';
+const APP_VERSION='v1.0.1339';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -48500,6 +48500,17 @@ async function wmsCkvAbrir(pedId){
   try{ var _pe=await dbSelect('wms_pallets_embarque','pedido_id=eq.'+pedId)||[]; var _pi=_pe.length?(await dbSelect('wms_pallet_itens','pallet_id=in.('+_pe.map(function(x){return x.id;}).join(',')+')')||[]):[];
     wmsPalletsEmbarque=(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id!==pedId;}).concat(_pe); var _ids={}; _pe.forEach(function(x){_ids[x.id]=1;});
     wmsPalletItens=(wmsPalletItens||[]).filter(function(x){return !(x.pedido_id===pedId||_ids[x.pallet_id]);}).concat(_pi); }catch(_e){}
+  // v1.0.1339: itens do pedido e cadastro dos produtos (peças por pacote, caixa) relidos do banco — a memória da tela podia estar
+  //            sem o pacote certo, e o checkout pedia "100 pacotes" onde era 1 pacote de 100 (ou 4.000 pacotes onde eram 4)
+  try{
+    var _its=await dbSelect('wms_pedido_itens','pedido_id=eq.'+pedId)||[];
+    if(_its.length) wmsPedidoItens=(wmsPedidoItens||[]).filter(function(i){return i.pedido_id!==pedId;}).concat(_its);
+    var _pp=(wmsPedidos||[]).find(function(x){return x.id===pedId;}), _pids=[...new Set(_its.map(function(i){return i.produto_id;}).filter(Boolean))];
+    var _prs=_pids.length?(await dbSelect('wms_produtos','id=in.('+_pids.join(',')+')')||[]):[];
+    var _skus=_its.filter(function(i){return !i.produto_id;}).map(function(i){return String(i.sku||'').trim();}).filter(Boolean);
+    if(_skus.length&&_pp) _prs=_prs.concat(await dbSelect('wms_produtos','cliente_id=eq.'+_pp.cliente_id+'&sku=in.('+_skus.map(function(x){return '"'+x.replace(/"/g,'')+'"';}).join(',')+')')||[]);
+    _prs.forEach(function(pr){ var j=(wmsProdutos||[]).findIndex(function(x){return x.id===pr.id;}); if(j>=0) wmsProdutos[j]=Object.assign({},wmsProdutos[j],pr); else wmsProdutos.push(pr); });
+  }catch(_r){}
   var pl=wmsCkvPlano(pedId); if(!pl){ showToast('Pedido não encontrado.','red'); return; }
   var abertoSalvo=null; try{ abertoSalvo=JSON.parse(safeLocal.getItem('ckv_'+pedId)||'null'); }catch(e){}
   _ckv={pedId:pedId,plano:pl,aberto:abertoSalvo||null,msg:null,passos:null};
