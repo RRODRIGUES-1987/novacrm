@@ -3176,7 +3176,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.19';   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
+const PORTAL_VERSION = 'v1.8.20';   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
+// v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
 // v1.8.18 →   // v1.8.18: o portal diz o que falta para o cartão do motorista
 // v1.8.17 →   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
 // v1.8.16 →   // v1.8.16: excluir pedido não separado e sem NF; quadro com rolagem sempre visível; romaneio no agendamento
@@ -4797,7 +4798,7 @@ window.renderVolFat = function(){
       let nf = '';
       if(r.nf){ const div = r.nf_status==='divergente', cor = div ? '#b91c1c' : (r.danfe===false ? '#b45309' : '#4d7a1a');
         const sub = div ? esc(r.nf_divergencias||'divergente') : (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''));
-        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}</div>`; }
+        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}${['em_romaneio','carregado'].indexOf(sit)<0?` · <a href="#" style="color:#b91c1c" title="Tira a nota (XML e DANFE) deste pedido para enviar a certa" onclick="event.preventDefault();nfDesligar(${i})">desligar nota</a>`:''}</div>`; }   // v1.8.20
       else if(foraMult) nf = `<span class="hint" style="color:#9a3412">ajuste as quantidades para múltiplo do pacote e reenvie o pedido</span>`;
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
@@ -4812,6 +4813,14 @@ window.renderVolFat = function(){
     </tbody></table></div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9
 };
 // v1.8.16: excluir pedido ainda não separado e sem nota fiscal (o empenho volta ao estoque; a MKLOG vê como excluído pelo portal)
+// v1.8.20: desligar a nota (XML + DANFE) ligada ao pedido errado — só antes do romaneio/carregamento
+window.nfDesligar = async function(i){
+  const r=(state._vfAll||state.volFat||[])[i]; if(!r||!r.nf) return;
+  if(!confirm('Desligar a NF '+r.nf+' do pedido '+(String(r.pedido||'').split(' · ')[0])+'?\n\nO XML e a DANFE saem do pedido e voc\u00ea pode enviar a nota certa. A MK Logística fica sabendo.')) return;
+  try{ const q=await sb.rpc('portal_desligar_nf',{p_pedido:r.id,p_autor:(state.user&&state.user.nome)||null}); if(q.error) throw q.error;
+    toast('Nota desligada do pedido.'); try{ const vf=await sb.rpc('portal_volumes_faturar'); state.volFat=vf.data||[]; }catch(_e){} renderVolFat(); }
+  catch(e){ toast('Não foi possível desligar: '+(e.message||e)); }
+};
 window.pedExcluir = async function(i){
   const r=(state._vfAll||state.volFat||[])[i]; if(!r) return;
   const m=prompt('Excluir o pedido '+(String(r.pedido||'').split(' · ')[0])+'?\nInforme o motivo (a MKLOG verá esta informação):',''); if(m===null) return;
