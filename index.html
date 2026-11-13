@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1346 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1347 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1346';
+const APP_VERSION='v1.0.1347';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46829,7 +46829,7 @@ async function pjAgdDecidir(id,ok){
   if(!ok){ motivo=prompt('Motivo da recusa (o cliente vê no portal):'); if(motivo===null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
   var upd=ok?{status:'confirmado',confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''}:{status:'recusado',motivo_recusa:motivo,confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''};
   try{ try{ await dbRpc('wms_agendamento_decidir',{p_id:id,p_ok:!!ok,p_motivo:motivo||null,p_por:upd.confirmado_por}); }catch(_r){ await dbUpdate('portal_agendamentos',id,upd); }   // v1.0.1343
-    _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green'); if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
+    _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green'); if(ge('wms-exp-agd')) wmsExpAgdCarregar(); else if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
   catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 
@@ -49365,15 +49365,50 @@ function gerarEtiquetaEmbarque(palletId){
 //  WMS · EXPEDIÇÃO / EMBARQUE (4ª conferência + pool de prismas)
 // ══════════════════════════════════════════════════════════════════
 let wmsExpTab='embarque';
-var _expView='docas'; // 'docas' | 'patio'
+var _expView='docas'; // 'docas' | 'patio' | 'agenda'
 function wmsExpSetView(v){_expView=v;if(curPage==='wms-expedicao')render();}
 function rWmsExpedicao(){
   // barra de alternância docas <-> pátio (unificação)
   var toggle='<div style="display:flex;gap:8px;margin-bottom:14px">'
     +'<button class="btn btn-sm'+(_expView==='docas'?' btn-p':'')+'" onclick="wmsExpSetView(\'docas\')">🚪 Docas</button>'
     +'<button class="btn btn-sm'+(_expView==='patio'?' btn-p':'')+'" onclick="wmsExpSetView(\'patio\')">🅿️ Pátio</button>'
+    +'<button class="btn btn-sm'+(_expView==='agenda'?' btn-p':'')+'" onclick="wmsExpSetView(\'agenda\')">📅 Agendamentos <span id="exp-agd-n" style="display:none;margin-left:4px;background:#f59e0b;color:#fff;border-radius:99px;padding:0 7px;font-size:11px;font-weight:700"></span></button>'
     +'</div>';
+  setTimeout(wmsExpAgdContar,40);   // v1.0.1347: bolinha com os agendamentos do portal aguardando confirmação
+  if(_expView==='agenda'){ setTimeout(wmsExpAgdCarregar,30); return toggle+'<div id="wms-exp-agd"><div style="padding:30px;text-align:center;color:var(--text3)">Buscando os agendamentos…</div></div>'; }
   return toggle+(_expView==='patio'?rWmsPatio():wmsExpDocasBody());
+}
+// v1.0.1347: agendamentos do portal (entrada e saída) dentro de Carga/Descarga — confirmar ou recusar aqui
+var _expAgdFiltro='todos';
+async function wmsAgdBuscar(dias){
+  try{ var r=await dbRpc('wms_agendamentos_lista',{p_dias:dias||14}); if(Array.isArray(r)) return r; }catch(_e){}
+  try{ return await dbRpc('wms_agendamentos_pendentes',{})||[]; }catch(_e2){}
+  try{ return await dbSelect('portal_agendamentos','status=in.(solicitado,confirmado)&data=gte.'+new Date(Date.now()-86400000).toISOString().slice(0,10)+'&order=data.asc,hora_inicio.asc&limit=300')||[]; }catch(_e3){ return []; }
+}
+async function wmsExpAgdContar(){
+  var el=ge('exp-agd-n'); if(!el) return; var A=await wmsAgdBuscar(14), n=A.filter(function(a){return a.status==='solicitado';}).length;
+  el=ge('exp-agd-n'); if(!el) return; el.textContent=n; el.style.display=n?'inline-block':'none';
+}
+function wmsExpAgdFiltrar(f){ _expAgdFiltro=f; wmsExpAgdCarregar(); }
+async function wmsExpAgdCarregar(){
+  var box=ge('wms-exp-agd'); if(!box) return;
+  var A=await wmsAgdBuscar(14); box=ge('wms-exp-agd'); if(!box) return;
+  var cli=function(id){ var c=(clientes||[]).find(function(x){return x.id===id;}); return c?c.nome:'—'; };
+  var pode=wmsPortalPode()||(profile&&['admin','gestor','supervisor_operacoes','lider_operacoes','portaria'].indexOf(profile.role)>=0)||wmsPodeAprovarConf();
+  var fl=_expAgdFiltro, vis=A.filter(function(a){ return fl==='todos'||(fl==='entrada'?a.tipo==='entrada':a.tipo!=='entrada'); });
+  var pend=vis.filter(function(a){return a.status==='solicitado';}), conf=vis.filter(function(a){return a.status==='confirmado';});
+  var chip=function(v,l){ var on=fl===v; return '<button class="btn btn-sm'+(on?' btn-p':'')+'" onclick="wmsExpAgdFiltrar(\''+v+'\')">'+l+'</button>'; };
+  var tipoTag=function(a){ var e=a.tipo==='entrada'; return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:'+(e?'#dbeafe':'#ffedd5')+';color:'+(e?'#1e40af':'#9a3412')+'">'+(e?'ENTRADA · descarga':'SAÍDA · carga')+'</span>'; };
+  var info=function(a){ return '<div style="font-size:12px;color:var(--text2)">'+pjData(a.data)+' '+pjHora(a.hora_inicio)+(a.hora_fim?'–'+pjHora(a.hora_fim):'')+' · '+(a.cd==='salto'?'Salto':'Itu')+(a.transportadora?' · '+ecomEsc(a.transportadora):'')+(a.placa?' · '+ecomEsc(a.placa):'')+(a.motorista?' · '+ecomEsc(a.motorista):'')+'</div>'; };
+  var cardPend=function(a){ return '<div style="border:1px solid #f59e0b;border-radius:11px;padding:11px 14px;margin-bottom:9px;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:230px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:700;font-size:14px"><span style="font-family:monospace">'+ecomEsc(a.protocolo||'')+'</span>'+tipoTag(a)+'<span style="font-size:11px;color:var(--text3);font-weight:400">'+ecomEsc(cli(a.depositante_id))+'</span></div>'+info(a)+'</div>'
+    +(pode?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="pjAgdDecidir(\''+a.id+'\',false)">Recusar</button><button class="btn btn-sm btn-primary" onclick="pjAgdDecidir(\''+a.id+'\',true)">✓ Confirmar</button>':'<span style="font-size:11px;color:var(--text3)">sem permissão para confirmar</span>')+'</div>'; };
+  var cardConf=function(a){ return '<div style="border:1px solid var(--border);border-radius:11px;padding:9px 14px;margin-bottom:7px;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:230px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:700;font-size:13px"><span style="font-family:monospace">'+ecomEsc(a.protocolo||'')+'</span>'+tipoTag(a)+'<span style="font-size:11px;color:var(--text3);font-weight:400">'+ecomEsc(cli(a.depositante_id))+'</span></div>'+info(a)+'</div><span style="font-size:11px;font-weight:700;color:var(--green-text)">confirmado</span></div>'; };
+  box.innerHTML='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><div style="font-weight:700;font-size:14px">Agendamentos do portal</div><span style="font-size:12px;color:var(--text3)">próximos 14 dias · entrada e saída</span><span style="margin-left:auto;display:flex;gap:6px">'+chip('todos','Todos')+chip('entrada','Entrada')+chip('saida','Saída')+'</span></div>'
+    +'<div style="font-size:12px;font-weight:800;color:#b45309;margin:4px 0 8px">Aguardando confirmação ('+pend.length+')</div>'
+    +(pend.map(cardPend).join('')||'<div style="padding:10px 0;color:var(--text3);font-size:13px">Nenhum agendamento aguardando.</div>')
+    +'<div style="font-size:12px;font-weight:800;color:var(--text2);margin:16px 0 8px">Confirmados ('+conf.length+')</div>'
+    +(conf.map(cardConf).join('')||'<div style="padding:10px 0;color:var(--text3);font-size:13px">Nenhum confirmado no período.</div>');
+  var n=ge('exp-agd-n'); if(n){ var np=A.filter(function(a){return a.status==='solicitado';}).length; n.textContent=np; n.style.display=np?'inline-block':'none'; }
 }
 // ===== EXPEDIÇÃO · VISÃO POR DOCA (romaneio entra na doca; valida ocupação) =====
 function wmsExpDocasBody(){
