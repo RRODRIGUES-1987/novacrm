@@ -3176,7 +3176,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.17';   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
+const PORTAL_VERSION = 'v1.8.18';   // v1.8.18: o portal diz o que falta para o cartão do motorista
+// v1.8.17 →   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
 // v1.8.16 →   // v1.8.16: excluir pedido não separado e sem NF; quadro com rolagem sempre visível; romaneio no agendamento
 // v1.8.15 →   // v1.8.15: filtro por coluna com o estilo próprio (o CSS global do portal esticava as caixas de marcar e escondia os valores)
 // v1.8.14: filtro por coluna (estilo Excel) no quadro de pedidos; sai o "mostrar carregados"
@@ -4191,6 +4192,14 @@ function pedChips(){
 
 /* ============================ v1.3 · CARTÃO DE EMBARQUE DO MOTORISTA ============================ */
 function cartaoCodigo(a){ return 'EMB-'+String(a.protocolo||a.id).replace(/\D/g,'').slice(-6).padStart(6,'0')+((a.cartao_versao||1)>1?'-'+a.cartao_versao:''); }   // v1.6.8: versão do cartão quando motorista/placa forem substituídos
+// v1.8.18: diz exatamente o que falta para o cartão (antes era sempre "quando a MKLOG confirmar")
+function cartaoMotivo(a){
+  if(a.status!=='confirmado') return a.status==='solicitado'?'O cartão do motorista fica disponível quando a MK Logística confirmar o agendamento.':'O agendamento está como "'+stNome(a.status)+'" — o cartão só existe para agendamento confirmado.';
+  if(estagioDe(a)==='liberado') return 'O veículo já foi liberado.';
+  if(!agdDadosOk(a)){ const nm=String(a.motorista_nome||'').trim(), fal=[]; if(!nm||/^a informar$/i.test(nm)) fal.push('nome do motorista'); if(!String(a.motorista_doc||'').trim()) fal.push('documento do motorista');
+    return 'Falta informar: '+fal.join(' e ')+'. Use ✎ Editar agendamento (a placa pode ser informada até a chegada).'; }
+  return '';
+}
 function cartaoPode(a){ return a.status==='confirmado' && estagioDe(a)!=='liberado' && agdDadosOk(a); }
 function agdDadosOk(a){ const nm=String(a.motorista_nome||'').trim(); return DEMO || a.tipo!=='saida' || !!(nm && !/^a informar$/i.test(nm) && String(a.motorista_doc||'').trim()); }   // v1.6.8 · v1.8.17: a placa não segura o cartão — pode ser informada até a chegada na doca
 function agdLinkTransp(a){ return a.transp_token ? location.origin+location.pathname+'?t='+a.transp_token : ''; }
@@ -4224,7 +4233,7 @@ function cartaoHtml(a, imprimir){
 function openCartao(id){
   const a=state.agendamentos.find(x=>x.id===id); if(!a) return;
   if(!agdDadosOk(a)){ $('detTitle').textContent='Cartão do motorista · '+a.protocolo; $('detBody').innerHTML=agdLinkPainel(a); openModal('mDet'); return; }   // v1.6.8
-  if(!cartaoPode(a)){ alert('O cartão do motorista fica disponível quando a MKLOG confirmar o agendamento.'); return; }
+  if(!cartaoPode(a)){ alert(cartaoMotivo(a)||'O cartão ainda não está disponível.'); return; }   // v1.8.18
   const cod=cartaoCodigo(a);
   const txt=`Cartão de embarque MKLOG ${cod}\n${a.tipo==='entrada'?'Entrada':'Saída'} · ${cdNome(a.cd)} · ${fmtDataLonga(a.data)} ${fmtHora(a.hora_inicio)}–${fmtHora(a.hora_fim)}\nPlaca ${a.placa||'—'} · Motorista ${a.motorista_nome||'—'}\nApresente o código ${cod} na portaria.`;
   $('detTitle').textContent='Cartão do motorista · '+a.protocolo;
@@ -4994,7 +5003,7 @@ function openDetalhe(kind, id){
     </div>
     ${(!DEMO&&o.tipo==='saida')?`<div id="agdDetPeds" data-agd="${o.id}" style="margin:0 0 14px"><div class="hint">Carregando os pedidos desta coleta…</div></div>`:''}
     ${!DEMO?`<div style="display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn btn-ghost" style="width:auto" onclick="agdEditarAbrir('${o.id}')">✎ Editar agendamento</button><button class="btn btn-ghost" style="width:auto;color:#b91c1c" onclick="agdCancelar('${o.id}')">Cancelar agendamento</button></div>`:''}
-    <div style="margin:-4px 0 14px">${cartaoPode(o)?`<button class="btn btn-primary" style="width:auto" onclick="openCartao('${o.id}')">Cartão do motorista</button>`:`<span class="hint">O cartão do motorista fica disponível quando a MKLOG confirmar o agendamento.</span>`}</div>`;
+    <div style="margin:-4px 0 14px">${cartaoPode(o)?`<button class="btn btn-primary" style="width:auto" onclick="openCartao('${o.id}')">Cartão do motorista</button>`:`<span class="hint">${esc(cartaoMotivo(o))}</span>`}</div>`;   // v1.8.18
   }
   const anexHtml = (o.anexos && o.anexos.length)
     ? `<div style="grid-column:1/-1"><div class="k">Anexos</div><div class="v">${o.anexos.map(a=>`📎 ${a.nome_arquivo||a.nome} <span style="color:var(--muted);font-size:12px">(${fmtTam(a.tamanho_bytes||a.tamanho||0)})</span>`).join('<br>')}</div></div>`

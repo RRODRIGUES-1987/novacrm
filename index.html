@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1356 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1357 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1356';
+const APP_VERSION='v1.0.1357';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46908,7 +46908,8 @@ function pjAgdHtml(){
 }
 // v1.0.1356: romaneio nascendo do agendamento confirmado. A função do banco cria (ou sincroniza, se já existe) o romaneio
 // com placa, motorista, transportadora e os pedidos ligados no portal; o portal passa a mostrar o número do romaneio.
-async function wmsAgdRomaneio(id,manual){
+var _agdRomTentado={};
+async function wmsAgdRomaneio(id,manual,silencioso){
   try{
     var r=await dbRpc('wms_agendamento_romaneio',{p_id:id}); if(Array.isArray(r)) r=r[0]; if(!r) throw new Error('sem retorno');
     if(r.company_id&&company&&r.company_id===company.id&&typeof wmsCapaAutoCriar==='function'){
@@ -46917,11 +46918,12 @@ async function wmsAgdRomaneio(id,manual){
         documentos:(r.pedidos||[]).map(function(x){return {tipo:'pedido',id:x.id,numero:x.numero||''};})});
       try{ if(typeof wmsRomaneios!=='undefined'&&!wmsRomaneios.some(function(x){return x.id===r.id;})){ var rr=await dbSelect('wms_romaneios','id=eq.'+r.id); if(rr&&rr[0]) wmsRomaneios=[rr[0]].concat(wmsRomaneios); } }catch(_e){}
     }
-    showToast((r.criado?'Romaneio ':'Romaneio atualizado: ')+(r.numero||'')+' · '+(r.qtd_pedidos||0)+' pedido(s)'+(r.movimento==='entrada'?' (recebimento)':''),'green');
-    if(ge('wms-exp-agd')) wmsExpAgdCarregar();
+    if(!silencioso||r.criado) showToast((r.criado?'Romaneio ':'Romaneio atualizado: ')+(r.numero||'')+' · '+(r.qtd_pedidos||0)+' pedido(s)'+(r.movimento==='entrada'?' (recebimento)':''),'green');
+    if(ge('wms-exp-agd')&&!silencioso) wmsExpAgdCarregar();
     return r;
   }catch(e){
     var m=String(e&&e.message||e).replace(/^\[rpc [^\]]+\]\s*/,'');
+    if(silencioso) return null;
     showToast((manual?'':'Confirmado, mas ')+'o romaneio não foi gerado: '+(/could not find|PGRST202|schema cache/i.test(m)?'rode o SQL da v1.0.1356':m),'amber');
     return null;
   }
@@ -49509,13 +49511,17 @@ async function wmsExpAgdCarregar(){
   var pode=wmsPortalPode()||(profile&&['admin','gestor','supervisor_operacoes','lider_operacoes','portaria'].indexOf(profile.role)>=0)||wmsPodeAprovarConf();
   var fl=_expAgdFiltro, vis=A.filter(function(a){ return fl==='todos'||(fl==='entrada'?a.tipo==='entrada':a.tipo!=='entrada'); });
   var pend=vis.filter(function(a){return a.status==='solicitado';}), conf=vis.filter(function(a){return a.status==='confirmado';});
+  // v1.0.1357: confirmado sem romaneio (confirmado antes da v1.0.1356 ou por outra tela) → o VERUS cria o romaneio com os pedidos, sem botão
+  var _semRom=A.filter(function(a){ return a.status==='confirmado'&&!a.romaneio_numero&&!_agdRomTentado[a.id]; });
+  if(_semRom.length&&pode){ _semRom.forEach(function(a){ _agdRomTentado[a.id]=1; });
+    setTimeout(async function(){ var fez=0; for(var i=0;i<_semRom.length;i++){ var r=await wmsAgdRomaneio(_semRom[i].id,false,true); if(r&&r.criado) fez++; } if(fez&&ge('wms-exp-agd')) wmsExpAgdCarregar(); },50); }
   var chip=function(v,l){ var on=fl===v; return '<button class="btn btn-sm'+(on?' btn-p':'')+'" onclick="wmsExpAgdFiltrar(\''+v+'\')">'+l+'</button>'; };
   var tipoTag=function(a){ var e=a.tipo==='entrada'; return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:'+(e?'#dbeafe':'#ffedd5')+';color:'+(e?'#1e40af':'#9a3412')+'">'+(e?'ENTRADA · descarga':'SAÍDA · carga')+'</span>'; };
   var info=function(a){ return '<div style="font-size:12px;color:var(--text2)">'+pjData(a.data)+' '+pjHora(a.hora_inicio)+(a.hora_fim?'–'+pjHora(a.hora_fim):'')+' · '+(a.cd==='salto'?'Salto':'Itu')+(a.transportadora?' · '+ecomEsc(a.transportadora):'')+(a.placa?' · '+ecomEsc(a.placa):'')+(a.motorista?' · '+ecomEsc(a.motorista):'')+'</div>'; };
   var cardPend=function(a){ return '<div style="border:1px solid #f59e0b;border-radius:11px;padding:11px 14px;margin-bottom:9px;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:230px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:700;font-size:14px"><span style="font-family:monospace">'+ecomEsc(a.protocolo||'')+'</span>'+tipoTag(a)+'<span style="font-size:11px;color:var(--text3);font-weight:400">'+ecomEsc(cli(a.depositante_id))+'</span></div>'+info(a)+'</div>'
     +(pode?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="pjAgdDecidir(\''+a.id+'\',false)">Recusar</button><button class="btn btn-sm btn-primary" onclick="pjAgdDecidir(\''+a.id+'\',true)">✓ Confirmar</button>':'<span style="font-size:11px;color:var(--text3)">sem permissão para confirmar</span>')+'</div>'; };
   var cardConf=function(a){ return '<div style="border:1px solid var(--border);border-radius:11px;padding:9px 14px;margin-bottom:7px;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:230px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:700;font-size:13px"><span style="font-family:monospace">'+ecomEsc(a.protocolo||'')+'</span>'+tipoTag(a)+'<span style="font-size:11px;color:var(--text3);font-weight:400">'+ecomEsc(cli(a.depositante_id))+'</span></div>'+info(a)+(a.romaneio_numero?'<div style="font-size:12px;margin-top:2px">Romaneio <b style="font-family:monospace">'+ecomEsc(a.romaneio_numero)+'</b></div>':'')+'</div><span style="font-size:11px;font-weight:700;color:var(--green-text)">confirmado</span>'
-    +(pode?'<button class="btn btn-sm" onclick="wmsAgdRomaneio(\''+a.id+'\',true)" title="Cria o romaneio ou acerta os pedidos dele com os do agendamento">'+(a.romaneio_numero?'↻ Atualizar romaneio':'＋ Gerar romaneio')+'</button>':'')+'</div>'; };   // v1.0.1356
+    +(pode&&a.romaneio_numero?'<button class="btn btn-sm" onclick="wmsAgdRomaneio(\''+a.id+'\',true)" title="Acerta os pedidos do romaneio com os do agendamento (cliente incluiu ou retirou pedidos)">↻ Atualizar romaneio</button>':'')+'</div>'; };   // v1.0.1356 · v1.0.1357: o romaneio nasce sozinho
   box.innerHTML='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><div style="font-weight:700;font-size:14px">Agendamentos do portal</div><span style="font-size:12px;color:var(--text3)">próximos 14 dias · entrada e saída</span><span style="margin-left:auto;display:flex;gap:6px">'+chip('todos','Todos')+chip('entrada','Entrada')+chip('saida','Saída')+'</span></div>'
     +'<div style="font-size:12px;font-weight:800;color:#b45309;margin:4px 0 8px">Aguardando confirmação ('+pend.length+')</div>'
     +(pend.map(cardPend).join('')||'<div style="padding:10px 0;color:var(--text3);font-size:13px">Nenhum agendamento aguardando.</div>')
