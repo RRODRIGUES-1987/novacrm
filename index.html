@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1359 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1361 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1359';
+const APP_VERSION='v1.0.1361';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -55267,6 +55267,161 @@ async function wmsAjSalvar(){
   }catch(e){ portErr('Não consegui salvar: '+(e.message||e)); }
 }
 // Aprovações: ajustes de saldo aguardando o diretor
+// ═══ v1.0.1360 · RESERVA MANUAL DE RG (CASCO e qualquer depositante com pacote fechado) ═══
+// Fluxo: portal → cliente solicita → pedido fica em aguardando_saldo com reserva_manual_sol no parametros
+//        → aparece aqui → supervisor/líder escolhe o RG → cria a reserva direto (bypass do múltiplo)
+//        → empenha o restante → pedido vai para separação
+async function wmsAprovReservaManuaisCarregar(){
+  var box=ge('wms-aprov-reservas-manuais'); if(!box) return;
+  var P=[]; try{
+    P=await dbSelect('wms_pedidos',
+      'company_id=eq.'+company.id+'&status=in.(aguardando_saldo,aguardando_aceite)&order=created_at.asc')||[];
+    P=P.filter(function(p){ var pr=p.parametros; if(typeof pr==='string'){try{pr=JSON.parse(pr);}catch(_e){pr={};}} return pr&&pr.reserva_manual_sol; });
+  }catch(e){ box.innerHTML=''; return; }
+  if(!P.length){ box.innerHTML=''; return; }
+  var pode=['admin','adm','gestor','supervisor_operacoes','lider_operacoes'].indexOf((profile&&profile.role)||'')>=0;
+  box.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--blue-text);margin:4px 0 8px">Reservas manuais de RG aguardando aceite ('+P.length+')</div>'
+    +P.map(function(ped){
+      var pr=ped.parametros; if(typeof pr==='string'){try{pr=JSON.parse(pr);}catch(_e){pr={};}}
+      var sol=pr&&pr.reserva_manual_sol||{}, cli=((clientes||[]).find(function(c){return c.id===ped.cliente_id;})||{}).nome||'';
+      return '<div style="border:1px solid var(--blue-text);border-radius:11px;padding:12px 14px;margin-bottom:10px;background:var(--bg)">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px"><div>'
+        +'<div style="font-weight:700;font-size:14px">'+ecomEsc(ped.numero_curto||'')
+        +' <span style="font-size:11px;color:var(--text3);font-weight:400">'+ecomEsc(cli)+'</span></div>'
+        +'<div style="font-size:11px;color:var(--text3)">Solicitado por: '+ecomEsc(sol.solicitado_por||'cliente')+' · '+new Date(sol.solicitado_em||Date.now()).toLocaleString('pt-BR')+'</div>'
+        +(sol.motivo?'<div style="font-size:12px;margin-top:4px;color:var(--text2)">Motivo: '+ecomEsc(sol.motivo)+'</div>':'')
+        +'</div><span style="background:var(--blue-bg);color:var(--blue-text);font-size:10px;font-weight:700;padding:3px 10px;border-radius:99px">⏳ Aguardando aceite</span></div>'
+        +(pode?'<div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">'
+          +'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsRsvManualRecusar(\''+ped.id+'\')">Recusar</button>'
+          +'<button class="btn btn-sm btn-primary" onclick="wmsRsvManualAbrirModal(\''+ped.id+'\')">🔑 Aceitar e reservar RG</button>'
+          +'</div>'
+          :'<div style="margin-top:8px;font-size:11px;color:var(--text3)">Aguardando aprovação do supervisor ou líder.</div>')
+        +'</div>'; }).join('');
+}
+async function wmsRsvManualRecusar(pedId){
+  var m=prompt('Motivo da recusa:',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  try{
+    var ped=(wmsPedidos||[]).find(function(x){return x.id===pedId;})||{}; var pr=ped.parametros; if(typeof pr==='string'){try{pr=JSON.parse(pr);}catch(_e){pr={};}}
+    var novo=Object.assign({},pr||{}); delete novo.reserva_manual_sol; novo.reserva_manual_rec={motivo:m,em:new Date().toISOString(),por:(typeof coletorAutor==='function'?coletorAutor():((cu&&cu.email)||''))};   // v1.0.1361: o portal mostra o motivo
+    await dbUpdate('wms_pedidos',pedId,{parametros:novo,status:'aguardando_saldo'});
+    Object.assign(ped,{parametros:novo,status:'aguardando_saldo'});
+    showToast('Reserva manual recusada. O cliente verá o motivo no portal.','amber'); wmsAprovReservaManuaisCarregar();
+  }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function wmsRsvManualAbrirModal(pedId){
+  var ped=(wmsPedidos||[]).find(function(x){return x.id===pedId;}); if(!ped) return;
+  var itens=[]; try{ var _db=await dbSelect('wms_pedido_itens','pedido_id=eq.'+pedId)||[]; itens=_db.filter(function(x){return String(x.status||'')!=='cancelado'&&String(x.status||'')!=='produto_nao_encontrado';}); }catch(_e){}
+  if(!itens.length){ showToast('Itens do pedido não encontrados.','red'); return; }
+  var RSV=[]; try{ RSV=await dbSelect('wms_reservas','pedido_id=eq.'+pedId+'&status=in.(reservada,consumida)&select=sku,qtd,status')||[]; }catch(_e){}
+  var cid=company.id;
+  var pacInfo=[]; var linhas='<div style="font-size:12px;color:var(--text3);padding:8px 0">Carregando RGs disponíveis…</div>';
+  var inner=function(){
+    var cli=((clientes||[]).find(function(c){return c.id===ped.cliente_id;})||{}).nome||'';
+    return '<div style="font-size:12px;color:var(--text2);margin-top:-8px">'+ecomEsc(ped.numero_curto||'')+' · '+ecomEsc(cli)+'</div>'
+      +'<div id="rsvm-linhas">'+linhas+'</div>'
+      +'<div><label class="fl">Motivo *</label><input class="fi" id="rsvm-motivo" value="'+((function(){var pr=ped.parametros;if(typeof pr==="string"){try{pr=JSON.parse(pr);}catch(_e){pr={}}}return pr&&pr.reserva_manual_sol&&pr.reserva_manual_sol.motivo||"";})())+'" placeholder="ex.: cliente limpando sacos abertos"></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><label class="fl">E-mail do supervisor</label><input class="fi" id="rsvm-email"></div><div><label class="fl">Senha</label><input class="fi" id="rsvm-pass" type="password"></div></div>'
+      +'<div id="rsvm-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px"></div>'
+      +'<div id="rsvm-ok" style="display:none;padding:8px 12px;border-radius:8px;background:var(--green-bg);color:var(--green-text);font-size:12.5px"></div>'; };
+  portModal('Reserva manual de RG · fora do múltiplo',inner(),'wmsRsvManualSalvar(\''+pedId+'\')' ,{saveLabel:'Reservar e liberar o pedido',width:'680px'});
+  // busca os itens fora do múltiplo e os RGs disponíveis
+  (async function(){
+    try{
+      var prodRes=await dbSelect('wms_produtos','cliente_id=eq.'+ped.cliente_id+'&select=id,sku,fator_conversao')||[];
+      var pacMap={}; prodRes.forEach(function(x){ if(x.fator_conversao>1) pacMap[String(x.sku||'').trim().toUpperCase()]=Number(x.fator_conversao); });
+      var skus=[...new Set(itens.map(function(i){return String(i.sku||'').trim().toUpperCase();}))]
+        .filter(function(sk){ var pac=pacMap[sk]||1; var tot=itens.filter(function(i){return String(i.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,i){return a+Number(i.quantidade||0);},0);
+          var res=RSV.filter(function(r){return String(r.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,r){return a+Number(r.qtd||0);},0);
+          return pac>1&&(tot-res)>0&&((tot-res)%pac)!==0; });
+      if(!skus.length){ ge('rsvm-linhas').innerHTML='<div style="color:var(--green-text);font-size:12.5px">Nenhum item fora do múltiplo encontrado. Use Liberar do saldo se houver outro motivo.</div>'; return; }
+      window._rsvmPedId=pedId; window._rsvmItens=itens; window._rsvmPacMap=pacMap; window._rsvmPickMap={};
+      var html=''; for(var si=0;si<skus.length;si++){
+        var sk=skus[si], pac=pacMap[sk]||1;
+        var tot=itens.filter(function(i){return String(i.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,i){return a+Number(i.quantidade||0);},0);
+        var res=RSV.filter(function(r){return String(r.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,r){return a+Number(r.qtd||0);},0);
+        var fora=(tot-res)%pac;
+        // só o produto do pedido, só pallets ativos endereçados do depositante; desconta o que já está reservado para outros pedidos
+        var skuOrig=(itens.find(function(i){return String(i.sku||'').trim().toUpperCase()===sk;})||{}).sku||sk;
+        var cands=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo&sku=eq.'+encodeURIComponent(skuOrig)+'&select=id,pallet_id,sku,qtd_fiscal&order=qtd_fiscal.asc&limit=300')||[];
+        var pids=[...new Set(cands.map(function(c){return c.pallet_id;}))], pals={};
+        for(var k0=0;k0<pids.length;k0+=150){ var pp=await dbSelect('wms_pallets','id=in.('+pids.slice(k0,k0+150).join(',')+')&status=not.in.(morto,expedido)&depositante_id=eq.'+ped.cliente_id+'&endereco_id=not.is.null&select=id,rg,endereco_codigo')||[]; pp.forEach(function(x){pals[x.id]=x;}); }
+        cands=cands.filter(function(c){return pals[c.pallet_id];});
+        var cIds=cands.map(function(c){return c.id;}), reservados={};
+        if(cIds.length){ var rv=await dbSelect('wms_reservas','conteudo_id=in.('+cIds.join(',')+')&status=eq.reservada&select=conteudo_id,qtd')||[]; rv.forEach(function(x){ reservados[x.conteudo_id]=(reservados[x.conteudo_id]||0)+Number(x.qtd||0); }); }
+        cands.forEach(function(c){ c.disp=Number(c.qtd_fiscal||0)-(reservados[c.id]||0); });
+        cands=cands.filter(function(c){return c.disp>0;}).sort(function(a,b){ return (a.disp===b.disp?0:(a.disp<b.disp?-1:1)); }).slice(0,10);
+        pacInfo.push({sk,pac,tot,res,fora,cands,pals});
+        html+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:8px 0 4px">'+ecomEsc(sk)+' · pedido '+tot.toLocaleString('pt-BR')+' pç · pacote '+pac.toLocaleString('pt-BR')+' · <span style="color:var(--amber-text)">fora do múltiplo: '+fora.toLocaleString('pt-BR')+' pç</span></div>'
+          +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:4px"><table style="width:100%;border-collapse:collapse">'
+          +'<thead><tr style="background:var(--bg2)"><th></th><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">RG</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">Endereço</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2)">Disponível</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2)">Reservar</th></tr></thead><tbody>';
+        cands.forEach(function(c,ci){
+          var pal=pals[c.pallet_id]||{}, disp=Number(c.disp||0), id='rsvm-'+si+'-'+ci;
+          html+='<tr style="border-top:1px solid var(--border)">'
+            +'<td style="padding:7px 8px;width:30px"><input type="checkbox" id="cb-'+id+'" onchange="wmsRsvManualToggle('+si+','+ci+',\''+c.id+'\','+disp+','+fora+','+si+')" '+( ci===0?'checked':'' )+'></td>'
+            +'<td style="padding:7px 8px;font-size:13px;font-family:monospace;font-weight:700">RG '+(pal.rg||'?')+'</td>'
+            +'<td style="padding:7px 8px;font-size:12px">'+(pal.endereco_codigo||'?')+'</td>'
+            +'<td style="padding:7px 8px;text-align:right;font-size:12px">'+disp.toLocaleString('pt-BR')+'</td>'
+            +'<td style="padding:7px 8px;width:90px"><input class="fi" id="qt-'+id+'" style="padding:5px 8px;text-align:right" value="'+( ci===0?String(fora):'' )+'" oninput="wmsRsvManualAtualizaTotal('+si+')"></td>'
+            +'</tr>';
+        });
+        html+='</tbody></table></div>'
+          +'<div id="rsvm-tot-'+si+'" style="font-size:12px;padding:7px 10px;background:var(--green-bg);color:var(--green-text);border-radius:7px">Reserva manual: <b>'+fora.toLocaleString('pt-BR')+' pç</b> · Total do item: '+(res+pac*Math.floor((tot-res)/pac))+' + '+fora+' = <b>'+tot+' pç ✓</b></div>';
+      }
+      var el=ge('rsvm-linhas'); if(el) el.innerHTML=html;
+      window._rsvmPacInfo=pacInfo;
+    }catch(e){ var el=ge('rsvm-linhas'); if(el) el.innerHTML='<div style="color:var(--red-text)">Erro ao buscar RGs: '+(e.message||e)+'</div>'; }
+  })();
+}
+function wmsRsvManualToggle(si,ci,cid,disp,fora,sku_i){
+  var el=ge('cb-rsvm-'+si+'-'+ci); if(!el) return;
+  if(el.checked){ ge('qt-rsvm-'+si+'-'+ci).value=String(fora); } else { ge('qt-rsvm-'+si+'-'+ci).value=''; }
+  wmsRsvManualAtualizaTotal(si);
+}
+function wmsRsvManualAtualizaTotal(si){
+  var pi=(window._rsvmPacInfo||[])[si]; if(!pi) return;
+  var tot=0; for(var ci=0;ci<pi.cands.length;ci++){
+    var v=parseFloat(String((ge('qt-rsvm-'+si+'-'+ci)||{}).value||'0').replace(',','.'))||0; tot+=v; }
+  var ok=tot===pi.fora;
+  var el=ge('rsvm-tot-'+si);
+  if(el) el.innerHTML='Reserva manual: <b>'+tot.toLocaleString('pt-BR')+' pç</b> · Total do item: '+(pi.res+pi.pac*Math.floor((pi.tot-pi.res)/pi.pac))+' + '+tot+' = <b>'+(pi.res+pi.pac*Math.floor((pi.tot-pi.res)/pi.pac)+tot)+' pç</b>'+(ok?' ✓':' ⚠ deve ser '+pi.fora);
+  if(el){ el.style.background=ok?'var(--green-bg)':'var(--amber-bg)'; el.style.color=ok?'var(--green-text)':'var(--amber-text)'; }
+}
+async function wmsRsvManualSalvar(pedId){
+  var err=ge('rsvm-err'), ok=ge('rsvm-ok'), btn=ge('port-modal-save');
+  var fail=function(m){ if(err){err.style.display='block';err.textContent=m;} if(btn){btn.disabled=false;btn.textContent='Reservar e liberar o pedido';} };
+  var mot=String((ge('rsvm-motivo')||{}).value||'').trim(), em=String((ge('rsvm-email')||{}).value||'').trim(), ps=(ge('rsvm-pass')||{}).value||'';
+  if(!mot) return fail('Informe o motivo.'); if(!em||!ps) return fail('Informe e-mail e senha do supervisor ou líder.');
+  if(btn){btn.disabled=true;btn.textContent='Validando…';}
+  var au=await wmsAuthLider(em,ps); if(!au.ok) return fail(au.reason);
+  if(btn) btn.textContent='Reservando…';
+  try{
+    var pi=window._rsvmPacInfo||[], picks=[];
+    for(var si=0;si<pi.length;si++){
+      for(var ci=0;ci<pi[si].cands.length;ci++){
+        var qtv=parseFloat(String((ge('qt-rsvm-'+si+'-'+ci)||{}).value||'0').replace(',','.'))||0;
+        if(qtv>0){ var c=pi[si].cands[ci], pal=pi[si].pals[c.pallet_id]||{}; picks.push({conteudo_id:c.id,pallet_id:c.pallet_id,sku:pi[si].sk,qtd:qtv}); }
+      }
+    }
+    if(!picks.length) return fail('Marque pelo menos um RG e informe a quantidade.');
+    for(var v0=0;v0<pi.length;v0++){ var soma=picks.filter(function(x){return x.sku===pi[v0].sk;}).reduce(function(a,x){return a+x.qtd;},0);
+      if(soma!==pi[v0].fora) return fail(pi[v0].sk+': a soma das reservas ('+soma.toLocaleString('pt-BR')+') precisa ser igual ao fora do múltiplo ('+pi[v0].fora.toLocaleString('pt-BR')+').'); }
+    for(var v1=0;v1<picks.length;v1++){ var ccd=null; for(var a1=0;a1<pi.length;a1++){ ccd=pi[a1].cands.find(function(c){return c.id===picks[v1].conteudo_id;})||ccd; } if(ccd&&picks[v1].qtd>Number(ccd.disp||0)) return fail('Quantidade maior que o disponível do RG.'); }
+    for(var i=0;i<picks.length;i++){
+      var pk=picks[i]; var itDb=wmsPedidoItens.filter(function(it){return it.pedido_id===pedId&&String(it.sku||'').trim().toUpperCase()===pk.sku;});
+      if(!itDb.length) continue;
+      await dbInsert('wms_reservas',{company_id:company.id,cliente_id:(((wmsPedidos||[]).find(function(x){return x.id===pedId;})||{}).cliente_id),pedido_id:pedId,pedido_item_id:itDb[0].id,pallet_id:pk.pallet_id,conteudo_id:pk.conteudo_id,sku:itDb[0].sku,qtd:pk.qtd,origem:'manual',motivo:'Reserva manual aprovada por '+au.nome+' · '+mot,created_by:cu&&cu.id});
+    }
+    // limpa o pedido.parametros.reserva_manual_sol e empenha o restante
+    var ped=(wmsPedidos||[]).find(function(x){return x.id===pedId;})||{}; var pr=ped.parametros; if(typeof pr==='string'){try{pr=JSON.parse(pr);}catch(_e){pr={};}}
+    var novo=Object.assign({},pr||{}); delete novo.reserva_manual_sol; delete novo.reserva_manual_rec;
+    await dbUpdate('wms_pedidos',pedId,{parametros:novo,status:'aguardando_saldo'}); Object.assign(ped,{parametros:novo,status:'aguardando_saldo'});
+    var empR=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:pedId}); if(empR&&Number(empR.faltou_total||0)>0) throw new Error('Ainda falta saldo após a reserva manual: '+JSON.stringify(empR.itens||[]));
+    if(ok){ok.style.display='block';ok.textContent='✓ Reserva manual criada por '+au.nome+'. Pedido liberado para separação!';}
+    if(btn){btn.disabled=true;btn.textContent='✓ Concluído';btn.onclick=function(){portClose();wmsAprovReservaManuaisCarregar();};}
+    if(err) err.style.display='none';
+    var pUp=await dbSelect('wms_pedidos','id=eq.'+pedId)||[]; if(pUp[0]) wmsPedidos=(wmsPedidos||[]).map(function(x){return x.id===pedId?pUp[0]:x;});
+  }catch(e){ fail('Erro: '+(e.message||e)); }
+}
 async function wmsAprovAjustesCarregar(){
   var box=ge('wms-aprov-ajustes'); if(!box) return;
   var P=[]; try{ P=await dbSelect('wms_pedidos','company_id=eq.'+company.id+'&tipo=eq.ajuste&status=eq.aguardando_aprovacao&order=created_at.asc')||[]; }catch(e){ box.innerHTML=''; return; }
@@ -55329,8 +55484,9 @@ function wmsAprovacoesConteudo(){
   }).join('');
   setTimeout(wmsAprovTravadasCarregar,30);   // v1.0.1331: conferências por pallet travadas
   setTimeout(wmsAprovAjustesCarregar,40);   // v1.0.1334: ajustes de saldo
+  setTimeout(wmsAprovReservaManuaisCarregar,45);   // v1.0.1360: reservas manuais de RG (pedidos fora do múltiplo aguardando aceite)
   setTimeout(wmsAprovAgdCarregar,50);   // v1.0.1338: agendamentos do portal aguardando confirmação
-  return `<div id="wms-aprov-agd"></div><div id="wms-aprov-ajustes"></div><div id="wms-aprov-travadas"></div><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
+  return `<div id="wms-aprov-agd"></div><div id="wms-aprov-reservas-manuais"></div><div id="wms-aprov-ajustes"></div><div id="wms-aprov-travadas"></div><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Conferências com divergência aguardando auditoria. ${podeAprovar?'Aprove para liberar o pedido ou rejeite para refazer.':'Somente usuários com permissão podem auditar.'}</div>
     ${rows||`<div class="empty"><p>Nenhuma conferência pendente de auditoria. ✓</p></div>`}`;
 }
 // Card de divergência de conferência de ENTRADA
