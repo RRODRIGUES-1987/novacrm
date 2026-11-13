@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1351 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1355 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1351';
+const APP_VERSION='v1.0.1355';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2831,6 +2831,14 @@ async function fcdCarregar(forcar){
   if(_fcdLoaded&&!forcar) return;
   try{ capasProcesso=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&order=created_at.desc')||[]; _fcdLoaded=true; }catch(e){}
 }
+// v1.0.1352: capa/cliente da unidade selecionada (Itu não mostra Salto). Cliente sem unidade aparece em todas.
+function capaCliNaUnidade(cliId){ if(!activeUnit) return true; var cl=(clientes||[]).find(function(x){return x.id===cliId;}); return !cl||!cl.unit_id||cl.unit_id===activeUnit; }
+function capaNaUnidade(c){ if(!activeUnit||!c) return true; if(c.unit_id) return c.unit_id===activeUnit; return capaCliNaUnidade(c.cliente_id); }
+// v1.0.1352: REC primeiro, depois EXP; dentro do tipo, a mais nova primeiro
+function capaOrdRecExp(a,b){ var ta=a.tipo==='expedicao'?1:0, tb=b.tipo==='expedicao'?1:0; if(ta!==tb) return ta-tb;
+  var ia=a.status==='inutilizada'?1:0, ib=b.status==='inutilizada'?1:0; if(ia!==ib) return ia-ib;
+  return String(b.numero||'').localeCompare(String(a.numero||''),'pt-BR',{numeric:true})||String(b.created_at||'').localeCompare(String(a.created_at||'')); }
+var capaOcultarInut=true;
 function fcdPeriodoPadrao(){
   if(fcdDe&&fcdAte) return;
   var d=new Date(), y=d.getFullYear(), m=d.getMonth();
@@ -2843,7 +2851,7 @@ function rFatCapasDigitar(){
   fcdPeriodoPadrao();
   if(!_fcdLoaded){ setTimeout(async function(){ await fcdCarregar(); if(curPage==='fat-capas-digitar') render(); },0); return '<div style="padding:30px;text-align:center;color:var(--text3)">Carregando capas\u2026</div>'; }
   var hoje=new Date(); hoje.setHours(0,0,0,0);
-  var noPer=(capasProcesso||[]).filter(function(c){ return c.data_operacao&&c.data_operacao>=fcdDe&&c.data_operacao<=fcdAte; });
+  var noPer=(capasProcesso||[]).filter(function(c){ return c.data_operacao&&c.data_operacao>=fcdDe&&c.data_operacao<=fcdAte&&capaNaUnidade(c); });   // v1.0.1352: unidade
   var porCli={};
   noPer.forEach(function(c){
     var k=c.cliente_id||c.cliente_nome||'?';
@@ -4877,6 +4885,22 @@ var capaDig=null;   // {id, i, perg:[], resp:{}, servs:[], modo:'digitar'|'corri
 async function capaDigIniciar(id,modo){
   var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
   var servs=await dbSelect('processo_capa_servicos','capa_id=eq.'+id+'&order=ordem.asc').catch(function(){return [];})||[];
+  // v1.0.1353: Movimentação extraordinária — se a tabela do cliente tem o serviço e a capa não, entra na digitação
+  // (entrada e saída), com a unidade de cobrança da tabela. Vale para capas criadas antes de o serviço ser marcado.
+  try{
+    var _rxExt=/extraordin/i;   // v1.0.1355: nas tabelas o serviço é "Mobilização de equipe em horário extraordinário"
+    if(c.tabela_id && !servs.some(function(sv){ return _rxExt.test(sv.servico||''); })){
+      var _qd=await dbSelect('tabelas_quadros','tabela_id=eq.'+c.tabela_id+'&select=id').catch(function(){return [];})||[];
+      var _ext=null;
+      if(_qd.length){ var _its=await dbSelect('tabelas_itens','quadro_id=in.('+_qd.map(function(q){return q.id;}).join(',')+')&select=servico,unidade_cobranca').catch(function(){return [];})||[];
+        _ext=_its.find(function(it){ return _rxExt.test(it.servico||''); })||null; }
+      if(_ext){
+        var _ord=servs.reduce(function(a,sv){ return Math.max(a,+sv.ordem||0); },-1)+1;
+        var _novo=await dbInsert('processo_capa_servicos',{capa_id:id,servico:_ext.servico,unidade_cobranca:_ext.unidade_cobranca||null,realizado:false,quantidade:null,ordem:_ord});
+        if(_novo) servs.push(Array.isArray(_novo)?_novo[0]:_novo);
+      }
+    }
+  }catch(_eExt){ console.warn('mov. extraordinária',_eExt); }
   var exp=c.tipo==='expedicao';
   var perg=[
     {k:'local_descarga',t:'Local de '+(exp?'carregamento':'descarga'),tipo:'txt'},   // v1.0.1068: local e operador primeiro
@@ -4914,7 +4938,7 @@ async function capaDigIniciar(id,modo){
   perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
   var resp={}; if(c.tem_nf_pallet!=null) resp.tem_nf_pallet=c.tem_nf_pallet?'Sim':'Não';   // v1.0.1143
   ['valor_nf_pallet','nf_numero','valor_nf','pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ if(c[k]!=null&&c[k]!=='') resp[k]=String(c[k]); });
-  if(modo==='corrigir'||c.status!=='aberta') servs.forEach(function(s,ix){ if(s.quantidade!=null) resp['serv_'+ix]=String(s.quantidade); });
+  servs.forEach(function(s,ix){ if(s.quantidade!=null) resp['serv_'+ix]=String(s.quantidade); });   // v1.0.1352: capa estornada volta com as quantidades já lançadas
   // v1.0.1281: ao corrigir, os campos por tipo vêm dos lançamentos gravados na capa
   if(split.length>1 && Array.isArray(c.lancamentos_tipo)){
     split.forEach(function(t,ti){ var suf=ti===0?'':'__'+ti, L=c.lancamentos_tipo.find(function(x){return x.tipo_id===t.id;}); if(!L) return;
@@ -4942,7 +4966,7 @@ function capaDigVoltar(){ if(capaDig&&capaDig.i>0){ capaDig.i--; while(capaDig.i
 function capaDigTecla(ev){ if(ev.key==='Enter'){ ev.preventDefault(); capaDigAvancar(); } else if(ev.key==='ArrowUp'){ ev.preventDefault(); capaDigVoltar(); } }
 function capaCabecalhoHtml(c){   // v1.0.1068
   var respNome=c.responsavel_id?(((profiles||[]).find(function(p){return p.id===c.responsavel_id;})||{}).full_name||''):'';
-  var cel=function(l,v){ return '<div><div style="font-size:10.5px;color:var(--text3)">'+l+'</div><div style="font-size:13px;font-weight:600">'+(v?ecomEsc(String(v)):'—')+'</div></div>'; };
+  var cel=function(l,v){ return '<div style="min-width:0"><div style="font-size:10.5px;color:var(--text3)">'+l+'</div><div style="font-size:13px;font-weight:600;overflow-wrap:anywhere;word-break:break-word">'+(v?ecomEsc(String(v)).replace(/\//g,'/<wbr>'):'—')+'</div></div>'; };   // v1.0.1352: muitas NFs/OS não invadem a coluna ao lado
   return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);margin-bottom:12px">'
     +cel('Data da operação',c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+cel('Transportadora',c.transportadora)+cel('Motorista',c.motorista)+cel('RG',c.rg)
     +cel('Placa cavalo / carreta',[c.placa_cavalo,c.placa_carreta].filter(Boolean).join(' / '))+cel('DOC',c.doc)+cel('Lacre',c.lacre)+cel('Origem',c.origem)
@@ -4985,7 +5009,7 @@ function capaLancTipoHtml(lanc,revisao){   // v1.0.1283: um bloco por tipo (cabe
   return h;
 }
 function capaResumoHtml(c,resp,servs,lanc){   // v1.0.1283: lanc (vários tipos) → só os dados comuns; NF, valor, pallets e serviços ficam nos blocos
-  var linha=function(l,v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--text2)">'+l+'</span><b>'+(v==null||v===''?'—':ecomEsc(String(v)))+'</b></div>'; };
+  var linha=function(l,v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--text2);flex:0 0 auto">'+l+'</span><b style="min-width:0;text-align:right;overflow-wrap:anywhere">'+(v==null||v===''?'—':ecomEsc(String(v)).replace(/\//g,'/<wbr>'))+'</b></div>'; };   // v1.0.1352
   var exp=c.tipo==='expedicao', h='';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px"><div><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">DADOS DA CARGA</div>';
   var porTipo=Array.isArray(lanc)&&lanc.length>1;
@@ -5156,7 +5180,64 @@ function capaPodeEditarDados(c){ return !!c && capaPodeEditar() && !c.fatura_id 
 function capaBtnEditarDados(c){
   if(!c||!capaPodeEditar()) return '';
   var ok=capaPodeEditarDados(c);
-  return '<button class="btn btn-sm"'+(ok?' onclick="capaEditarDados(\''+c.id+'\')"':' disabled title="Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados"')+'>✏ Editar dados</button>';
+  return '<button class="btn btn-sm"'+(ok?' onclick="capaEditarDados(\''+c.id+'\')"':' disabled title="Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados"')+'>✏ Editar dados</button>'
+    +(capaPodeEditarFiscal(c)?'<button class="btn btn-sm" onclick="capaEditarFiscal(\''+c.id+'\')" title="NF, valor da NF e DOC/OS — também depois de conferida ou faturada">✏ NF · valor · DOC</button>':'');   // v1.0.1354
+}
+// v1.0.1354: NF, valor da NF e DOC/OS editáveis a qualquer momento (cobertura fiscal, DOC/OS cancelado, complemento),
+// entrada e saída, inclusive depois de faturada — só admin, ADM e financeiro. Cada troca fica nas observações; a fatura já emitida não muda.
+function capaPodeEditarFiscal(c){ return !!c && c.status!=='inutilizada' && ['admin','adm','financeiro'].indexOf((profile&&profile.role)||'')>=0; }
+function capaEditarFiscal(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c||!capaPodeEditarFiscal(c)) return;
+  var exp=c.tipo==='expedicao', v=function(x){ return ecomEsc(x==null?'':String(x)); };
+  var num=function(x){ return x==null||x===''?'':String(x).replace('.',','); };
+  var fat=c.status==='faturada'||!!c.fatura_id;
+  var L=Array.isArray(c.lancamentos_tipo)&&c.lancamentos_tipo.length>1?c.lancamentos_tipo:null;
+  var corpo='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div style="grid-column:1/-1"><label class="fl">DOC / OS</label><input class="fi" id="cf-doc" value="'+v(c.doc)+'"></div>';
+  if(L){
+    L.forEach(function(x,i){
+      corpo+='<div style="grid-column:1/-1;font-size:12px;font-weight:700;color:var(--text2);margin-top:4px">'+ecomEsc(x.tipo_nome||('Tipo '+(i+1)))+'</div>'
+        +'<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="cf-nf-'+i+'" value="'+v(x.nf_numero)+'"></div>'
+        +'<div><label class="fl">Valor da NF (R$)</label><input class="fi" id="cf-vl-'+i+'" inputmode="decimal" value="'+num(x.valor_nf)+'"></div>';
+    });
+  } else {
+    corpo+='<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="cf-nf" value="'+v(c.nf_numero)+'"></div>'
+      +'<div><label class="fl">Valor da NF (R$)</label><input class="fi" id="cf-vl" inputmode="decimal" value="'+num(c.valor_nf)+'"></div>';
+  }
+  corpo+='</div>'+(fat?'<div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--amber-bg);color:var(--amber-text);font-size:12.5px">⚠ Capa faturada'+(c.fatura_numero?' ('+ecomEsc(c.fatura_numero)+')':'')+': a alteração fica registrada na capa e não muda a fatura já emitida.</div>':'')
+    +'<div class="lsub" style="color:var(--text3);margin-top:8px">Cada alteração fica registrada nas observações da capa (de → para, quem e quando).</div>';
+  portModal('NF · valor · DOC · '+ecomEsc(c.numero),corpo,'capaSalvarFiscal(\''+c.id+'\')',{saveLabel:'Salvar'});
+}
+async function capaSalvarFiscal(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c||!capaPodeEditarFiscal(c)) return;
+  var brl=function(x){ return x==null?'(vazio)':'R$ '+Number(x).toLocaleString('pt-BR',{minimumFractionDigits:2}); };
+  var novo={}, mud=[];
+  var doc=String((ge('cf-doc')||{}).value||'').trim();
+  if(doc!==String(c.doc||'')){ novo.doc=doc||null; mud.push('DOC/OS de '+(c.doc||'(vazio)')+' para '+(doc||'(vazio)')); }
+  var L=Array.isArray(c.lancamentos_tipo)&&c.lancamentos_tipo.length>1?c.lancamentos_tipo:null;
+  if(L){
+    var L2=L.map(function(x){ return Object.assign({},x); }), mexeu=false;
+    for(var i=0;i<L2.length;i++){
+      var nf=String((ge('cf-nf-'+i)||{}).value||'').trim(), vtx=String((ge('cf-vl-'+i)||{}).value||'').trim(), vl=vtx===''?null:capaNumBR(vtx);
+      if(vtx!==''&&vl==null){ portErr('Valor inválido em '+(L2[i].tipo_nome||'tipo '+(i+1))+'.'); return; }
+      if(nf!==String(L2[i].nf_numero||'')){ mud.push((L2[i].tipo_nome||'Tipo '+(i+1))+' · NF de '+(L2[i].nf_numero||'(vazio)')+' para '+(nf||'(vazio)')); L2[i].nf_numero=nf||null; mexeu=true; }
+      if((vl==null?null:+vl)!==(L2[i].valor_nf==null?null:+L2[i].valor_nf)){ mud.push((L2[i].tipo_nome||'Tipo '+(i+1))+' · valor de '+brl(L2[i].valor_nf)+' para '+brl(vl)); L2[i].valor_nf=vl; mexeu=true; }
+    }
+    if(mexeu){ novo.lancamentos_tipo=L2; novo.valor_nf=+L2.reduce(function(a,x){return a+(+x.valor_nf||0);},0).toFixed(2);
+      novo.nf_numero=L2.map(function(x){return x.nf_numero;}).filter(function(x){return x&&String(x)!=='0';}).join(' / ')||null; }
+  } else {
+    var nf1=String((ge('cf-nf')||{}).value||'').trim(), vt1=String((ge('cf-vl')||{}).value||'').trim(), vl1=vt1===''?null:capaNumBR(vt1);
+    if(vt1!==''&&vl1==null){ portErr('Valor da NF inválido.'); return; }
+    if(nf1!==String(c.nf_numero||'')){ novo.nf_numero=nf1||null; mud.push('NF de '+(c.nf_numero||'(vazio)')+' para '+(nf1||'(vazio)')); }
+    if((vl1==null?null:+vl1)!==(c.valor_nf==null?null:+c.valor_nf)){ novo.valor_nf=vl1; mud.push('Valor da NF de '+brl(c.valor_nf)+' para '+brl(vl1)); }
+  }
+  if(!mud.length){ portClose(); return; }
+  var fat=c.status==='faturada'||!!c.fatura_id;
+  novo.observacoes=capaRegObs(c,(fat?'Após faturamento · ':'')+'Dados fiscais alterados: '+mud.join('; '));
+  portSaving();
+  try{ await dbUpdate('processo_capas',c.id,novo); Object.assign(c,novo); if(typeof _capaVerCache!=='undefined') delete _capaVerCache[id];
+    portClose(); showToast('Capa '+c.numero+': NF / valor / DOC atualizados','green'); render(); }
+  catch(e){ portErr('Erro: '+(e.message||e)); }
 }
 var CAPA_CAMPOS_REG=[['data_operacao','Data da operação'],['doc','DOC'],['nf_numero','NF'],['motorista','Motorista'],['transportadora','Transportadora'],
   ['placa_cavalo','Placa cavalo'],['placa_carreta','Placa carreta'],['origem','Origem'],['rg','RG'],['lacre','Lacre'],['tipo_veiculo','Tipo de veículo']];
@@ -5268,12 +5349,10 @@ async function capaEstornarConferencia(id){
 async function capaEstornarDigitacao(id){
   var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
   if(['pendente_conferencia','digitada','devolvida'].indexOf(c.status)<0){ alert('Só dá para estornar a digitação de capa pendente de conferência ou devolvida.'); return; }
-  var m=prompt('Motivo do estorno da digitação (as quantidades serão zeradas e a capa volta para "a digitar"):',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
+  var m=prompt('Motivo do estorno da digitação (a capa volta para "a digitar" com tudo o que já foi lançado — altere só o necessário):',''); if(m==null) return; m=m.trim(); if(!m){ alert('Informe o motivo.'); return; }
   try{
-    var servs=await dbSelect('processo_capa_servicos','capa_id=eq.'+id).catch(function(){return [];})||[];
-    for(var i=0;i<servs.length;i++) await dbUpdate('processo_capa_servicos',servs[i].id,{quantidade:null,realizado:false});
-    var up={status:'aberta',valor_nf:null,pallets_movimentados:null,pallets_pbr:null,qtd_pbr:null,qtd_chep:null,qtd_outros:null,tipo_carga:null,tipo_carga_pallet:null,local_descarga:null,operador_resp:null,
-      digitada_em:null,digitada_por:null,motivo_devolucao:null,observacoes:capaRegObs(c,'Digitação estornada: '+m)};
+    // v1.0.1352: o estorno não apaga mais nada — quantidades, NF, valor, pallets e serviços continuam preenchidos
+    var up={status:'aberta',digitada_em:null,digitada_por:null,motivo_devolucao:null,observacoes:capaRegObs(c,'Digitação estornada: '+m)};
     await dbUpdate('processo_capas',id,up); Object.assign(c,up); delete _capaVerCache[id];
     showToast('Digitação da capa '+c.numero+' estornada · volta para a digitar.','green'); capaViewId=null; render();
   }catch(e){ alert('Erro: '+(e.message||e)); }
@@ -55529,14 +55608,15 @@ function rCapasProcesso_i(){
   if(capaViewId){return rCapaDigitacaoTela(capaViewId);}
 
   const pode=capaPodeEditar();
-  const lista=capasProcesso.filter(c=>capaFiltroTipo==='todos'||c.tipo===capaFiltroTipo);
+  const _base=capasProcesso.filter(capaNaUnidade);   // v1.0.1352: só a unidade selecionada
+  const lista=_base.filter(c=>(capaFiltroTipo==='todos'||c.tipo===capaFiltroTipo)&&!(capaOcultarInut&&c.status==='inutilizada')).sort(capaOrdRecExp);   // v1.0.1352: REC antes de EXP; inutilizadas ocultas
 
   // Cards de gestão
-  const total=capasProcesso.length;
-  const abertas=capasProcesso.filter(c=>c.status==='aberta').length;
-  const digitadas=capasProcesso.filter(c=>c.status==='digitada'||c.status==='pendente_conferencia'||c.status==='conferida').length;
-  const devolvidas=capasProcesso.filter(c=>c.status==='devolvida').length;   // v1.0.1066
-  const faturadas=capasProcesso.filter(c=>c.status==='faturada').length;
+  const total=_base.length;
+  const abertas=_base.filter(c=>c.status==='aberta').length;
+  const digitadas=_base.filter(c=>c.status==='digitada'||c.status==='pendente_conferencia'||c.status==='conferida').length;
+  const devolvidas=_base.filter(c=>c.status==='devolvida').length;   // v1.0.1066
+  const faturadas=_base.filter(c=>c.status==='faturada').length;
   const card=(label,valor,cor)=>`<div style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
     <div style="font-size:22px;font-weight:800;color:${cor}">${valor}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:2px">${label}</div></div>`;
@@ -55578,7 +55658,8 @@ function rCapasProcesso_i(){
       <button class="tab ${capaFiltroTipo==='recebimento'?'active':''}" onclick="capaFiltroTipo='recebimento';render()">Recebimento</button>
       <button class="tab ${capaFiltroTipo==='expedicao'?'active':''}" onclick="capaFiltroTipo='expedicao';render()">Expedição</button>
     </div>
-    ${pode?'<button class="btn btn-p btn-sm" onclick="capaNovaModal()">+ Nova capa</button>':''}
+    <span style="display:flex;align-items:center;gap:14px"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2);cursor:pointer"><input type="checkbox" ${capaOcultarInut?'checked':''} onchange="capaOcultarInut=this.checked;render()"> Ocultar inutilizadas</label>
+    ${pode?'<button class="btn btn-p btn-sm" onclick="capaNovaModal()">+ Nova capa</button>':''}</span>
   </div>
   ${lista.length?lista.map(row).join(''):'<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma capa registrada</p></div>'}`;
 }
@@ -55610,7 +55691,7 @@ async function capaCarregarServicosDigitacao(id){
 function capaNovaModal(){
   if(!capaPodeEditar())return;
   const cid=company?.id;
-  const cliOpts=clientes.filter(c=>c.company_id===cid).map(c=>`<option value="${c.id}">${c.nome}${c.cpf_cnpj?' · '+c.cpf_cnpj:''}</option>`).join('');
+  const cliOpts=clientes.filter(c=>c.company_id===cid&&(!activeUnit||!c.unit_id||c.unit_id===activeUnit)).map(c=>`<option value="${c.id}">${c.nome}${c.cpf_cnpj?' · '+c.cpf_cnpj:''}</option>`).join('');
   portModal('Nova Capa de Processo',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label class="fl">Tipo *</label>
