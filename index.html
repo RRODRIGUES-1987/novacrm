@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1357 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1358 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1357';
+const APP_VERSION='v1.0.1358';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45602,7 +45602,7 @@ function wmsReVolumes(){
   var out=[];
   peds.sort(function(a,b){return String(wmsNumeroCurto(a)||'').localeCompare(String(wmsNumeroCurto(b)||''));})
       .forEach(function(p){
-    var pals=wmsPalletsEmbarque.filter(function(pl){return pl.pedido_id===p.id;})
+    var pals=(wmsExpFracionado(p.cliente_id)?wmsVolsDoPedido(p.id):wmsPalletsEmbarque.filter(function(pl){return pl.pedido_id===p.id;})).slice()   // v1.0.1358
                                .sort(function(a,b){return (a.vol_num||0)-(b.vol_num||0);});
     var N=pals.length;
     pals.forEach(function(pl){ out.push({pl:pl,ped:p,N:N}); });
@@ -47654,6 +47654,16 @@ function wmsCliTabSaida(c){
       </div>
     </div>
     <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
+      <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:7px">Tipo de expedição</div>
+      <div style="display:flex;gap:8px">
+        ${(()=>{ const fr=wmsCliParam(c.id,'expedicao_fracionada')===true; return [['pallet','Pallet a pallet','Unitização gera o pallet; embarque bipa o pallet e o prisma; romaneio fecha com todos os pallets.'],['fracionado','Fracionado (por volume)','Cada caixa/pacote do checkout é um volume; embarque bipa a etiqueta do checkout (sem prisma); coleta parcial tira pedidos inteiros.']].map(([v,lbl,desc])=>{ const on=(v==='fracionado')===fr; return `
+        <label style="flex:1;display:flex;gap:8px;align-items:flex-start;padding:9px 11px;border:1.5px solid ${on?'var(--blue-text)':'var(--border)'};border-radius:8px;cursor:pointer;background:${on?'var(--blue-bg)':'var(--bg)'}">
+          <input type="radio" name="wms-exp-tipo" value="${v}" ${on?'checked':''} style="margin-top:2px">
+          <div><div style="font-weight:600;font-size:12px">${lbl}</div><div style="font-size:10px;color:var(--text3)">${desc}</div></div>
+        </label>`; }).join(''); })()}
+      </div>
+    </div>
+    <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
       <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:7px">Controle de embarque (4ª)</div>
       <div style="display:flex;gap:8px">
         ${[['bipe','Bipar','Embarque só bipando a etiqueta do pallet.'],['manual','Confirmação manual','Embarque confirmado manualmente, sem bipe.']].map(([v,lbl,desc])=>`
@@ -47803,6 +47813,11 @@ async function wmsSalvarParamCliente(clienteId){
   { // v1.0.1109: saldo controlado no VERUS (empenho de saída)
     const sv=ge('wms-saldo-verus');
     if(sv){ const cA=clientes.find(x=>x.id===clienteId)||{}; dados.parametros=Object.assign({},cA.parametros||{},dados.parametros||{},{saldo_verus:sv.checked}); }
+  }
+  { // v1.0.1358: tipo de expedição (pallet a pallet × fracionado por volume)
+    const et=document.querySelector('input[name="wms-exp-tipo"]:checked');
+    if(et){ const cA=clientes.find(x=>x.id===clienteId)||{}; let pa=cA.parametros; if(typeof pa==='string'){ try{ pa=JSON.parse(pa); }catch(_e){ pa={}; } }
+      dados.parametros=Object.assign({},pa||{},dados.parametros||{},{expedicao_fracionada:et.value==='fracionado'}); }
   }
   const bloqE=ge('wms-conf-ent-bloqueia-div'); if(bloqE)dados.wms_conf_ent_bloqueia_div=bloqE.checked;
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
@@ -48931,7 +48946,9 @@ async function wmsCkvCriarVolume(sku,qtd,tipo,bipes,cxInfo){
     var obj={company_id:cid,unit_id:p.unit_id||null,numero:numero,cliente_id:p.cliente_id,pedido_id:p.id,consolidado:false,status:'montado',
       tot_volumes:1,vol_num:vol,vol_total:pl.N,encerrado:true,etiqueta_codigo:'PLT|'+numero+'|'+p.id,owner_id:cu?.id||null,
       montado_por_nome:profile?.full_name||cu?.email||null,montado_em:new Date().toISOString()};
-    var r=await dbInsert('wms_pallets_embarque',obj), pal=Array.isArray(r)?r[0]:r;
+    obj.origem='checkout';   // v1.0.1358: volume nascido no checkout (embarque fracionado e reimpressão só enxergam estes)
+    var r; try{ r=await dbInsert('wms_pallets_embarque',obj); }catch(_eo){ if(/origem/.test(String(_eo&&_eo.message))){ delete obj.origem; r=await dbInsert('wms_pallets_embarque',obj); } else throw _eo; }
+    var pal=Array.isArray(r)?r[0]:r;
     wmsPalletsEmbarque=[pal].concat(wmsPalletsEmbarque||[]);
     (_ckv.volInfo=_ckv.volInfo||{})[pal.id]={sku:sku,qtd:qtd,tipo:tipo,cx:cxInfo?{id:cxInfo.id,pallet_id:cxInfo.pallet_id}:null};   // v1.0.1299: para desfazer
     var it=await dbInsert('wms_pallet_itens',{company_id:cid,pallet_id:pal.id,produto_id:g.produto_id||null,sku:sku,descricao:g.desc||null,quantidade:qtd,pedido_id:p.id});
@@ -49241,8 +49258,12 @@ async function wmsFinalizarUnitizacao(){
 }
 
 // Reimprime as etiquetas de embarque de um pedido (reabre o modal PDF/ZPL)
-function wmsReimprimirEtiquetas(pedidoId){   // v1.0.1341: escolhe quais volumes reimprimir (antes saíam todos da OS)
-  const pallets=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId).sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));
+async function wmsReimprimirEtiquetas(pedidoId){   // v1.0.1341: escolhe quais volumes reimprimir (antes saíam todos da OS)
+  try{ const V=await dbSelect('wms_pallets_embarque','pedido_id=eq.'+pedidoId)||[];   // v1.0.1358: volumes do checkout feitos em outro computador
+    V.forEach(v=>{ const j=(wmsPalletsEmbarque||[]).findIndex(x=>x.id===v.id); if(j>=0) wmsPalletsEmbarque[j]=v; else wmsPalletsEmbarque.push(v); });
+    if(V.length){ const I=await dbSelect('wms_pallet_itens','pallet_id=in.('+V.map(v=>v.id).join(',')+')')||[]; I.forEach(it=>{ if(!(wmsPalletItens||[]).some(x=>x.id===it.id)) wmsPalletItens.push(it); }); } }catch(_e){}
+  const _pR=wmsPedidos.find(x=>x.id===pedidoId)||{};
+  const pallets=(wmsExpFracionado(_pR.cliente_id)?wmsVolsDoPedido(pedidoId):wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId)).slice().sort((a,b)=>(a.vol_num||0)-(b.vol_num||0));   // v1.0.1358: fracionado = só os volumes do checkout
   if(!pallets.length){showToast('Este pedido não tem pallets/etiquetas.','amber');return;}
   const p=wmsPedidos.find(x=>x.id===pedidoId)||{}, N=Math.max(...pallets.map(x=>x.vol_total||0),pallets.length);
   const lin=pallets.map(pl=>{ const its=(wmsPalletItens||[]).filter(x=>x.pallet_id===pl.id); return '<label style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-top:1px solid var(--border);cursor:pointer;font-size:13px"><input type="checkbox" class="reimp-vol" value="'+pl.id+'" style="width:18px;height:18px"><b style="min-width:70px">vol '+(pl.vol_num||'?')+'/'+N+'</b><span style="font-family:monospace;color:var(--text3);min-width:110px">'+ecomEsc(pl.numero||'')+'</span><span style="color:var(--text2)">'+its.map(x=>ecomEsc(x.sku)+' × '+Number(x.quantidade||0).toLocaleString('pt-BR')).join(', ')+'</span></label>'; }).join('');
@@ -49257,7 +49278,7 @@ function wmsReimprimirEtiquetas(pedidoId){   // v1.0.1341: escolhe quais volumes
 function wmsReimprimirVolumes(pedidoId,todas){
   const ids=todas?null:Array.prototype.map.call(document.querySelectorAll('.reimp-vol:checked'),c=>c.value);
   if(!todas&&!ids.length){ showToast('Marque ao menos um volume','amber'); return; }
-  const p=wmsPedidos.find(x=>x.id===pedidoId)||{}, all=wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId), sel=todas?all:all.filter(pl=>ids.indexOf(pl.id)>=0);
+  const p=wmsPedidos.find(x=>x.id===pedidoId)||{}, all=(wmsExpFracionado(p.cliente_id)?wmsVolsDoPedido(pedidoId):wmsPalletsEmbarque.filter(pl=>pl.pedido_id===pedidoId)), sel=todas?all:all.filter(pl=>ids.indexOf(pl.id)>=0);   // v1.0.1358
   const cli=(clientes||[]).find(c=>c.id===p.cliente_id), N=Math.max(...all.map(x=>x.vol_total||0),all.length);
   const romNumero=p.romaneio_id?((wmsRomaneios||[]).find(x=>x.id===p.romaneio_id)||{}).numero:null;
   const o=ge('reimp-ov'); if(o) o.remove();
@@ -53994,8 +54015,126 @@ async function wmsAbrirEmbarque(romaneioId){   // v1.0.1338: atualiza do banco a
   }catch(_e){}
   wmsAbrirEmbarqueRender(romaneioId);
 }
+// ═══ v1.0.1358 · EXPEDIÇÃO FRACIONADA (por volume, como a PE) ═══
+// Parâmetro do depositante (parametros.expedicao_fracionada). O volume é o que nasceu no checkout (origem = checkout);
+// o embarque bipa a etiqueta do checkout, sem prisma; pedido só sai completo — a coleta parcial tira pedidos inteiros.
+function wmsExpFracionado(cliId){ return wmsCliParam(cliId,'expedicao_fracionada')===true; }
+function wmsVolsDoPedido(pedId){ var all=(wmsPalletsEmbarque||[]).filter(function(x){return x.pedido_id===pedId;}); var ck=all.filter(function(x){return x.origem==='checkout';}); return ck.length?ck:all; }
+function wmsEmbFracDados(romId){
+  return (wmsPedidos||[]).filter(function(p){return p.romaneio_id===romId;})
+    .sort(function(a,b){ return String(wmsNumeroCurto(a)||'').localeCompare(String(wmsNumeroCurto(b)||''),'pt-BR',{numeric:true}); })
+    .map(function(p){ var v=wmsVolsDoPedido(p.id).slice().sort(function(a,b){return (a.vol_num||0)-(b.vol_num||0);}); return {p:p,vols:v,emb:v.filter(function(x){return x.status==='embarcado';}).length}; });
+}
+function wmsEmbFracFaltam(d){ var f=d.vols.filter(function(x){return x.status!=='embarcado';}).map(function(x){return x.vol_num||'?';}); return f.length>6?(f.length+' volumes'):('vol '+f.join(', ').replace(/, ([^,]*)$/,' e $1')); }
+function wmsEmbFracLinhas(romId){
+  var D=wmsEmbFracDados(romId);
+  if(!D.length) return '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text3);font-size:12px">Nenhum pedido neste romaneio.</td></tr>';
+  return D.map(function(d){ var n=d.vols.length, ok=n>0&&d.emb===n, pct=n?Math.round(d.emb/n*100):0, ped=String(d.p.numero_pedido||'');
+    return '<tr style="border-top:1px solid var(--border)"><td style="padding:8px;font-size:12px"><b>OS '+ecomEsc(wmsNumeroCurto(d.p)||'')+'</b><div style="font-size:11px;color:var(--text3)">'+ecomEsc(ped.length>40?ped.slice(0,40)+'…':ped)+'</div></td>'
+      +'<td style="padding:8px;width:170px"><div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(ok?'var(--green-text)':'var(--blue-text)')+';border-radius:99px"></div></div></td>'
+      +'<td style="padding:8px;text-align:center;font-size:13px;font-weight:700;font-family:monospace">'+d.emb+'/'+n+'</td>'
+      +'<td style="padding:8px;text-align:right;font-size:11px">'+(!n?'<span style="color:var(--red-text)">sem volumes do checkout</span>':ok?'<span class="bdg" style="background:var(--green-bg);color:var(--green-text)">✓ completo</span>':(d.emb?'<span style="color:var(--amber-text)">faltam '+wmsEmbFracFaltam(d)+'</span>':'<span style="color:var(--text3)">nenhum volume</span>'))+'</td></tr>'; }).join('');
+}
+function wmsEmbFracAtualizar(){ var b=ge('emb-frac-body'); if(b&&wmsEmbRomaneio) b.innerHTML=wmsEmbFracLinhas(wmsEmbRomaneio); wmsEmbAtualizaProgresso(); }
+function wmsEmbFracAbrir(r){
+  wmsEmbRomaneio=r.id; window._wmsEmbFrac=true; _wmsEmbAguardandoPrisma=null;
+  var D=wmsEmbFracDados(r.id), ids=[]; D.forEach(function(d){ d.vols.forEach(function(v){ ids.push(v.id); }); });
+  window._wmsEmbPallets=ids;
+  var cli=(clientes||[]).find(function(c){return c.id===wmsRomClienteId(r);}), emb=ids.filter(function(id){ var v=wmsPalletsEmbarque.find(function(x){return x.id===id;}); return v&&v.status==='embarcado'; }).length, pct=ids.length?Math.round(emb/ids.length*100):0;
+  var inner='<div style="font-size:12px;color:var(--text2);margin-bottom:-6px">Romaneio <b>'+ecomEsc(r.numero||'')+'</b> · '+ecomEsc((cli&&cli.nome)||'')+(r.transportadora?' · '+ecomEsc(r.transportadora):'')+(r.placa?' · <b>'+ecomEsc(r.placa)+'</b>':'')+' · <span class="bdg" style="background:var(--blue-bg);color:var(--blue-text)">fracionado</span></div>'
+    +'<div id="emb-passo" style="font-size:12px;font-weight:700;color:var(--text2)">Bipe a etiqueta de cada volume. O pedido só sai completo.</div>'
+    +'<div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:4px"><span>Progresso do embarque</span><span id="emb-pct-lbl">'+emb+'/'+ids.length+' · '+pct+'%</span></div>'
+    +'<div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden"><div id="emb-pct-bar" style="height:100%;width:'+pct+'%;background:'+(pct===100?'var(--green-text)':'var(--blue-text)')+';border-radius:99px;transition:width .3s"></div></div></div>'
+    +'<div style="padding:11px 13px;background:var(--blue-bg);border-radius:9px"><div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta do volume (a mesma impressa no checkout)</div>'
+    +'<input id="emb-bipe" placeholder="Bipe a etiqueta..." autocomplete="off" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--blue-text);border-radius:7px;font-size:14px" onkeydown="if(event.key===\'Enter\'){wmsEmbarqueBipe(this.value);this.value=\'\';this.focus();}"></div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg2)"><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">Pedido</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">Volumes</th><th style="padding:6px 8px;text-align:center;font-size:10px;color:var(--text2)">Carregados</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2)">Situação</th></tr></thead><tbody id="emb-frac-body">'+wmsEmbFracLinhas(r.id)+'</tbody></table></div>'
+    +'<div><button class="btn" style="color:var(--amber-text);border-color:var(--amber-text)" onclick="wmsEmbFracParcialModal()">Fechar como coleta parcial</button></div>';
+  portModal('Embarque — '+ecomEsc(r.numero||''),inner,'wmsFinalizarEmbarque()',{saveLabel:'Finalizar embarque',width:'620px'});
+  setTimeout(function(){ var i=ge('emb-bipe'); if(i) i.focus(); },60);
+}
+async function wmsEmbFracBipe(codigo){
+  var cod=String(codigo||'').trim(); if(!cod) return;
+  var cl=function(x){ return String(x||'').replace(/[^a-z0-9]/gi,'').toUpperCase(); }, cN=cl(cod);
+  var acha=function(){ return (wmsPalletsEmbarque||[]).find(function(x){ return x.etiqueta_codigo===cod||x.numero===cod||cl(x.etiqueta_codigo)===cN; }); };
+  var v=acha();
+  if(!v){ try{ var parts=cod.split('|'), V=[]; if(parts.length>=2) V=await dbSelect('wms_pallets_embarque','numero=eq.'+encodeURIComponent(parts[1].trim()))||[];
+      if(!V.length) V=await dbSelect('wms_pallets_embarque','etiqueta_codigo=eq.'+encodeURIComponent(cod))||[];
+      if(V[0]){ if(!(wmsPalletsEmbarque||[]).some(function(x){return x.id===V[0].id;})) wmsPalletsEmbarque.push(V[0]); v=V[0];
+        var ped=(wmsPedidos||[]).find(function(p){return p.id===v.pedido_id;}); if(ped&&ped.romaneio_id===wmsEmbRomaneio&&wmsVolsDoPedido(ped.id).some(function(x){return x.id===v.id;})&&window._wmsEmbPallets.indexOf(v.id)<0) window._wmsEmbPallets.push(v.id); } }catch(_e){} }
+  if(!v){ wmsBeep(true); _wmsEmbStatusMsg('Etiqueta não reconhecida: '+cod,'var(--red-text)'); return; }
+  if((window._wmsEmbPallets||[]).indexOf(v.id)<0){
+    var ped2=(wmsPedidos||[]).find(function(p){return p.id===v.pedido_id;});
+    wmsBeep(true); _wmsEmbStatusMsg(ped2&&ped2.romaneio_id===wmsEmbRomaneio?'Esta é a etiqueta ANTIGA (unitização) da OS '+wmsNumeroCurto(ped2)+' — bipe a etiqueta impressa no checkout.':'Este volume não é deste romaneio'+(ped2?' (OS '+wmsNumeroCurto(ped2)+')':'')+'.','var(--red-text)'); return; }
+  if(v.status==='embarcado'){ _wmsEmbStatusMsg('Volume '+(v.vol_num||'?')+' já carregado.','var(--blue-text)'); return; }
+  try{
+    await _wmsEmbarcarPallet(v,'bipe');
+    var p=(wmsPedidos||[]).find(function(x){return x.id===v.pedido_id;}), vs=p?wmsVolsDoPedido(p.id):[], e=vs.filter(function(x){return x.status==='embarcado';}).length;
+    _wmsEmbStatusMsg('✓ Volume '+(v.vol_num||'?')+'/'+vs.length+' da OS '+(p?wmsNumeroCurto(p):'')+' carregado'+(e===vs.length?' · OS completa':' · bipe o próximo'),'var(--green-text)');
+    if(navigator.vibrate) navigator.vibrate(40);
+  }catch(err){ wmsBeep(true); _wmsEmbStatusMsg('Erro: '+(err.message||err),'var(--red-text)'); }
+  wmsEmbFracAtualizar();
+}
+async function wmsAuthLider(email,pass){
+  try{
+    var rr=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'Content-Type':'application/json','apikey':SB_KEY},body:JSON.stringify({email:email,password:pass})});
+    if(!rr.ok) return {ok:false,reason:'E-mail ou senha inválidos'};
+    var j=await rr.json(), uid=j.user&&j.user.id, tk=j.access_token; if(!uid||!tk) return {ok:false,reason:'Falha na validação'};
+    var pr=await fetch(SB_URL+'/rest/v1/profiles?id=eq.'+uid+'&select=role,full_name',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tk}}), pj=await pr.json(), x=(pj&&pj[0])||{};
+    if(['admin','gestor','supervisor_operacoes','lider_operacoes'].indexOf(x.role)>=0) return {ok:true,nome:x.full_name||email};
+    return {ok:false,reason:'Somente supervisor ou líder de operações autoriza a coleta parcial'};
+  }catch(e){ return {ok:false,reason:'Erro: '+(e.message||e)}; }
+}
+function wmsEmbFracParcialModal(){
+  var D=wmsEmbFracDados(wmsEmbRomaneio), vao=D.filter(function(d){return d.vols.length&&d.emb===d.vols.length;}), ficam=D.filter(function(d){return !(d.vols.length&&d.emb===d.vols.length);});
+  if(!vao.length){ showToast('Nenhum pedido completo: não há o que sair nesta coleta.','amber'); return; }
+  if(!ficam.length){ showToast('Todos os pedidos estão completos: use Finalizar embarque.','blue'); return; }
+  window._embFracParc={vao:vao,ficam:ficam};
+  var r=wmsRomaneios.find(function(x){return x.id===wmsEmbRomaneio;})||{};
+  var grupo=function(t,arr,f){ return '<div style="border:1px solid var(--border);border-radius:10px"><div style="font-size:12px;font-weight:700;color:var(--text3);padding:8px 10px;background:var(--bg2);border-radius:10px 10px 0 0">'+t+'</div>'+arr.map(function(d){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-top:1px solid var(--border);font-size:13px"><span>OS '+ecomEsc(wmsNumeroCurto(d.p)||'')+'</span>'+f(d)+'</div>'; }).join('')+'</div>'; };
+  var descarregar=ficam.filter(function(d){return d.emb>0;});
+  var h='<div class="modal-overlay" id="emb-parc-ov" style="z-index:9900;display:flex;align-items:center;justify-content:center"><div class="modal" style="max-width:620px;width:95%"><div style="padding:20px;display:flex;flex-direction:column;gap:14px">'
+    +'<div style="font-size:16px;font-weight:600">Fechar '+ecomEsc(r.numero||'')+' como coleta parcial</div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin-top:-8px">O pedido só sai completo. Os pedidos incompletos saem do romaneio inteiros e voltam para nova coleta. Autorização do supervisor ou líder.</div>'
+    +grupo('✓ SEGUEM NO VEÍCULO · '+vao.length+' pedido(s)',vao,function(d){ return '<span style="font-family:monospace;color:#059669">'+d.vols.length+' volume(s)</span>'; })
+    +grupo('↩ FICAM PARA TRÁS · '+ficam.length+' pedido(s)',ficam,function(d){ return '<span style="font-family:monospace;color:#b45309">'+(d.emb?'retirar '+d.emb+' de '+d.vols.length+' do caminhão':'não carregado')+'</span>'; })
+    +(descarregar.length?'<div style="background:var(--amber-bg);color:var(--amber-text);border-radius:8px;padding:9px 12px;font-size:12.5px">⚠ Retire do caminhão os volumes já carregados de: <b>'+descarregar.map(function(d){return 'OS '+ecomEsc(wmsNumeroCurto(d.p)||'');}).join(', ')+'</b>. O carregamento deles será estornado.</div>':'')
+    +'<div><label class="fl">Motivo *</label><input class="fi" id="emb-parc-mot" placeholder="ex.: caminhão sem espaço / cliente pediu só parte"></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><label class="fl">E-mail do supervisor</label><input class="fi" id="emb-parc-email" autocomplete="off"></div><div><label class="fl">Senha</label><input class="fi" id="emb-parc-pass" type="password" autocomplete="off"></div></div>'
+    +'<div id="emb-parc-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px"></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px"><button class="btn" onclick="ge(\'emb-parc-ov\').remove()">Cancelar</button><button class="btn btn-p" id="emb-parc-ok" onclick="wmsEmbFracParcialConfirmar()">Fechar coleta parcial</button></div>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+  setTimeout(function(){ var i=ge('emb-parc-mot'); if(i) i.focus(); },50);
+}
+async function wmsEmbFracParcialConfirmar(){
+  var X=window._embFracParc, err=ge('emb-parc-err'), btn=ge('emb-parc-ok'); if(!X) return;
+  var fail=function(m){ if(err){ err.style.display='block'; err.textContent=m; } if(btn){ btn.disabled=false; btn.textContent='Fechar coleta parcial'; } };
+  var mot=String((ge('emb-parc-mot')||{}).value||'').trim(), em=String((ge('emb-parc-email')||{}).value||'').trim(), ps=(ge('emb-parc-pass')||{}).value||'';
+  if(!mot) return fail('Informe o motivo.'); if(!em||!ps) return fail('Informe e-mail e senha do supervisor ou líder.');
+  if(btn){ btn.disabled=true; btn.textContent='Validando…'; }
+  var au=await wmsAuthLider(em,ps); if(!au.ok) return fail(au.reason);
+  var r=wmsRomaneios.find(function(x){return x.id===wmsEmbRomaneio;})||{};
+  try{
+    for(var i=0;i<X.ficam.length;i++){ var d=X.ficam[i];
+      for(var k=0;k<d.vols.length;k++){ var v=d.vols[k]; if(v.status!=='embarcado') continue;
+        var car={status:'montado',embarcado_por:null,embarcado_por_nome:null,embarcado_em:null,seq_leitura:null};
+        await dbUpdate('wms_pallets_embarque',v.id,car); Object.assign(v,car);
+        var cfs=(wmsConferencias||[]).filter(function(cf){return cf.pallet_id===v.id&&cf.tipo===4;}); for(var q=0;q<cfs.length;q++){ try{ await dbDelete('wms_conferencias',cfs[q].id); }catch(_c){} }
+        wmsConferencias=(wmsConferencias||[]).filter(function(cf){return !(cf.pallet_id===v.id&&cf.tipo===4);}); }
+      await dbUpdate('wms_pedidos',d.p.id,{romaneio_id:null}); d.p.romaneio_id=null;
+      try{ await sbFetch('DELETE','/rest/v1/portal_agendamento_pedidos?pedido_id=eq.'+d.p.id,null,tok); }catch(_a){}   // volta a poder entrar em outro agendamento
+      try{ await wmsPedidoHist(d.p.id,'coleta_parcial','Retirado do romaneio '+(r.numero||'')+' (coleta parcial, pedido não sai incompleto) · motivo: '+mot+' · autorizado por '+au.nome); }catch(_h){}
+    }
+    try{ await wmsRecalcRomaneio(r.id); }catch(_r){}
+    var ov=ge('emb-parc-ov'); if(ov) ov.remove(); window._embFracParc=null;
+    showToast('Coleta parcial: '+X.vao.length+' pedido(s) seguem · '+X.ficam.length+' voltaram para nova coleta. Agora finalize o embarque.','green');
+    portClose(); wmsEmbFracAbrir(r);
+  }catch(e){ fail('Erro: '+(e.message||e)); }
+}
 function wmsAbrirEmbarqueRender(romaneioId){
   const r=wmsRomaneios.find(x=>x.id===romaneioId);if(!r)return;
+  if(wmsExpFracionado(wmsRomClienteId(r))) return wmsEmbFracAbrir(r);   // v1.0.1358
+  window._wmsEmbFrac=false;
   wmsEmbRomaneio=romaneioId;
   _wmsEmbAguardandoPrisma=null;
   const cliEmb=clientes.find(c=>c.id===r.cliente_id);
@@ -54078,6 +54217,7 @@ function wmsEmbCancelarPasso(){
   _wmsEmbStatusMsg('Bipe a etiqueta do pallet.','var(--text2)');
 }
 async function wmsEmbarqueBipe(codigo){
+  if(window._wmsEmbFrac) return wmsEmbFracBipe(codigo);   // v1.0.1358
   const cod=String(codigo||'').trim();
   if(!cod)return;
   const _clean=s=>String(s||'').replace(/[^a-z0-9]/gi,'').toUpperCase();
@@ -54191,7 +54331,7 @@ async function wmsFinalizarEmbarque(){
   const r=wmsRomaneios.find(x=>x.id===wmsEmbRomaneio);if(!r){portClose();return;}
   // bloqueio 1: prisma atribuído
   const diag=wmsRomaneioProntoEmbarque(r.id);
-  if(!diag.temPrisma){
+  if(!diag.temPrisma && !window._wmsEmbFrac){   // v1.0.1358: fracionado não usa prisma
     portErr('Atribua um prisma de caminhão ao romaneio antes de finalizar o embarque.');
     return;
   }
@@ -54202,7 +54342,7 @@ async function wmsFinalizarEmbarque(){
     return;
   }
   const pendentes=(window._wmsEmbPallets||[]).map(id=>wmsPalletsEmbarque.find(p=>p.id===id)).filter(p=>p&&p.status!=='embarcado');
-  if(pendentes.length){ if(!confirm(pendentes.length+' pallet(s) ainda não bipado(s). Finalizar mesmo assim?'))return; }
+  if(pendentes.length){ if(window._wmsEmbFrac){ portErr('Faltam '+pendentes.length+' volume(s). Bipe todos ou use "Fechar como coleta parcial" — o pedido só sai completo.'); return; } if(!confirm(pendentes.length+' pallet(s) ainda não bipado(s). Finalizar mesmo assim?'))return; }
   // v1.0.1240: foto do baú carregado (parâmetro do depositante)
   const _cliFb=(clientes||[]).find(c=>c.id===wmsRomClienteId(r));
   let _fotoUrl=(window._wmsFotoBau||{})[r.id]||null;
