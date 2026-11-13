@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1347 | Gerado: 2026-11-12 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1349 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1347';
+const APP_VERSION='v1.0.1349';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -60372,7 +60372,8 @@ function ecomOsPrint(osId,fmt){
   var os=ecomOrdensSep.find(function(o){return o.id===osId;}); if(!os)return;
   var _tipo=fmt||os.tipo;   // v1.0.1034: formato de impressão escolhido (a OS continua a mesma)
   var pids=ecomOsPedidos.filter(function(l){return l.os_id===osId;}).map(function(l){return l.pedido_id;});
-  var peds=pids.map(function(id){return ecomPedidos.find(function(p){return p.id===id;});}).filter(Boolean);
+  var peds=pids.map(function(id){return ecomPedidos.find(function(p){return p.id===id;});}).filter(Boolean)
+    .filter(function(p){ return p.status!=='cancelado'; });   // v1.0.1349: pedido cancelado não sai nas folhas (nem na capa)
   var sheets=[];
   if(_tipo==='sku'){
     var multi=peds.filter(function(p){return ecomPedDistinctSkus(p.id)>1;});
@@ -60955,6 +60956,11 @@ function ecomCxScan(code){
   // de uma planilha lida errada): com o checkout em andamento, é bipe de produto; sem pedido em andamento, vale o produto
   // (a folha/etiqueta do pedido não tem o formato de SKU)
   if(ped && (isSku || ecomCxEhCodigoProduto(code))){ ped=null; }   // v1.0.1136: inclui EAN
+  // v1.0.1348: com a folha em andamento, a etiqueta de um pedido desta folha ou de pedido já conferido (ex.: o mesmo
+  // comprador em duas listas da OS) não substitui a folha — antes a folha era trocada e sumia com linhas por conferir
+  if(ped && ecomCx && ecomCx.fila && ecomCx.fila.length && ecomCx.modo==='sku' && (ecomCx.fila.indexOf(ped.id)>=0 || !ecomCxReady(ped))){
+    ecomBeep(); ecomCxFlash('Etiqueta do pedido E-'+String(ped.numero_interno||0).padStart(6,'0')+(ecomCxReady(ped)?'':(' (j\u00e1 '+ped.status+')'))+' \u2014 a folha continua. Bipe o PRODUTO do pedido atual.','amber'); ecomCxRender(); return;
+  }
   if(ped){ ecomCxLoadPedido(ped); return; }
   if(ecomCx && ecomCx.fila && ecomCx.fila.length){ ecomCxBip(code); return; }
   if(isSku){ ecomCxLoadSku(code); return; }
@@ -61054,7 +61060,50 @@ function ecomCxLoadSku(sku, osId){
     ecomCxRender(); return;
   }
   ecomCx={modo:'sku', sku:sku, osId:osId||null, osNum:(_os?_os.numero:null), fila:fila.map(function(p){return p.id;}), msg:'Folha '+sku+(_os?(' \u00b7 OS-'+String(_os.numero||0).padStart(4,'0')):'')+' carregada ('+fila.length+' pedidos)', msgcolor:'green'};
+  // v1.0.1348: linha da folha impressa que não entrou na conferência (situação diferente de separado) — avisa já na carga
+  if(osId){ var _fora=ecomCxFolhaFora(osId,lc,ecomCx.fila); if(_fora.length){ ecomCx.msg+=' \u00b7 ATEN\u00c7\u00c3O: '+_fora.length+' pedido(s) da folha fora da confer\u00eancia: '+ecomCxListaPed(_fora); ecomCx.msgcolor='amber'; } }
+  if(osId){ var _canc=ecomCxFolhaCanc(osId,lc); if(_canc.length){ ecomCx.canc=_canc.map(function(p){return p.id;}); ecomCx.msg+=' \u00b7 '+ecomCxCancMsg(_canc); ecomCx.msgcolor='amber'; } }   // v1.0.1349
   ecomCxRender();
+}
+// v1.0.1348: pedido de código único com este SKU (mesmo critério da folha impressa), sem olhar a situação
+function ecomCxCodUnico(p,lc){
+  var its=ecomItensDo(p.id); var s={}; its.forEach(function(i){ var k=(i.sku||i.ean||i.descricao||'').toLowerCase(); if(k)s[k]=1; });
+  return Object.keys(s).length===1 && its.some(function(i){ return String(i.sku||'').toLowerCase()===lc; });
+}
+// v1.0.1348: linhas da folha impressa (pedidos da OS com este SKU) que não estão na fila e não foram conferidas
+function ecomCxFolhaFora(osId,lc,fila){
+  var ids={}; (ecomOsPedidos||[]).forEach(function(l){ if(l.os_id===osId) ids[l.pedido_id]=1; });
+  var fim=['conferido','romaneado','carregado','expedido','cancelado'];
+  return (ecomPedidos||[]).filter(function(p){ return ids[p.id] && (fila||[]).indexOf(p.id)<0 && fim.indexOf(p.status)<0 && ecomCxCodUnico(p,lc); });
+}
+// v1.0.1349: pedidos cancelados que estão na folha impressa (não entram na conferência, mas o papel mostra a linha)
+function ecomCxFolhaCanc(osId,lc){
+  var ids={}; (ecomOsPedidos||[]).forEach(function(l){ if(l.os_id===osId) ids[l.pedido_id]=1; });
+  return (ecomPedidos||[]).filter(function(p){ return ids[p.id] && p.status==='cancelado' && ecomCxCodUnico(p,lc); });
+}
+function ecomCxCancMsg(arr){ return arr.length?('CANCELADO(S) nesta folha: '+arr.map(function(p){ return 'E-'+String(p.numero_interno||0).padStart(6,'0')+' ('+(p.destinatario_nome||'')+', '+ecomItensDo(p.id).reduce(function(a,i){return a+ecomN(i.qtd);},0)+' un.)'; }).join(', ')+' \u2014 N\u00c3O embalar: devolva os itens ao endere\u00e7o'):''; }
+function ecomCxListaPed(arr){ return arr.map(function(p){ return 'E-'+String(p.numero_interno||0).padStart(6,'0')+' ('+(p.destinatario_nome||'')+(p.status?(' · '+p.status):'')+')'; }).join(', '); }
+// v1.0.1348: antes de mostrar "Folha concluída", relê no banco a situação de todos os pedidos da OS com este SKU.
+// Pedido que ficou pronto depois que a folha abriu entra na fila; pedido da folha que não pôde ser conferido segura a folha.
+var _cxFimRodando=false;
+async function ecomCxFolhaFimCheck(){
+  var cx=ecomCx; if(!cx||_cxFimRodando) return;
+  _cxFimRodando=true;
+  try{
+    var lc=String(cx.sku||'').toLowerCase();
+    var ids=[]; (ecomOsPedidos||[]).forEach(function(l){ if(l.os_id===cx.osId) ids.push(l.pedido_id); });
+    try{ await ecomCxAtualizarStatus(ids.concat(cx.fila)); }catch(_e){}
+    if(ecomCx!==cx) return;
+    var setIds={}; ids.forEach(function(x){ setIds[x]=1; });
+    var novos=(ecomPedidos||[]).filter(function(p){ return setIds[p.id] && cx.fila.indexOf(p.id)<0 && ecomCxReady(p) && ecomCxCodUnico(p,lc); }).sort(ecomOrdTransp);
+    novos.forEach(function(p){ cx.fila.push(p.id); });
+    if(ecomCxCurrentPid()){ cx.fimPend=null; ecomCxFlash('Ainda h\u00e1 pedido nesta folha \u2014 bipe o produto','amber'); return; }
+    var fora=ecomCxFolhaFora(cx.osId,lc,cx.fila);
+    if(fora.length){ cx.fimPend=fora.map(function(p){return p.id;}); ecomBeep(); ecomCxFlash('A folha N\u00c3O terminou: '+ecomCxListaPed(fora)+' \u2014 chame o supervisor','red'); return; }
+    cx.fimPend=null; cx.fimOk=true;
+    var _canc=ecomCxFolhaCanc(cx.osId,lc);   // v1.0.1349: cancelamento pode ter chegado depois que a folha abriu
+    if(_canc.length){ ecomBeep(); ecomCxFlash('Folha conclu\u00edda \u00b7 '+ecomCxCancMsg(_canc),'amber'); }
+  }finally{ _cxFimRodando=false; if(ecomCx===cx) ecomCxRender(); }
 }
 async function ecomCxAutoConcluiOS(pid){
   try{
@@ -61127,7 +61176,7 @@ async function ecomCxBip(code){
   _ecomCxBusy=true;
   try{
   var pid=ecomCxCurrentPid();
-  if(!pid){ ecomCxFlash('Folha concluida','green'); ecomCxRender(); return; }
+  if(!pid){ if(ecomCx.modo==='sku'&&ecomCx.osId&&!ecomCx.fimOk){ ecomCxRender(); return; } ecomCxFlash('Folha concluida','green'); ecomCxRender(); return; }   // v1.0.1348
   var _pf=ecomPedidos.find(function(x){return x.id===pid;});
   if(ecomEhFull(_pf)){ await ecomFullBip(_pf,ecomItensDo(pid),code); return; }   // v1.0.1049: Embarque Full
   var prod=ecomProdByCode(code);
@@ -61238,6 +61287,16 @@ function ecomCxRender(){
     setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },30); return;
   }
   var pid=ecomCxCurrentPid();
+  // v1.0.1348: folha da OS só aparece concluída depois de conferida no banco
+  if(!pid && ecomCx.modo==='sku' && ecomCx.osId && !ecomCx.fimOk){
+    if(!ecomCx.fimPend){ ecomCxFolhaFimCheck(); }
+    body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxSemEtiqHtml()+ecomCxMsgHtml()
+      +(ecomCx.fimPend
+        ?'<div style="border:3px solid var(--red-text,#b91c1c);border-radius:20px;padding:48px 56px;text-align:center;max-width:680px"><div style="font-size:56px">&#9888;&#65039;</div><div style="font-size:28px;font-weight:800;color:var(--red-text,#b91c1c)">Folha N\u00c3O conclu\u00edda</div><div style="font-size:16px;margin-top:8px">'+ecomCx.fimPend.length+' pedido(s) da folha ainda n\u00e3o podem ser conferidos</div><div style="font-size:13px;color:var(--text3);margin-top:10px">Separe a caixa e chame o supervisor. Bipe a folha de novo depois de liberado.</div></div>'
+        :'<div style="border:3px dashed var(--border);border-radius:20px;padding:48px 56px;text-align:center;color:var(--text3);font-size:20px">Conferindo se a folha terminou\u2026</div>')
+      +'</div>';
+    setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },30); return;
+  }
   if(!pid){
     body.innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+ecomCxSemEtiqHtml()+ecomCxMsgHtml()
       +'<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:60px;text-align:center"><div style="font-size:60px">&#9989;</div><div style="font-size:30px;font-weight:800;color:var(--green-text,#059669)">Folha concluida</div><div style="font-size:16px;color:var(--text3);margin-top:6px">'+ecomCx.fila.length+' pedido(s) conferido(s)</div><button class="btn btn-p" style="margin-top:18px;font-size:16px;padding:10px 22px" onclick="ecomCx=null;ecomCxRender()">Nova folha</button></div></div>';
