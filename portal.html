@@ -3176,7 +3176,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.16';   // v1.8.16: excluir pedido não separado e sem NF; quadro com rolagem sempre visível; romaneio no agendamento
+const PORTAL_VERSION = 'v1.8.17';   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
+// v1.8.16 →   // v1.8.16: excluir pedido não separado e sem NF; quadro com rolagem sempre visível; romaneio no agendamento
 // v1.8.15 →   // v1.8.15: filtro por coluna com o estilo próprio (o CSS global do portal esticava as caixas de marcar e escondia os valores)
 // v1.8.14: filtro por coluna (estilo Excel) no quadro de pedidos; sai o "mostrar carregados"
 // v1.8.13: situação "itens fora do múltiplo" separada de "aguardando saldo"
@@ -4191,7 +4192,7 @@ function pedChips(){
 /* ============================ v1.3 · CARTÃO DE EMBARQUE DO MOTORISTA ============================ */
 function cartaoCodigo(a){ return 'EMB-'+String(a.protocolo||a.id).replace(/\D/g,'').slice(-6).padStart(6,'0')+((a.cartao_versao||1)>1?'-'+a.cartao_versao:''); }   // v1.6.8: versão do cartão quando motorista/placa forem substituídos
 function cartaoPode(a){ return a.status==='confirmado' && estagioDe(a)!=='liberado' && agdDadosOk(a); }
-function agdDadosOk(a){ return DEMO || a.tipo!=='saida' || !!(a.motorista_nome && a.placa && a.motorista_doc); }   // v1.6.8
+function agdDadosOk(a){ const nm=String(a.motorista_nome||'').trim(); return DEMO || a.tipo!=='saida' || !!(nm && !/^a informar$/i.test(nm) && String(a.motorista_doc||'').trim()); }   // v1.6.8 · v1.8.17: a placa não segura o cartão — pode ser informada até a chegada na doca
 function agdLinkTransp(a){ return a.transp_token ? location.origin+location.pathname+'?t='+a.transp_token : ''; }
 function agdLinkPainel(a){
   const url=agdLinkTransp(a); if(!url) return '';
@@ -5073,7 +5074,8 @@ window.agdEditarAbrir=async function(id){
     <div class="modal-f"><button class="btn btn-ghost" style="width:auto" onclick="$('mAgdEd').remove()">Cancelar</button><button class="btn btn-primary" style="width:auto" id="edOk">Salvar alterações</button></div></div></div>`);
   $('edOk').onclick=async function(){ this.disabled=true;
     const p={data:$('edData').value,hora_inicio:$('edHi').value||null,hora_fim:$('edHf').value||null,tipo_veiculo:$('edVeic').value,transportadora:$('edTr').value,transp_contato:$('edTrCt').value,placa:$('edPlaca').value.toUpperCase(),motorista_nome:$('edMot').value,motorista_doc:$('edDoc').value};
-    try{ const q=await sb.rpc('portal_agd_editar',{p_agendamento:id,p}); if(q.error) throw q.error; $('mAgdEd').remove(); toast('Agendamento atualizado.'); agdAvisarTransp(id,'alterado');
+    try{ const q=await sb.rpc('portal_agd_editar',{p_agendamento:id,p}); if(q.error) throw q.error; $('mAgdEd').remove();
+      const rq=q.data||{}; toast(rq.reaprovacao?'Agendamento alterado · a nova data/janela volta para a confirmação da MK Logística.':(rq.alterado===false?'Nada foi alterado.':'Agendamento atualizado'+(rq.cartao_versao?' · cartão v'+rq.cartao_versao:'')+'.')); agdAvisarTransp(id,'alterado');   // v1.8.17
       await loadDados(); render(); if(!$('mDet').classList.contains('hide')) openDetalhe('agd',id); }
     catch(e){ $('edErr').textContent=e.message||String(e); this.disabled=false; } };
 };
