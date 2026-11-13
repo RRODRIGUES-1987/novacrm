@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1349 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1350 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1349';
+const APP_VERSION='v1.0.1350';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46828,7 +46828,16 @@ async function pjAgdDecidir(id,ok){
   var motivo=null;
   if(!ok){ motivo=prompt('Motivo da recusa (o cliente vê no portal):'); if(motivo===null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
   var upd=ok?{status:'confirmado',confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''}:{status:'recusado',motivo_recusa:motivo,confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''};
-  try{ try{ await dbRpc('wms_agendamento_decidir',{p_id:id,p_ok:!!ok,p_motivo:motivo||null,p_por:upd.confirmado_por}); }catch(_r){ await dbUpdate('portal_agendamentos',id,upd); }   // v1.0.1343
+  try{
+    // v1.0.1350: a decisão só vale se o banco gravou. Antes, sem a função, o update direto podia não atingir nenhuma
+    // linha (regra de acesso do portal) e a tela mostrava "confirmado" sem nada gravado.
+    try{ await dbRpc('wms_agendamento_decidir',{p_id:id,p_ok:!!ok,p_motivo:motivo||null,p_por:upd.confirmado_por}); }
+    catch(_r){
+      if(!/could not find the function|PGRST202|does not exist|schema cache/i.test(String(_r&&_r.message||_r))) throw new Error(String(_r&&_r.message||_r).replace(/^\[rpc [^\]]+\]\s*/,''));
+      await dbUpdate('portal_agendamentos',id,upd);
+    }
+    var _chk=(await dbSelect('portal_agendamentos','id=eq.'+id+'&select=id,status').catch(function(){return [];}))||[];
+    if(!_chk[0]||_chk[0].status!==upd.status) throw new Error('o banco n\u00e3o gravou a decis\u00e3o (situa\u00e7\u00e3o atual: '+((_chk[0]&&_chk[0].status)||'sem acesso')+'). Rode o SQL da v1.0.1350.');
     _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green'); if(ge('wms-exp-agd')) wmsExpAgdCarregar(); else if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
   catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
