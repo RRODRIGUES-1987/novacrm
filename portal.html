@@ -378,6 +378,12 @@
   table.tbl th{text-align:left;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;background:#FAFAF8;border-bottom:1px solid var(--line);white-space:nowrap}
   table.tbl td{padding:10px 12px;border-top:1px solid var(--line);white-space:nowrap}
   table.tbl td.num,table.tbl th.num{text-align:right}
+  /* v1.8.16: quadro de pedidos na altura da tela — a rolagem lateral fica sempre visível, sem descer a página */
+  #volFat .tbl-wrap{max-height:calc(100vh - 230px);border:none;box-shadow:none;border-radius:0}
+  #volFat table.tbl{min-width:760px}
+  #volFat table.tbl thead th{position:sticky;top:0;z-index:2}
+  #volFat table.tbl td{white-space:normal;vertical-align:top}
+  #volFat table.tbl td .hint{max-width:300px}
   table.tbl tr:hover td{background:#FBFBF9}
   .mono{font-family:var(--mono);font-size:12.5px}
   .chart-grid{display:grid;grid-template-columns:1fr;gap:14px}
@@ -3170,7 +3176,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.15';   // v1.8.15: filtro por coluna com o estilo próprio (o CSS global do portal esticava as caixas de marcar e escondia os valores)
+const PORTAL_VERSION = 'v1.8.16';   // v1.8.16: excluir pedido não separado e sem NF; quadro com rolagem sempre visível; romaneio no agendamento
+// v1.8.15 →   // v1.8.15: filtro por coluna com o estilo próprio (o CSS global do portal esticava as caixas de marcar e escondia os valores)
 // v1.8.14: filtro por coluna (estilo Excel) no quadro de pedidos; sai o "mostrar carregados"
 // v1.8.13: situação "itens fora do múltiplo" separada de "aguardando saldo"
 // v1.8.12: pedidos carregados no quadro · DANFE casada pelo XML do mesmo envio · rastreabilidade por caixa/pacote
@@ -4773,9 +4780,18 @@ window.renderVolFat = function(){
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${foraMult?'#ffedd5':SIT[1]};color:${foraMult?'#9a3412':SIT[2]};white-space:nowrap">${foraMult?'itens fora do múltiplo':SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
-      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button></td></tr>`; }).join('')}
+      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button>${(!r.nf&&(semLista||semSaldo))?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px;color:#b91c1c" title="Excluir pedido (ainda não separado e sem nota)" onclick="pedExcluir(${i})">🗑</button>`:''}</td></tr>`; }).join('')}
     ${L.some(volPasa)?'':'<tr><td colspan="9" style="text-align:center;padding:18px;color:#64748b">Nenhum pedido com esses filtros · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a></td></tr>'}
     </tbody></table></div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9
+};
+// v1.8.16: excluir pedido ainda não separado e sem nota fiscal (o empenho volta ao estoque; a MKLOG vê como excluído pelo portal)
+window.pedExcluir = async function(i){
+  const r=(state._vfAll||state.volFat||[])[i]; if(!r) return;
+  const m=prompt('Excluir o pedido '+(String(r.pedido||'').split(' · ')[0])+'?\nInforme o motivo (a MKLOG verá esta informação):',''); if(m===null) return;
+  if(!m.trim()){ alert('Informe o motivo.'); return; }
+  try{ const q=await sb.rpc('portal_excluir_pedido',{p_pedido:r.id,p_motivo:m.trim(),p_autor:(state.user&&state.user.nome)||null}); if(q.error) throw q.error;
+    state.volFat=(state.volFat||[]).filter(x=>x.id!==r.id); renderVolFat(); toast('Pedido excluído.'); }
+  catch(e){ toast('Não foi possível excluir: '+(e.message||e)); }
 };
 window.volFatDet = function(i){
   const r = (state._vfAll||state.volFat||[])[i]; if(!r) return;
@@ -4973,7 +4989,7 @@ function openDetalhe(kind, id){
       <div><div class="k">Situação</div><div class="v"><span class="badge b-${o.status}">${stNome(o.status)}</span></div></div>
       <div><div class="k">Local e janela</div><div class="v">${cdNome(o.cd)} · ${fmtDataLonga(o.data)} · ${fmtHora(o.hora_inicio)}–${fmtHora(o.hora_fim)}</div></div>
       <div><div class="k">Veículo</div><div class="v">${o.tipo_veiculo||'—'} ${o.placa?'· '+o.placa:''}<br>${o.motorista_nome||''}</div></div>
-      <div><div class="k">Pedido vinculado</div><div class="v proto" style="font-size:13px">${pv}</div></div>
+      <div><div class="k">${o.romaneio_numero?'Romaneio':'Pedido vinculado'}</div><div class="v proto" style="font-size:13px">${o.romaneio_numero?esc(o.romaneio_numero):pv}</div></div>
     </div>
     ${(!DEMO&&o.tipo==='saida')?`<div id="agdDetPeds" data-agd="${o.id}" style="margin:0 0 14px"><div class="hint">Carregando os pedidos desta coleta…</div></div>`:''}
     ${!DEMO?`<div style="display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap"><button class="btn btn-ghost" style="width:auto" onclick="agdEditarAbrir('${o.id}')">✎ Editar agendamento</button><button class="btn btn-ghost" style="width:auto;color:#b91c1c" onclick="agdCancelar('${o.id}')">Cancelar agendamento</button></div>`:''}
