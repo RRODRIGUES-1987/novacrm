@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1364 | Gerado: 2026-11-13 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1365 | Gerado: 2026-11-14 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1364';
+const APP_VERSION='v1.0.1365';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36156,7 +36156,7 @@ function rWmsRomaneios_i(){
     ${card(fmt(totVol),'Pallets','var(--blue-text)')}
     ${card(fmt(totL)+' L','Litros','var(--blue-text)')}
     ${card(fmt(totKg)+' kg','Peso','var(--blue-text)')}
-  </div>${wmsTFBar('rom',WMS_CHIPS_ROM,'Buscar nº do romaneio, depositante ou bipe a capa do pedido...')}`;
+  </div>${wmsTFBar('rom',WMS_CHIPS_ROM,'Buscar nº do romaneio, OS, pedido, depositante ou bipe a capa...')}`;
   if(!roms.length){
     return `${cards}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text3)">Nenhum romaneio no período. ${semRom.length} pedido(s) disponível(is).</div>${btnMontar}</div>`;
@@ -36165,7 +36165,7 @@ function rWmsRomaneios_i(){
     const cli=(wmsIxCliente()||new Map()).get(r.cliente_id)||clientes.find(c=>c.id===r.cliente_id);
     const st=WMS_ROM_STATUS[r.status]||{l:r.status,c:'#888',bg:'rgba(136,136,136,.12)'};
     const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
-    const _bPeds=(wmsPedidos||[]).filter(p=>p.romaneio_id===r.id).map(p=>(p.numero_curto||'')+' '+String(p.numero_curto||'').replace(/^0+/,'')+' '+(p.numero_pedido||'')).join(' ');   // v1.0.1338: OS e pedidos do romaneio entram na busca
+    const _bPeds=(wmsPedidos||[]).filter(p=>p.romaneio_id===r.id).map(p=>(p.numero_curto||'')+' '+String(p.numero_curto||'').replace(/^0+/,'')+' '+(p.numero_pedido||'')+' '+(p.numero_interno||'')).join(' ')+' '+((_wmsRomBuscaExtra[r.id])||'');   // v1.0.1338: OS e pedidos do romaneio entram na busca
     return `<div class="li" data-busca="${((r.numero||'')+' '+(cli?.nome||'')+' '+_bPeds).toLowerCase().replace(/"/g,'')}" data-rom-id="${r.id}" style="cursor:pointer" onclick="wmsRomaneioDetalhe('${r.id}')">
       <div style="display:flex;align-items:center" onclick="event.stopPropagation()">${wmsSelChk('rom',r.id)}</div>
       <div style="display:flex;flex-direction:column;justify-content:center;padding-right:14px;margin-right:14px;border-right:1px solid var(--border)">
@@ -36419,11 +36419,34 @@ let _wmsTelaFiltro={sep:{dep:'',de:'',ate:'',st:'',q:''},conf:{dep:'',de:'',ate:
 function wmsTFSet(sc,k,v){_wmsTelaFiltro[sc][k]=v;render();}
 function wmsTFLimparPeriodo(sc){_wmsTelaFiltro[sc].de='';_wmsTelaFiltro[sc].ate='';render();}
 // v1.0.1338: na lista de romaneios, bipar a capa do pedido (ou digitar o número + Enter) abre o romaneio direto
-function wmsRomBipe(v){ var q=String(v||'').trim().toLowerCase(); if(!q) return;
-  var d=q.replace(/\D/g,''), rs=Array.prototype.filter.call(document.querySelectorAll('#wms-rom-list [data-rom-id]'),function(el){ var b=el.getAttribute('data-busca')||''; return b.indexOf(q)>=0||(d&&b.indexOf(d.replace(/^0+/,''))>=0); });
+// v1.0.1365: OS/pedido na busca de romaneios também para pedidos já embarcados (fora da memória)
+var _wmsRomBuscaExtra={}, _wmsRomBuscaT=null, _wmsRomBuscaSeq=0;
+async function wmsRomBuscaBanco(q){
+  q=String(q||'').trim(); var t=q.replace(/[^0-9A-Za-z\-\/._]/g,''); if(t.length<3) return [];
+  var d=t.replace(/\D/g,''), dz=d.replace(/^0+/,''), cid=company?.id;
+  var conds=['numero_curto.ilike.*'+t+'*','numero_pedido.ilike.*'+t+'*'];
+  if(dz&&dz!==t) conds.push('numero_curto.ilike.*'+dz+'*');
+  if(dz&&/^\d+$/.test(t)&&dz.length<10) conds.push('numero_interno.eq.'+dz);
+  var rows=[]; try{ rows=await dbSelect('wms_pedidos','company_id=eq.'+cid+'&romaneio_id=not.is.null&or=('+conds.join(',')+')&select=id,romaneio_id,numero_curto,numero_pedido,numero_interno&order=created_at.desc&limit=60')||[]; }catch(_e){}
+  rows.forEach(function(p){ var x=((p.numero_curto||'')+' '+String(p.numero_curto||'').replace(/^0+/,'')+' '+(p.numero_pedido||'')+' '+(p.numero_interno||'')).toLowerCase().replace(/"/g,'');
+    var cur=_wmsRomBuscaExtra[p.romaneio_id]||''; if(cur.indexOf(x)<0) _wmsRomBuscaExtra[p.romaneio_id]=(cur+' '+x).trim();
+    var el=document.querySelector('#wms-rom-list [data-rom-id="'+p.romaneio_id+'"]'); if(el){ var b=el.getAttribute('data-busca')||''; if(b.indexOf(x)<0) el.setAttribute('data-busca',b+' '+x); } });
+  return rows;
+}
+function wmsRomBuscaAgenda(v){
+  clearTimeout(_wmsRomBuscaT); var seq=++_wmsRomBuscaSeq;
+  if(String(v||'').trim().length<3) return;
+  _wmsRomBuscaT=setTimeout(async function(){ await wmsRomBuscaBanco(v); if(seq===_wmsRomBuscaSeq) wmsTFBusca('rom',v,true); },350);
+}
+async function wmsRomBipe(v){ var q=String(v||'').trim().toLowerCase(); if(!q) return;
+  var d=q.replace(/\D/g,'');
+  var achar=function(){ return Array.prototype.filter.call(document.querySelectorAll('#wms-rom-list [data-rom-id]'),function(el){ var b=el.getAttribute('data-busca')||''; return b.indexOf(q)>=0||(d&&b.indexOf(d.replace(/^0+/,''))>=0); }); };
+  var rs=achar();
+  if(!rs.length){ clearTimeout(_wmsRomBuscaT); _wmsRomBuscaSeq++; await wmsRomBuscaBanco(v); rs=achar(); }
   if(rs.length===1){ wmsRomaneioDetalhe(rs[0].getAttribute('data-rom-id')); return; }
-  if(!rs.length) showToast('Nenhum romaneio com esse número ou pedido','amber'); else wmsTFBusca('rom',v); }
-function wmsTFBusca(sc,q){ /* só DOM: não usa índices */
+  if(!rs.length) showToast('Nenhum romaneio com esse número, OS ou pedido (confira o período e o filtro de status)','amber'); else wmsTFBusca('rom',v,true); }
+function wmsTFBusca(sc,q,_semBanco){ /* só DOM: não usa índices */
+  if(sc==='rom'&&!_semBanco) wmsRomBuscaAgenda(q);
   const list=ge('wms-'+sc+'-list');if(!list)return;
   const ql=(q||'').toLowerCase();let vis=0;
   list.querySelectorAll('[data-busca]').forEach(function(el){
