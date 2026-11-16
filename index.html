@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1365 | Gerado: 2026-11-14 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1366 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1365';
+const APP_VERSION='v1.0.1366';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -55366,23 +55366,31 @@ async function wmsRsvManualAbrirModal(pedId){
       +'<div style="font-size:12px;color:var(--text3)">Aceite registrado em nome de <b>'+ecomEsc((typeof coletorAutor==='function'?coletorAutor():'')||(cu&&cu.email)||'')+'</b> (mesma regra da confirmação de agendamento: quem tem a tela de Aprovações).</div>'   // v1.0.1364: sem senha de supervisor
       +'<div id="rsvm-err" style="display:none;background:var(--red-bg);color:var(--red-text);padding:8px 12px;border-radius:8px;font-size:12px"></div>'
       +'<div id="rsvm-ok" style="display:none;padding:8px 12px;border-radius:8px;background:var(--green-bg);color:var(--green-text);font-size:12.5px"></div>'; };
-  portModal('Reserva manual de RG · fora do múltiplo',inner(),'wmsRsvManualSalvar(\''+pedId+'\')' ,{saveLabel:'Reservar e liberar o pedido',width:'680px'});
+  portModal('Reserva manual de RG',inner(),'wmsRsvManualSalvar(\''+pedId+'\')' ,{saveLabel:'Reservar e liberar o pedido',width:'680px'});
   // busca os itens fora do múltiplo e os RGs disponíveis
   (async function(){
     try{
-      var prodRes=await dbSelect('wms_produtos','cliente_id=eq.'+ped.cliente_id+'&select=id,sku,fator_conversao')||[];
+      // v1.0.1366: só os produtos do pedido — o select de todos os produtos do depositante parava em 1.000 linhas (CASCO tem 1.528)
+      var _skP=[...new Set(itens.map(function(i){return String(i.sku||'').trim();}).filter(Boolean))], prodRes=[];
+      for(var _k=0;_k<_skP.length;_k+=80){ prodRes=prodRes.concat(await dbSelect('wms_produtos','cliente_id=eq.'+ped.cliente_id+'&sku=in.('+_skP.slice(_k,_k+80).map(function(x){return '"'+x.replace(/"/g,'')+'"';}).join(',')+')&select=id,sku,fator_conversao')||[]); }
       var pacMap={}; prodRes.forEach(function(x){ if(x.fator_conversao>1) pacMap[String(x.sku||'').trim().toUpperCase()]=Number(x.fator_conversao); });
       var skus=[...new Set(itens.map(function(i){return String(i.sku||'').trim().toUpperCase();}))]
         .filter(function(sk){ var pac=pacMap[sk]||1; var tot=itens.filter(function(i){return String(i.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,i){return a+Number(i.quantidade||0);},0);
           var res=RSV.filter(function(r){return String(r.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,r){return a+Number(r.qtd||0);},0);
           return pac>1&&(tot-res)>0&&((tot-res)%pac)!==0; });
-      if(!skus.length){ ge('rsvm-linhas').innerHTML='<div style="color:var(--green-text);font-size:12.5px">Nenhum item fora do múltiplo encontrado. Use Liberar do saldo se houver outro motivo.</div>'; return; }
+      var livre=false;
+      if(!skus.length){   // v1.0.1366: o cliente pediu reserva manual mas nada está fora do múltiplo → escolha livre do RG
+        livre=true;
+        skus=[...new Set(itens.map(function(i){return String(i.sku||'').trim().toUpperCase();}))].filter(function(sk){ var tot=itens.filter(function(i){return String(i.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,i){return a+Number(i.quantidade||0);},0);
+          var res=RSV.filter(function(r){return String(r.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,r){return a+Number(r.qtd||0);},0); return (tot-res)>0; });
+        if(!skus.length){ ge('rsvm-linhas').innerHTML='<div style="color:var(--green-text);font-size:12.5px">Todos os itens do pedido já estão reservados.</div>'; return; }
+      }
       window._rsvmPedId=pedId; window._rsvmItens=itens; window._rsvmPacMap=pacMap; window._rsvmPickMap={};
       var html=''; for(var si=0;si<skus.length;si++){
         var sk=skus[si], pac=pacMap[sk]||1;
         var tot=itens.filter(function(i){return String(i.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,i){return a+Number(i.quantidade||0);},0);
         var res=RSV.filter(function(r){return String(r.sku||'').trim().toUpperCase()===sk;}).reduce(function(a,r){return a+Number(r.qtd||0);},0);
-        var fora=(tot-res)%pac;
+        var pend=tot-res, fora=livre?0:pend%pac;
         // só o produto do pedido, só pallets ativos endereçados do depositante; desconta o que já está reservado para outros pedidos
         var skuOrig=(itens.find(function(i){return String(i.sku||'').trim().toUpperCase()===sk;})||{}).sku||sk;
         var cands=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo&sku=eq.'+encodeURIComponent(skuOrig)+'&select=id,pallet_id,sku,qtd_fiscal&order=qtd_fiscal.asc&limit=300')||[];
@@ -55393,39 +55401,49 @@ async function wmsRsvManualAbrirModal(pedId){
         if(cIds.length){ var rv=await dbSelect('wms_reservas','conteudo_id=in.('+cIds.join(',')+')&status=eq.reservada&select=conteudo_id,qtd')||[]; rv.forEach(function(x){ reservados[x.conteudo_id]=(reservados[x.conteudo_id]||0)+Number(x.qtd||0); }); }
         cands.forEach(function(c){ c.disp=Number(c.qtd_fiscal||0)-(reservados[c.id]||0); });
         cands=cands.filter(function(c){return c.disp>0;}).sort(function(a,b){ return (a.disp===b.disp?0:(a.disp<b.disp?-1:1)); }).slice(0,10);
-        pacInfo.push({sk,pac,tot,res,fora,cands,pals});
-        html+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:8px 0 4px">'+ecomEsc(sk)+' · pedido '+tot.toLocaleString('pt-BR')+' pç · pacote '+pac.toLocaleString('pt-BR')+' · <span style="color:var(--amber-text)">fora do múltiplo: '+fora.toLocaleString('pt-BR')+' pç</span></div>'
+        pacInfo.push({sk,pac,tot,res,fora,cands,pals,livre,pend});
+        html+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:8px 0 4px">'+ecomEsc(sk)+' · pedido '+tot.toLocaleString('pt-BR')+' pç · pacote '+pac.toLocaleString('pt-BR')+' · '+(livre?'<span style="color:var(--green-text)">dentro do múltiplo</span>':'<span style="color:var(--amber-text)">fora do múltiplo: '+fora.toLocaleString('pt-BR')+' pç</span>')+'</div>'
+          +(livre?'<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Marque o RG que o cliente pediu. O restante sai em pacotes fechados pelo empenho normal.</div>':'')
           +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:4px"><table style="width:100%;border-collapse:collapse">'
           +'<thead><tr style="background:var(--bg2)"><th></th><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">RG</th><th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text2)">Endereço</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2)">Disponível</th><th style="padding:6px 8px;text-align:right;font-size:10px;color:var(--text2)">Reservar</th></tr></thead><tbody>';
         cands.forEach(function(c,ci){
           var pal=pals[c.pallet_id]||{}, disp=Number(c.disp||0), id='rsvm-'+si+'-'+ci;
           html+='<tr style="border-top:1px solid var(--border)">'
-            +'<td style="padding:7px 8px;width:30px"><input type="checkbox" id="cb-'+id+'" onchange="wmsRsvManualToggle('+si+','+ci+',\''+c.id+'\','+disp+','+fora+','+si+')" '+( ci===0?'checked':'' )+'></td>'
+            +'<td style="padding:7px 8px;width:30px"><input type="checkbox" id="cb-'+id+'" onchange="wmsRsvManualToggle('+si+','+ci+',\''+c.id+'\','+disp+','+fora+','+si+')" '+( ci===0&&!livre?'checked':'' )+'></td>'
             +'<td style="padding:7px 8px;font-size:13px;font-family:monospace;font-weight:700">RG '+(pal.rg||'?')+'</td>'
             +'<td style="padding:7px 8px;font-size:12px">'+(pal.endereco_codigo||'?')+'</td>'
             +'<td style="padding:7px 8px;text-align:right;font-size:12px">'+disp.toLocaleString('pt-BR')+'</td>'
-            +'<td style="padding:7px 8px;width:90px"><input class="fi" id="qt-'+id+'" style="padding:5px 8px;text-align:right" value="'+( ci===0?String(fora):'' )+'" oninput="wmsRsvManualAtualizaTotal('+si+')"></td>'
+            +'<td style="padding:7px 8px;width:90px"><input class="fi" id="qt-'+id+'" style="padding:5px 8px;text-align:right" value="'+( ci===0&&!livre?String(fora):'' )+'" oninput="wmsRsvManualAtualizaTotal('+si+')"></td>'
             +'</tr>';
         });
         html+='</tbody></table></div>'
-          +'<div id="rsvm-tot-'+si+'" style="font-size:12px;padding:7px 10px;background:var(--green-bg);color:var(--green-text);border-radius:7px">Reserva manual: <b>'+fora.toLocaleString('pt-BR')+' pç</b> · Total do item: '+(res+pac*Math.floor((tot-res)/pac))+' + '+fora+' = <b>'+tot+' pç ✓</b></div>';
+          +'<div id="rsvm-tot-'+si+'" style="font-size:12px;padding:7px 10px;background:'+(livre?'var(--bg2)':'var(--green-bg)')+';color:'+(livre?'var(--text3)':'var(--green-text)')+';border-radius:7px">'+(livre?'Nenhum RG marcado: o item sai todo pelo empenho normal.':'Reserva manual: <b>'+fora.toLocaleString('pt-BR')+' pç</b> · Total do item: '+(res+pac*Math.floor((tot-res)/pac))+' + '+fora+' = <b>'+tot+' pç ✓</b>')+'</div>';
       }
       var el=ge('rsvm-linhas'); if(el) el.innerHTML=html;
       window._rsvmPacInfo=pacInfo;
+      if(livre) for(var _si=0;_si<pacInfo.length;_si++) wmsRsvManualAtualizaTotal(_si);
     }catch(e){ var el=ge('rsvm-linhas'); if(el) el.innerHTML='<div style="color:var(--red-text)">Erro ao buscar RGs: '+(e.message||e)+'</div>'; }
   })();
 }
 function wmsRsvManualToggle(si,ci,cid,disp,fora,sku_i){
   var el=ge('cb-rsvm-'+si+'-'+ci); if(!el) return;
-  if(el.checked){ ge('qt-rsvm-'+si+'-'+ci).value=String(fora); } else { ge('qt-rsvm-'+si+'-'+ci).value=''; }
+  var _pi=(window._rsvmPacInfo||[])[si];
+  if(el.checked){ ge('qt-rsvm-'+si+'-'+ci).value=String(_pi&&_pi.livre?Math.min(disp,_pi.pend):fora); } else { ge('qt-rsvm-'+si+'-'+ci).value=''; }
   wmsRsvManualAtualizaTotal(si);
 }
 function wmsRsvManualAtualizaTotal(si){
   var pi=(window._rsvmPacInfo||[])[si]; if(!pi) return;
   var tot=0; for(var ci=0;ci<pi.cands.length;ci++){
     var v=parseFloat(String((ge('qt-rsvm-'+si+'-'+ci)||{}).value||'0').replace(',','.'))||0; tot+=v; }
-  var ok=tot===pi.fora;
   var el=ge('rsvm-tot-'+si);
+  if(pi.livre){   // v1.0.1366: escolha livre — soma ≤ pendente e o restante fecha pacotes inteiros
+    var rest=pi.pend-tot, okL=tot<=pi.pend&&(pi.pac<=1||rest%pi.pac===0);
+    if(el) el.innerHTML=!tot?'Nenhum RG marcado: o item sai todo pelo empenho normal.'
+      :'Reserva manual: <b>'+tot.toLocaleString('pt-BR')+' pç</b> · restante <b>'+rest.toLocaleString('pt-BR')+' pç</b>'+(okL?(pi.pac>1&&rest>0?' em '+(rest/pi.pac)+' pacote(s) fechado(s)':'')+' · total '+pi.pend.toLocaleString('pt-BR')+' pç ✓':(tot>pi.pend?' ⚠ passa do pedido':' ⚠ o restante precisa fechar pacotes de '+pi.pac.toLocaleString('pt-BR')+' — marque mais um RG'));
+    if(el){ el.style.background=!tot?'var(--bg2)':(okL?'var(--green-bg)':'var(--amber-bg)'); el.style.color=!tot?'var(--text3)':(okL?'var(--green-text)':'var(--amber-text)'); }
+    return;
+  }
+  var ok=tot===pi.fora;
   if(el) el.innerHTML='Reserva manual: <b>'+tot.toLocaleString('pt-BR')+' pç</b> · Total do item: '+(pi.res+pi.pac*Math.floor((pi.tot-pi.res)/pi.pac))+' + '+tot+' = <b>'+(pi.res+pi.pac*Math.floor((pi.tot-pi.res)/pi.pac)+tot)+' pç</b>'+(ok?' ✓':' ⚠ deve ser '+pi.fora);
   if(el){ el.style.background=ok?'var(--green-bg)':'var(--amber-bg)'; el.style.color=ok?'var(--green-text)':'var(--amber-text)'; }
 }
@@ -55448,6 +55466,7 @@ async function wmsRsvManualSalvar(pedId){
     }
     if(!picks.length) return fail('Marque pelo menos um RG e informe a quantidade.');
     for(var v0=0;v0<pi.length;v0++){ var soma=picks.filter(function(x){return x.sku===pi[v0].sk;}).reduce(function(a,x){return a+x.qtd;},0);
+      if(pi[v0].livre){ var rst=pi[v0].pend-soma; if(soma>pi[v0].pend) return fail(pi[v0].sk+': a reserva ('+soma.toLocaleString('pt-BR')+') passa do que falta no pedido ('+pi[v0].pend.toLocaleString('pt-BR')+').'); if(pi[v0].pac>1&&rst%pi[v0].pac!==0) return fail(pi[v0].sk+': o restante ('+rst.toLocaleString('pt-BR')+') precisa fechar pacotes de '+pi[v0].pac.toLocaleString('pt-BR')+'. Marque mais um RG.'); continue; }
       if(soma!==pi[v0].fora) return fail(pi[v0].sk+': a soma das reservas ('+soma.toLocaleString('pt-BR')+') precisa ser igual ao fora do múltiplo ('+pi[v0].fora.toLocaleString('pt-BR')+').'); }
     for(var v1=0;v1<picks.length;v1++){ var ccd=null; for(var a1=0;a1<pi.length;a1++){ ccd=pi[a1].cands.find(function(c){return c.id===picks[v1].conteudo_id;})||ccd; } if(ccd&&picks[v1].qtd>Number(ccd.disp||0)) return fail('Quantidade maior que o disponível do RG.'); }
     for(var i=0;i<picks.length;i++){
