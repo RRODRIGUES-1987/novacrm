@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1366 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1367 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1366';
+const APP_VERSION='v1.0.1367';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46951,23 +46951,34 @@ async function wmsAgdRomaneio(id,manual,silencioso){
     return null;
   }
 }
+var _pjAgdEmCurso={};   // v1.0.1367: trava contra clique duplo (o 2º clique dava "já está como confirmado")
 async function pjAgdDecidir(id,ok){
+  if(_pjAgdEmCurso[id]) return;
   var motivo=null;
   if(!ok){ motivo=prompt('Motivo da recusa (o cliente vê no portal):'); if(motivo===null) return; motivo=motivo.trim(); if(!motivo){ alert('Informe o motivo.'); return; } }
   var upd=ok?{status:'confirmado',confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''}:{status:'recusado',motivo_recusa:motivo,confirmado_em:new Date().toISOString(),confirmado_por:(profile&&profile.full_name)||cu?.email||''};
   try{
     // v1.0.1350: a decisão só vale se o banco gravou. Antes, sem a função, o update direto podia não atingir nenhuma
     // linha (regra de acesso do portal) e a tela mostrava "confirmado" sem nada gravado.
+    _pjAgdEmCurso[id]=true;
+    var _jaEstava=false;
     try{ await dbRpc('wms_agendamento_decidir',{p_id:id,p_ok:!!ok,p_motivo:motivo||null,p_por:upd.confirmado_por}); }
     catch(_r){
-      if(!/could not find the function|PGRST202|does not exist|schema cache/i.test(String(_r&&_r.message||_r))) throw new Error(String(_r&&_r.message||_r).replace(/^\[rpc [^\]]+\]\s*/,''));
-      await dbUpdate('portal_agendamentos',id,upd);
+      var _m=String(_r&&_r.message||_r).replace(/^\[rpc [^\]]+\]\s*/,'');
+      if(/j[aá] est[aá] como/i.test(_m)) _jaEstava=true;   // v1.0.1367: já decidido (clique duplo, outra tela ou outro usuário) — confere abaixo
+      else if(!/could not find the function|PGRST202|does not exist|schema cache/i.test(_m)) throw new Error(_m);
+      else await dbUpdate('portal_agendamentos',id,upd);
     }
-    var _chk=(await dbSelect('portal_agendamentos','id=eq.'+id+'&select=id,status').catch(function(){return [];}))||[];
-    if(!_chk[0]||_chk[0].status!==upd.status) throw new Error('o banco n\u00e3o gravou a decis\u00e3o (situa\u00e7\u00e3o atual: '+((_chk[0]&&_chk[0].status)||'sem acesso')+'). Rode o SQL da v1.0.1350.');
-    _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;}); showToast(ok?'Agendamento confirmado.':'Agendamento recusado.','green');
-    if(ok) await wmsAgdRomaneio(id);   /* v1.0.1356: confirmado → romaneio de embarque (saída) ou de recebimento (entrada) */ if(ge('wms-exp-agd')) wmsExpAgdCarregar(); else if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
-  catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+    var _chk=(await dbSelect('portal_agendamentos','id=eq.'+id+'&select=id,status,confirmado_por').catch(function(){return [];}))||[];
+    if(!_chk[0]||_chk[0].status!==upd.status){
+      if(_jaEstava&&_chk[0]) throw new Error('este agendamento já foi decidido antes: está "'+_chk[0].status+'"'+(_chk[0].confirmado_por?' (por '+_chk[0].confirmado_por+')':'')+'. A lista foi atualizada.');
+      throw new Error('o banco n\u00e3o gravou a decis\u00e3o (situa\u00e7\u00e3o atual: '+((_chk[0]&&_chk[0].status)||'sem acesso')+'). Rode o SQL da v1.0.1350.');
+    }
+    _pj.agd=(_pj.agd||[]).map(function(a){return a.id===id?Object.assign({},a,upd):a;});
+    showToast(_jaEstava?('Este agendamento já estava '+(ok?'confirmado':'recusado')+(_chk[0].confirmado_por?' (por '+_chk[0].confirmado_por+')':'')+'.'):(ok?'Agendamento confirmado.':'Agendamento recusado.'),'green');
+    if(ok) await wmsAgdRomaneio(id,false,_jaEstava);   /* v1.0.1356: confirmado → romaneio de embarque (saída) ou de recebimento (entrada); v1.0.1367: já confirmado → só garante o romaneio, em silêncio */ if(ge('wms-exp-agd')) wmsExpAgdCarregar(); else if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); else render(); }
+  catch(e){ showToast('Erro: '+(e.message||e),'red'); if(ge('wms-exp-agd')) wmsExpAgdCarregar(); else if(ge('wms-aprov-agd')) wmsAprovAgdCarregar(); }
+  finally{ delete _pjAgdEmCurso[id]; }
 }
 
 // v1.0.1206: aba "Janelas de operação" no depositante — grade semanal e bloqueios DESTE cliente, e o flag de aprovação
