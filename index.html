@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1373 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1374 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1373';
+const APP_VERSION='v1.0.1374';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3856,6 +3856,15 @@ async function ecomFullProdBipML(p,its,meta,code){
   var _cxl=!sk?ecomFullCaixaDoCodigo(meta,code):null;   // v1.0.1223: etiqueta de caixa bipada (confirmação), sem erro
   // v1.0.1312: modo lote — caixa completa espera a MASTER: tem de ser uma etiqueta reservada para o produto e ainda não usada
   if(pend&&pend.lote&&pend.aguarda_master){
+    // v1.0.1374: etiqueta de caixa do ML sem código impresso no PDF (spx vazio): o QR do envio vale para a caixa pendente
+    //            (ou a próxima livre do produto), e o id do QR fica gravado nela — o mesmo QR não fecha outra caixa
+    if(!_cxl&&meta.ml){ var _qm=ecomFullMlQrEnvio(code);
+      if(_qm&&String(_qm.envio)===String(meta.envio||'').replace(/\D/g,'')){
+        var _ord=function(a,b){return a.n-b.n;}, _cs=(meta.caixas||[]);
+        _cxl=_cs.find(function(c){return +c.n===+pend.n&&!c.fechada_em;})
+          ||_cs.filter(function(c){return !c.fechada_em&&c.reservada===pend.sku;}).sort(_ord)[0]
+          ||_cs.filter(function(c){return !c.fechada_em&&!c.reservada&&!Object.keys(c.itens||{}).length;}).sort(_ord)[0]||null;
+        if(_cxl) _cxl.spx=ecomFullNormQr(code); } }
     if(!_cxl){ ecomBeep(); ecomCxFlash(sk?('A caixa já tem as '+pend.qtd+' unidades de '+pend.sku+': agora cole e BIPE a etiqueta da caixa (master)'):('Código não reconhecido: '+code+' · bipe a etiqueta da caixa (master)'),'red'); ecomCxRender(); return; }
     if(_cxl.fechada_em){ ecomBeep(); ecomCxFlash('Esta etiqueta de caixa ('+_cxl.n+') já foi usada em outra caixa','red'); ecomCxRender(); return; }
     if(_cxl.reservada&&_cxl.reservada!==pend.sku){ ecomBeep(); ecomCxFlash('Esta etiqueta de caixa ('+_cxl.n+') é do produto '+_cxl.reservada+', não do '+pend.sku,'red'); ecomCxRender(); return; }
@@ -4231,6 +4240,12 @@ function ecomFullPainelCheckout(p){
 
 // v1.0.1228: QR da caixa do Full Mercado Livre é um JSON {"id":…,"reference_id":"80697101:3",…}. Com o teclado em ABNT,
 // o leitor troca " por ^ e : por Ç (ex.: ^reference_id^Ç^80697101:3^) — o VERUS desfaz isso e acha envio + número da caixa.
+// v1.0.1374: lê envio e id do QR da caixa do Full ML (mesmas trocas de teclado ABNT do embarque)
+function ecomFullMlQrEnvio(code){
+  var t=String(code||'').replace(/\^/g,'"').replace(/[ÇçÖ]/g,':').replace(/[¨´`]/g,'"');
+  var mr=t.match(/reference_id"?\s*:\s*"?(\d{5,})/i)||t.match(/(?:^|\D)(\d{7,9})[:\/-](\d{1,3})(?:\D|$)/); if(!mr) return null;
+  return {envio:mr[1], id:(t.match(/"id"\s*:\s*"?(\d{5,})/i)||[])[1]||null};
+}
 function ecomFullEmbCaixaML(code){
   // v1.0.1229: no ML o "reference_id" (envio:N) se repete em todas as caixas do envio; o que muda é o "id" de cada caixa.
   // Cada id novo é atribuído à próxima caixa ainda não embarcada; o mesmo id bipado de novo cai na mesma caixa (duplicado).
