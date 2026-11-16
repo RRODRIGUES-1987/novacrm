@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1369 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1370 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1369';
+const APP_VERSION='v1.0.1370';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3863,7 +3863,7 @@ async function ecomFullProdBipML(p,its,meta,code){
     if(+_cxl.n!==+pend.n){ var _ph=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;}); if(_ph&&!_ph.fechada_em&&!(meta.lote&&meta.lote.caixas.indexOf(+_ph.n)>=0)) delete _ph.reservada; }
     _cxl.itens={}; _cxl.itens[pend.sku]=pend.qtd; _cxl.qtd=pend.qtd; _cxl.fechada_em=_ag; _cxl.sku=pend.sku; _cxl.impressa_em=_cxl.impressa_em||_ag; delete _cxl.reservada;
     var _skL=pend.sku, _nL=_cxl.n; meta.cx_pend=null; meta.cx_atual=(_nL||0)+1;
-    var _comp=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+    var _comp=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); })&&!(meta.caixas||[]).some(function(x){return x.reetiq;})&&!(meta.retirada&&meta.retirada.status==='pendente');   // v1.0.1370
     if(ecomN(un[_skL])-ecomFullConf(p,_skL)<=0&&meta.lote&&meta.lote.sku===_skL){ (meta.caixas||[]).forEach(function(c){ if(!c.fechada_em&&c.reservada===_skL) delete c.reservada; }); meta.lote=null; }
     p.full_meta=meta; await dbUpdate('ecom_pedidos',p.id,{full_meta:meta});
     if(_comp){
@@ -3907,7 +3907,7 @@ async function ecomFullProdBipML(p,its,meta,code){
     var agora=new Date().toISOString(), c=(meta.caixas||[]).find(function(x){return +x.n===+pend.n;});
     if(c){ c.itens={}; c.itens[sk]=pend.qtd; c.qtd=pend.qtd; c.fechada_em=agora; c.sku=sk; delete c.reservada; }
     meta.cx_pend=null; meta.cx_atual=(pend.n||0)+1;
-    var completo=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); });
+    var completo=Object.keys(un).every(function(k){ return ecomFullConf(p,k)>=ecomN(un[k]); })&&!(meta.caixas||[]).some(function(x){return x.reetiq;})&&!(meta.retirada&&meta.retirada.status==='pendente');   // v1.0.1370
     await salvar();
     var imp=false; if(c&&c.pagina){ try{ imp=await ecomFullImprimirPaginas(meta.master_pdf,[ecomFullItemCaixa(meta,c)],'master'); }catch(_e){} }
     if(imp&&imp!=='semqz'&&c){ c.impressa_em=new Date().toISOString(); await salvar(); }
@@ -3940,6 +3940,7 @@ async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
     var nCx=Math.ceil(resta/upc), livres=(meta.caixas||[]).filter(function(c){ return !c.fechada_em&&!c.reservada&&c.pagina; }).sort(function(a,b){return a.n-b.n;});
     if(livres.length<nCx){ ecomBeep(); ecomCxFlash(prefixo+sk+' precisa de '+nCx+' caixa(s) e só há '+livres.length+' etiqueta(s) de caixa livre(s). Importe as etiquetas de volume que faltam.','red'); ecomCxRender(); return true; }
     var um=ecomFullPaginasUnid(meta,sk,conf,1);
+    if(!um.length&&meta.ml) um=ecomFullPaginasUnid(meta,sk,0,1);   // v1.0.1370: aumento do envio — a etiqueta de unidade do produto é a mesma
     if(!um.length){ ecomBeep(); ecomCxFlash(prefixo+'Não achei a etiqueta de unidade de '+sk+' no PDF de produtos. Importe o PDF de produtos.','red'); ecomCxRender(); return true; }
     var res=livres.slice(0,nCx); res.forEach(function(c){ c.reservada=sk; });
     meta.lote={sku:sk,caixas:res.map(function(c){return c.n;}),unidades:resta,em:new Date().toISOString()};
@@ -4001,20 +4002,32 @@ function ecomFullRetiradaImprimir(pid){
 var _subst=null;
 function ecomFullSubstAbrir(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), un=ecomFullUnid(p);
-  _subst={pid:pid,vol:null,buf:null,nfFile:null,nfTot:null,nfNum:'',fica:{}}; Object.keys(un).forEach(function(k){ _subst.fica[k]=true; });
+  _subst={pid:pid,vol:null,buf:null,nfFile:null,nfTot:null,nfNum:'',nfQ:null,nfDesc:{},fica:{}}; Object.keys(un).forEach(function(k){ _subst.fica[k]=true; });
   var d=document.createElement('div'); d.id='m-subst'; d.className='modal-overlay';
   d.innerHTML='<div class="modal" style="max-width:980px;width:96%"><div class="modal-hdr"><span>⇄ Substituir envio · E-'+String(p.numero_interno||0).padStart(6,'0')+' · envio atual '+ecomEsc(meta.envio||'—')+'</span></div><div style="padding:16px" id="m-subst-b"></div></div>';
   document.body.appendChild(d); ecomFullSubstRender();
 }
 function ecomFullSubstCalc(){
   var S=_subst, p=(ecomPedidos||[]).find(function(x){return x.id===S.pid;}), meta=ecomFullMeta(p), un=ecomFullUnid(p);
-  var sair=Object.keys(S.fica).filter(function(k){return !S.fica[k];}).map(function(k){return k.toUpperCase();});
+  var sair=Object.keys(S.fica).filter(function(k){return S.nfQ?!ecomN(S.nfQ[k.toUpperCase()]):!S.fica[k];}).map(function(k){return k.toUpperCase();});   // v1.0.1370: com a NF nova, sai quem não está nela
   var cx=(meta.caixas||[]).slice().sort(function(a,b){return a.n-b.n;}), resto=[], sai=[];
   cx.forEach(function(c){ var ks=Object.keys(c.itens||{}); if(ks.length&&ks.every(function(k){return sair.indexOf(String(k).toUpperCase())>=0;})) sai.push(c); else if(ks.length||c.fechada_em) resto.push(c); });
   var totAnt=Object.keys(un).reduce(function(a,k){return a+ecomN(un[k]);},0), totNovo=Object.keys(un).filter(function(k){return sair.indexOf(k.toUpperCase())<0;}).reduce(function(a,k){return a+ecomN(un[k]);},0);
   var novas=S.vol?S.vol.caixas.slice().sort(function(a,b){return a.n-b.n;}):[];
-  var erro=!S.vol?'Suba o PDF das etiquetas de caixa do envio novo.':(S.vol.envio===meta.envio?'Este PDF é do envio atual ('+meta.envio+'), não de um envio novo.':(novas.length<resto.length?'O envio novo tem '+novas.length+' etiqueta(s), mas ficam '+resto.length+' caixa(s) com produto: confira os produtos que continuam.':''));
-  return {p:p,meta:meta,un:un,sair:sair,resto:resto,sai:sai,novas:novas,totAnt:totAnt,totNovo:totNovo,erro:erro};
+  // v1.0.1370: SUBSTITUIR A MAIOR — com a NF nova, a quantidade de cada produto vem dela: aumenta (OS complementar), sai (ordem de retirada) ou entra produto novo
+  var nova={}, aum={}, reduz=[], upc=ecomFullUpc48(meta), cxExtra=0, aumTot=0;
+  Object.keys(un).forEach(function(k){ nova[k]=S.fica[k]?ecomN(un[k]):0; });
+  if(S.nfQ){ Object.keys(nova).forEach(function(k){ nova[k]=ecomN(S.nfQ[k.toUpperCase()]); }); Object.keys(S.nfQ).forEach(function(k){ if(!Object.keys(un).some(function(x){return x.toUpperCase()===k;})) nova[k]=ecomN(S.nfQ[k]); }); }
+  Object.keys(nova).forEach(function(k){ var a=ecomN(un[k]), n=ecomN(nova[k]); if(n>a){ aum[k]=n-a; aumTot+=n-a; cxExtra+=Math.ceil((n-a)/upc); } else if(n>0&&n<a) reduz.push(k+' ('+a+' → '+n+')'); });
+  var novosSku=Object.keys(aum).filter(function(k){ return !(k in un); });
+  if(S.nfQ){ totNovo=Object.keys(nova).reduce(function(a,k){return a+ecomN(nova[k]);},0); }
+  var precisa=resto.length+cxExtra;
+  var erro=!S.vol?'Suba o PDF das etiquetas de caixa do envio novo.':(S.vol.envio===meta.envio?'Este PDF é do envio atual ('+meta.envio+'), não de um envio novo.':
+    (reduz.length?'A NF nova reduz sem zerar: '+reduz.join(', ')+'. Redução parcial não é feita aqui: retire as caixas pelo pedido.':
+    (aumTot&&!S.nfFile?'Para aumentar quantidades, a NF nova é obrigatória.':
+    (aumTot&&['romaneado','carregado'].indexOf(p.status)>=0?'Este Full já está no romaneio: tire do romaneio antes de aumentar.':
+    (novas.length<precisa?'O envio novo tem '+novas.length+' etiqueta(s), mas são necessárias '+precisa+' ('+resto.length+' caixa(s) que ficam'+(cxExtra?' + '+cxExtra+' caixa(s) novas para o aumento':'')+'): confira os produtos e o PDF.':'')))));
+  return {p:p,meta:meta,un:un,sair:sair,resto:resto,sai:sai,novas:novas,totAnt:totAnt,totNovo:totNovo,erro:erro,nova:nova,aum:aum,aumTot:aumTot,cxExtra:cxExtra,novosSku:novosSku,upc:upc};
 }
 function ecomFullSubstRender(){
   var S=_subst, C=ecomFullSubstCalc(), e=ecomEsc, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
@@ -4023,16 +4036,20 @@ function ecomFullSubstRender(){
     +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">1 · ETIQUETAS DE CAIXA DO ENVIO NOVO (PDF)</div><input type="file" accept=".pdf" onchange="ecomFullSubstPdf(this)" style="margin-top:6px">'
       +(S.vol?'<div style="font-size:12.5px;margin-top:4px;color:var(--green-text)">✓ envio <b>'+e(S.vol.envio)+'</b> · '+S.vol.caixas.length+' etiqueta(s) de caixa</div>':'')+'</div>'
     +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">2 · PRODUTOS QUE CONTINUAM NO ENVIO</div>'
-      +Object.keys(C.un).map(function(k){ var on=S.fica[k]; return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px;'+(on?'':'color:var(--red-text)')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="_subst.fica[\''+e(k)+'\']=this.checked;ecomFullSubstRender()"><b>'+e(k)+'</b> · '+nb(C.un[k])+' un · '+cxPor(k)+' cx'+(on?'':' · sai do envio')+'</label>'; }).join('')+'</div>'
-    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">3 · NF DA REMESSA NOVA (XML ou DANFE) · opcional agora</div><input type="file" accept=".xml,.pdf" onchange="ecomFullSubstNf(this)" style="margin-top:6px">'
+      +(S.nfQ?'<div style="font-size:11px;color:var(--text3);margin:2px 0 4px">pela NF '+e(S.nfNum||'')+' · quantidades novas</div>'+Object.keys(C.nova).map(function(k){ var a=ecomN(C.un[k]), n=ecomN(C.nova[k]), cor=n===0?'var(--red-text)':(n>a?'var(--blue-text)':''), tx=n===0?'sai do envio':(n>a?(a?'+'+nb(n-a)+' · OS complementar':'produto novo · OS complementar'):(n<a?'redução parcial':'igual'));
+          return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:13px;color:'+cor+'"><span><b>'+e(k)+'</b> · '+cxPor(k)+' cx</span><span>'+nb(a)+' → <b>'+nb(n)+'</b> un · '+tx+'</span></div>'; }).join('')
+      :Object.keys(C.un).map(function(k){ var on=S.fica[k]; return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px;'+(on?'':'color:var(--red-text)')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="_subst.fica[\''+e(k)+'\']=this.checked;ecomFullSubstRender()"><b>'+e(k)+'</b> · '+nb(C.un[k])+' un · '+cxPor(k)+' cx'+(on?'':' · sai do envio')+'</label>'; }).join('')
+        +'<div style="font-size:11px;color:var(--text3);margin-top:4px">Para aumentar quantidade, suba a NF nova (passo 3): as quantidades passam a vir dela.</div>')+'</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text3)">3 · NF DA REMESSA NOVA (XML ou DANFE) · '+(C.aumTot?'<b style="color:var(--red-text)">obrigatória: aumenta</b>':'opcional agora')+'</div><input type="file" accept=".xml,.pdf" onchange="ecomFullSubstNf(this)" style="margin-top:6px">'
       +(S.nfFile?'<div style="font-size:12.5px;margin-top:4px;color:'+(S.nfTot===C.totNovo?'var(--green-text)':'var(--amber-text)')+'">'+(S.nfTot!=null?('NF '+e(S.nfNum||'')+' · '+nb(S.nfTot)+' un'+(S.nfTot===C.totNovo?' ✓ bate com o envio novo':' · o envio novo tem '+nb(C.totNovo)+' un')):'NF selecionada')+'</div>':'')+'</div>'
     +'</div><div style="border:1.5px solid #1e3a8a;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">'
     +'<div style="font-size:11px;color:var(--text3)">4 · PRÉVIA DA SUBSTITUIÇÃO</div>'
     +(C.erro?'<div style="color:var(--amber-text);font-size:13px">'+e(C.erro)+'</div>':
       '<div style="font-size:13px"><b>'+C.resto.length+' caixa(s) ficam</b> e recebem as etiquetas novas, em ordem<div style="font-size:11px;color:var(--text2);font-family:monospace;max-height:90px;overflow:auto">'+C.resto.map(function(c,i){ return 'cx '+c.n+'→'+C.novas[i].n+(c.fechada_em?'':' (aberta)'); }).join(' · ')+'</div></div>'
       +(C.sai.length?'<div style="font-size:13px;color:var(--red-text)"><b>'+C.sai.length+' caixa(s) saem</b> e voltam ao estoque<div style="font-size:11px;font-family:monospace">'+C.sai.map(function(c){ return 'cx '+c.n+': '+Object.keys(c.itens||{}).map(function(k){return k+' × '+c.itens[k];}).join(', '); }).join(' · ')+'</div></div>':'')
+      +(C.aumTot?'<div style="font-size:13px;color:var(--blue-text)"><b>Aumento de '+nb(C.aumTot)+' un</b> · OS complementar só com a diferença ('+Object.keys(C.aum).map(function(k){return e(k)+' +'+nb(C.aum[k]);}).join(', ')+') · '+C.cxExtra+' caixa(s) nova(s) no checkout'+(C.novosSku.length?'<div style="color:var(--amber-text)">Produto novo no envio ('+C.novosSku.map(e).join(', ')+'): importe também o PDF das etiquetas de unidade dele.</div>':'')+'</div>':'')
       +'<div style="font-size:13px"><b>Unidades:</b> '+nb(C.totAnt)+' → <b>'+nb(C.totNovo)+'</b>'+(S.nfFile?' · NF nova '+e(S.nfNum||''):' · NF nova: importar depois')+'</div>'
-      +'<div style="font-size:12px;color:var(--text2)">Ao confirmar: o pedido volta para <b>conferindo</b> até cada caixa receber a etiqueta nova (cole e bipe a etiqueta nova de cada caixa no checkout); as etiquetas novas já saem impressas.</div>')
+      +'<div style="font-size:12px;color:var(--text2)">'+(C.aumTot?'Ao confirmar: sai impressa a <b>OS complementar</b>; separada a diferença, o checkout abre as caixas novas e o embarque passa a ter '+(C.novas.length)+' caixa(s). ':'')+'Ao confirmar: o pedido volta para <b>conferindo</b> até cada caixa receber a etiqueta nova (cole e bipe a etiqueta nova de cada caixa no checkout); as etiquetas novas já saem impressas.</div>')
     +'<div style="display:flex;gap:8px;margin-top:auto"><button class="btn" onclick="var d=ge(\'m-subst\');if(d)d.remove()">Cancelar</button><button class="btn btn-p" style="flex:1" '+(C.erro?'disabled':'')+' onclick="ecomFullSubstConfirmar()">Confirmar substituição e imprimir as etiquetas novas</button></div>'
     +'</div></div><div style="font-size:11px;color:var(--text3);margin-top:10px">Fica no histórico do pedido: envio e NF anteriores, caixas renumeradas e devolvidas, quem fez e quando.</div>';
   var el=ge('m-subst-b'); if(el) el.innerHTML=b;
@@ -4047,7 +4064,11 @@ async function ecomFullSubstPdf(input){
 }
 async function ecomFullSubstNf(input){
   var f=input.files&&input.files[0]; if(!f) return; _subst.nfFile=f; _subst.nfTot=null; _subst.nfNum='';
-  try{ var nf=/\.pdf$/i.test(f.name||'')?await ecomNfeDoDanfe(f):ecomNfeParse(await f.text()); if(nf){ _subst.nfTot=(nf.itens||[]).reduce(function(a,y){return a+ecomN(y.qtd);},0); _subst.nfNum=nf.numero||''; } }catch(e){}
+  _subst.nfQ=null; _subst.nfDesc={};
+  try{ var nf=/\.pdf$/i.test(f.name||'')?await ecomNfeDoDanfe(f):ecomNfeParse(await f.text()); if(nf){ _subst.nfTot=(nf.itens||[]).reduce(function(a,y){return a+ecomN(y.qtd);},0); _subst.nfNum=nf.numero||'';
+      var q={}; (nf.itens||[]).forEach(function(y){ var k=String(y.sku||'').toUpperCase(); if(!k) return; q[k]=(q[k]||0)+ecomN(y.qtd); if(y.descricao&&!_subst.nfDesc[k]) _subst.nfDesc[k]=y.descricao; });   // v1.0.1370
+      if(Object.keys(q).length) _subst.nfQ=q; else showToast('Li a NF, mas não os itens: as quantidades continuam as atuais','amber'); }
+    else showToast('Não reconheci a NF neste arquivo','red'); }catch(e){ showToast('Erro ao ler a NF: '+(e.message||e),'red'); }
   ecomFullSubstRender();
 }
 async function ecomFullSubstConfirmar(){
@@ -4069,19 +4090,61 @@ async function ecomFullSubstConfirmar(){
     if(C.sair.length){ Object.keys(meta.unidades||{}).forEach(function(u){ if(C.sair.indexOf(u.toUpperCase())>=0) delete meta.unidades[u]; }); meta.total=C.totNovo;
       var its=ecomItensDo(p.id).filter(function(i){ return C.sair.indexOf(String(i.sku||'').toUpperCase())>=0; }); for(var q=0;q<its.length;q++){ try{ await dbDelete('ecom_pedido_itens',its[q].id); }catch(_e){} }
       ecomPedidoItens=(ecomPedidoItens||[]).filter(function(i){ return !its.some(function(z){return z.id===i.id;}); }); }
+    // v1.0.1370: AUMENTO — itens sobem, OS complementar só com a diferença, caixas novas ficam livres para o checkout
+    var _osC=null;
+    if(C.aumTot){
+      var _itsP=ecomItensDo(p.id);
+      for(var _q=0;_q<_itsP.length;_q++){ var _ia=_itsP[_q]; if(ecomN(_ia.qtd_separada)<ecomN(_ia.qtd)){ try{ await dbUpdate('ecom_pedido_itens',_ia.id,{qtd_separada:ecomN(_ia.qtd)}); _ia.qtd_separada=ecomN(_ia.qtd); }catch(_e){} } }   // o que já foi separado não volta para a lista
+      var _ks=Object.keys(C.aum);
+      for(var _a=0;_a<_ks.length;_a++){ var _k=_ks[_a], _d=C.aum[_k];
+        var _uk=Object.keys(meta.unidades||{}).find(function(u){return u.toUpperCase()===_k.toUpperCase();});
+        if(meta.unidades){ meta.unidades[_uk||_k]=ecomN(C.nova[_k]); }
+        var _li=ecomItensDo(p.id).filter(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===_k.toUpperCase(); });
+        if(_li.length){ var _l=_li[_li.length-1]; await dbUpdate('ecom_pedido_itens',_l.id,{qtd:ecomN(_l.qtd)+_d}); _l.qtd=ecomN(_l.qtd)+_d; }
+        else { var _pr=(typeof ecomProdDoSku==='function')?ecomProdDoSku(_k,ecomLojistaId):null;
+          var _ni=await ecomInserirItem({company_id:cid,pedido_id:p.id,produto_id:_pr?_pr.id:null,sku:_k,ean:(_pr&&_pr.ean)||null,descricao:(S.nfDesc&&S.nfDesc[_k])||(_pr&&_pr.descricao)||_k,qtd:_d});
+          if(_ni) ecomPedidoItens=(ecomPedidoItens||[]).concat([_ni]); }
+      }
+      var _osIns={company_id:cid,tipo:'pedido',status:'separando',operador:ecomOper(),qtd_pedidos:1,qtd_itens:C.aumTot,marketplace:'Full Mercado Livre · complementar'};
+      try{ _osC=await dbInsert('ecom_ordens_sep',_osIns); }catch(_mk){ delete _osIns.marketplace; _osC=await dbInsert('ecom_ordens_sep',_osIns); }
+      await dbInsert('ecom_os_pedidos',{company_id:cid,os_id:_osC.id,pedido_id:p.id});
+      meta.complementos=(meta.complementos||[]).concat([{os_id:_osC.id,os_numero:_osC.numero||null,itens:C.aum,envio:S.vol.envio,nf:S.nfNum||null,criado_em:ag,por:(typeof currentUser!=='undefined'&&currentUser&&(currentUser.full_name||currentUser.email))||null}]);
+      meta.total=C.totNovo;
+    }
     meta.envio=S.vol.envio; meta.master_pdf=path; meta.troca_envio_em=ag; meta.nf_pendente_troca=true;
     var upd={full_meta:meta, numero_pedido:'ML-'+S.vol.envio};
-    if(kept.some(function(c){return c.reetiq;})&&['conferido','separado'].indexOf(p.status)>=0) upd.status='conferindo';   // volta para trás até reetiquetar
+    if(_osC){ upd.os_id=_osC.id; upd.status='separando'; }
+    if(!_osC&&kept.some(function(c){return c.reetiq;})&&['conferido','separado'].indexOf(p.status)>=0) upd.status='conferindo';   // volta para trás até reetiquetar
     await dbUpdate('ecom_pedidos',p.id,upd); Object.assign(p,upd); delete _ecomFullPdfCache[path];
     try{ var et=(ecomEtiquetas||[]).find(function(x){return x.pedido_id===p.id;}); if(et){ await dbUpdate('ecom_etiquetas',et.id,{arquivo_path:path,order_id:'ML-'+S.vol.envio}); et.arquivo_path=path; et.order_id='ML-'+S.vol.envio; } }catch(_e){}
     var dlg=ge('m-subst'); if(dlg) dlg.remove();
     if(meta.retirada&&meta.retirada.status==='pendente') ecomFullRetiradaImprimir(p.id);   // v1.0.1316
     if(S.nfFile){ try{ await ecomNfeImportFiles({files:[S.nfFile],value:''}); }catch(_n){ showToast('Envio trocado; a NF não foi importada: '+(_n.message||_n),'amber'); } }
     await ecomFullImprimirPaginas(path,kept.map(function(c){return ecomFullItemCaixa(meta,c);}),'master');
+    if(_osC){ try{ _ecomLoaded=false; await ecomLoadAll(); }catch(_l){} setTimeout(function(){ ecomFullComplImprimir(_osC.id); },900); }   // v1.0.1370
     ecomProgAbrir('Substituição de envio',1,false);
-    ecomProgResultado('Envio substituído',null,['E-'+String(p.numero_interno||0).padStart(6,'0')+': envio <b>'+ecomEsc(envAnt)+'</b> → <b>'+ecomEsc(S.vol.envio)+'</b>. '+kept.length+' caixa(s) com etiqueta nova impressa.'].concat(C.sai.length?['<b style="color:var(--red-text)">Ordem de retirada '+ecomEsc((meta.retirada||{}).numero||'')+' gerada e impressa: retire do Full '+C.sai.length+' caixa(s)</b>, bipe a etiqueta antiga de cada uma no checkout e devolva ao estoque: '+C.sai.map(function(c){return 'cx '+c.n+' ('+Object.keys(c.itens||{}).map(function(k){return k+' × '+c.itens[k];}).join(', ')+')';}).join(' · ')]:[]).concat(['No checkout, cole e <b>bipe a etiqueta nova de cada caixa</b>: com todas reetiquetadas, o Full volta para conferido.'].concat(S.nfFile?[]:['Falta importar a NF nova da remessa.'])),'amber');
+    ecomProgResultado('Envio substituído',null,['E-'+String(p.numero_interno||0).padStart(6,'0')+': envio <b>'+ecomEsc(envAnt)+'</b> → <b>'+ecomEsc(S.vol.envio)+'</b>. '+kept.length+' caixa(s) com etiqueta nova impressa.'].concat(C.sai.length?['<b style="color:var(--red-text)">Ordem de retirada '+ecomEsc((meta.retirada||{}).numero||'')+' gerada e impressa: retire do Full '+C.sai.length+' caixa(s)</b>, bipe a etiqueta antiga de cada uma no checkout e devolva ao estoque: '+C.sai.map(function(c){return 'cx '+c.n+' ('+Object.keys(c.itens||{}).map(function(k){return k+' × '+c.itens[k];}).join(', ')+')';}).join(' · ')]:[]).concat(_osC?['<b style="color:var(--blue-text)">OS complementar OS-'+String(_osC.numero||0).padStart(4,'0')+' gerada e impressa: separe só a diferença</b> ('+Object.keys(C.aum).map(function(k){return ecomEsc(k)+' +'+C.aum[k];}).join(', ')+'). No checkout, escolha o produto: saem as etiquetas de unidade e as '+C.cxExtra+' caixa(s) nova(s).']:[]).concat(['No checkout, cole e <b>bipe a etiqueta nova de cada caixa</b>: com todas reetiquetadas, o Full volta para conferido.'].concat(S.nfFile?[]:['Falta importar a NF nova da remessa.'])),'amber');
     ecomRenderBody();
   }catch(e){ showToast('Não consegui substituir o envio: '+(e.message||e),'red'); }
+}
+// v1.0.1370: OS COMPLEMENTAR do Full ML — só a diferença do aumento (o resto do pedido já foi separado)
+function ecomFullComplDaOS(osId){
+  var out=null; (ecomPedidos||[]).forEach(function(p){ if(out||!ecomEhFull(p)) return; var c=(ecomFullMeta(p).complementos||[]).find(function(x){return x.os_id===osId;}); if(c) out={p:p,c:c}; }); return out;
+}
+function ecomFullComplImprimir(osId){
+  var r=ecomFullComplDaOS(osId); if(!r){ showToast('OS complementar não encontrada','amber'); return; }
+  var p=r.p, c=r.c, e=ecomEsc, os=(ecomOrdensSep||[]).find(function(o){return o.id===osId;})||{numero:c.os_numero};
+  var ks=Object.keys(c.itens||{}), tot=ks.reduce(function(a,k){return a+ecomN(c.itens[k]);},0);
+  var lin=ks.map(function(k){ var it=ecomItensDo(p.id).find(function(i){return String(i.sku||'').toUpperCase()===k.toUpperCase();})||{sku:k};
+    var end=''; try{ end=ecomProdEndereco(it)||''; }catch(_e){}
+    return '<tr><td style="font-size:16px;font-weight:700">'+e(k)+'</td><td>'+e(ecomFullDesc(p,k)||it.descricao||'')+'</td><td style="font-family:monospace">'+e(end||'—')+'</td><td style="font-size:18px;font-weight:800;text-align:center">'+ecomN(c.itens[k])+'</td><td></td></tr>'; }).join('');
+  var html='<!doctype html><html><head><meta charset="utf-8"><title>OS complementar</title><style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#111;font-size:12px}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #999;padding:7px;text-align:left}th{background:#eee}</style></head><body>'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #111;padding-bottom:6px"><div><div style="font-size:11px;color:#555">MK LOG · ORDEM DE SEPARAÇÃO COMPLEMENTAR · FULL MERCADO LIVRE</div><h1>OS-'+String(os.numero||0).padStart(4,'0')+'</h1></div><div style="text-align:right;font-size:11px">E-'+String(p.numero_interno||0).padStart(6,'0')+' · envio '+e(c.envio||'')+(c.nf?' · NF '+e(c.nf):'')+'<br>emitida em '+new Date(c.criado_em).toLocaleString('pt-BR')+'</div></div>'
+    +'<p style="font-size:13px">O envio foi substituído por um <b>maior</b>. Separe <b>somente as quantidades abaixo</b> (o restante do pedido já foi separado e conferido) e leve ao checkout do Full.</p>'
+    +'<table><tr><th>Produto</th><th>Descrição</th><th>Endereço</th><th>Separar</th><th>Visto</th></tr>'+lin+'<tr><td colspan="3"><b>Total</b></td><td style="text-align:center"><b>'+tot+'</b></td><td></td></tr></table>'
+    +'<div style="margin-top:28px;display:flex;gap:40px;font-size:12px"><div>Separado por: ______________________</div><div>Data/hora: ____/____ ____:____</div></div></body></html>';
+  var fr=document.createElement('iframe'); fr.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'; document.body.appendChild(fr);
+  var d=fr.contentWindow.document; d.open(); d.write(html); d.close(); setTimeout(function(){ try{ fr.contentWindow.focus(); fr.contentWindow.print(); }catch(_e){} setTimeout(function(){ fr.remove(); },60000); },400);
 }
 async function ecomFullProdCancelarML(pid){
   var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; var meta=ecomFullMeta(p), pend=meta.cx_pend; if(!pend) return;
@@ -60864,6 +60927,7 @@ function ecomOsSemEndereco(osId){
 }
 function ecomOsPrint(osId,fmt){
   var os=ecomOrdensSep.find(function(o){return o.id===osId;}); if(!os)return;
+  if(ecomFullComplDaOS(osId)) return ecomFullComplImprimir(osId);   // v1.0.1370: OS complementar do Full ML sai só com a diferença
   var _tipo=fmt||os.tipo;   // v1.0.1034: formato de impressão escolhido (a OS continua a mesma)
   var pids=ecomOsPedidos.filter(function(l){return l.os_id===osId;}).map(function(l){return l.pedido_id;});
   var peds=pids.map(function(id){return ecomPedidos.find(function(p){return p.id===id;});}).filter(Boolean)
