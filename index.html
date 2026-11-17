@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1378 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1379 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1378';
+const APP_VERSION='v1.0.1379';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -42359,14 +42359,15 @@ function wmsEntradaModal(){
     +'<div><label class="fl">Data prevista</label><input type="date" class="fi" id="ent-data" value="'+esc(c.data_prevista)+'"></div>'
     +'<div><label class="fl">Tipo recebimento</label><select class="fi" id="ent-tipo">'+tipoOpts+'</select></div>'
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px">'
+    +'<div><label class="fl">Tipo de documento</label><select class="fi" id="ent-tdoc"><option value=""'+(c.tipo_documento==='DEV'?'':' selected')+'>Entrada normal</option><option value="DEV"'+(c.tipo_documento==='DEV'?' selected':'')+'>DEV · devolução</option></select></div>'   // v1.0.1379
     +'<div><label class="fl">Ref. documento (PC/NF cliente)</label><input class="fi" id="ent-ref" value="'+esc(c.ref_documento)+'" placeholder="referência"></div>'
     +'<div><label class="fl">Observação</label><input class="fi" id="ent-obs" value="'+esc(c.observacao)+'"></div>'
     +'</div>'
     +'<div style="border-top:1px solid var(--border);padding-top:10px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Itens previstos</b><button class="btn btn-sm" onclick="wmsEntItemAdd()">+ Item</button></div>'
     +'<div id="ent-itens"></div></div>'
     +'</div>';
-  portModal((c.id?'Documento de entrada #'+(c.numero_entrada||''):'Novo documento de entrada'), inner, 'wmsEntradaSalvar()', {width:'720px',saveLabel:c.id?'Salvar':'Criar'});
+  portModal((c.id?'Documento de entrada #'+(c.numero_entrada||'')+(c.tipo_documento==='DEV'?' · DEV':''):'Novo documento de entrada'), inner, 'wmsEntradaSalvar()', {width:'720px',saveLabel:c.id?'Salvar':'Criar'});
   setTimeout(wmsEntItensRefresh,30);
 }
 function wmsEntItensRefresh(){
@@ -42410,6 +42411,7 @@ async function wmsEntradaSalvar(){
   c.tipo_recebimento=ge('ent-tipo')?.value||null;
   c.ref_documento=ge('ent-ref')?.value||'';
   c.observacao=ge('ent-obs')?.value||'';
+  c.tipo_documento=ge('ent-tdoc')?.value||null;   // v1.0.1379
   if(!c.depositante_id){portErr('Selecione o depositante.');return;}
   portSaving();
   try{
@@ -42417,11 +42419,13 @@ async function wmsEntradaSalvar(){
     if(!entradaId){
       var numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'ENT'}).catch(function(){return null;});
       var obj={company_id:cid,unit_id:c.unit_id,numero_entrada:numero,depositante_id:c.depositante_id,remetente:c.remetente,data_prevista:c.data_prevista,status:c.status||'previsto',tipo_recebimento:c.tipo_recebimento,ref_documento:c.ref_documento,observacao:c.observacao,owner_id:cu?.id||null};
-      var salvo=await dbInsert('wms_entradas',obj);
+      if(c.tipo_documento) obj.tipo_documento=c.tipo_documento;
+      var salvo; try{ salvo=await dbInsert('wms_entradas',obj); }catch(_eTD){ if(obj.tipo_documento&&/tipo_documento/.test(String(_eTD&&_eTD.message))){ delete obj.tipo_documento; salvo=await dbInsert('wms_entradas',obj); showToast('Rode o SQL da v1.0.1379 (tipo_documento) — o documento ficou como entrada normal.','amber'); } else throw _eTD; }
       var row=Array.isArray(salvo)?salvo[0]:salvo;
       entradaId=row.id; wmsEntradas=[row,...wmsEntradas];
     }else{
-      await dbUpdate('wms_entradas',entradaId,{depositante_id:c.depositante_id,remetente:c.remetente,unit_id:c.unit_id,data_prevista:c.data_prevista,tipo_recebimento:c.tipo_recebimento,ref_documento:c.ref_documento,observacao:c.observacao});
+      var _upE={depositante_id:c.depositante_id,remetente:c.remetente,unit_id:c.unit_id,data_prevista:c.data_prevista,tipo_recebimento:c.tipo_recebimento,ref_documento:c.ref_documento,observacao:c.observacao,tipo_documento:c.tipo_documento||null};
+      try{ await dbUpdate('wms_entradas',entradaId,_upE); }catch(_eTD2){ if(/tipo_documento/.test(String(_eTD2&&_eTD2.message))){ delete _upE.tipo_documento; await dbUpdate('wms_entradas',entradaId,_upE); showToast('Rode o SQL da v1.0.1379 (tipo_documento).','amber'); } else throw _eTD2; }
       var ex=wmsEntradas.find(function(x){return x.id===entradaId;}); if(ex)Object.assign(ex,c);
       // apaga itens antigos p/ regravar (simples e seguro nesta fase)
       var antigos=await invFetchAll('wms_entrada_itens','entrada_id=eq.'+entradaId);
@@ -43305,7 +43309,7 @@ function wmsConfEntCaixasAbrir(){
   var doc=(wmsEntradas||[]).find(function(x){return x.id===ctx.entrada_id;})||{};
   var esc=function(v){return (v==null?'':String(v)).replace(/</g,'&lt;').replace(/"/g,'&quot;');};
   var inner=''
-    +'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Romaneio <b style="font-family:monospace">'+esc(r.numero||'')+'</b> · Doc <b>#'+esc(doc.numero_entrada||'')+'</b> · recebimento caixa a caixa</div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Romaneio <b style="font-family:monospace">'+esc(r.numero||'')+'</b> · Doc <b>#'+esc(doc.numero_entrada||'')+'</b>'+(doc.tipo_documento==='DEV'?' <span class="bdg" style="background:var(--amber-bg);color:var(--amber-text)">DEV · devolução</span>':'')+' · recebimento caixa a caixa</div>'
     +'<div style="border:1px solid var(--blue-text);background:var(--blue-bg);border-radius:9px;padding:11px">'
     +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px">Bipe o <b>código de barras do produto</b> (CUST P/N) e depois o <b>QR de cada caixa</b>. Para caixas iguais seguidas, basta bipar os QRs.</div>'
     +'<input id="cxr-cod" class="fi" autocomplete="off" placeholder="Código de barras do produto ou QR da caixa…" style="width:100%;font-family:monospace" '
@@ -43313,13 +43317,14 @@ function wmsConfEntCaixasAbrir(){
     +'<div id="cxr-prod" style="font-size:12px;margin-top:8px;color:var(--text3)">Nenhum produto selecionado.</div>'
     +'<div id="cxr-msg" style="margin-top:6px"></div>'
     +'</div>'
+    +wmsCxrSemQrHtml(ctx,doc)
     +'<div id="cxr-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 0"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px"><div style="font-weight:600;font-size:13px">Caixas recebidas <span id="cxr-cont" style="color:var(--text3);font-weight:400">· 0</span></div><div id="cxr-etq" style="font-size:11px;color:var(--text3)"></div></div>'
     +'<div id="cxr-lista" style="border:1px solid var(--border);border-radius:9px;overflow:hidden;max-height:340px;overflow-y:auto"></div>';
   portClose();
   portModal('Receber caixas',inner,'wmsConfEntCaixasConcluir()',{saveLabel:'Concluir',width:'880px'});
   wmsCxrRender();
-  setTimeout(function(){var b=ge('cxr-cod');if(b)b.focus();},40);
+  setTimeout(function(){var b=ge('cxr-cod');if(b)b.focus(); try{ wmsCxrSemQrTroca(); }catch(_e){} },40);
 }
 function wmsCxrMsg(ok,txt){
   var el=ge('cxr-msg'); if(!el)return;
@@ -43359,7 +43364,9 @@ async function wmsCxrBip(raw){
     var prod=wmsProdutoDe(null,s,ctx.dep);
     var it=saldo.find(function(x){ return wmsNorm(x.sku)===cod || (prod&&x.produto_id===prod.id); });
     if(!it){ wmsCxrMsg(false,'Produto '+s+' não pertence a esta nota.'); return; }
-    _cxr.prod=it; wmsCxrRender(); wmsCxrMsg(true,'Produto '+it.sku+' selecionado. Bipe os QRs das caixas.'); return;
+    _cxr.prod=it; wmsCxrRender();
+    if(wmsCxrSemQrModo(ctx,it)){ var _sel=ge('cxr-sq-prod'); if(_sel){ _sel.value=it.produto_id; wmsCxrSemQrTroca(); } var _q=ge('cxr-sq-qtd'); if(_q) _q.focus(); wmsCxrMsg(true,'Produto '+it.sku+' sem QR: informe '+(wmsCxrSemQrModo(ctx,it)==='dev'?'os pacotes':'a quantidade')+' e gere o RG.'); return; }   // v1.0.1379
+    wmsCxrMsg(true,'Produto '+it.sku+' selecionado. Bipe os QRs das caixas.'); return;
   }
   // ── QR da caixa ──
   var cx=wmsCaixaLer(s,cfg); if(cx.erro){ wmsCxrMsg(false,cx.erro); return; }
@@ -43391,7 +43398,8 @@ async function wmsCxrGravar(ctx,item,cx,u,fator){
   var r=(wmsRomaneios||[]).find(function(x){return x.id===ctx.romaneio_id;})||{};
   var seq=wmsConfEntPallets(ctx.romaneio_id,null).reduce(function(m,p){return Math.max(m,p.sequencia||0);},0)+1;
   var qtdControle=item.converte?cx.qtd/fator:cx.qtd;
-  var controles={}; if(cx.lote)controles['Lote']=cx.lote; if(cx.fab)controles['Fabricação']=cx.fab; controles['Caixa']=cx.id; if(cx.cod_forn)controles['Cód. fornecedor']=cx.cod_forn;
+  var controles={}; if(cx.lote)controles['Lote']=cx.lote; if(cx.fab)controles['Fabricação']=cx.fab; if(cx.id)controles['Caixa']=cx.id; if(cx.cod_forn)controles['Cód. fornecedor']=cx.cod_forn;
+  if(cx.origem)controles['Origem']=cx.origem;   // v1.0.1379: DEV / bandeira de pallet (sem QR)
   // 1) conferência: tarefa + item contra a nota (mesmos registros do fluxo padrão)
   var cab=await dbInsert('wms_tarefas_conf_entrada',{company_id:cid,unit_id:r.unit_id||activeUnit||null,romaneio_id:ctx.romaneio_id,
     evento_id:r.evento_id||null,entrada_id:ctx.entrada_id,etapa:1,sequencia:seq,tipo_volume:'pallet',status:'concluida',
@@ -43405,20 +43413,103 @@ async function wmsCxrGravar(ctx,item,cx,u,fator){
   var stg=_cxr.stg, doca=(wmsDocas||[]).find(function(d){return d.id===r.doca_id;}), galpao=(doca&&doca.galpao)||null;
   var tipoCx=(wmsPalletTipos||[]).find(function(t){return /caixa/i.test(t.nome||'');});
   var pal=await dbInsert('wms_pallets',{company_id:cid,unit_id:r.unit_id||activeUnit||null,status:stg?'enderecado':'montado',galpao:(stg&&stg.galpao)||galpao,
-    endereco_id:stg?stg.id:null,endereco_codigo:stg?stg.codigo:null,pallet_tipo_id:(tipoCx&&tipoCx.id)||wmsPalletTipoDoProduto(item.produto_id)||null,
+    endereco_id:stg?stg.id:null,endereco_codigo:stg?stg.codigo:null,pallet_tipo_id:(cx.palletProduto?(wmsPalletTipoDoProduto(item.produto_id)||(tipoCx&&tipoCx.id)):((tipoCx&&tipoCx.id)||wmsPalletTipoDoProduto(item.produto_id)))||null,
     romaneio_id:ctx.romaneio_id,entrada_id:ctx.entrada_id,depositante_id:ctx.dep,conf_pallet_id:tar.id,conferente_id:cu?.id||null,
-    conferente_nome:profile?.full_name||cu?.email||null,nascido_em:agora,owner_id:cu?.id||null,codigo_externo:cx.id,qtd_original_controle:qtdControle});
+    conferente_nome:profile?.full_name||cu?.email||null,nascido_em:agora,owner_id:cu?.id||null,codigo_externo:cx.id||null,qtd_original_controle:qtdControle});
   var novo=Array.isArray(pal)?pal[0]:pal; if(!novo||!novo.id)throw new Error('RG da caixa não gerado');
   var ct=await dbInsert('wms_pallet_conteudo',{company_id:cid,pallet_id:novo.id,produto_id:item.produto_id,sku:item.sku,descricao:item.descricao,
     qtd_controle:qtdControle,un_controle:u.unControle,qtd_fiscal:cx.qtd,un_fiscal:u.unFiscal,fator_conversao:u.fator,
     lote:cx.lote||null,data_fabricacao:cx.fab||null,validade:null,controles:controles,entrada_id:ctx.entrada_id,status:'ativo',owner_id:cu?.id||null});
   wmsPallets=[novo].concat(wmsPallets||[]); wmsPalletConteudo=(Array.isArray(ct)?ct:[ct]).concat(wmsPalletConteudo||[]);
   try{ await wmsPalletEvento(novo.id,'nascimento',{romaneio_id:ctx.romaneio_id,entrada_id:ctx.entrada_id,
-    endereco_para:stg?stg.codigo:(galpao?('DOCA · '+galpao):'DOCA'),observacao:'Caixa '+cx.id+' recebida por QR · '+cx.qtd+' '+u.unFiscal,
+    endereco_para:stg?stg.codigo:(galpao?('DOCA · '+galpao):'DOCA'),observacao:(cx.id?('Caixa '+cx.id+' recebida por QR'):(cx.origem||'Recebido sem QR'))+' · '+cx.qtd+' '+u.unFiscal,
     dados:{caixa:cx.id,lote:cx.lote,itens:[{sku:item.sku,qtd:qtdControle,un:u.unControle,lote:cx.lote}]}}); }catch(e){}
   // 3) rastro do bipe (mesma trilha das demais etapas)
   try{ await wmsRegistrarLeituras('recebimento',[{sku:item.sku,descricao:item.descricao,produto_id:item.produto_id,tipo_volume:'pallet',quantidade:cx.qtd}],{pallet_id:novo.id,modo:'bipe',unit_id:r.unit_id||null}); }catch(e){}
   return novo;
+}
+// ═══ v1.0.1379 · RECEBIMENTO SEM QR dentro do "Receber caixas" ═══
+//  • produto com "Etiqueta pallet" (insumo com bandeira de pallet): escolhe o produto, informa a quantidade → RG + etiqueta pallet MK
+//  • documento DEV (devolução, chega só o pacote): informa os pacotes → RG de uma caixa vazia + etiqueta DEV com o RG em destaque
+function wmsCxrSemQrModo(ctx,item){
+  var doc=(wmsEntradas||[]).find(function(x){return x.id===ctx.entrada_id;})||{};
+  if(doc.tipo_documento==='DEV') return 'dev';
+  var pr=(wmsProdutos||[]).find(function(p){return p.id===(item&&item.produto_id);});
+  return (pr&&pr.etiqueta_recebimento==='pallet')?'pallet':null;
+}
+function wmsCxrSemQrHtml(ctx,doc){
+  var esc=function(v){return (v==null?'':String(v)).replace(/</g,'&lt;').replace(/"/g,'&quot;');};
+  var dev=doc&&doc.tipo_documento==='DEV';
+  var itens=wmsConfEntSaldoLinha().filter(function(s){ return dev||wmsCxrSemQrModo(ctx,s)==='pallet'; });
+  if(!itens.length) return '';
+  return '<div style="border:1px solid '+(dev?'var(--amber-text)':'var(--border)')+';background:'+(dev?'var(--amber-bg)':'var(--bg2)')+';border-radius:9px;padding:11px;margin-top:10px">'
+    +'<div style="font-size:12px;font-weight:700;margin-bottom:2px">'+(dev?'Devolução · pacotes sem caixa':'Sem etiqueta de produto · bandeira de pallet')+'</div>'
+    +'<div style="font-size:11px;color:var(--text2);margin-bottom:8px">'+(dev?'Escolha o produto e informe quantos pacotes voltaram. O VERUS gera o RG de uma caixa vazia e imprime a etiqueta DEV para colar nela.':'Escolha o produto e informe a quantidade da bandeira. O VERUS gera o RG e imprime a etiqueta pallet MK.')+'</div>'
+    +'<div style="display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap">'
+      +'<div style="flex:2 1 260px"><div class="fl">Produto</div><select id="cxr-sq-prod" class="fi" onchange="wmsCxrSemQrTroca()">'+itens.map(function(s){return '<option value="'+esc(s.produto_id)+'">'+esc(s.sku)+' · '+esc(String(s.descricao||'').slice(0,40))+'</option>';}).join('')+'</select></div>'
+      +'<div style="width:120px"><div class="fl" id="cxr-sq-lbl">'+(dev?'Pacotes':'Quantidade')+'</div><input id="cxr-sq-qtd" class="fi" type="number" min="1" step="any" style="text-align:center" oninput="wmsCxrSemQrTroca()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wmsCxrSemQrGerar();}"></div>'
+      +'<button class="btn btn-p" style="white-space:nowrap" onclick="wmsCxrSemQrGerar()">Gerar RG e imprimir</button>'
+    +'</div><div id="cxr-sq-hint" style="font-size:11.5px;color:var(--text2);margin-top:6px"></div></div>';
+}
+function wmsCxrSemQrItem(){
+  var ctx=_confEntCtx, sel=ge('cxr-sq-prod'); if(!ctx||!sel) return null;
+  return wmsConfEntSaldoLinha().find(function(s){return s.produto_id===sel.value;})||null;
+}
+function wmsCxrSemQrTroca(){
+  var ctx=_confEntCtx, it=wmsCxrSemQrItem(), h=ge('cxr-sq-hint'), q=ge('cxr-sq-qtd'); if(!it||!h) return;
+  var modo=wmsCxrSemQrModo(ctx,it)||'dev', u=it.un||wmsProdUnidades(it.produto_id), fator=Number(u.fator)||1, n=Number(q&&q.value)||0;
+  var pr=(wmsProdutos||[]).find(function(p){return p.id===it.produto_id;})||{};
+  if(q&&!q.value&&modo==='pallet'&&pr.qtd_por_pallet){ q.placeholder=String(pr.qtd_por_pallet*(it.converte?fator:1)); }
+  var sal='saldo na nota: <b>'+Number(it.saldo).toLocaleString('pt-BR')+' '+ecomEsc(u.unFiscal||'')+'</b>';
+  if(modo==='dev') h.innerHTML=(n?'<b>'+n+' PCT × '+fator.toLocaleString('pt-BR')+' PÇ = '+(n*fator).toLocaleString('pt-BR')+' PÇ</b> · ':'Pacote de '+fator.toLocaleString('pt-BR')+' PÇ · ')+sal;
+  else h.innerHTML=(n?'<b>'+n.toLocaleString('pt-BR')+' '+ecomEsc(u.unFiscal||'')+'</b>'+(it.converte?' = '+(n/fator).toLocaleString('pt-BR')+' '+ecomEsc(u.unControle||''):'')+' · ':'')+sal+(pr.qtd_por_pallet?' · padrão por pallet: '+pr.qtd_por_pallet:'');
+}
+async function wmsCxrSemQrGerar(){
+  var ctx=_confEntCtx; if(!ctx) return;
+  if(_cxr.ocupado){ wmsCxrMsg(false,'Aguarde: gravando o RG anterior.'); return; }
+  var it=wmsCxrSemQrItem(); if(!it){ wmsCxrMsg(false,'Escolha o produto.'); return; }
+  var modo=wmsCxrSemQrModo(ctx,it)||'dev', qEl=ge('cxr-sq-qtd'), n=Number(qEl&&(qEl.value||(modo==='pallet'?qEl.placeholder:'')))||0;
+  if(!(n>0)){ wmsCxrMsg(false,'Informe '+(modo==='dev'?'quantos pacotes':'a quantidade')+'.'); if(qEl) qEl.focus(); return; }
+  var u=it.un||wmsProdUnidades(it.produto_id), fator=it.converte?(Number(u.fator)||1):1;
+  var qtd=modo==='dev'?n*(Number(u.fator)||1):n;
+  if(it.converte && (qtd%fator)!==0){ wmsCxrMsg(false,qtd+' '+u.unFiscal+' não fecha em '+u.unControle+' de '+fator+'.'); return; }
+  if(qtd>it.saldo && ctx.cfg&&ctx.cfg.bloqueia){ wmsCxrMsg(false,qtd+' '+u.unFiscal+' passa do saldo da nota ('+it.saldo+').'); return; }
+  _cxr.ocupado=true;
+  try{
+    var cx={id:null,qtd:qtd,lote:null,fab:null,origem:modo==='dev'?'DEV · devolução ('+n+' pacotes)':'Bandeira de pallet',palletProduto:modo==='pallet'};
+    var pal=await wmsCxrGravar(ctx,it,cx,u,fator);
+    _cxr.sessao.push({id:'sq-'+pal.id, idCurto:modo==='dev'?'DEV':'bandeira', sku:it.sku, qtd:qtd, sacos:it.converte?qtd/fator:null, lote:null, rgFmt:wmsRgFmt(pal.rg)});
+    if(qEl){ qEl.value=''; }
+    wmsCxrRender(); wmsCxrSemQrTroca();
+    wmsCxrMsg(true,wmsRgFmt(pal.rg)+' · '+it.sku+' · '+(modo==='dev'?(n+' PCT × '+(Number(u.fator)||1)+' PÇ = '+qtd+' PÇ'):(qtd+' '+u.unFiscal))+(qtd>it.saldo?' · ⚠ acima do saldo (divergência registrada)':'')+' · imprimindo etiqueta');
+    if(modo==='dev') wmsEtiquetaDevImprimir(pal.id,n,Number(u.fator)||1); else wmsEtiquetaPallet(pal.id);
+  }catch(e){ wmsCxrMsg(false,'Erro ao gerar o RG: '+String(e&&e.message||e)); }
+  finally{ _cxr.ocupado=false; }
+}
+// etiqueta DEV (10×10): RG em destaque, quantidade "N PCT × X PÇ = T PÇ"
+async function wmsEtiquetaDevImprimir(palletId,pct,porPct){
+  var pl=(wmsPallets||[]).find(function(x){return x.id===palletId;}); if(!pl){ showToast('RG não encontrado.','red'); return; }
+  var it=wmsPalletConteudoDo(palletId)[0]||{};
+  var dep=(clientes||[]).find(function(c){return c.id===pl.depositante_id;}), doc=(wmsEntradas||[]).find(function(e){return e.id===pl.entrada_id;});
+  var rg=wmsRgFmt(pl.rg), qr=''; try{ qr=await wmsQrDataUrl(rg); }catch(e){}
+  var esc=function(v){return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;');};
+  var tot=pct*porPct, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var h='<div class="etq"><div class="in">'
+    +'<div class="tit">DEVOLUÇÃO · DEV</div>'
+    +'<div style="display:flex;gap:2mm;align-items:center;margin-top:1.6mm;border:0.6mm solid #000;padding:1.2mm 2mm">'
+      +'<div style="flex:1;min-width:0"><div class="lb">RG DA CAIXA</div><div style="font-size:30pt;font-weight:bold;font-family:monospace;line-height:1;letter-spacing:0.5px">'+esc(rg)+'</div></div>'
+      +(qr?('<img src="'+qr+'" style="width:24mm;height:24mm;flex-shrink:0">'):'')
+    +'</div>'
+    +'<div class="row2"><div class="bx" style="flex:2"><div class="lb">DEPOSITANTE</div><div class="v2">'+esc((dep&&dep.nome)||'—')+'</div></div><div class="bx"><div class="lb">DOC. ENTRADA</div><div class="v2">'+esc((doc&&doc.numero_entrada)||'—')+'</div></div></div>'
+    +'<div class="item">'
+      +'<div class="skurow"><span class="sku">'+esc(it.sku||'—')+'</span><span class="lb">SKU</span></div>'
+      +'<div class="desc">'+esc(String(it.descricao||'').slice(0,60))+'</div>'
+      +'<div style="padding:1.6mm 2mm"><div class="lb">QUANTIDADE</div><div style="font-size:15pt;font-weight:bold;line-height:1.1">'+nb(pct)+' PCT × '+nb(porPct)+' PÇ = '+nb(tot)+' PÇ</div></div>'
+    +'</div>'
+    +'<div class="ft">Devolução recebida pelo VERUS · '+esc(new Date().toLocaleString('pt-BR'))+' · '+esc(profile?.full_name||cu?.email||'—')+'</div>'
+    +'</div></div>';
+  wmsEtiquetaPalletPrint(h,'DEV '+rg);
+  try{ await wmsPalletEvento(pl.id,'ajuste',{observacao:'Etiqueta DEV impressa'}); }catch(e){}
 }
 async function wmsConfEntCaixasConcluir(){
   try{ await wmsConfEntAtualizaStatus(); }catch(e){}
@@ -46327,6 +46418,11 @@ function wmsProdutoModal(id){
              <option value="0" ${!p.proibe_picking?'selected':''}>Sim</option>
              <option value="1" ${p.proibe_picking?'selected':''}>Não — IBC/contêiner, só do 02 acima</option>
            </select></div>
+         <div><label class="fl" title="Etiqueta caixa: a caixa chega com a etiqueta/QR do fornecedor. Etiqueta pallet: chega só com a bandeira de pallet (ex.: insumos) — o recebimento escolhe o produto, informa a quantidade e o VERUS gera o RG e imprime a etiqueta pallet MK.">Etiqueta no recebimento</label>
+           <select class="fi" id="wp-etqrec">
+             <option value="caixa" ${(p.etiqueta_recebimento||'caixa')!=='pallet'?'selected':''}>Etiqueta caixa (padrão)</option>
+             <option value="pallet" ${p.etiqueta_recebimento==='pallet'?'selected':''}>Etiqueta pallet — bandeira, gera etiqueta MK</option>
+           </select></div>
          <div><label class="fl">Curva (giro)</label>
            <select class="fi" id="wp-curva">
              <option value="" ${!p.curva?'selected':''}>—</option>
@@ -46424,6 +46520,7 @@ async function wmsProdutoSalvar(id){
       shelf_life_min_dias:(()=>{const v=ge('wp-shelf')?.value;return v===''||v==null?null:Math.max(0,parseInt(v)||0);})(),   // v1.0.1265
       controla_validade:(ge('wp-ctrlval')?.value==='1'),
       proibe_picking:(ge('wp-proibepk')?.value==='1'),
+      etiqueta_recebimento:(ge('wp-etqrec')?.value==='pallet'?'pallet':'caixa'),   // v1.0.1379
       regra_id:ge('wp-regra')?.value||null,
       validade_dias:(()=>{const v=ge('wp-validade')?.value;return v===''||v==null?null:parseInt(v);})(),
       e_liquido:ge('wp-liquido')?.checked||false,
@@ -46463,7 +46560,7 @@ async function wmsProdutoSalvar(id){
       const histAnt=Array.isArray(prodAntigo.historico)?prodAntigo.historico:[];
       obj.historico=[{em:new Date().toISOString(),por:(profile?.full_name||cu?.email||null),alteracoes:alteracoes}, ...histAnt].slice(0,200);
     }
-    await dbUpdate('wms_produtos',id,obj);
+    try{ await dbUpdate('wms_produtos',id,obj); }catch(_eER){ if(/etiqueta_recebimento/.test(String(_eER&&_eER.message))){ delete obj.etiqueta_recebimento; await dbUpdate('wms_produtos',id,obj); showToast('Rode o SQL da v1.0.1379 (etiqueta_recebimento) — a etiqueta no recebimento não foi gravada.','amber'); } else throw _eER; }
     wmsProdutos=wmsProdutos.map(p=>p.id===id?{...p,...obj}:p);
     // sincroniza atributos controlados (checkboxes) -> wms_produto_atributos
     try{
