@@ -620,6 +620,7 @@
         <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost so-demo" onclick="kTvAbrir()">📺 Painel do motorista</button><button class="btn btn-ghost so-demo" onclick="kTotAbrir()">🖥 Autoatendimento</button>
         <button class="btn btn-primary" onclick="openAgd()">＋ Agendar</button></span>
       </div>
+      <div id="agdChips" class="pchips"></div>
       <div id="listaAgd" class="list"></div>
       <div id="coletasBox" class="hide" style="margin-top:18px"></div>
     </section>
@@ -3176,7 +3177,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.20';   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
+const PORTAL_VERSION = 'v1.8.21';   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
 // v1.8.18 →   // v1.8.18: o portal diz o que falta para o cartão do motorista
 // v1.8.17 →   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
@@ -3729,8 +3730,9 @@ function renderLista(kind){
   const rows = kind==='ped'
     ? [...state.pedidos].filter(p=>(!pedFiltro.classe||p.classe===pedFiltro.classe)&&(!pedFiltro.tipo||p.tipo===pedFiltro.tipo)&&(!pedFiltro.fora||(()=>{const x=pedIndic(p);return x&&x.fechado&&!x.otif;})()))
         .sort((a,b)=>(b.criado_em||'').localeCompare(a.criado_em||''))
-    : [...state.agendamentos].sort((a,b)=>(a.data||'').localeCompare(b.data||''));
-  if(kind==='ped') pedChips();
+    : [...state.agendamentos].filter(agdPassa).sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  if(kind==='ped') pedChips(); else agdChips();
+  if(!rows.length&&kind!=='ped'&&(state.agendamentos||[]).length){ L.innerHTML='<div class="empty">Nenhum agendamento com esses filtros (carregados e cancelados ficam ocultos até você marcar).</div>'; return; }   // v1.8.21
   if(!rows.length){
     L.innerHTML = `<div class="empty">Nenhum ${kind==='ped'?'pedido':'agendamento'} ainda.<br>
       <button class="btn btn-primary" onclick="${kind==='ped'?'openPedido()':'openAgd()'}">${kind==='ped'?'＋ Criar pedido':'＋ Agendar veículo'}</button></div>`;
@@ -4177,6 +4179,29 @@ function pedIndHtml(p){
   return `<div class="ind"><div class="ind-fr"><small>Fill rate</small>${fr}<div class="bar"><i style="width:${x.fill==null?0:Math.round(x.fill*100)}%;background:${cor}"></i></div></div><div class="ind-ot">${ot}</div></div>`;
 }
 let pedFiltro = {classe:'', tipo:'', fora:false};
+// v1.8.21: filtros do agendamento (como na tela de pedidos) · nasce sem os realizados (carregados) e os cancelados
+const AGD_OCULTOS_PADRAO = ['realizado','cancelado'];
+let agdFiltro = {tipo:'', fora:new Set(AGD_OCULTOS_PADRAO), q:''};
+function agdPassa(a){
+  if(agdFiltro.tipo && a.tipo!==agdFiltro.tipo) return false;
+  if(agdFiltro.fora.has(a.status)) return false;
+  if(agdFiltro.q){ const q=agdFiltro.q.toLowerCase(); if(JSON.stringify(a).toLowerCase().indexOf(q)<0) return false; }
+  return true;
+}
+window.agdTogSit = function(st){ if(agdFiltro.fora.has(st)) agdFiltro.fora.delete(st); else agdFiltro.fora.add(st); renderLista('agd'); };
+window.agdBusca = function(v){ agdFiltro.q=String(v||'').trim(); renderLista('agd'); const i=$('agdQ'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } };
+function agdChips(){
+  const el=$('agdChips'); if(!el) return;
+  const all=state.agendamentos||[], n=f=>all.filter(f).length;
+  const ch=(lbl,on,act)=>`<button class="pchip${on?' on':''}" onclick="${act}">${lbl}</button>`;
+  const sts=[...new Set(['solicitado','confirmado','reagendar','realizado','cancelado'].concat(all.map(a=>a.status).filter(Boolean)))];
+  el.innerHTML = ch('Entradas '+n(a=>a.tipo==='entrada'), agdFiltro.tipo==='entrada', "agdFiltro.tipo=agdFiltro.tipo==='entrada'?'':'entrada';renderLista('agd')")
+    + ch('Saídas '+n(a=>a.tipo==='saida'), agdFiltro.tipo==='saida', "agdFiltro.tipo=agdFiltro.tipo==='saida'?'':'saida';renderLista('agd')")
+    + '<span class="psep"></span>'
+    + sts.map(st=>ch((agdFiltro.fora.has(st)?'':'✓ ')+((st==='realizado')?'Carregado / realizado':stNome(st))+' '+n(a=>a.status===st), !agdFiltro.fora.has(st), "agdTogSit('"+st+"')")).join('')
+    + '<span class="psep"></span>'
+    + `<input id="agdQ" placeholder="🔍 placa, protocolo, transportadora, pedido" value="${String(agdFiltro.q).replace(/"/g,'&quot;')}" oninput="agdBusca(this.value)" style="min-width:240px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:13px">`;
+}
 function pedChips(){
   const el=$('pedChips'); if(!el) return;
   const all=state.pedidos, n=f=>all.filter(f).length;
@@ -5432,11 +5457,11 @@ function showDone(kind, protocolo, msg){
     if(p.status==='cancelado') return 'cancelado';
     if(p.status==='enviado') return 'enviado';
     const w = p.wms_status||'importado';
-    if(w==='expedido') return 'concluido';
+    if(['expedido','embarcado','carregado','faturado','concluido'].includes(w)) return 'concluido';   // v1.8.21: o WMS grava 'embarcado' ao carregar o romaneio
     if(['em_separacao','separado','conferido','em_romaneio'].includes(w)) return 'em_operacao';
     return 'aprovado';
   }
-  const WMS_TXT = {importado:'Importado', em_separacao:'Em separação', separado:'Separado', conferido:'Conferido', em_romaneio:'Em romaneio', expedido:'Expedido', cancelado:'Cancelado'};
+  const WMS_TXT = {importado:'Importado', em_separacao:'Em separação', separado:'Separado', conferido:'Conferido', em_romaneio:'Em romaneio', expedido:'Expedido', embarcado:'Carregado', carregado:'Carregado', cancelado:'Cancelado'};
 
   window.loadDados = async function(){
     if(DEMO) return _orig.loadDados();
@@ -5461,7 +5486,7 @@ function showDone(kind, protocolo, msg){
     state.pallets = state.estoqueReal.reduce((a,r)=>a+r.caixas_fechadas,0);
     state.pedidos = (ped.data||[]).map(p=>({ id:p.id, protocolo:p.protocolo, tipo:'saida', status:mapStatus(p), _p:p,
       nf_numero:null, referencia:p.referencia, destinatario:p.destinatario, observacoes:p.observacoes, criado_em:p.criado_em, prazo:null, anexos:[],
-      itens:(p.itens||[]).map(i=>({sku:i.sku, descricao:i.descricao||i.sku, quantidade:+i.quantidade, atendida:p.wms_status==='expedido'?+i.quantidade:0, unidade:'PÇ'})) }));
+      itens:(p.itens||[]).map(i=>({sku:i.sku, descricao:i.descricao||i.sku, quantidade:+i.quantidade, atendida:['expedido','embarcado','carregado'].includes(p.wms_status)?+i.quantidade:0, unidade:'PÇ'})) }));
     state.eventos = [];
     (ped.data||[]).forEach(p=>{
       state.eventos.push({pedido_id:p.id, evento:'pedido_criado', autor_tipo:'cliente', autor_nome:p.criado_por, criado_em:p.criado_em});

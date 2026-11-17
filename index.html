@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1375 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1377 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1375';
+const APP_VERSION='v1.0.1377';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -54167,12 +54167,12 @@ function wmsEmbFracLinhas(romId){
 }
 function wmsEmbFracAtualizar(){ var b=ge('emb-frac-body'); if(b&&wmsEmbRomaneio) b.innerHTML=wmsEmbFracLinhas(wmsEmbRomaneio); wmsEmbAtualizaProgresso(); }
 function wmsEmbFracAbrir(r){
-  wmsEmbRomaneio=r.id; window._wmsEmbFrac=true; _wmsEmbAguardandoPrisma=null;
+  wmsEmbRomaneio=r.id; window._wmsEmbFrac=true; _wmsEmbAguardandoPrisma=null; window._wmsEmbFracPrismaOk=false;   // v1.0.1376: o carregamento só começa depois do bipe do prisma
   var D=wmsEmbFracDados(r.id), ids=[]; D.forEach(function(d){ d.vols.forEach(function(v){ ids.push(v.id); }); });
   window._wmsEmbPallets=ids;
   var cli=(clientes||[]).find(function(c){return c.id===wmsRomClienteId(r);}), emb=ids.filter(function(id){ var v=wmsPalletsEmbarque.find(function(x){return x.id===id;}); return v&&v.status==='embarcado'; }).length, pct=ids.length?Math.round(emb/ids.length*100):0;
   var inner='<div style="font-size:12px;color:var(--text2);margin-bottom:-6px">Romaneio <b>'+ecomEsc(r.numero||'')+'</b> · '+ecomEsc((cli&&cli.nome)||'')+(r.transportadora?' · '+ecomEsc(r.transportadora):'')+(r.placa?' · <b>'+ecomEsc(r.placa)+'</b>':'')+' · <span class="bdg" style="background:var(--blue-bg);color:var(--blue-text)">fracionado</span></div>'
-    +'<div id="emb-passo" style="font-size:12px;font-weight:700;color:var(--text2)">Bipe a etiqueta de cada volume. O pedido só sai completo.</div>'
+    +'<div id="emb-passo" style="font-size:12px;font-weight:700;color:var(--amber-text)">'+(function(){ var _pr=_wmsEmbPrismaDoRomaneio(); return _pr?('Para iniciar, bipe o PRISMA '+ecomEsc(_pr.codigo)+' do veículo. Depois, a etiqueta de cada volume (o pedido só sai completo).'):'Romaneio sem prisma atribuído: atribua o prisma na portaria antes de carregar.'; })()+'</div>'
     +'<div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:4px"><span>Progresso do embarque</span><span id="emb-pct-lbl">'+emb+'/'+ids.length+' · '+pct+'%</span></div>'
     +'<div style="height:8px;background:var(--bg2);border-radius:99px;overflow:hidden"><div id="emb-pct-bar" style="height:100%;width:'+pct+'%;background:'+(pct===100?'var(--green-text)':'var(--blue-text)')+';border-radius:99px;transition:width .3s"></div></div></div>'
     +'<div style="padding:11px 13px;background:var(--blue-bg);border-radius:9px"><div style="font-size:11px;color:var(--text2);margin-bottom:5px">Bipe a etiqueta do volume (a mesma impressa no checkout)</div>'
@@ -54198,11 +54198,23 @@ function wmsEmbFracCamDevolver(){
 }
 async function wmsEmbFracBipe(codigo){
   var cod=String(codigo||'').trim().replace(/^[LMQH][AM],/,''); if(!cod) return;   // v1.0.1362: QR gráfico antigo vinha com "LA," na frente
+  // v1.0.1376: pelo menos 1 bipe do prisma do veículo para iniciar o carregamento
+  if(!window._wmsEmbFracPrismaOk){
+    var _pr=_wmsEmbPrismaDoRomaneio(), _cl=function(x){ return String(x||'').replace(/[^a-z0-9]/gi,'').toUpperCase(); };
+    if(!_pr){ wmsBeep(true); _wmsEmbStatusMsg('Romaneio sem prisma atribuído: atribua o prisma na portaria antes de carregar.','var(--red-text)'); return; }
+    var _pc=_cl(_pr.codigo), _cn=_cl(cod);
+    if(_pc===_cn||_cn.endsWith(_pc)||(_cn.length<=_pc.length+4&&_cn.indexOf(_pc)>=0)){
+      window._wmsEmbFracPrismaOk=true; var _ps=ge('emb-passo'); if(_ps){ _ps.style.color='var(--green-text)'; _ps.textContent='✓ Prisma '+_pr.codigo+' confirmado · bipe a etiqueta de cada volume (o pedido só sai completo).'; }
+      _wmsEmbStatusMsg('✓ Prisma '+_pr.codigo+' confirmado. Pode carregar.','var(--green-text)'); return;
+    }
+    wmsBeep(true); _wmsEmbStatusMsg('Primeiro bipe o PRISMA '+_pr.codigo+' do veículo para iniciar o carregamento.','var(--red-text)'); return;
+  }
   if(/^\d{1,6}$/.test(cod)){ wmsBeep(true); _wmsEmbStatusMsg('Isso é o código de barras da QUANTIDADE ('+cod+'). Bipe o QR do volume, no canto da etiqueta. Etiqueta sem QR: reimprima pelo pedido.','var(--red-text)'); return; }
   var cl=function(x){ return String(x||'').replace(/[^a-z0-9]/gi,'').toUpperCase(); }, cN=cl(cod);
-  var acha=function(){ return (wmsPalletsEmbarque||[]).find(function(x){ return x.etiqueta_codigo===cod||x.numero===cod||cl(x.etiqueta_codigo)===cN; }); };
+  var _p0=cod.indexOf('|')>=0?cod.split('|')[0].trim():null;   // v1.0.1377: QR da etiqueta CASCO = volume|item|quantidade
+  var acha=function(){ return (wmsPalletsEmbarque||[]).find(function(x){ return x.etiqueta_codigo===cod||x.numero===cod||cl(x.etiqueta_codigo)===cN||(_p0&&(x.numero===_p0||x.etiqueta_codigo===_p0)); }); };
   var v=acha();
-  if(!v){ try{ var parts=cod.split('|'), V=[]; if(parts.length>=2) V=await dbSelect('wms_pallets_embarque','numero=eq.'+encodeURIComponent(parts[1].trim()))||[];
+  if(!v){ try{ var parts=cod.split('|'), V=[]; if(_p0) V=await dbSelect('wms_pallets_embarque','numero=eq.'+encodeURIComponent(_p0))||[]; if(!V.length&&parts.length>=2) V=await dbSelect('wms_pallets_embarque','numero=eq.'+encodeURIComponent(parts[1].trim()))||[];
       if(!V.length) V=await dbSelect('wms_pallets_embarque','etiqueta_codigo=eq.'+encodeURIComponent(cod))||[];
       if(V[0]){ if(!(wmsPalletsEmbarque||[]).some(function(x){return x.id===V[0].id;})) wmsPalletsEmbarque.push(V[0]); v=V[0];
         var ped=(wmsPedidos||[]).find(function(p){return p.id===v.pedido_id;}); if(ped&&ped.romaneio_id===wmsEmbRomaneio&&wmsVolsDoPedido(ped.id).some(function(x){return x.id===v.id;})&&window._wmsEmbPallets.indexOf(v.id)<0) window._wmsEmbPallets.push(v.id); } }catch(_e){} }
@@ -54986,7 +54998,8 @@ function zplEtiquetaCasco(o){
     '^FO34,498^A0N,20,20^FDPROCESSO - SAIDA^FS','^FO34,532^FB360,1,0,L,0^A0N,52,52^FD'+E(o.processo||'')+'^FS',
     '^FO414,498^A0N,20,20^FDVOLUME^FS','^FO414,528^FB360,1,0,L,0^A0N,60,60^FD'+E((o.volNum||'?')+'/'+(o.volTotal||'?'))+'^FS','^FO400,490^GB2,290,2^FS','^FO20,600^GB760,2,2^FS',
     '^FO34,608^A0N,20,20^FDDATA^FS','^FO34,634^A0N,34,34^FD'+E(o.data||'')+'^FS','^FO34,690^A0N,20,20^FDCONTROLE QUALIDADE^FS',
-    (o.codigo?(function(){ try{ var g=qrZplGFA(String(o.codigo),150,2); return '^FO'+(396-g.px-8)+',640'+g.field+'^FS'; }catch(_e){ return '^FO250,644^BQN,2,4^FDLA,'+E(o.codigo)+'^FS'; } })():''),   // v1.0.1362: QR do volume (número PLT) para o embarque fracionado
+    (o.codigo?(function(){ var t=String(o.codigo)+'|'+String(o.sku||'')+'|'+String(o.qtd==null?'':o.qtd);   // v1.0.1377: QR = volume | item | quantidade (uma leitura só)
+      try{ var g=qrZplGFA(t,136,2,3); return '^FO'+(396-g.px-8)+','+(780-g.px-4)+g.field+'^FS'; }catch(_e){ return '^FO250,640^BQN,2,3^FDLA,'+E(t)+'^FS'; } })():''),
     '^FO414,608^A0N,20,20^FDQUANTIDADE^FS','^BY3,2,90^FO440,640^BCN,90,N,N,N^FD'+E(o.qtd)+'^FS',
     '^XZ'];
   return L.join('\n');
@@ -55023,9 +55036,9 @@ function qrMatrix(text){
   return mat;
 }
 // Gera um campo ^GFA de um QR no tamanho desejado (alvoPx = lado aprox. em dots), com zona de silencio
-function qrZplGFA(text,alvoPx,quiet){
+function qrZplGFA(text,alvoPx,quiet,minCell){
   const mat=qrMatrix(text); const n=mat.length; const q=(quiet==null?4:quiet);
-  const dim=n+2*q; const cell=Math.max(6,Math.round((alvoPx||460)/dim)); const px=dim*cell;
+  const dim=n+2*q; const cell=Math.max(minCell||6,Math.floor((alvoPx||460)/dim)||1); const px=dim*cell;   // v1.0.1377: minCell opcional (QR com mais dados cabe no mesmo espaço)
   const rowBytes=Math.ceil(px/8); const total=rowBytes*px; let hex='';
   for(let y=0;y<px;y++){
     const my=Math.floor(y/cell)-q; const bytes=new Uint8Array(rowBytes);
