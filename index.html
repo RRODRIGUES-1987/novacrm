@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1380 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1382 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1380';
+const APP_VERSION='v1.0.1382';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -39234,11 +39234,42 @@ async function wmsOsAutoTick(manual){
       window._osAutoErro=null;
       var r=null; try{ r=await wmsGerarListas('pedido_a_pedido',{auto:true,ids:[p.id]}); }catch(eG){ console.warn('[OS auto]',p.numero_curto,eG); window._osAutoErro=eG&&eG.message||String(eG); }
       if(r&&r.criadas&&r.criadas.length){ var l=(wmsListasSeparacao||[]).find(function(x){return x.id===r.criadas[0];}); showToast('OS automática: '+(l&&l.numero_lista||'lista')+' · pedido '+(p.numero_curto||p.numero_pedido||'')+' liberado para o coletor','green'); }
-      else showToast('OS automática não gerada · '+(p.numero_curto||p.numero_pedido||'')+' · '+String((r&&r.pulados&&r.pulados[0])||window._osAutoErro||'veja o pedido').slice(0,160),'amber');
+      else {
+        var _mot=String((r&&r.pulados&&r.pulados[0])||window._osAutoErro||'lista não gerada');
+        try{ _mot=await wmsOsAutoSemLista(p,_mot)||_mot; }catch(_sl){ console.warn('[OS auto] sem lista',_sl); }   // v1.0.1382: o motivo fica gravado no pedido (antes só aparecia num aviso passageiro)
+        showToast('OS automática não gerada · '+(p.numero_curto||p.numero_pedido||'')+' · '+_mot.slice(0,160),'amber');
+      }
     }
     if(typeof render==='function'&&/^wms-/.test(String(typeof curPage!=='undefined'?curPage:''))) render();
   } finally { _osAutoRodando=false; }
 }
+// v1.0.1382: a OS automática tentou e não gerou lista → o pedido não pode ficar "Importado" em silêncio.
+//  • confere o saldo (empenha e solta): faltou → status "aguardando saldo" (aparece para a torre e no portal do cliente);
+//  • qualquer outro motivo (ex.: produto sem múltiplo cadastrado) → fica gravado no pedido e aparece no selo e no detalhe.
+async function wmsOsAutoSemLista(p,motivo){
+  var atual=null; try{ atual=((await dbSelect('wms_pedidos','id=eq.'+p.id+'&select=id,status,parametros&limit=1'))||[])[0]; }catch(_e){}
+  if(!atual) return motivo;
+  var st=String(atual.status||''), par=atual.parametros||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } }
+  var up={};
+  if(st==='importado' && wmsSaldoVerus(p.cliente_id)){
+    var jaTinha=[]; try{ jaTinha=(await dbSelect('wms_reservas','pedido_id=eq.'+p.id+'&status=eq.reservada&select=id&limit=1'))||[]; }catch(_e){}
+    if(!jaTinha.length){   // só testa o saldo de quem não tem reserva própria (reserva manual aprovada fica intocada)
+      var empR=null; try{ empR=await wmsRpc('wms_empenhar_pedido',{p_pedido_id:p.id}); }catch(eE){ empR=null; }
+      try{ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); }catch(_e){}
+      if(empR && !empR.erro && Number(empR.faltou_total||0)>0){
+        var fal=(empR.itens||[]).filter(function(x){return Number(x.faltou)>0;}).map(function(x){ return x.sku+(x.motivo?' — '+x.motivo:' falta '+Number(x.faltou).toLocaleString('pt-BR')); });
+        motivo='Sem saldo completo: '+fal.join(' · ');
+        up.status='aguardando_saldo';
+      }
+    }
+  }
+  up.parametros=Object.assign({},par,{os_auto_motivo:String(motivo).slice(0,300),os_auto_motivo_em:new Date().toISOString()});
+  await dbUpdate('wms_pedidos',p.id,up);
+  Object.assign(p,up); var m=(wmsPedidos||[]).find(function(x){return x.id===p.id;}); if(m) Object.assign(m,up);
+  if(up.status==='aguardando_saldo' && p.origem==='sap_b1'){ try{ sapAcao('aviso_saldo',{pedido_id:p.id}); }catch(_e){} }
+  return motivo;
+}
+function wmsOsAutoMotivo(p){ var par=(p&&p.parametros)||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } } return (p&&(p.status==='importado'||p.status==='aguardando_saldo')&&par.os_auto_motivo)?String(par.os_auto_motivo):''; }
 setInterval(function(){ wmsOsAutoTick(); },60000);
 async function wmsGerarListas(tipo,opts){
   // v1.0.1320: modo automático (OS automática ao importar e empenhar) — sem tela, sem mexer na seleção nem no modal do usuário
@@ -39470,6 +39501,7 @@ function wmsPedBadge(st,pedId,p_ref){
   if(st==='aguardando_saldo'&&p_ref){ var cliP=(clientes||[]).find(function(c){return c.id===p_ref.cliente_id;}),pr=(cliP&&cliP.parametros)||{}; if(typeof pr==='string'){try{pr=JSON.parse(pr);}catch(_e){pr={};}} if(pr.pacote_fechado===true||pr.pacote_fechado==='true'){var its=(wmsPedidoItens||[]).filter(function(ii){return ii.pedido_id===p_ref.id&&ii.status!=='cancelado';}),totSku={}; its.forEach(function(ii){var k=String(ii.sku||'').trim().toUpperCase();totSku[k]=(totSku[k]||0)+Number(ii.quantidade||0);}); if(Object.keys(totSku).some(function(k){var pr2=wmsProdutoDe(null,k,p_ref.cliente_id)||{},pac=Number(pr2.fator_conversao)||0;return pac>1&&totSku[k]%pac!==0;})) return '<span style="background:#ffedd5;color:#9a3412;font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">Itens fora do múltiplo</span>';} }
   if(st==='importado' && pedId && _wmsPedEmp[pedId]) return '<span style="background:rgba(16,185,129,.14);color:#059669;font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap" title="Estoque reservado (empenhado) — falta gerar a lista de separação">Empenhado</span>';
   if(st==='excluido') return '<span class="bdg" style="background:var(--red-bg);color:var(--red-text)">Excluído</span>';   // v1.0.1171
+  if(st==='importado' && p_ref && wmsOsAutoMotivo(p_ref)) return '<span style="background:rgba(217,119,6,.14);color:#b45309;font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap" title="'+String(wmsOsAutoMotivo(p_ref)).replace(/"/g,'&quot;')+'">⚠ OS não gerada</span>';   // v1.0.1382
   const s=WMS_PED_STATUS[st]||{l:st,c:'#888',bg:'rgba(136,136,136,.12)'};
   return `<span style="background:${s.bg};color:${s.c};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap">${s.l}</span>`;
 }
@@ -42727,8 +42759,8 @@ async function wmsPalletNascer(ctx,confPalletId,itens,palletTipoId){
     endereco_para:stg?stg.codigo:(galpao?('DOCA · '+galpao):'DOCA'),
     observacao:'Nascido na conferência de entrada · '+linhas.length+' item(ns)'+(stg?(' · stage '+stg.codigo):' · sem stage'),
     dados:{itens:linhas.map(function(l){return {sku:l.sku,qtd:l.qtd_controle,un:l.un_controle,lote:l.lote};})}});
-  wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(function(){return wmsPallets;});
-  wmsPalletConteudo=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(function(){return wmsPalletConteudo;});
+  wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(function(){return wmsPallets;});
+  wmsPalletConteudo=await dbSelectAll('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(function(){return wmsPalletConteudo;});
   return (wmsPallets||[]).find(function(p){return p.id===novo.id;})||novo;
 }
 // ─── ETIQUETA PALLET (10x10) — uma por item ───
@@ -43871,8 +43903,8 @@ async function wmsConfEntEstornarPallet(palletId){
         for(var z=0;z<cont.length;z++){ await dbUpdate('wms_pallet_conteudo',cont[z].id,{qtd_controle:0,qtd_fiscal:0,status:'zerado'}); }
         await dbUpdate('wms_pallets',rgp.id,{status:'morto',morto_em:new Date().toISOString(),motivo_morte:'cancelado'});
       }catch(e){}
-      wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(function(){return wmsPallets;});
-      wmsPalletConteudo=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(function(){return wmsPalletConteudo;});
+      wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(function(){return wmsPallets;});
+      wmsPalletConteudo=await dbSelectAll('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(function(){return wmsPalletConteudo;});
     }
     for(var i=0;i<its.length;i++){ await dbDelete('wms_conf_entrada_itens',its[i].id); }
     await dbDelete('wms_tarefas_conf_entrada',palletId);
@@ -44446,7 +44478,7 @@ function wmsPedidoDetalhe(id){
   portModal(`Pedido ${p.numero_pedido}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
-        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${(_wmsNfPed[p.id]||[]).length?' · NF '+(_wmsNfPed[p.id]).map(function(n){return n.numero+(n.status==='divergente'?' <span style="color:var(--amber-text)" title="'+String(n.divergencias||'').replace(/"/g,'')+'">⚠ divergente</span>':'');}).join(', '):''}${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div></div>
+        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${(_wmsNfPed[p.id]||[]).length?' · NF '+(_wmsNfPed[p.id]).map(function(n){return n.numero+(n.status==='divergente'?' <span style="color:var(--amber-text)" title="'+String(n.divergencias||'').replace(/"/g,'')+'">⚠ divergente</span>':'');}).join(', '):''}${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div>${wmsOsAutoMotivo(p)?'<div style="margin-top:6px;border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:6px 9px;font-size:12px"><b>OS automática não gerada:</b> '+ecomEsc(wmsOsAutoMotivo(p))+'</div>':''}</div>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
@@ -50607,7 +50639,7 @@ async function endConfirmar(){
     if(!p||!end)continue;
     try{await wmsMovMoverRg(p,end,'enderecamento');n++;}catch(e){err++;}
   }
-  try{wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
+  try{wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
   _end.atrib={};_end.selOrigem={};
   showToast(n+' endereçado(s)'+(err?(' · '+err+' com erro'):'')+'.',err?'amber':'green');
   if(curPage==='wms-enderecamento')render();
@@ -50737,7 +50769,7 @@ async function endTConfirmar(){
     if(!p||!end)continue;
     try{await wmsMovMoverRg(p,end,'transferencia');n++;}catch(e){err++;}
   }
-  try{wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
+  try{wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
   _end.t.atrib={};_end.t.sel={};
   showToast(n+' transferido(s)'+(err?(' · '+err+' com erro'):'')+'.',err?'amber':'green');
   if(curPage==='wms-enderecamento')render();
@@ -50833,8 +50865,8 @@ async function endFConfirmar(){
       nUnit++;
     }catch(e){showToast('Falha ao unitizar '+wmsRgFmt(mv.p.rg)+': '+(e.message||e),'red');}
   }
-  try{wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
-  try{wmsPalletConteudo=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo');}catch(e){}
+  try{wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc');}catch(e){}
+  try{wmsPalletConteudo=await dbSelectAll('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo');}catch(e){}
   _end.t.f.sel={};_end.t.f.qty={};
   showToast(nUnit+' unitização(ões) concluída(s).','green');
   if(curPage==='wms-enderecamento')render();
@@ -55902,8 +55934,8 @@ async function wmsAuditarConfEntrada(cf){
   }
   const d=(wmsEntradas||[]).find(x=>x.id===cf.entrada_id);
   if(d){ await dbUpdate('wms_entradas',d.id,{status:'conferido'}); d.status='conferido'; }
-  wmsPallets=await dbSelect('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(()=>wmsPallets);
-  wmsPalletConteudo=await dbSelect('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(()=>wmsPalletConteudo);
+  wmsPallets=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&order=rg.desc').catch(()=>wmsPallets);
+  wmsPalletConteudo=await dbSelectAll('wms_pallet_conteudo','company_id=eq.'+cid+'&status=eq.ativo').catch(()=>wmsPalletConteudo);
   return true;
 }
 async function wmsAuditarConf(confId,decisao){
