@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1377 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1378 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1377';
+const APP_VERSION='v1.0.1378';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -4976,6 +4976,67 @@ async function capaOcrDescartar(id){ try{ await dbUpdate('capa_leituras',id,{sta
 function capaPodeConferir(){ return (profile&&profile.role==='admin')||canDo('fat-capas-conferir','pode_editar')||canDo('fat-capas-conferir','pode_criar'); }
 function capaNumBR(v){ var s=String(v==null?'':v).trim(); if(s==='') return null; s=s.replace(/\s/g,''); if(/,\d+$/.test(s)) s=s.replace(/\./g,'').replace(',','.'); var n=Number(s); return isNaN(n)||n<0?null:n; }
 var capaDig=null;   // {id, i, perg:[], resp:{}, servs:[], modo:'digitar'|'corrigir'}
+// v1.0.1378: responsáveis financeiros do cliente (Parâmetros › Financeiro). Cada responsável escolhido na capa abre uma
+//            frente de digitação (NF, valor, pallets e serviços dele); com vários tipos de produto, frente = responsável × tipo.
+function capaRespDoCliente(cliId){
+  var c=(clientes||[]).find(function(x){return x.id===cliId;}), p=c&&c.parametros; if(typeof p==='string'){ try{ p=JSON.parse(p); }catch(_e){ p={}; } }
+  var L=(p&&p.financeiro&&p.financeiro.responsaveis)||[]; return Array.isArray(L)?L.map(function(x){return String(x||'').trim();}).filter(Boolean):[];
+}
+function capaRespParse(txt,lista){
+  var out=[], erro=false;
+  String(txt||'').split(/[,;\n]+/).map(function(x){return x.trim();}).filter(Boolean).forEach(function(t){
+    var i=parseInt(t,10), nm=null;
+    if(String(i)===t&&i>=1&&i<=lista.length) nm=lista[i-1];
+    else nm=lista.find(function(x){return fcdNorm(x)===fcdNorm(t);})||null;
+    if(!nm){ var parc=lista.filter(function(x){return fcdNorm(x).indexOf(fcdNorm(t))>=0;}); if(parc.length===1) nm=parc[0]; }
+    if(nm){ if(out.indexOf(nm)<0) out.push(nm); } else erro=true;
+  });
+  return {nomes:out,erro:erro};
+}
+function capaDigMontar(c,servs,resps,listaResp){
+  var exp=c.tipo==='expedicao';
+  var perg=[
+    {k:'local_descarga',t:'Local de '+(exp?'carregamento':'descarga'),tipo:'txt'},   // v1.0.1068: local e operador primeiro
+    {k:'operador_resp',t:'Operador responsável',tipo:'txt'},
+    {k:'valor_nf',t:'Valor total da NF (R$)',tipo:'num',obrig:true},   // v1.0.1071: soma/subtrai no valor em estoque
+    {k:'tem_nf_pallet',t:'Existe nota de pallet?',tipo:'opc',opc:['Sim','Não'],obrig:true},   // v1.0.1143
+    {k:'valor_nf_pallet',t:'Valor da nota de pallet (R$)',tipo:'num',obrig:true,se:function(r){ return r.tem_nf_pallet==='Sim'; }},
+    {k:'nf_numero',t:'NF de '+(exp?'saída':'entrada'),tipo:'txt'},   // v1.0.1130
+    {k:'pallets_movimentados',t:'Pallets '+(exp?'separados':'descarregados'),tipo:'num',obrig:true},
+    {k:'pallets_pbr',t:'Pallets '+(exp?'carregados':'armazenados'),tipo:'num',obrig:true},
+    {k:'qtd_pbr',t:'Pallets PBR',tipo:'num',obrig:true},
+    {k:'qtd_chep',t:'Pallets CHEP',tipo:'num',obrig:true},
+    {k:'qtd_outros',t:'Pallets de outros tipos',tipo:'num',obrig:true},
+    {k:'tipo_carga',t:'Tipo de carga',tipo:'opc',opc:CAPA_CARGA,obrig:true}
+  ];
+  // v1.0.1280 → v1.0.1281: capa com MAIS DE UM tipo de produto → NF, valor, pallets e serviços perguntados por tipo; a capa é UMA só, com os lançamentos quebrados por tipo
+  var _tl=wmsTiposProduto(c.cliente_id), _tm=Array.isArray(c.tipos_produto)?c.tipos_produto:[];
+  var tipos=_tl.filter(function(t){ return _tm.indexOf(t.id)>=0; });
+  // v1.0.1378: frentes = responsáveis × tipos (sem responsáveis, só os tipos, como antes)
+  var _R=(resps&&resps.length)?resps:[null], _T=tipos.length?tipos:[{id:null,nome:''}], split=[];
+  _R.forEach(function(r){ _T.forEach(function(t){ split.push({id:t.id,nome:t.nome,responsavel:r}); }); });
+  var qResp=(listaResp&&listaResp.length)?{k:'responsaveis',t:'Responsáveis desta capa',tipo:'resp',lista:listaResp,obrig:true}:null;
+  if(qResp){ var _io=perg.findIndex(function(q){return q.k==='operador_resp';}); perg.splice(_io+1,0,qResp); }
+  var _rot=function(t){ return [t.responsavel,t.nome].filter(Boolean).join(' · '); };
+  if(split.length>1){
+    var POR_TIPO=['valor_nf','nf_numero','pallets_movimentados','pallets_pbr'];
+    var base=perg.filter(function(q){ return POR_TIPO.indexOf(q.k)<0; }), modelo=perg.filter(function(q){ return POR_TIPO.indexOf(q.k)>=0; });
+    var ini=base.filter(function(q){ return q.k==='local_descarga'||q.k==='operador_resp'||q.k==='responsaveis'; }), fim=base.filter(function(q){ return q.k!=='local_descarga'&&q.k!=='operador_resp'&&q.k!=='responsaveis'; });
+    perg=ini.slice();
+    split.forEach(function(t,ti){
+      var suf=ti===0?'':'__'+ti, pre=(ti+1)+'/'+split.length+' · '+_rot(t)+' — ';
+      modelo.forEach(function(q){ perg.push(Object.assign({},q,{k:q.k+suf,t:pre+q.t,tipoIx:ti})); });
+      servs.forEach(function(sv,ix){ perg.push({k:'serv_'+ix+suf,t:pre+sv.servico,u:sv.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix,tipoIx:ti}); });
+    });
+    perg=perg.concat(fim);
+  } else {
+    var _pre1=_rot(split[0])?(_rot(split[0])+' — '):'';   // v1.0.1337: com um tipo só, o tipo também aparece nas perguntas (v1.0.1378: e o responsável)
+    if(_pre1) perg=perg.map(function(q){ return ['valor_nf','nf_numero','pallets_movimentados','pallets_pbr'].indexOf(q.k)>=0?Object.assign({},q,{t:_pre1+q.t}):q; });
+    servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:_pre1+s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
+  }
+  perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
+  return {perg:perg,frentes:split.length>1?split:null};
+}
 async function capaDigIniciar(id,modo){
   var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
   var servs=await dbSelect('processo_capa_servicos','capa_id=eq.'+id+'&order=ordem.asc').catch(function(){return [];})||[];
@@ -4995,47 +5056,15 @@ async function capaDigIniciar(id,modo){
       }
     }
   }catch(_eExt){ console.warn('mov. extraordinária',_eExt); }
-  var exp=c.tipo==='expedicao';
-  var perg=[
-    {k:'local_descarga',t:'Local de '+(exp?'carregamento':'descarga'),tipo:'txt'},   // v1.0.1068: local e operador primeiro
-    {k:'operador_resp',t:'Operador responsável',tipo:'txt'},
-    {k:'valor_nf',t:'Valor total da NF (R$)',tipo:'num',obrig:true},   // v1.0.1071: soma/subtrai no valor em estoque
-    {k:'tem_nf_pallet',t:'Existe nota de pallet?',tipo:'opc',opc:['Sim','Não'],obrig:true},   // v1.0.1143
-    {k:'valor_nf_pallet',t:'Valor da nota de pallet (R$)',tipo:'num',obrig:true,se:function(r){ return r.tem_nf_pallet==='Sim'; }},
-    {k:'nf_numero',t:'NF de '+(exp?'saída':'entrada'),tipo:'txt'},   // v1.0.1130
-    {k:'pallets_movimentados',t:'Pallets '+(exp?'separados':'descarregados'),tipo:'num',obrig:true},
-    {k:'pallets_pbr',t:'Pallets '+(exp?'carregados':'armazenados'),tipo:'num',obrig:true},
-    {k:'qtd_pbr',t:'Pallets PBR',tipo:'num',obrig:true},
-    {k:'qtd_chep',t:'Pallets CHEP',tipo:'num',obrig:true},
-    {k:'qtd_outros',t:'Pallets de outros tipos',tipo:'num',obrig:true},
-    {k:'tipo_carga',t:'Tipo de carga',tipo:'opc',opc:CAPA_CARGA,obrig:true}
-  ];
-  // v1.0.1280 → v1.0.1281: capa com MAIS DE UM tipo de produto → NF, valor, pallets e serviços perguntados por tipo; a capa é UMA só, com os lançamentos quebrados por tipo
-  var _tl=wmsTiposProduto(c.cliente_id), _tm=Array.isArray(c.tipos_produto)?c.tipos_produto:[];
-  var split=_tl.filter(function(t){ return _tm.indexOf(t.id)>=0; });
-  if(split.length>1){
-    var POR_TIPO=['valor_nf','nf_numero','pallets_movimentados','pallets_pbr'];
-    var base=perg.filter(function(q){ return POR_TIPO.indexOf(q.k)<0; }), modelo=perg.filter(function(q){ return POR_TIPO.indexOf(q.k)>=0; });
-    var ini=base.filter(function(q){ return q.k==='local_descarga'||q.k==='operador_resp'; }), fim=base.filter(function(q){ return q.k!=='local_descarga'&&q.k!=='operador_resp'; });
-    perg=ini.slice();
-    split.forEach(function(t,ti){
-      var suf=ti===0?'':'__'+ti, pre=(ti+1)+'/'+split.length+' · '+t.nome+' — ';
-      modelo.forEach(function(q){ perg.push(Object.assign({},q,{k:q.k+suf,t:pre+q.t,tipoIx:ti})); });
-      servs.forEach(function(sv,ix){ perg.push({k:'serv_'+ix+suf,t:pre+sv.servico,u:sv.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix,tipoIx:ti}); });
-    });
-    perg=perg.concat(fim);
-  } else {
-    var _pre1=split.length===1?(split[0].nome+' — '):'';   // v1.0.1337: com um tipo só, o tipo também aparece nas perguntas
-    if(_pre1) perg=perg.map(function(q){ return ['valor_nf','nf_numero','pallets_movimentados','pallets_pbr'].indexOf(q.k)>=0?Object.assign({},q,{t:_pre1+q.t}):q; });
-    servs.forEach(function(s,ix){ perg.push({k:'serv_'+ix,t:_pre1+s.servico,u:s.unidade_cobranca||'',tipo:'num',obrig:true,serv:ix}); });
-  }
-  perg.push({k:'observacoes',t:'Observações',tipo:'txt'});
+  var _lr=capaRespDoCliente(c.cliente_id), _rsIni=Array.isArray(c.responsaveis)&&c.responsaveis.length?c.responsaveis.filter(function(x){return _lr.indexOf(x)>=0;}):null;   // v1.0.1378
+  var _mm=capaDigMontar(c,servs,_rsIni,_lr), perg=_mm.perg, split=_mm.frentes||[];
   var resp={}; if(c.tem_nf_pallet!=null) resp.tem_nf_pallet=c.tem_nf_pallet?'Sim':'Não';   // v1.0.1143
+  if(_rsIni&&_rsIni.length) resp.responsaveis=_rsIni.join(', ');   // v1.0.1378
   ['valor_nf_pallet','nf_numero','valor_nf','pallets_movimentados','pallets_pbr','qtd_pbr','qtd_chep','qtd_outros','tipo_carga','local_descarga','operador_resp','observacoes'].forEach(function(k){ if(c[k]!=null&&c[k]!=='') resp[k]=String(c[k]); });
   servs.forEach(function(s,ix){ if(s.quantidade!=null) resp['serv_'+ix]=String(s.quantidade); });   // v1.0.1352: capa estornada volta com as quantidades já lançadas
   // v1.0.1281: ao corrigir, os campos por tipo vêm dos lançamentos gravados na capa
   if(split.length>1 && Array.isArray(c.lancamentos_tipo)){
-    split.forEach(function(t,ti){ var suf=ti===0?'':'__'+ti, L=c.lancamentos_tipo.find(function(x){return x.tipo_id===t.id;}); if(!L) return;
+    split.forEach(function(t,ti){ var suf=ti===0?'':'__'+ti, L=c.lancamentos_tipo.find(function(x){return (x.tipo_id||null)===(t.id||null)&&(x.responsavel||null)===(t.responsavel||null);}); if(!L) return;
       if(L.nf_numero!=null) resp['nf_numero'+suf]=String(L.nf_numero); if(L.valor_nf!=null) resp['valor_nf'+suf]=String(L.valor_nf);
       if(L.pallets_movimentados!=null) resp['pallets_movimentados'+suf]=String(L.pallets_movimentados); if(L.pallets_pbr!=null) resp['pallets_pbr'+suf]=String(L.pallets_pbr);
       (L.servicos||[]).forEach(function(sv){ var ix=servs.findIndex(function(x){return x.id===sv.id||x.servico===sv.servico;}); if(ix>=0&&sv.quantidade!=null) resp['serv_'+ix+suf]=String(sv.quantidade); });
@@ -5049,6 +5078,12 @@ function capaDigAvancar(){
   var d=capaDig; if(!d) return; var q=d.perg[d.i]; var el=ge('capa-q'); var v=el?el.value:'';
   var err=ge('capa-q-err'); var falha=function(m){ if(err){ err.textContent=m; } if(el) el.focus(); };
   if(q.tipo==='num'){ var n=capaNumBR(v); if(n==null) return falha(q.serv!=null?'Responda com um número. Se não houve esse serviço, digite 0.':'Responda com um número (0 se não houve).'); d.resp[q.k]=String(n); }
+  else if(q.tipo==='resp'){   // v1.0.1378: responsáveis → reabre as frentes de digitação
+    var _pr=capaRespParse(v,q.lista||[]); if(_pr.erro||!_pr.nomes.length) return falha('Digite os números dos responsáveis separados por vírgula (ex.: 1, 4).');
+    d.resp.responsaveis=_pr.nomes.join(', ');
+    var _c=(capasProcesso||[]).find(function(x){return x.id===d.id;});
+    if(_c){ var _mm=capaDigMontar(_c,d.servs,_pr.nomes,q.lista||[]); d.perg=_mm.perg; d.split=_mm.frentes; d.i=d.perg.findIndex(function(x){return x.k==='responsaveis';}); }
+  }
   else if(q.tipo==='opc'){ var t=String(v).trim(), idx=parseInt(t,10); var op=(idx>=1&&idx<=q.opc.length)?q.opc[idx-1]:q.opc.find(function(o){return fcdNorm(o)===fcdNorm(t);}); if(!op) return falha('Digite '+q.opc.map(function(_o,ix){return ix+1;}).join(', ').replace(/, (\d+)$/,' ou $1')+'.'); d.resp[q.k]=op; }
   else d.resp[q.k]=String(v).trim();
   d.i++;
@@ -5064,14 +5099,14 @@ function capaCabecalhoHtml(c){   // v1.0.1068
   return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);margin-bottom:12px">'
     +cel('Data da operação',c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+cel('Transportadora',c.transportadora)+cel('Motorista',c.motorista)+cel('RG',c.rg)
     +cel('Placa cavalo / carreta',[c.placa_cavalo,c.placa_carreta].filter(Boolean).join(' / '))+cel('DOC',c.doc)+cel('Lacre',c.lacre)+cel('Origem',c.origem)
-    +cel('Tipo de veículo',c.tipo_veiculo)+cel('Tipo de operação',c.tipo_operacao)+cel('Responsável',respNome)+'</div>';
+    +cel('Tipo de veículo',c.tipo_veiculo)+cel('Tipo de operação',c.tipo_operacao)+cel('Responsável',respNome)+(Array.isArray(c.responsaveis)&&c.responsaveis.length?cel('Responsáveis (financeiro)',c.responsaveis.join(', ')):'')+'</div>';
 }
 // v1.0.1281: lançamentos por tipo de produto (uma capa, detalhe por tipo)
 function capaLancTipoMontar(d){
   var r=d.resp, n=function(k){ var v=capaNumBR(r[k]); return v==null?0:v; };
   return (d.split||[]).map(function(t,ti){
     var suf=ti===0?'':'__'+ti;
-    var L={tipo_id:t.id,tipo_nome:t.nome,nf_numero:r['nf_numero'+suf]||null,valor_nf:n('valor_nf'+suf),pallets_movimentados:n('pallets_movimentados'+suf),pallets_pbr:n('pallets_pbr'+suf),
+    var L={tipo_id:t.id,tipo_nome:t.nome,responsavel:t.responsavel||null,nf_numero:r['nf_numero'+suf]||null,valor_nf:n('valor_nf'+suf),pallets_movimentados:n('pallets_movimentados'+suf),pallets_pbr:n('pallets_pbr'+suf),
       servicos:(d.servs||[]).map(function(sv,ix){ return {id:sv.id,servico:sv.servico,unidade:sv.unidade_cobranca||null,quantidade:n('serv_'+ix+suf)}; })};
     L.sem_movimento=!(L.nf_numero&&String(L.nf_numero)!=='0') && !L.valor_nf && !L.pallets_movimentados && !L.pallets_pbr && !L.servicos.some(function(x){return x.quantidade;});
     return L;
@@ -5088,10 +5123,11 @@ function capaLancTipoHtml(lanc,revisao){   // v1.0.1283: um bloco por tipo (cabe
   var servs=function(L){ var com=L.filter(function(x){return Number(x.quantidade)>0;}), sem=L.length-com.length;
     return '<div style="padding:6px 12px 10px;font-size:12.5px">'+(com.length?com.map(function(x){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0"><span>'+ecomEsc(x.servico||'')+(x.unidade?' <small style="color:var(--text3)">('+ecomEsc(x.unidade)+')</small>':'')+'</span><b>'+nb(x.quantidade)+'</b></div>'; }).join(''):'<div style="color:var(--text3);padding:4px 0">nenhum serviço com quantidade</div>')
       +(sem>0?'<div style="font-size:11px;color:var(--text3);margin-top:4px">+ '+sem+' serviço(s) sem quantidade</div>':'')+'</div>'; };
-  var h='<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin:4px 0 6px">LANÇAMENTOS POR TIPO DE PRODUTO · '+vivos.length+' tipo(s)</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:14px">';
+  var _temR=lanc.some(function(L){return L.responsavel;}), _rotL=function(L){ return [L.responsavel,L.tipo_nome].filter(Boolean).join(' · '); };   // v1.0.1378
+  var h='<div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin:4px 0 6px">'+(_temR?'LANÇAMENTOS POR FRENTE · '+vivos.length+' frente(s)':'LANÇAMENTOS POR TIPO DE PRODUTO · '+vivos.length+' tipo(s)')+'</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:14px">';
   lanc.forEach(function(L,ti){
     h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;'+(L.sem_movimento?'opacity:.55':'')+'">'
-      +'<div style="background:var(--bg2);padding:9px 12px;display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b style="font-size:14px">'+ecomEsc(L.tipo_nome||'')+'</b><span style="font-size:11px;color:var(--text3)">'+(L.sem_movimento?'sem movimento · não entra':'tipo '+(ti+1)+' de '+lanc.length)+'</span></div>'
+      +'<div style="background:var(--bg2);padding:9px 12px;display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b style="font-size:14px">'+ecomEsc(_rotL(L))+'</b><span style="font-size:11px;color:var(--text3)">'+(L.sem_movimento?'sem movimento · não entra':(_temR?'frente ':'tipo ')+(ti+1)+' de '+lanc.length)+'</span></div>'
       +(L.sem_movimento?'':cab(L.nf_numero,L.valor_nf,L.pallets_movimentados)+servs(L.servicos||[]))+'</div>';
   });
   // total da capa
@@ -5159,6 +5195,7 @@ function capaDigTela(c){
     +'<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3)"><span>'+(q.serv!=null?'SERVIÇO':'DADOS DA CARGA')+'</span><span>pergunta '+(d.i+1)+' de '+tot+'</span></div>'
     +'<div style="height:6px;background:var(--bg3);border-radius:99px;margin:8px 0 16px;overflow:hidden"><div style="width:'+pc+'%;height:6px;background:var(--blue-text)"></div></div>'
     +'<div style="font-size:21px;font-weight:700;margin-bottom:10px">'+ecomEsc(q.t)+(q.u?' <span style="font-size:14px;color:var(--text3);font-weight:400">('+ecomEsc(q.u)+')</span>':'')+'</div>'
+    +(q.tipo==='resp'?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px 14px;font-size:13px;color:var(--text2);margin-bottom:10px;max-height:240px;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">'+(q.lista||[]).map(function(o,ix){return '<div><b style="color:var(--blue-text)">'+(ix+1)+'</b> · '+ecomEsc(o)+'</div>';}).join('')+'</div><div style="font-size:12px;color:var(--text3);margin-bottom:6px">Cada responsável abre uma frente de digitação (NF, valor, pallets e serviços dele). Ex.: 1, 4</div>':'')
     +(q.tipo==='opc'?'<div style="font-size:13px;color:var(--text2);margin-bottom:8px">'+q.opc.map(function(o,ix){return '<b>'+(ix+1)+'</b> · '+ecomEsc(o);}).join(' &nbsp; ')+'</div>':'')
     +((d.duvidas&&d.duvidas[q.k])?'<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:7px 10px;margin-bottom:8px;font-size:12.5px">⚠ Lido da foto com dúvida: '+ecomEsc(d.duvidas[q.k])+'. Confira na foto.</div>':'')
     +'<input id="capa-q" class="fi" autocomplete="off" '+(q.tipo==='num'?'inputmode="decimal"':'')+' value="'+ecomEsc(val)+'" onkeydown="capaDigTecla(event)" style="font-size:24px;height:56px;padding:0 14px">'
@@ -5193,10 +5230,12 @@ async function capaDigFinalizar(acao){
     dados.pallets_movimentados=_vivos.reduce(function(a,L){return a+(+L.pallets_movimentados||0);},0);
     dados.pallets_pbr=_vivos.reduce(function(a,L){return a+(+L.pallets_pbr||0);},0);
     dados.nf_numero=_vivos.map(function(L){return L.nf_numero;}).filter(function(x){return x&&String(x)!=='0';}).join(' / ')||null;
-    if(acao!=='devolver') dados.tipos_produto=_vivos.map(function(L){return L.tipo_id;});
+    if(acao!=='devolver'){ var _tp=[]; _vivos.forEach(function(L){ if(L.tipo_id&&_tp.indexOf(L.tipo_id)<0) _tp.push(L.tipo_id); }); if(_tp.length) dados.tipos_produto=_tp; }   // v1.0.1378: sem repetir o tipo entre responsáveis
   }
+  if(r.responsaveis) dados.responsaveis=String(r.responsaveis).split(',').map(function(x){return x.trim();}).filter(Boolean);   // v1.0.1378
   try{
-    await dbUpdate('processo_capas',c.id,dados); Object.assign(c,dados);
+    try{ await dbUpdate('processo_capas',c.id,dados); }catch(_eR){ if(dados.responsaveis&&/responsaveis/.test(String(_eR&&_eR.message))){ delete dados.responsaveis; await dbUpdate('processo_capas',c.id,dados); showToast('Rode o SQL da coluna responsaveis em processo_capas — os responsáveis ficaram só nos lançamentos.','amber'); } else throw _eR; }
+    Object.assign(c,dados);
     for(var ix=0;ix<d.servs.length;ix++){ var q=_lanc?_lanc.filter(function(L){return !L.sem_movimento;}).reduce(function(a,L){return a+(+(L.servicos[ix]||{}).quantidade||0);},0):n('serv_'+ix); await dbUpdate('processo_capa_servicos',d.servs[ix].id,{quantidade:q,realizado:q>0}); }   // v1.0.1281: soma dos tipos
     // v1.0.1280: tipos a mais → capas novas, já digitadas, ligadas a esta pela origem
     var _novas=[];
@@ -7513,8 +7552,17 @@ async function cparLoad(clienteId){
 function cparRender(){
   var el=ge('cli-tab-params-content'); if(!el) return;
   var tab=function(k,t){ var on=cparSub===k; return '<button class="tab'+(on?' active':'')+'" onclick="cparSub=\''+k+'\';cparRender()">'+t+'</button>'; };
-  var corpo=cparSub==='op'?cparOpHtml():cparSub==='etq'?cparEtqHtml():cparSub==='cod'?cparCodHtml():cparAutoHtml();
-  el.innerHTML='<div class="tabs" style="margin-bottom:12px">'+tab('op','Operação')+tab('etq','Etiquetas')+tab('cod','Códigos de produto')+tab('auto','Automações')+'</div>'+corpo;
+  var corpo=cparSub==='op'?cparOpHtml():cparSub==='etq'?cparEtqHtml():cparSub==='cod'?cparCodHtml():cparSub==='fin'?cparFinHtml():cparAutoHtml();
+  el.innerHTML='<div class="tabs" style="margin-bottom:12px">'+tab('op','Operação')+tab('etq','Etiquetas')+tab('cod','Códigos de produto')+tab('fin','Financeiro')+tab('auto','Automações')+'</div>'+corpo;
+}
+// v1.0.1378: Financeiro — responsáveis que a digitação da capa oferece (cada um abre uma frente de NF, valor, pallets e serviços)
+function cparFinHtml(){
+  var L=(cparP().financeiro||{}).responsaveis||[];
+  return '<div style="font-weight:600;margin-bottom:2px">Responsáveis da capa de processo</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:8px">Um nome por linha. Na digitação da capa, logo antes do valor da nota, o financeiro escolhe pelo número quais responsáveis estão na carga; cada um abre uma frente de digitação. Lista vazia: a capa segue sem essa pergunta.</div>'
+    +'<textarea class="fi" id="cpar-fin-resp" rows="14" style="font-size:13px;line-height:1.5" placeholder="Claudinei Molinari&#10;…">'+cparEsc(L.join('\n'))+'</textarea>'
+    +'<div style="font-size:11px;color:var(--text3);margin:4px 0 10px">'+L.length+' responsável(is) cadastrado(s).</div>'
+    +'<button class="btn btn-p btn-sm" onclick="cparSalvarParams(\'financeiro\')">Salvar financeiro</button>';
 }
 function cparSel(id,val,opts){ return '<select class="fi" id="'+id+'">'+opts.map(function(o){return '<option value="'+o[0]+'"'+(String(val)===String(o[0])?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
 function cparOpHtml(){
@@ -7585,6 +7633,7 @@ function cparLeituraTestar(){
 async function cparSalvarParams(sec){
   var p=Object.assign({},cparP());
   if(sec==='operacao') p.operacao={regra_saida:ge('cpar-regra').value,onda:ge('cpar-onda').value,fora_multiplo:ge('cpar-multiplo').value,obs:ge('cpar-obs').value.trim()};
+  if(sec==='financeiro'){ var _vis=[]; String(ge('cpar-fin-resp').value||'').split(/\n+/).map(function(x){return x.trim();}).filter(Boolean).forEach(function(x){ if(!_vis.some(function(y){return fcdNorm(y)===fcdNorm(x);})) _vis.push(x); }); p.financeiro=Object.assign({},p.financeiro||{},{responsaveis:_vis}); }   // v1.0.1378
   if(sec==='etiquetas'){
     p.etiquetas={modelo_embarque:ge('cpar-etq-modelo').value,origem:ge('cpar-etq-origem').value,imprimir_caixa:!!ge('cpar-etq-cx').checked,imprimir_pallet:!!ge('cpar-etq-pl').checked};
   }
