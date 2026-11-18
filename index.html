@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1386 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1388 | Gerado: 2026-11-18 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1386';
+const APP_VERSION='v1.0.1388';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38552,7 +38552,10 @@ async function colRgCarregar(listaId){
 var _rec=null, _arm=null;
 function recParseQr(raw){ var t=String(raw||'').trim(); if(t.indexOf('&')<0) return null; var p=t.split('&'); if(p.length<4) return null;
   var q=Number(String(p[3]||'').replace(',','.')); if(!p[0]||!(q>0)) return null; return {raw:t,id:p[0].trim(),lote:(p[2]||'').trim(),qtd:q,wo:String(p[6]||'').replace(/^01/,'')}; }
-function recEhRg(raw){ return /^\d{6,7}$/.test(String(raw||'').trim()); }
+// v1.0.1388: o RG bipado pode vir com prefixo P/P-, com o prefixo 95xx da etiqueta antiga ou com zeros à esquerda
+//            (a separação já aceitava; o recebimento só aceitava 6 ou 7 dígitos secos e recusava o bipe)
+function recRgNum(raw){ var d=String(raw||'').trim().replace(/^P-?/i,'').replace(/[\s.]/g,''); if(!/^\d+$/.test(d)) return null; if(/^95\d{2}\d{4,}$/.test(d)) d=d.slice(4); d=d.replace(/^0+/,''); return /^\d{5,8}$/.test(d)?d:null; }
+function recEhRg(raw){ return !!recRgNum(raw); }
 function recEhPn(raw){ return /^\d{10}-\d{2}S?$/i.test(String(raw||'').trim()); }
 async function coletorRecListas(){
   _colScanHandler=null; _rec=null;
@@ -38574,10 +38577,14 @@ function coletorRecMarcar(id){ window._recSel=window._recSel||[]; var i=window._
 async function coletorRecAbrir(){
   var ids=(window._recSel||[]).slice(); if(!ids.length){ showToast('Marque pelo menos uma nota','amber'); return; }
   var itens=[]; try{ itens=await dbSelect('wms_entrada_itens','entrada_id=in.('+ids.join(',')+')&select=entrada_id,sku,qtd_prevista')||[]; }catch(e){}
-  _rec={ids:ids,itens:itens,passo:'qr',qr:null,sku:null,rg:null,resumo:[],log:[],msg:null,ultima:null};
+  var ents=[]; try{ ents=await dbSelect('wms_entradas','id=in.('+ids.join(',')+')&select=id,depositante_id')||[]; }catch(e){}
+  var gate=ents.some(function(e){ return recParam(e.depositante_id,'receb_liberar_pn'); });   // v1.0.1387
+  _rec={ids:ids,itens:itens,passo:'qr',qr:null,sku:null,rg:null,resumo:[],log:[],msg:null,ultima:null,conf:[],cd:null,gate:gate};
   await coletorRecResumo(); coletorRecRender();
 }
-async function coletorRecResumo(){ try{ _rec.resumo=await dbRpc('wms_receb_resumo',{p_entradas:_rec.ids})||[]; }catch(e){ _rec.msg={t:'erro',x:'Resumo: '+(e.message||e)}; } }
+async function coletorRecResumo(){ var R=_rec; if(!R) return;
+  try{ R.resumo=await dbRpc('wms_receb_resumo',{p_entradas:R.ids})||[]; }catch(e){ R.msg={t:'erro',x:'Resumo: '+recErr(e)}; }
+  try{ R.conf=await dbRpc('wms_receb_conferentes',{p_entradas:R.ids})||[]; }catch(e){ R.conf=R.conf||[]; } }
 function coletorRecRender(){
   var R=_rec, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
   var tot=R.resumo.reduce(function(a,x){return a+(+x.caixas||0);},0);
@@ -38590,8 +38597,7 @@ function coletorRecRender(){
       +'<div style="font-size:11px;color:var(--text3)">caixa '+ecomEsc(R.qr.id)+'</div></div>'):'';
   var msg=R.msg?'<div style="padding:9px 10px;border-radius:10px;margin-bottom:10px;font-size:13px;font-weight:600;background:'+(R.msg.t==='erro'?'var(--red-bg)':R.msg.t==='ok'?'var(--green-bg)':'var(--amber-bg)')+';color:'+(R.msg.t==='erro'?'var(--red-text)':R.msg.t==='ok'?'var(--green-text)':'var(--amber-text)')+'">'+ecomEsc(R.msg.x)+'</div>':'';
   var btn='<button type="button" id="col-acao-btn" onclick="'+(coletorCamSuporta()?'coletorCamToggle(coletorScanSubmit)':'coletorDigitar()')+'" style="display:block;width:100%;padding:18px 10px;border:0;border-radius:16px;text-align:center;background:'+ps[2]+';color:#fff;cursor:pointer;margin-bottom:12px"><div style="font-size:16px;font-weight:800">'+ps[0]+'</div><div style="font-size:11px;opacity:.85">'+ps[1]+'</div></button>';
-  var tab='<div style="font-size:11px;color:var(--text3);margin:4px 0">Conferido × nota · '+tot+' caixa(s)</div>'+R.resumo.map(function(x){ var ok=Number(x.conferido)===Number(x.previsto)&&Number(x.previsto)>0, sobra=Number(x.conferido)>Number(x.previsto);
-      return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span>'+ecomEsc(x.sku)+'</span><b style="color:'+(ok?'var(--green-text)':sobra?'var(--red-text)':'var(--text)')+'">'+nb(x.conferido)+'/'+nb(x.previsto)+'</b></div>'; }).join('');
+  var tab='<div id="rec-tab">'+recTabHtml(R)+'</div>';   // v1.0.1387
   var rod='<div style="display:flex;gap:8px;margin-top:12px">'+(R.ultima?'<button onclick="coletorRecDesfazer()" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:12px">↩ Desfazer a última caixa</button>':'')
     +(R.passo!=='qr'?'<button onclick="_rec.passo=\'qr\';_rec.qr=null;_rec.sku=null;_rec.rg=null;_rec.msg=null;coletorRecRender()" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:12px">✕ Recomeçar esta caixa</button>':'')
     +'</div><button onclick="coletorRecEstornoAbrir()" style="display:block;width:100%;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);font-size:12.5px">↩ Estornar caixa pelo RG</button>'
@@ -38615,37 +38621,133 @@ function coletorRecRender(){
     _colScanHandler=coletorRecEstornoBipe; return;
   }
   window._colTeclado=(R.passo==='rg')?'numeric':'text';
-  coletorShow('Receber','coletorRecListas()',coletorScanBox()+msg+card+btn+tab+rod);
+  coletorShow('Receber','coletorRecListas()',coletorScanBox()+msg+'<div id="rec-conf">'+recConfHtml(R)+'</div>'+(R.cd?recCdHtml(R):(card+btn))+tab+rod);   // v1.0.1387
+  recTimerStart();
   setTimeout(function(){ var bb=ge('col-bigbtn'); if(bb) bb.style.display='none'; var i=ge('col-scan'); if(i){ try{i.focus({preventScroll:true});}catch(e){} } },30);
   _colScanHandler=coletorRecBipe;
 }
 async function coletorRecBipe(raw){
   var R=_rec; if(!R) return; raw=String(raw||'').trim(); R.msg=null; coletorCamStop();
   var aviso=function(t,x){ R.msg={t:t,x:x}; if(navigator.vibrate) navigator.vibrate(t==='erro'?[60,40,60]:40); if(typeof wmsBeep==='function') wmsBeep(t==='erro'); coletorRecRender(); };
+  if(R.cd) return aviso('erro','Antes da próxima caixa: toque em "Levei para o cross-docking" ou em "Armazenar normal".');   // v1.0.1387
   if(R.passo==='qr'){ var q=recParseQr(raw); if(!q) return aviso('erro','Isso não é o QR da caixa. Bipe o QR (quadrado) da etiqueta.'); R.qr=q; R.passo='pn'; return coletorRecRender(); }
   if(R.passo==='pn'){
     if(recParseQr(raw)) return aviso('erro','Agora é o CUST P/N (código de barras com o código da CASCO).');
     if(recEhRg(raw)) return aviso('erro','Isso é um RG. Antes, bipe o CUST P/N da etiqueta da caixa.');
     var sku=raw.toUpperCase(); var naNota=R.itens.some(function(i){return String(i.sku||'').trim().toUpperCase()===sku;});
     R.sku=sku; R.passo='rg'; if(!naNota) R.msg={t:'aviso',x:sku+' não está nas notas desta carga: vai como sobra.'}; return coletorRecRender(); }
-  if(R.passo==='rg'){ if(!recEhRg(raw)) return aviso('erro','Bipe a etiqueta do RG (número de 6 ou 7 dígitos).'); R.rg=raw; R.passo='conf'; return coletorRecRender(); }
+  if(R.passo==='rg'){ if(!recEhRg(raw)) return aviso('erro','Isso não parece um RG. Bipe a etiqueta do RG. Leitura recebida: "'+raw.slice(0,40)+'"'); R.rg=recRgNum(raw); R.passo='conf'; return coletorRecRender(); }
   if(R.passo==='conf'){
     var q2=recParseQr(raw); if(!q2) return aviso('erro','Confirme bipando o QR da MESMA caixa.');
     if(q2.id!==R.qr.id){ R.passo='rg'; R.rg=null; return aviso('erro','QR de outra caixa! O RG foi colado na caixa errada? Confira, cole o RG na caixa certa e bipe o RG de novo.'); }
     var ent=(R.itens.find(function(i){return String(i.sku||'').trim().toUpperCase()===R.sku;})||{}).entrada_id||R.ids[0];
     try{
       var r=await dbRpc('wms_receber_caixa',{p_entrada:ent,p_qr:R.qr.raw,p_sku:R.sku,p_rg:Number(R.rg),p_operador:coletorAutor()});
-      R.ultima=r&&r.pallet_id?r:null; R.log.unshift(r); var tx='✓ Caixa RG '+R.rg+' · '+R.sku+' · '+Number(R.qr.qtd).toLocaleString('pt-BR')+' pç';
+      R.ultima=r&&r.pallet_id?r:null; R.log.unshift(r);
+      if(r&&r.cd&&r.pallet_id) R.cd={pallet_id:r.pallet_id,rg:R.rg,sku:R.sku,qtd:Number(R.qr.qtd)||0,pedido:r.cd.numero,falta:Number(r.cd.falta)||0,endereco:r.cd_endereco};   // v1.0.1387
+      var tx='✓ Caixa RG '+R.rg+' · '+R.sku+' · '+Number(R.qr.qtd).toLocaleString('pt-BR')+' pç';
       R.passo='qr'; R.qr=null; R.sku=null; R.rg=null; await coletorRecResumo(); return aviso('ok',tx);
     }catch(e){ var m=String(e.message||e); if(/RG .* já está em uso/i.test(m)){ R.passo='rg'; R.rg=null; } else if(/já foi conferida/i.test(m)){ R.passo='qr'; R.qr=null; R.sku=null; R.rg=null; } return aviso('erro',m.replace(/^.*?:\s*(?=[A-ZÁÉÍÓÚ])/,'')); }
   }
+}
+// ═══ v1.0.1387 · RECEBIMENTO PARCIAL POR P/N · VÁRIOS CONFERENTES · CROSS-DOCKING ═══
+//  • Liberar P/N (comando, sem senha): libera o que já foi conferido do P/N para armazenar/separar, com a nota aberta
+//  • vários logins na mesma carga: faixa de conferentes, quadro atualizado sozinho e trava no fechamento
+//  • cross-docking: caixa inteira que cabe na falta de um pedido "aguardando saldo" vai para o endereço virtual CD-NF<nota>
+//  Tudo por parâmetro do depositante (receb_liberar_pn / receb_crossdock), desligado por padrão.
+function recParam(clienteId,chave){ var c=(clientes||[]).find(function(x){return x.id===clienteId;}), pr=(c&&c.parametros)||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr[chave]===true||pr[chave]==='true'; }
+function recErr(e){ return String((e&&e.message)||e||'').replace(/^\[rpc [^\]]+\]\s*/,''); }
+function recHora(iso){ if(!iso) return ''; var d=new Date(iso); return isNaN(d)?'':d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+function recDataHora(iso){ if(!iso) return '—'; var d=new Date(iso); return isNaN(d)?'—':(d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})); }
+function recHa(iso){ if(!iso) return ''; var m=Math.max(0,Math.round((Date.now()-new Date(iso).getTime())/60000)); return m<60?(m+' min'):(Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')); }
+function recConfHtml(R){
+  var cf=(R&&R.conf)||[]; if(cf.length<2) return '';
+  return '<div style="background:var(--blue-bg);color:var(--blue-text);border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:12px;font-weight:600">'+cf.length+' conferentes nesta carga · '
+    +cf.map(function(c){ return ecomEsc(String(c.nome||'—').split(' ')[0])+' '+Number(c.caixas||0).toLocaleString('pt-BR')+' cx'; }).join(' · ')+'</div>';
+}
+function recTabHtml(R){
+  var nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var tot=R.resumo.reduce(function(a,x){return a+(+x.caixas||0);},0);
+  var pill=function(bg,cor,txt){ return '<span style="font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap;background:'+bg+';color:'+cor+'">'+txt+'</span>'; };
+  return '<div style="font-size:11px;color:var(--text3);margin:4px 0">Conferido × nota · '+tot+' caixa(s)</div>'+R.resumo.map(function(x,ix){
+    var ok=Number(x.conferido)===Number(x.previsto)&&Number(x.previsto)>0, sobra=Number(x.conferido)>Number(x.previsto);
+    var ps='';
+    if(Number(x.pedidos_aguardando)>0) ps+=pill('var(--amber-bg)','var(--amber-text)',nb(x.pedidos_aguardando)+' pedido'+(Number(x.pedidos_aguardando)>1?'s':'')+' aguardando');
+    if(Number(x.cd)>0) ps+=pill('var(--blue-bg)','var(--blue-text)',nb(x.cd)+' cx no cross-docking');
+    var dir='';
+    if(R.gate){
+      if(Number(x.a_liberar)>0) dir='<button onclick="coletorRecLiberar('+ix+')" style="padding:6px 12px;border:1px solid #1e3a8a;border-radius:9px;background:var(--bg);color:#1e3a8a;font-size:12px;font-weight:700;cursor:pointer">Liberar P/N'+(Number(x.liberadas)>0?' · +'+nb(x.a_liberar)+' cx':'')+'</button>';
+      else if(Number(x.liberadas)>0) dir=pill('var(--green-bg)','var(--green-text)','liberado '+recHora(x.liberado_em));
+    }
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px">'
+      +'<span style="min-width:0"><span style="font-family:monospace">'+ecomEsc(x.sku)+'</span>'+(ps?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">'+ps+'</div>':'')+'</span>'
+      +'<span style="text-align:right;white-space:nowrap"><b style="color:'+(ok?'var(--green-text)':sobra?'var(--red-text)':'var(--text)')+'">'+nb(x.conferido)+'/'+nb(x.previsto)+'</b>'+(dir?'<div style="margin-top:4px">'+dir+'</div>':'')+'</span></div>';
+  }).join('');
+}
+function recCdHtml(R){
+  var c=R.cd, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  return '<div style="border:2px solid #b45309;border-radius:14px;padding:12px;margin-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:800;color:#b45309">NÃO ARMAZENAR · CROSS-DOCKING</div>'
+    +'<div style="font-size:26px;font-weight:900;font-family:monospace;margin:4px 0 2px">'+ecomEsc(c.endereco||'CD')+'</div>'
+    +'<div style="font-size:13.5px">Pedido <b>OS '+ecomEsc(c.pedido||'—')+'</b> · faltam '+nb(c.falta)+' pç deste P/N</div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:4px">Caixa RG '+ecomEsc(c.rg)+' · '+ecomEsc(c.sku)+' · '+nb(c.qtd)+' pç · cabe inteira na falta do pedido.</div></div>'
+    +'<button type="button" onclick="coletorRecCdOk()" style="display:block;width:100%;padding:18px 10px;border:0;border-radius:16px;text-align:center;background:#b45309;color:#fff;cursor:pointer;margin-bottom:8px"><div style="font-size:16px;font-weight:800">Levei para o cross-docking</div><div style="font-size:11px;opacity:.9">a caixa fica em '+ecomEsc(c.endereco||'CD')+', empenhada na OS '+ecomEsc(c.pedido||'')+'</div></button>'
+    +'<button type="button" onclick="coletorRecCdNao()" style="display:block;width:100%;padding:11px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-size:12.5px;margin-bottom:12px;cursor:pointer">Armazenar normal (não vai para o cross-docking)</button>';
+}
+function recTimerStart(){
+  if(window._recTimer) return;
+  window._recTimer=setInterval(async function(){
+    var R=_rec; if(!R){ clearInterval(window._recTimer); window._recTimer=null; return; }
+    if(!ge('rec-tab')||R.estorno||R._busy) return;
+    R._busy=true;
+    try{
+      var a=await dbRpc('wms_receb_resumo',{p_entradas:R.ids}); var c=R.conf; try{ c=await dbRpc('wms_receb_conferentes',{p_entradas:R.ids})||[]; }catch(_e){}
+      if(_rec!==R) return;
+      if(Array.isArray(a)) R.resumo=a; R.conf=c||[];
+      var t=ge('rec-tab'); if(t) t.innerHTML=recTabHtml(R); var cf=ge('rec-conf'); if(cf) cf.innerHTML=recConfHtml(R);
+    }catch(_e){} finally{ R._busy=false; }
+  },10000);
+}
+async function coletorRecCdOk(){
+  var R=_rec; if(!R||!R.cd||R._cdBusy) return; var c=R.cd; R._cdBusy=true;
+  try{
+    var r=await dbRpc('wms_cd_confirmar',{p_pallet:c.pallet_id,p_operador:coletorAutor()});
+    R.cd=null; R.ultima=null;
+    R.msg={t:'ok',x:'✓ RG '+c.rg+' em '+((r&&r.endereco)||c.endereco)+' · empenhada na OS '+((r&&r.pedido)||c.pedido)+(r&&Number(r.pedidos_completos)>0?' · pedido completo: liberado para separar':'')};
+    await coletorRecResumo();
+  }catch(e){
+    var m=recErr(e); R.msg={t:'erro',x:m};
+    if(/já foi atendido|não cabe mais|já saiu do recebimento/i.test(m)) R.cd=null;
+  }finally{ R._cdBusy=false; }
+  coletorRecRender();
+}
+function coletorRecCdNao(){
+  var R=_rec; if(!R||!R.cd) return; var c=R.cd; R.cd=null;
+  R.msg={t:'aviso',x:'Caixa RG '+c.rg+' segue para a armazenagem normal.'}; coletorRecRender();
+}
+async function coletorRecLiberar(ix){
+  var R=_rec; if(!R) return; var x=R.resumo[ix]; if(!x) return;
+  var nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  var nCd=Number(x.cd_a_liberar||0), nArm=Math.max(0,Number(x.a_liberar||0)-nCd), falta=Number(x.previsto||0)-Number(x.conferido||0);
+  var linha=function(k,v){ return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>'+k+'</span><b>'+v+'</b></div>'; };
+  var html='Conferido até agora: <b>'+nb(x.conferido)+' de '+nb(x.previsto)+' pç</b> · '+nb(x.caixas)+' caixa(s)'
+    +'<div style="margin-top:8px">'+linha('Para cross-docking',nb(nCd)+' caixa(s)')+linha('Para armazenar',nb(nArm)+' caixa(s)')+'</div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">'+(falta>0?('A nota continua aberta: as '+nb(falta)+' pç restantes podem ser liberadas depois. '):'A nota continua aberta. ')+'Fica registrado quem liberou e quando.</div>';
+  if(!(await vConfirmar('Liberar '+x.sku+'?',html,'Liberar','#1e3a8a'))) return;
+  try{
+    var r=await dbRpc('wms_receb_liberar_pn',{p_entradas:R.ids,p_sku:x.sku,p_operador:coletorAutor()});
+    R.msg={t:'ok',x:'✓ '+x.sku+' liberado: '+nb(r&&r.caixas)+' caixa(s)'+(r&&Number(r.cd)>0?' · '+nb(r.cd)+' no cross-docking':'')+(r&&Number(r.armazenar)>0?' · '+nb(r.armazenar)+' para armazenar':'')+(r&&Number(r.pedidos_completos)>0?' · '+nb(r.pedidos_completos)+' pedido(s) completo(s), liberado(s) para separar':'')};
+    await coletorRecResumo();
+  }catch(e){ R.msg={t:'erro',x:recErr(e)}; }
+  coletorRecRender();
 }
 function coletorRecEstornoAbrir(){ if(!_rec) return; _rec.estorno={pal:null}; _rec.msg=null; coletorRecRender(); }
 function coletorRecEstornoSair(){ if(!_rec) return; _rec.estorno=null; _rec.msg=null; coletorRecRender(); }
 async function coletorRecEstornoBipe(raw){
   var R=_rec; if(!R||!R.estorno) return; raw=String(raw||'').trim(); coletorCamStop();
   var erro=function(x){ R.msg={t:'erro',x:x}; if(navigator.vibrate) navigator.vibrate([60,40,60]); if(typeof wmsBeep==='function') wmsBeep(true); coletorRecRender(); };
-  if(!recEhRg(raw)) return erro('Informe o RG (número de 6 ou 7 dígitos).');
+  if(!recEhRg(raw)) return erro('Informe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
+  raw=recRgNum(raw);   // v1.0.1388
   try{
     var P=(await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+Number(raw)+'&status=neq.morto&select=id,rg,status,endereco_codigo,codigo_externo,conferente_nome,nascido_em,entrada_id&limit=1'))||[];
     var pal=P[0]; if(!pal) return erro('Não há caixa com o RG '+raw+' no sistema.');
@@ -38675,13 +38777,20 @@ async function coletorRecDesfazer(){
 }
 async function coletorRecFechar(){
   var R=_rec; if(!R) return; await coletorRecResumo();
+  var nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
   var dv=R.resumo.filter(function(x){return Number(x.conferido)!==Number(x.previsto);});
-  var txt=dv.length?('Há divergência com a nota:\n'+dv.slice(0,12).map(function(x){ var d=Number(x.conferido)-Number(x.previsto); return '• '+x.sku+': '+(d>0?'sobra ':'falta ')+Math.abs(d).toLocaleString('pt-BR'); }).join('\n')+'\n\nO conferido entra e a diferença fica registrada para a CASCO.'):'Tudo bate com a nota. Fechar o recebimento?';
-  if(!confirm(txt)) return;
+  var html=dv.length?('Há divergência com a nota:<div style="margin:8px 0">'+dv.slice(0,12).map(function(x){ var d=Number(x.conferido)-Number(x.previsto); return '• '+ecomEsc(x.sku)+': '+(d>0?'sobra ':'falta ')+nb(Math.abs(d)); }).join('<br>')+'</div>O conferido entra e a diferença fica registrada para o cliente.'):'Tudo bate com a nota.';
+  var pend=R.gate?R.resumo.reduce(function(a,x){return a+Number(x.a_liberar||0);},0):0;   // v1.0.1387
+  if(pend) html+='<div style="margin-top:8px">'+nb(pend)+' caixa(s) ainda sem "Liberar P/N" serão liberadas ao fechar.</div>';
+  if(!(await vConfirmar('Fechar o recebimento?',html,'Fechar','#1e3a8a'))) return;
   var resp=coletorAutor();
-  if(dv.length){ resp=prompt('Divergência: nome do supervisor que autoriza fechar',''); if(!resp) return; }
-  try{ var r=await dbRpc('wms_receb_fechar',{p_entradas:R.ids,p_responsavel:resp}); showToast('Recebimento fechado'+(dv.length?' com '+dv.length+' divergência(s)':'')+'. Falta armazenar as caixas.','green'); window._recSel=[]; coletorRecListas(); }
-  catch(e){ R.msg={t:'erro',x:String(e.message||e)}; coletorRecRender(); }
+  if(dv.length){ resp=await vPerguntar('Divergência no recebimento','Nome do supervisor que autoriza fechar','',true); if(!resp) return; }
+  try{
+    var r;
+    try{ r=await dbRpc('wms_receb_fechar',{p_entradas:R.ids,p_responsavel:resp,p_operador:coletorAutor()}); }
+    catch(e1){ if(/PGRST202|schema cache|Could not find the function/i.test(String(e1&&e1.message||e1))) r=await dbRpc('wms_receb_fechar',{p_entradas:R.ids,p_responsavel:resp}); else throw e1; }
+    showToast('Recebimento fechado'+(dv.length?' com '+dv.length+' divergência(s)':'')+'. Falta armazenar as caixas.','green'); window._recSel=[]; coletorRecListas();
+  }catch(e){ R.msg={t:'erro',x:recErr(e)}; coletorRecRender(); }
 }
 // armazenagem (sugestão manual por enquanto: parâmetro armazenagem_sugestao do depositante)
 function coletorArmAbrir(){ _arm={passo:'rg',rg:null,info:null,msg:null,log:[]}; coletorArmRender(); }
@@ -38701,7 +38810,8 @@ async function coletorArmBipe(raw){
   var A=_arm; if(!A) return; raw=String(raw||'').trim(); A.msg=null; coletorCamStop();
   var erro=function(x){ A.msg={t:'erro',x:x}; if(navigator.vibrate) navigator.vibrate([60,40,60]); if(typeof wmsBeep==='function') wmsBeep(true); coletorArmRender(); };
   if(A.passo==='rg'){
-    if(!/^\d{5,8}$/.test(raw)) return erro('Bipe o RG da caixa.');
+    if(!recRgNum(raw)) return erro('Bipe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
+    raw=recRgNum(raw);   // v1.0.1388
     try{ var p=await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+raw+'&status=neq.morto&select=id,rg,endereco_codigo,status&limit=1'); p=(p||[])[0];
       if(!p) return erro('RG '+raw+' não encontrado.');
       var c=(await dbSelect('wms_pallet_conteudo','pallet_id=eq.'+p.id+'&select=sku,descricao,qtd_fiscal&limit=1')||[])[0]||{};
@@ -38709,11 +38819,11 @@ async function coletorArmBipe(raw){
     }catch(e){ erro(String(e.message||e)); }
     return;
   }
-  if(/^\d{6,7}$/.test(raw)&&raw!==A.rg) return erro('Isso é outro RG. Bipe a etiqueta do endereço (ou toque em ✕ para trocar de caixa).');
+  var _outroRg=recRgNum(raw); if(_outroRg&&/^\d{6,7}$/.test(_outroRg)&&_outroRg!==A.rg) return erro('Isso é outro RG. Bipe a etiqueta do endereço (ou toque em ✕ para trocar de caixa).');
   try{ var r=await dbRpc('wms_armazenar_rg',{p_company:company.id,p_rg:Number(A.rg),p_endereco:raw,p_operador:coletorAutor()});
-    A.log.unshift(r); A.msg={t:'ok',x:'✓ RG '+A.rg+' guardado em '+r.endereco+(r.antes&&r.antes!==r.endereco?' (antes em '+r.antes+')':'')}; A.passo='rg'; A.rg=null; A.info=null;
+    A.log.unshift(r); A.msg={t:'ok',x:'✓ RG '+A.rg+' guardado em '+r.endereco+(r.antes&&r.antes!==r.endereco?' (antes em '+r.antes+')':'')+(Number(r.pedidos_completos)>0?' · '+r.pedidos_completos+' pedido(s) aguardando saldo completou(aram)':'')}; A.passo='rg'; A.rg=null; A.info=null;
     if(navigator.vibrate) navigator.vibrate(60); coletorArmRender();
-  }catch(e){ erro(String(e.message||e)); }
+  }catch(e){ erro(recErr(e)); }   // v1.0.1387
 }
 async function coletorSepRgAbrir(listaId){
   if(_colRg.listaId!==listaId){ _colRg={listaId:listaId,pal:{},cont:{},passo:null,msg:null}; coletorShow('Separar','coletorSepListas()','<div style="padding:30px;text-align:center;color:var(--text3)">Carregando caixas…</div>'); await colRgCarregar(listaId); }
@@ -39402,7 +39512,7 @@ async function wmsGerarListas(tipo,opts){
           empenhos.push({p,r:empR});
           // v1.0.1215 → v1.0.1267: pedido com saldo parcial NÃO vai para separação (qualquer origem, não só SAP) — desfaz o empenho, trava e avisa
           if(empR && !empR.erro && Number(empR.faltou_total||0)>0){
-            try{ await wmsRpc('wms_liberar_empenho',{p_pedido_id:p.id}); }catch(_e){}
+            await wmsLiberarEmpenhoAuto(p.id);   // v1.0.1387: mantém as caixas de cross-docking empenhadas
             try{ await dbUpdate('wms_pedidos',p.id,{status:'aguardando_saldo'}); p.status='aguardando_saldo'; }catch(_e){}
             if(p.origem==='sap_b1') sapAcao('aviso_saldo',{pedido_id:p.id});
             const _fal=(empR.itens||[]).filter(x=>Number(x.faltou)>0).map(x=>x.sku+(x.motivo?' — '+x.motivo:' falta '+Number(x.faltou).toLocaleString('pt-BR'))+(Number(x.retido_shelf_life)>0?' ('+Number(x.retido_shelf_life).toLocaleString('pt-BR')+' retido por validade)':''));   // v1.0.1275: motivo (ex.: fora do múltiplo do pacote)
@@ -42440,6 +42550,67 @@ function wmsEntradaNova(){
   _entEdit={cab:{id:null,depositante_id:'',remetente:'',unit_id:activeUnit||'',data_prevista:hojeLocalISO(),status:'previsto',tipo_recebimento:'',ref_documento:'',observacao:''},itens:[]};
   wmsEntradaModal();
 }
+// ═══ v1.0.1387 · CROSS-DOCKING: painel da nota (Entradas › documento) e linha do tempo da caixa (clique no RG) ═══
+function wmsCdSituacao(x){
+  var ps=String(x.pedido_status||''), rs=String(x.reserva||''), st=String(x.pallet_status||x.status||'');
+  var num=x.pedido?('OS '+x.pedido):'pedido';
+  if(st==='morto'||st==='expedido'||/^(expedido|embarcado|carregado|concluido)$/.test(ps)) return {l:'saiu · '+num,t:'green',fim:true};
+  if(String(x.endereco||'').indexOf('CD-NF')!==0) return {l:'movida para '+(x.endereco||'—'),t:'gray',fim:true};
+  if(rs.indexOf('consumida')>=0) return {l:'separada · '+num,t:'blue'};
+  if(rs.indexOf('reservada')<0) return {l:'sem empenho (pedido cancelado ou caixa trocada)',t:'red',parada:true};
+  if(ps==='aguardando_saldo'||ps==='aguardando_aceite') return (x.gate&&!x.liberado_em)?{l:'aguarda Liberar P/N',t:'amber',parada:true}:{l:'aguarda pedido completar',t:'amber',parada:true};
+  if(ps==='importado') return {l:'pedido completo · aguardando lista',t:'blue'};
+  var lb=(typeof WMS_PED_STATUS!=='undefined'&&WMS_PED_STATUS[ps]&&WMS_PED_STATUS[ps].l)||ps||'—';
+  return {l:String(lb).toLowerCase()+' · '+num,t:'blue'};
+}
+function wmsCdPill(s){ var m={green:['var(--green-bg)','var(--green-text)'],amber:['var(--amber-bg)','var(--amber-text)'],red:['var(--red-bg)','var(--red-text)'],blue:['var(--blue-bg)','var(--blue-text)'],gray:['var(--bg2)','var(--text2)']}[s.t]||['var(--bg2)','var(--text2)'];
+  return '<span style="font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+ecomEsc(s.l)+'</span>'; }
+async function wmsEntCdCarregar(entradaId){
+  var box=ge('ent-cd'); if(!box) return;
+  var d=null; try{ d=await dbRpc('wms_receb_painel',{p_entrada:entradaId}); }catch(e){ return; }
+  box=ge('ent-cd'); if(!box) return;
+  var cx=(d&&d.caixas)||[], lib=(d&&d.liberacoes)||[]; if(!cx.length&&!lib.length){ box.innerHTML=''; return; }
+  try{ if(company&&company.id) dbRpc('wms_cd_limpar',{p_company:company.id}).catch(function(){}); }catch(_e){}
+  var nb=function(v){return Number(v||0).toLocaleString('pt-BR');}, esc=ecomEsc;
+  var sit=cx.map(wmsCdSituacao), noCd=0, sairam=0, peds={}, maisAntiga=null;
+  cx.forEach(function(x,i){ if(x.pedido) peds[x.pedido]=1; if(sit[i].fim){ if(/^saiu/.test(sit[i].l)) sairam++; } else noCd++; if(sit[i].parada&&x.cd_em&&(!maisAntiga||new Date(x.cd_em)<new Date(maisAntiga))) maisAntiga=x.cd_em; });
+  var kv=function(k,v,alerta){ return '<div style="flex:1;min-width:120px;border-radius:9px;padding:8px 11px;background:'+(alerta?'var(--amber-bg)':'var(--bg2)')+'"><div style="font-size:10.5px;color:'+(alerta?'var(--amber-text)':'var(--text3)')+'">'+k+'</div><div style="font-size:18px;font-weight:800;color:'+(alerta?'var(--amber-text)':'var(--text)')+'">'+v+'</div></div>'; };
+  var th=function(t,al){ return '<th style="padding:6px 8px;text-align:'+(al||'left')+';font-size:10px;font-weight:700;color:#fff;background:#1e3a8a;border:0">'+t+'</th>'; };
+  var h='<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="font-size:13px">Recebimento parcial e cross-docking</b>'+(cx.length?'<span style="font-family:monospace;font-size:12px;color:var(--text2)">'+esc(d.endereco||'')+'</span>':'')+'</div>';
+  if(cx.length){
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+kv('Caixas no '+esc(d.endereco||'CD'),nb(noCd))+kv('Pedidos atendidos',nb(Object.keys(peds).length))+kv('Já saíram',nb(sairam))+kv('Parada há mais tempo',maisAntiga?recHa(maisAntiga):'—',!!maisAntiga)+'</div>'
+      +'<div style="border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:240px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1e3a8a">'+th('RG')+th('P/N')+th('QTD','right')+th('PEDIDO')+th('RECEBIDA')+th('NO CD DESDE')+th('SITUAÇÃO')+'</tr></thead><tbody>'
+      +cx.map(function(x,i){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px"><span onclick="wmsRgTrilhaModal(\''+x.pallet_id+'\')" title="Ver o rastreio da caixa" style="font-family:monospace;font-weight:700;color:var(--blue-text);cursor:pointer;text-decoration:underline">'+esc(x.rg)+'</span></td>'
+          +'<td style="padding:6px 8px;font-family:monospace">'+esc(x.sku||'')+'</td><td style="padding:6px 8px;text-align:right">'+nb(x.qtd)+'</td><td style="padding:6px 8px">'+(x.pedido?'OS '+esc(x.pedido):'—')+'</td>'
+          +'<td style="padding:6px 8px;white-space:nowrap">'+esc(String(x.conferente||'—').split(' ')[0])+' · '+recDataHora(x.recebida_em)+'</td><td style="padding:6px 8px;white-space:nowrap">'+recDataHora(x.cd_em)+(sit[i].parada?' <span style="color:var(--amber-text)">('+recHa(x.cd_em)+')</span>':'')+'</td>'
+          +'<td style="padding:6px 8px">'+wmsCdPill(sit[i])+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+  }
+  if(lib.length) h+='<div style="font-size:11.5px;color:var(--text2);margin-top:8px;line-height:1.7"><b>Liberações de P/N:</b> '+lib.map(function(l){ return '<span style="white-space:nowrap"><span style="font-family:monospace">'+esc(l.sku||'')+'</span> · '+nb(l.caixas)+' cx · '+nb(l.qtd)+' pç · '+esc(l.operador||'—')+' · '+recDataHora(l.em)+'</span>'; }).join(' &nbsp;|&nbsp; ')+'</div>';
+  box.innerHTML=h+'</div>';
+}
+async function wmsRgTrilhaModal(palletId){
+  var o=document.createElement('div'); o.className='modal-overlay'; o.style.zIndex='9998'; o.style.alignItems='center';
+  o.innerHTML='<div class="modal" style="max-width:480px;width:94%"><div style="padding:18px"><div id="rg-trilha-body" style="font-size:13px;color:var(--text3)">Carregando o rastreio…</div>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" data-r="0">Fechar</button></div></div></div>';
+  o.addEventListener('click',function(e){ if(e.target===o||e.target.closest('[data-r]')) o.remove(); });
+  document.body.appendChild(o);
+  var body=o.querySelector('#rg-trilha-body'), esc=ecomEsc, nb=function(v){return Number(v||0).toLocaleString('pt-BR');};
+  try{
+    var d=await dbRpc('wms_receb_trilha_rg',{p_pallet:palletId}), p=(d&&d.pallet)||null, ev=(d&&d.eventos)||[];
+    if(!p){ body.innerHTML='Caixa não encontrada.'; return; }
+    var rot={recebida:'Recebida',cd_destinada:'Destinada'+(p.pedido?' · OS '+p.pedido:''),cd_entrada:'Entrou no cross-docking',liberada:'P/N liberado',armazenada:'Armazenada',pedido_completo:'Pedido completo'};
+    var linha=function(ok,titulo,sub,dir){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)"><div style="min-width:0"><span style="display:inline-block;width:18px;font-weight:800;color:'+(ok?'var(--green-text)':'var(--amber-text)')+'">'+(ok?'✓':'•')+'</span><b style="font-weight:700;color:var(--text)">'+esc(titulo)+'</b>'+(sub?'<div style="font-size:11px;color:var(--text3);margin-left:18px">'+esc(sub)+'</div>':'')+'</div><div style="font-size:11.5px;color:var(--text3);white-space:nowrap;text-align:right">'+dir+'</div></div>'; };
+    var h='<div style="font-size:15px;font-weight:800;color:var(--text)">RG '+esc(p.rg)+' · '+esc(p.sku||'')+' · '+nb(p.qtd)+' pç</div>'
+      +'<div style="font-size:11.5px;color:var(--text3);margin:2px 0 8px">NF '+esc(p.nf||'—')+' · caixa '+esc(p.caixa||'—')+(p.lote?' · lote '+esc(p.lote):'')+' · hoje em '+esc(p.endereco||'doca (sem endereço)')+'</div>';
+    if(!ev.length) h+=linha(true,'Recebida','',esc(String(p.conferente||'—').split(' ')[0])+' · '+recDataHora(p.recebida_em));
+    h+=ev.map(function(e){ return linha(true,(e.evento==='cd_entrada'&&e.endereco)?('Entrou em '+e.endereco):(rot[e.evento]||e.evento),e.detalhe,esc(String(e.operador||'—').split(' ')[0])+' · '+recDataHora(e.em)); }).join('');
+    if(p.cd_em){ var s=wmsCdSituacao(p); h+=linha(!!s.fim,s.l.charAt(0).toUpperCase()+s.l.slice(1),'',s.parada?('há '+recHa(p.cd_em)):'agora'); }
+    else if(String(p.status||'')==='recebido') h+=linha(false,(p.gate&&!p.liberado_em)?'Aguardando Liberar P/N':'Aguardando armazenar','','agora');
+    body.innerHTML=h;
+  }catch(e){ body.innerHTML='<span style="color:var(--red-text)">Erro ao carregar o rastreio: '+esc(recErr(e))+'</span>'; }
+}
 function wmsEntradaAbrir(id){
   var e=(wmsEntradas||[]).find(function(x){return x.id===id;}); if(!e)return;
   _entEdit={cab:Object.assign({},e),itens:[]};
@@ -42477,9 +42648,11 @@ function wmsEntradaModal(){
     +'</div>'
     +'<div style="border-top:1px solid var(--border);padding-top:10px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><b style="font-size:13px">Itens previstos</b><button class="btn btn-sm" onclick="wmsEntItemAdd()">+ Item</button></div>'
     +'<div id="ent-itens"></div></div>'
+    +(c.id?'<div id="ent-cd"></div>':'')   // v1.0.1387
     +'</div>';
   portModal((c.id?'Documento de entrada #'+(c.numero_entrada||'')+(c.tipo_documento==='DEV'?' · DEV':''):'Novo documento de entrada'), inner, 'wmsEntradaSalvar()', {width:'720px',saveLabel:c.id?'Salvar':'Criar'});
   setTimeout(wmsEntItensRefresh,30);
+  if(c.id) setTimeout(function(){ wmsEntCdCarregar(c.id); },60);   // v1.0.1387
 }
 function wmsEntItensRefresh(){
   var box=ge('ent-itens'); if(!box)return;
@@ -43414,6 +43587,20 @@ function wmsConfEntSaldoLinha(){
 //  evento e leitura), sem passar pelas funções do fluxo padrão — nada muda para os demais.
 // ═══════════════════════════════════════════════════════════════════
 var _cxr={prod:null, sessao:[], stg:undefined, ocupado:false};
+// v1.0.1387: relê do banco o que já foi conferido neste romaneio/documento (a memória da tela não enxerga o colega)
+async function wmsCxrSync(){
+  var ctx=_confEntCtx; if(!ctx) return;
+  try{
+    var t=await dbSelectAll('wms_tarefas_conf_entrada','romaneio_id=eq.'+ctx.romaneio_id)||[];
+    var it=await dbSelectAll('wms_conf_entrada_itens','entrada_id=eq.'+ctx.entrada_id)||[];
+    if(_confEntCtx!==ctx||_cxr.ocupado) return;
+    var tinhaT=(wmsTarefasConfEnt||[]).some(function(x){return x.romaneio_id===ctx.romaneio_id;}), tinhaI=(wmsConfEntItens||[]).some(function(x){return x.entrada_id===ctx.entrada_id;});
+    if((!t.length&&tinhaT)||(!it.length&&tinhaI)) return;   // leitura vazia com dado local: provável falha de rede, não troca
+    wmsTarefasConfEnt=t.concat((wmsTarefasConfEnt||[]).filter(function(x){return x.romaneio_id!==ctx.romaneio_id;}));
+    wmsConfEntItens=it.concat((wmsConfEntItens||[]).filter(function(x){return x.entrada_id!==ctx.entrada_id;}));
+    if(ge('cxr-lista')) wmsCxrRender();
+  }catch(e){}
+}
 function wmsConfEntCaixasAbrir(){
   var ctx=_confEntCtx; if(!ctx)return;
   _cxr={prod:null, sessao:[], stg:undefined, ocupado:false};
@@ -43436,6 +43623,8 @@ function wmsConfEntCaixasAbrir(){
   portClose();
   portModal('Receber caixas',inner,'wmsConfEntCaixasConcluir()',{saveLabel:'Concluir',width:'880px'});
   wmsCxrRender();
+  wmsCxrSync();   // v1.0.1387: outro usuário pode estar recebendo a mesma nota
+  if(!window._cxrTimer) window._cxrTimer=setInterval(function(){ if(!ge('cxr-lista')||!_confEntCtx){ clearInterval(window._cxrTimer); window._cxrTimer=null; return; } if(!_cxr.ocupado) wmsCxrSync(); },15000);
   setTimeout(function(){var b=ge('cxr-cod');if(b)b.focus(); try{ wmsCxrSemQrTroca(); }catch(_e){} },40);
 }
 function wmsCxrMsg(ok,txt){
@@ -44330,6 +44519,8 @@ async function estoqueEmpenhoModal(conteudoId,palletId,ev){
 }
 function wmsSaldoVerus(clienteId){ var c=(clientes||[]).find(function(x){return x.id===clienteId;}); return !!(c&&c.parametros&&c.parametros.saldo_verus===true); }
 async function wmsRpc(fn,args){ var r=await sbFetch('POST','/rest/v1/rpc/'+fn,args||{},tok); if(!r.ok){ var m=(r.data&&(r.data.message||r.data.hint||r.data.details))||('erro '+r.status); throw new Error(m); } return r.data; }
+// v1.0.1387: solta o empenho automático preservando o cross-docking (banco antigo, sem o parâmetro: solta tudo, como antes)
+async function wmsLiberarEmpenhoAuto(pedidoId){ try{ return await wmsRpc('wms_liberar_empenho',{p_pedido_id:pedidoId,p_manter_cd:true}); }catch(e){ try{ return await wmsRpc('wms_liberar_empenho',{p_pedido_id:pedidoId}); }catch(_e){ return 0; } } }
 // empenha uma lista de pedidos (só os de depositante com saldo no VERUS) e devolve um resumo em HTML
 function wmsEmpenhoResumoHtml(empenhos){
   if(!empenhos||!empenhos.length) return '';
@@ -44372,7 +44563,7 @@ async function wmsPedEmpenhoCarregar(pedidoId){
     var esc=ecomEsc, rows=itens.map(function(it){
       var rs=res.filter(function(r){return r.pedido_item_id===it.id;}), emp=rs.reduce(function(a,r){return a+Number(r.qtd||0);},0), ped=Number(it.quantidade||0);
       var rgs=rs.map(function(r){ var pl=pals[r.pallet_id]||{}, c=conts[r.conteudo_id]||{}, ant=c.controles&&(c.controles['RG anterior']||c.controles.rg_anterior);
-        return '<span title="'+esc(pl.endereco_codigo||'')+'" style="white-space:nowrap">'+esc(ant||wmsRgFmt(pl.rg))+' <span style="color:var(--text3)">('+Number(r.qtd).toLocaleString('pt-BR')+(c.qtd_fiscal&&Number(r.qtd)<Number(c.qtd_fiscal)?' de '+Number(c.qtd_fiscal).toLocaleString('pt-BR'):'')+(r.status==='consumida'?' · baixado':'')+')</span></span>'; }).join(' · ');
+        return '<span title="'+esc(pl.endereco_codigo||'')+'" style="white-space:nowrap">'+esc(ant||wmsRgFmt(pl.rg))+(/^CD-NF/.test(pl.endereco_codigo||'')?' <span onclick="wmsRgTrilhaModal(\''+pl.id+'\')" title="Cross-docking: ver o rastreio da caixa" style="cursor:pointer;font-size:10px;font-weight:700;background:var(--blue-bg);color:var(--blue-text);padding:1px 7px;border-radius:99px">'+esc(pl.endereco_codigo)+'</span>':'')+' <span style="color:var(--text3)">('+Number(r.qtd).toLocaleString('pt-BR')+(c.qtd_fiscal&&Number(r.qtd)<Number(c.qtd_fiscal)?' de '+Number(c.qtd_fiscal).toLocaleString('pt-BR'):'')+(r.status==='consumida'?' · baixado':'')+')</span></span>'; }).join(' · ');
       var _k=String(it.sku||'').trim().toUpperCase(), _pr=wmsProdutoDe(it.produto_id,it.sku,p.cliente_id)||{}, _pac=Number(_pr.fator_conversao)||0;
       var _foraMult=emp<ped&&_pacOn&&_pac>1&&(_totSku[_k]%_pac)!==0;
       if(emp>=ped) _ok++; else if(_foraMult){ if(_fora.indexOf(_k)<0) _fora.push(_k+': '+_totSku[_k].toLocaleString('pt-BR')+' não fecha pacote de '+_pac.toLocaleString('pt-BR')); } else _semSaldo.push(_k);
