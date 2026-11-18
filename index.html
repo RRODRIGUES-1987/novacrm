@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1391 | Gerado: 2026-11-18 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1392 | Gerado: 2026-11-18 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1391';
+const APP_VERSION='v1.0.1392';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37172,12 +37172,20 @@ function wmsPendenciasMultiploHtml(pend,titulo){
 // Fim do ciclo: romaneio carregado (ou veículo liberado na portaria) → pedidos do romaneio viram 'embarcado'.
 async function wmsEncerrarPedidosRomaneio(romId,origem){
   var fim={}; WMS_FIM_STATUS.split(',').forEach(function(k){fim[k]=1;}); fim.excluido=1;
-  var agora=new Date().toISOString(), n=0;
-  var peds=(wmsPedidos||[]).filter(function(p){ return p.romaneio_id===romId && !fim[p.status]; });
+  var agora=new Date().toISOString(), n=0, falhas=[];
+  // v1.0.1392: os pedidos do romaneio vêm do BANCO. A memória da tela pode não saber que o pedido entrou no romaneio
+  //            (ligado em outro computador ou pelo agendamento) e o pedido ficava "conferido" com a carga já na rua.
+  var mem=(wmsPedidos||[]).filter(function(p){ return p.romaneio_id===romId; }), doBanco=[];
+  try{ doBanco=await dbSelect('wms_pedidos','romaneio_id=eq.'+romId+'&select=id,status,numero_pedido,numero_curto')||[]; }catch(_e){ doBanco=[]; }
+  var porId={}; mem.forEach(function(p){ porId[p.id]={id:p.id,status:p.status,numero_pedido:p.numero_pedido,numero_curto:p.numero_curto}; });
+  doBanco.forEach(function(p){ porId[p.id]=p; });
+  var peds=Object.keys(porId).map(function(k){return porId[k];}).filter(function(p){ return !fim[p.status]; });
   for(var i=0;i<peds.length;i++){
-    try{ await dbUpdate('wms_pedidos',peds[i].id,{status:'embarcado',embarcado_em:agora,embarcado_obs:origem||null}); peds[i].status='embarcado'; peds[i].embarcado_em=agora; n++; }
-    catch(e){ console.warn('[embarque] pedido não encerrado:',peds[i].numero_pedido,e&&e.message); }
+    try{ await dbUpdate('wms_pedidos',peds[i].id,{status:'embarcado',embarcado_em:agora,embarcado_obs:origem||null}); n++;
+      var m=(wmsPedidos||[]).find(function(x){return x.id===peds[i].id;}); if(m){ m.status='embarcado'; m.embarcado_em=agora; m.romaneio_id=romId; } }
+    catch(e){ falhas.push((peds[i].numero_curto||peds[i].numero_pedido||'pedido')+': '+String(e&&e.message||e).replace(/^\[rpc [^\]]+\]\s*/,'').slice(0,120)); console.warn('[embarque] pedido não encerrado:',peds[i].numero_pedido,e&&e.message); }
   }
+  if(falhas.length&&typeof showToast==='function') showToast('Atenção: '+falhas.length+' pedido(s) deste romaneio NÃO foram marcados como embarcados. '+falhas.slice(0,3).join(' | '),'red');
   return n;
 }
 function wmsMultiploDe(produtoId,sku,clienteId){
