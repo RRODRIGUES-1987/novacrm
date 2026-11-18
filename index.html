@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1383 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1384 | Gerado: 2026-11-16 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1383';
+const APP_VERSION='v1.0.1384';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -11270,6 +11270,7 @@ async function propAceiteAplicar(pid){
     // 2) a tabela passa a usar a proposta aceita
     const upd={tarifas:p.tarifas||'[]',proposta_id:p.id,vigencia_inicio:vig,vigencia_fim:null};
     ['cond_faturamento','cond_reajustes','cond_prazo_contrato','cond_fat_minimo','cond_notice','cond_prazo_pagamento_dias'].forEach(k=>{ if(p[k]!=null&&p[k]!=='') upd[k]=p[k]; });
+    if(propImpPorFora(p)&&p.tipo_proposta!=='cessao'){ upd.pis_aliquota=PROP_IMP.pis; upd.cofins_aliquota=PROP_IMP.cofins; upd.iss_incluso=false; }   // v1.0.1384: a negociação aceita leva os tributos por fora para o faturamento
     await dbUpdate('tabelas_tarifarias',t.id,upd);
     tabelasTarifarias=tabelasTarifarias.map(x=>x.id===t.id?{...x,...upd}:x);
     // 3) a proposta vira aprovada
@@ -17390,8 +17391,11 @@ function buildPropostaEditorHTML(sc,nextPO,mes_ano,dealOpts,role,cid,editId){
             <input class="fi" id="e-venc_regra_obs" value="${sc.venc_regra_obs||''}" placeholder="Observacao de pagamento (aparece na cobranca)" style="margin-top:6px">
           </div>
         </div>
-        <div class="fg prop-so-logistica"><label class="fl">PIS/COFINS</label><input class="fi" value="Inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
+        ${propImpPorFora(sc)?`<div class="fg prop-so-logistica"><label class="fl">PIS/COFINS – 3,65%</label><input class="fi" value="Não inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
         <div class="fg prop-so-logistica"><label class="fl">ISS – 2%</label><input class="fi" value="Não inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
+        <div class="fg prop-so-logistica"><label class="fl">Carga tributária efetiva</label><input class="fi" value="${propImpCarga()}% sobre o valor da nota fiscal (ISS 2% + PIS 0,65% + COFINS 3%)" readonly style="background:var(--bg2)"></div>`
+        :`<div class="fg prop-so-logistica"><label class="fl">PIS/COFINS</label><input class="fi" value="Inclusos nos valores acima" readonly style="background:var(--bg2)"></div>
+        <div class="fg prop-so-logistica"><label class="fl">ISS – 2%</label><input class="fi" value="Não inclusos nos valores acima" readonly style="background:var(--bg2)"></div>`}
       </div>
     </div>
   </div>`;
@@ -17693,6 +17697,22 @@ function propTipoSet(t){
   if(c) propCessaoRender();
 }
 
+// v1.0.1384: tributos por fora (ISS + PIS/COFINS) — proteção para a reforma tributária.
+//  Vale para proposta nova e para as que ainda estão em aberto (rascunho, aguardando aprovação, em negociação);
+//  proposta já aprovada/enviada/fechada mantém a redação com que nasceu (PIS/COFINS inclusos).
+const PROP_IMP={iss:2,pis:0.65,cofins:3};
+function propImpPorFora(p){
+  if(!p||!p.id) return true;
+  if(p.impostos_por_fora===true) return true;
+  if(p.impostos_por_fora===false) return false;
+  // sem a marca gravada: vale para o que ainda está em aberto e para tudo que nasceu a partir de 18/11/2026
+  return ['rascunho','aguardando_aprovacao','negociacao'].includes(p.status) || String(p.created_at||'')>='2026-11-18';
+}
+function propImpCarga(){ return (PROP_IMP.iss+PROP_IMP.pis+PROP_IMP.cofins).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
+async function propGravar(id,dados){   // grava a proposta; se a coluna nova ainda não existir no banco, grava sem ela e avisa
+  try{ return id?await dbUpdate('propostas',id,dados):await dbInsert('propostas',dados); }
+  catch(e){ if(/impostos_por_fora/.test(String(e&&e.message))){ const d2=Object.assign({},dados); delete d2.impostos_por_fora; showToast('Rode o SQL da v1.0.1384 (impostos_por_fora em propostas).','amber'); return id?await dbUpdate('propostas',id,d2):await dbInsert('propostas',d2); } throw e; }
+}
 async function salvarProposta(status){
   const dados=getPropDados(status);
   const p=propEditando;
@@ -17704,10 +17724,12 @@ async function salvarProposta(status){
     } else if(['aprovada','enviada'].includes(p.status)&&(role==='admin'||role==='adm')&&status==='aprovada'){
       dados.status='aprovada'; // admin pode salvar aprovada direto
     }
-    await dbUpdate('propostas',p.id,dados);
+    dados.impostos_por_fora=propImpPorFora(Object.assign({},p,{status:p.status}));   // v1.0.1384
+    await propGravar(p.id,dados);
     propostas=propostas.map(x=>x.id===p.id?{...x,...dados}:x);
   } else {
-    const res=await dbInsert('propostas',dados);
+    dados.impostos_por_fora=true;   // v1.0.1384: toda proposta nova nasce com os tributos por fora
+    const res=await propGravar(null,dados);
     if(res){
       propostas.unshift(res);
       propEditando=res;
@@ -18215,8 +18237,11 @@ ${''/* PÁG 3: serviços não acordados + condições gerais + assinaturas (na c
     <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Notice para saída ou prorrogação: <strong>${p.cond_notice||'30 dias'}.</strong></li>
     ${p.tipo_proposta==='cessao'?'':`<li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Prazo de aprovação de pedido: <strong>${p.cond_prazo_aprovacao||'2 dias úteis após apresentação'}.</strong></li>`}
     <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Prazo de Pagamento: <strong>${p.cond_prazo_pagamento_dias||'7'} dias corridos após a apresentação da fatura.</strong></li>
-    ${p.tipo_proposta==='cessao'?'':`<li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">PIS/COFINS: <strong>Inclusos nos valores acima.</strong></li>
-    <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">ISS – 2%: <strong>Não inclusos nos valores acima.</strong></li>`}
+    ${p.tipo_proposta==='cessao'?'':(propImpPorFora(p)?`<li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Tributos – ISS (2%), PIS (0,65%) e COFINS (3%): <strong>Não inclusos nos valores acima.</strong> Os valores desta proposta são líquidos de tributos, que serão acrescidos no faturamento conforme a legislação vigente na data de emissão.</li>
+    <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Carga tributária efetiva atual: <strong>${propImpCarga()}% sobre o valor da nota fiscal</strong> (ISS 2% + PIS/COFINS 3,65%).</li>
+    <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">Alteração tributária: <strong>havendo alteração da carga tributária incidente sobre os serviços, inclusive em razão da reforma tributária (IBS e CBS), os valores serão ajustados na mesma proporção, para mais ou para menos, a partir da vigência da alteração.</strong></li>`
+    :`<li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">PIS/COFINS: <strong>Inclusos nos valores acima.</strong></li>
+    <li style="font-size:10px;font-family:Calibri,Arial;margin-bottom:3px">ISS – 2%: <strong>Não inclusos nos valores acima.</strong></li>`)}
   </ul>
   <ul style="padding-left:16px;margin-bottom:16px">
   </ul>
@@ -18297,6 +18322,7 @@ async function autoFecharDeal(dealId, dealObj, cid){
       cond_fat_minimo:proposta.cond_fat_minimo||'',
       cond_notice:proposta.cond_notice||'',
       cond_prazo_pagamento_dias:proposta.cond_prazo_pagamento_dias||'',
+      ...(propImpPorFora(proposta)&&proposta.tipo_proposta!=='cessao'?{pis_aliquota:PROP_IMP.pis,cofins_aliquota:PROP_IMP.cofins,iss_incluso:false}:{}),   // v1.0.1384
     });
     if(nova){tabelasTarifarias.unshift(nova);tabelaCriada=true;}
   }
