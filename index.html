@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1400 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1401 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1400';
+const APP_VERSION='v1.0.1401';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38691,7 +38691,9 @@ function recParseQr(raw){ var t=String(raw||'').trim(); if(t.indexOf('&')<0) ret
   var q=Number(String(p[3]||'').replace(',','.')); if(!p[0]||!(q>0)) return null; return {raw:t,id:p[0].trim(),lote:(p[2]||'').trim(),qtd:q,wo:String(p[6]||'').replace(/^01/,'')}; }
 // v1.0.1388: o RG bipado pode vir com prefixo P/P-, com o prefixo 95xx da etiqueta antiga ou com zeros à esquerda
 //            (a separação já aceitava; o recebimento só aceitava 6 ou 7 dígitos secos e recusava o bipe)
-function recRgNum(raw){ var d=String(raw||'').trim().replace(/^P-?/i,'').replace(/\s/g,''); if(!/^\d+$/.test(d)) return null; if(/^95\d{2}\d{4,}$/.test(d)) d=d.slice(4); d=d.replace(/^0+/,''); return /^\d{5,8}$/.test(d)?d:null; }
+// v1.0.1401: RG gerado pelo sistema pode ser curto (etiqueta DEV: P-001629 → 1629). Com o prefixo P, ou quando a tela já espera um RG (curto=true),
+//            aceita de 1 a 8 dígitos; número solto continua exigindo 5 a 8, para não confundir com outros códigos.
+function recRgNum(raw,curto){ var t=String(raw||'').trim(), temP=/^P-?\d/i.test(t), d=t.replace(/^P-?/i,'').replace(/\s/g,''); if(!/^\d+$/.test(d)) return null; if(/^95\d{2}\d{4,}$/.test(d)) d=d.slice(4); d=d.replace(/^0+/,''); return ((temP||curto)?/^\d{1,8}$/:/^\d{5,8}$/).test(d)?d:null; }
 function recEhRg(raw){ return !!recRgNum(raw); }
 function recEhPn(raw){ return /^\d{10}-\d{2}S?$/i.test(String(raw||'').trim()); }
 async function coletorRecListas(){
@@ -38897,8 +38899,8 @@ function coletorRecEstornoSair(){ if(!_rec) return; _rec.estorno=null; _rec.msg=
 async function coletorRecEstornoBipe(raw){
   var R=_rec; if(!R||!R.estorno) return; raw=String(raw||'').trim(); coletorCamStop();
   var erro=function(x){ R.msg={t:'erro',x:x}; if(navigator.vibrate) navigator.vibrate([60,40,60]); if(typeof wmsBeep==='function') wmsBeep(true); coletorRecRender(); };
-  if(!recEhRg(raw)) return erro('Informe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
-  raw=recRgNum(raw);   // v1.0.1388
+  if(!recRgNum(raw,true)) return erro('Informe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
+  raw=recRgNum(raw,true);   // v1.0.1388 · v1.0.1401
   try{
     var P=(await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+Number(raw)+'&status=neq.morto&select=id,rg,status,endereco_codigo,codigo_externo,conferente_nome,nascido_em,entrada_id&limit=1'))||[];
     var pal=P[0]; if(!pal) return erro('Não há caixa com o RG '+raw+' no sistema.');
@@ -38965,8 +38967,8 @@ async function coletorArmBipe(raw){
   var _lidoA=raw, _passoA=(A.passo==='rg'?'arm_rg':'arm_end'), _rgA=A.rg||null;   // v1.0.1395
   var erro=function(x){ recLog({tela:'armazenar',passo:_passoA,lido:_lidoA,ok:false,resultado:x,rg:_rgA,sku:(A.info&&A.info.sku)||null}); A.msg={t:'erro',x:x}; if(navigator.vibrate) navigator.vibrate([60,40,60]); if(typeof wmsBeep==='function') wmsBeep(true); coletorArmRender(); };
   if(A.passo==='rg'){
-    if(!recRgNum(raw)) return erro('Bipe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
-    raw=recRgNum(raw);   // v1.0.1388
+    if(!recRgNum(raw,true)) return erro('Bipe o RG da caixa. Leitura recebida: "'+raw.slice(0,40)+'"');
+    raw=recRgNum(raw,true);   // v1.0.1388 · v1.0.1401: RG curto
     try{ var p=await dbSelect('wms_pallets','company_id=eq.'+company.id+'&rg=eq.'+raw+'&status=neq.morto&select=id,rg,endereco_codigo,status&limit=1'); p=(p||[])[0];
       if(!p) return erro('RG '+raw+' não encontrado.');
       var c=(await dbSelect('wms_pallet_conteudo','pallet_id=eq.'+p.id+'&select=sku,descricao,qtd_fiscal&limit=1')||[])[0]||{};
