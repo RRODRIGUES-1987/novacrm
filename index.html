@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1399 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1400 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1399';
+const APP_VERSION='v1.0.1400';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2831,6 +2831,105 @@ async function fcdCarregar(forcar){
   if(_fcdLoaded&&!forcar) return;
   try{ capasProcesso=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&order=created_at.desc')||[]; _fcdLoaded=true; }catch(e){}
 }
+// ═══ v1.0.1400 · UNIDADE E OPERAÇÃO DA CAPA · edição e lote ═══
+var _capaSel=new Set();
+function capaSelToggle(id,on){ if(on) _capaSel.add(id); else _capaSel.delete(id); var b=ge('capa-sel-barra'); if(b) b.outerHTML=capaSelBarra(); }
+function capaSelLimpar(){ _capaSel=new Set(); render(); }
+function capaSelLista(){ return (capasProcesso||[]).filter(function(c){ return _capaSel.has(c.id)&&c.status!=='faturada'&&c.status!=='inutilizada'&&!c.fatura_id; }); }
+function capaSelBarra(){
+  var n=capaSelLista().length;
+  if(!n) return '<div id="capa-sel-barra"></div>';
+  return '<div id="capa-sel-barra" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--blue-bg);color:var(--blue-text);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13px">'
+    +'<b>'+n+' capa'+(n===1?'':'s')+' selecionada'+(n===1?'':'s')+'</b>'
+    +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="capaLoteModal()">Definir unidade e operação</button><button class="btn btn-sm" onclick="capaSelLimpar()">Limpar seleção</button></span></div>';
+}
+// preenche o seletor de operações do cliente, filtrado pela unidade escolhida no mesmo formulário (prefixo capa-e ou capa-l)
+async function capaUnOpCarregar(pref,clienteId,atual){
+  var sel=ge(pref+'-op'); if(!sel) return;
+  sel.removeAttribute('data-ok');
+  if(!clienteId){ sel.innerHTML='<option value="">— capas de clientes diferentes: só a unidade —</option>'; sel.disabled=true; return; }
+  var un=(ge(pref+'-unit')||{}).value||'';
+  try{
+    var todos=(await dbSelect('clientes_contatos','cliente_id=eq.'+clienteId+'&order=created_at.asc'))||[];
+    sel=ge(pref+'-op'); if(!sel) return;
+    var L=todos.filter(function(x){ return !x.unit_id||!un||x.unit_id===un||x.id===atual; });
+    var vazio=pref==='capa-l'?'— não alterar a operação —':(atual?'':'— sem operação —');
+    sel.innerHTML=(vazio?'<option value="">'+vazio+'</option>':'')+L.map(function(x){ var tb=(tabelasTarifarias||[]).find(function(t){return t.id===x.tabela_id;});
+      return '<option value="'+x.id+'"'+(x.id===atual?' selected':'')+'>'+ecomEsc((x.tipo_operacao?x.tipo_operacao+' — ':'')+(x.nome||''))+(x.unit_id?' · '+ecomEsc(capaUnidadeNome(x.unit_id)):'')+(tb?' · tabela '+ecomEsc(tb.nome||''):'')+'</option>'; }).join('');
+    if(!L.length) sel.innerHTML='<option value="">Nenhuma operação deste cliente nesta unidade</option>';
+    sel.setAttribute('data-ok','1');
+  }catch(e){ sel.innerHTML='<option value="">Não consegui carregar as operações</option>'; }
+}
+// monta o que muda na capa (não grava): unitId/opId = undefined significa "não mexer"
+async function capaUnOpPlano(c,unitId,opId){
+  var novo={}, mud=[], servNovos=null;
+  if(unitId!==undefined&&(unitId||null)!==(c.unit_id||null)){ novo.unit_id=unitId||null; mud.push('Unidade de '+(capaUnidadeNome(c.unit_id)||'(sem unidade)')+' para '+(capaUnidadeNome(unitId)||'(sem unidade)')); }
+  if(opId!==undefined&&opId&&opId!==c.responsavel_id){
+    if(!(c.status==='aberta'||c.status==='devolvida')) throw new Error('Capa '+c.numero+' já foi digitada: a operação só muda depois de estornar a digitação. A unidade pode ser trocada.');
+    var op=((await dbSelect('clientes_contatos','id=eq.'+opId))||[])[0];
+    if(!op||op.cliente_id!==c.cliente_id) throw new Error('A operação escolhida não é do cliente da capa '+c.numero+'.');
+    var un=(unitId!==undefined?unitId:c.unit_id)||null;
+    if(op.unit_id&&un&&op.unit_id!==un) throw new Error('A operação escolhida é de outra unidade ('+(capaUnidadeNome(op.unit_id)||'outra')+').');
+    var tabDe=function(cl){ if(!cl) return null; var t=(tabelasTarifarias||[]).find(function(t){ return t.status!=='pendente'&&(t.cliente_id===cl.id||(t.cliente_nome&&cl.nome&&String(t.cliente_nome).toLowerCase()===String(cl.nome).toLowerCase())); }); return t?t.id:null; };
+    var cli=(clientes||[]).find(function(x){return x.id===c.cliente_id;}), pag=op.pagador_id&&op.pagador_id!==c.cliente_id?(clientes||[]).find(function(x){return x.id===op.pagador_id;}):null;
+    var tabId=op.tabela_id||tabDe(pag)||tabDe(cli)||null, nomeTab=function(id){ return ((tabelasTarifarias||[]).find(function(t){return t.id===id;})||{}).nome||'(nenhuma)'; };
+    novo.responsavel_id=op.id; novo.tipo_operacao=op.tipo_operacao||null; novo.pagador_id=pag?pag.id:null; novo.pagador_nome=pag?pag.nome:null;
+    mud.push('Operação de '+(c.tipo_operacao||'(sem operação)')+' para '+(op.tipo_operacao||op.nome||'(sem nome)'));
+    if(tabId!==(c.tabela_id||null)){
+      novo.tabela_id=tabId; servNovos=[];
+      if(tabId){
+        var quadros=(await dbSelect('tabelas_quadros','tabela_id=eq.'+tabId+'&order=ordem.asc'))||[], ordem=0, campo=c.tipo==='expedicao'?'cap_expedicao':'cap_recebimento';
+        for(var qi=0;qi<quadros.length;qi++){ var itens=(await dbSelect('tabelas_itens','quadro_id=eq.'+quadros[qi].id+'&order=ordem.asc'))||[];
+          itens.forEach(function(it){ if(it[campo]) servNovos.push({capa_id:c.id,servico:it.servico||'',unidade_cobranca:it.unidade_cobranca||null,realizado:false,quantidade:null,ordem:ordem++}); }); }
+      }
+      mud.push('Tabela de preço de '+nomeTab(c.tabela_id)+' para '+nomeTab(tabId)+' · serviços trocados pelos da nova tabela ('+servNovos.length+')');
+    }
+  }
+  return {novo:novo,mud:mud,servNovos:servNovos};
+}
+async function capaUnOpServicos(c,servNovos){
+  var velhos=(await dbSelect('processo_capa_servicos','capa_id=eq.'+c.id+'&select=id'))||[];
+  for(var vi=0;vi<velhos.length;vi++){ await dbDelete('processo_capa_servicos',velhos[vi].id); }
+  for(var si=0;si<servNovos.length;si++){ await dbInsert('processo_capa_servicos',servNovos[si]); }
+  if(typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;
+}
+function capaLoteModal(){
+  var L=capaSelLista(); if(!L.length){ showToast('Selecione ao menos uma capa.','amber'); return; }
+  var clis={}; L.forEach(function(c){ clis[c.cliente_id||'?']=1; }); var umCli=Object.keys(clis).length===1?L[0].cliente_id:null;
+  var dig=L.filter(function(c){ return !(c.status==='aberta'||c.status==='devolvida'); }).length;
+  var inner='<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">'+L.length+' capa(s): '+ecomEsc(L.slice(0,8).map(function(c){return c.numero;}).join(', '))+(L.length>8?' e mais '+(L.length-8):'')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div><label class="fl">Unidade</label><select class="fi" id="capa-l-unit" onchange="capaUnOpCarregar(\'capa-l\',\''+(umCli||'')+'\',\'\')"><option value="">— não alterar a unidade —</option>'
+      +capaUnidades().map(function(u){ return '<option value="'+u.id+'">'+ecomEsc(u.name||'')+'</option>'; }).join('')+'</select></div>'
+    +'<div><label class="fl">Operação</label><select class="fi" id="capa-l-op"><option value="">Carregando…</option></select></div></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:8px">Trocar a operação troca a tabela de preço e os serviços das capas abertas ou devolvidas.'
+    +(dig?' <b style="color:var(--amber-text)">'+dig+' capa(s) já digitada(s)</b> recebem só a unidade; para trocar a operação delas, estorne a digitação antes.':'')
+    +(umCli?'':' As capas são de clientes diferentes, então só a unidade pode ser definida em lote.')+' Cada alteração fica registrada nas observações da capa.</div>';
+  portModal('Definir unidade e operação',inner,'capaLoteSalvar()',{saveLabel:'Aplicar nas '+L.length+' capas'});
+  setTimeout(function(){ capaUnOpCarregar('capa-l',umCli,''); },40);
+}
+async function capaLoteSalvar(){
+  var L=capaSelLista(); if(!L.length){ portClose(); return; }
+  var un=(ge('capa-l-unit')||{}).value||'', oEl=ge('capa-l-op'), op=(oEl&&!oEl.disabled&&oEl.getAttribute('data-ok')==='1')?(oEl.value||''):'';
+  if(!un&&!op){ portErr('Escolha a unidade, a operação ou as duas.'); return; }
+  portSaving();
+  var feitas=0, soUnidade=[], falhas=[];
+  for(var i=0;i<L.length;i++){ var c=L[i];
+    try{
+      var plano=null;
+      try{ plano=await capaUnOpPlano(c,un?un:undefined,op?op:undefined); }
+      catch(e1){ if(op&&un&&/já foi digitada/.test(String(e1.message))){ plano=await capaUnOpPlano(c,un,undefined); soUnidade.push(c.numero); } else throw e1; }
+      if(!plano.mud.length) continue;
+      plano.novo.observacoes=capaRegObs(c,'Dados alterados: '+plano.mud.join('; '));
+      await dbUpdate('processo_capas',c.id,plano.novo);
+      if(plano.servNovos) await capaUnOpServicos(c,plano.servNovos);
+      Object.assign(c,plano.novo); feitas++;
+    }catch(e){ falhas.push(c.numero+': '+String(e.message||e)); }
+  }
+  _capaSel=new Set(); portClose(); render();
+  showToast(feitas+' capa(s) atualizada(s)'+(soUnidade.length?' · só a unidade em '+soUnidade.length+' já digitada(s): '+soUnidade.slice(0,6).join(', '):'')+(falhas.length?' · '+falhas.length+' não alterada(s): '+falhas.slice(0,3).join(' | '):''),falhas.length?'red':(soUnidade.length?'amber':'green'));
+}
+
 // v1.0.1399: unidades da empresa e nome da unidade (a capa passa a gravar a unidade)
 function capaUnidades(){ var cid=company&&company.id; return (userUnits||[]).filter(function(u){ return !cid||u.company_id===cid; }); }
 function capaUnidadeNome(id){ if(!id) return ''; var u=(userUnits||[]).find(function(x){return x.id===id;}); return u?(u.name||''):''; }
@@ -5400,8 +5499,16 @@ function capaEditarDados(id){
                :'<div style="margin-top:10px"><span class="fl">Tipos de produto</span><div style="font-size:13px;margin-top:4px">'+((Array.isArray(c.tipos_produto)?c.tipos_produto:[]).map(function(id){ var t=_tiposCli.find(function(x){return x.id===id;}); return t?ecomEsc(t.nome):''; }).filter(Boolean).join(' · ')||'—')+'</div></div>')
       +'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+(podeTipo?'Com mais de um tipo marcado, a digitação é quebrada por tipo (cada um com sua NF, valor, pallets e serviços), na mesma capa.':'Os tipos só podem ser alterados em capa aberta ou devolvida (antes da digitação conferida).')+'</div></div>';
   }
+  // v1.0.1400: unidade e operação da capa (a operação define a tabela de preço)
+  var _uoHtml='<div style="grid-column:1/-1;border:1px solid var(--blue-text);border-radius:10px;padding:10px 12px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div><label class="fl">Unidade</label><select class="fi" id="capa-e-unit" onchange="capaUnOpCarregar(\'capa-e\',\''+c.cliente_id+'\',\''+(c.responsavel_id||'')+'\')"><option value="">— sem unidade (vale a do cliente) —</option>'
+      +capaUnidades().map(function(u){ return '<option value="'+u.id+'"'+(c.unit_id===u.id?' selected':'')+'>'+ecomEsc(u.name||'')+'</option>'; }).join('')+'</select></div>'
+    +'<div><label class="fl">Operação</label><select class="fi" id="capa-e-op"'+(podeTipo?'':' disabled')+'><option value="">Carregando…</option></select></div></div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+(podeTipo?'Trocar a operação troca a tabela de preço: os serviços passam a ser os da nova tabela e as quantidades já digitadas são zeradas. Depois, reimprima a capa.':'Capa já digitada: a operação só muda depois de estornar a digitação. A unidade pode ser trocada.')
+    +' Tabela atual: <b>'+ecomEsc(((tabelasTarifarias||[]).find(function(t){return t.id===c.tabela_id;})||{}).nome||'nenhuma')+'</b></div></div>';
+  setTimeout(function(){ capaUnOpCarregar('capa-e',c.cliente_id,c.responsavel_id||''); },40);
   portModal('Editar dados da capa · '+ecomEsc(c.numero),
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+tipoHtml+matHtml
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+tipoHtml+_uoHtml+matHtml
     +'<div><label class="fl">Data da operação *</label><input class="fi" id="capa-e-data_operacao" type="date" value="'+v('data_operacao')+'"></div>'
     +'<div><label class="fl">DOC</label><input class="fi" id="capa-e-doc" value="'+v('doc')+'"></div>'
     +'<div><label class="fl">NF de '+(exp?'saída':'entrada')+'</label><input class="fi" id="capa-e-nf_numero" value="'+v('nf_numero')+'"></div>'
@@ -5443,6 +5550,15 @@ async function capaSalvarDados(id){
       novo.tipos_produto=novosT; trocaMat=true; mud.push('Tipos de produto de '+nomeT(antT)+' para '+nomeT(novosT));
     }
   }
+  // v1.0.1400: unidade e operação
+  var _uEl=ge('capa-e-unit'), _oEl=ge('capa-e-op'), _uo=null;
+  var _unNovo=_uEl?(_uEl.value||null):(c.unit_id||null), trocaUn=!!_uEl&&_unNovo!==(c.unit_id||null);
+  var _opOk=!!_oEl&&!_oEl.disabled&&_oEl.getAttribute('data-ok')==='1', _opNovo=_opOk?(_oEl.value||null):(c.responsavel_id||null), trocaOp=_opOk&&!!_opNovo&&_opNovo!==(c.responsavel_id||null);
+  if(trocaOp&&trocaTipo){ portErr('Troque o tipo da capa e a operação em duas etapas: salve um e depois o outro.'); return; }
+  if(trocaUn||trocaOp){
+    try{ _uo=await capaUnOpPlano(c,trocaUn?_unNovo:undefined,trocaOp?_opNovo:undefined); }catch(eU){ portErr(String(eU.message||eU)); return; }
+    Object.assign(novo,_uo.novo); mud=mud.concat(_uo.mud);
+  }
   if(!mud.length&&!trocaTipo){ portClose(); return; }
   portSaving();
   try{
@@ -5468,6 +5584,7 @@ async function capaSalvarDados(id){
       if(typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;   // a digitação recomeça com os serviços novos
     }
     if(trocaMat&&typeof capaDig!=='undefined'&&capaDig&&capaDig.id===c.id) capaDig=null;   // v1.0.1335: digitação recomeça com os blocos dos tipos novos
+    if(_uo&&_uo.servNovos) await capaUnOpServicos(c,_uo.servNovos);   // v1.0.1400
     Object.assign(c,novo);
     portClose();
     if(trocaTipo) showToast('Capa agora é '+(novoTipo==='expedicao'?'Expedição':'Recebimento')+': '+c.numero+' (antes '+numAntigo+'). Reimprima a capa (📄 PDF).','green');
@@ -56966,10 +57083,13 @@ function rCapasProcesso_i(){
     const st=CAPA_STATUS[c.status]||CAPA_STATUS.aberta;
     const tipoLabel=c.tipo==='expedicao'?'Expedição':'Recebimento';
     const tipoCor=c.tipo==='expedicao'?'var(--red-text)':'var(--green-text)';
+    const _selOk=pode&&c.status!=='faturada'&&c.status!=='inutilizada'&&!c.fatura_id;   // v1.0.1400
+    const _semTab=_selOk&&!c.tabela_id;
     return`<div class="li">
+      ${_selOk?`<input type="checkbox" ${_capaSel.has(c.id)?'checked':''} title="Selecionar para definir unidade e operação" onclick="event.stopPropagation()" onchange="capaSelToggle('${c.id}',this.checked)" style="margin-right:10px;width:16px;height:16px;flex-shrink:0">`:(pode?'<span style="width:26px;flex-shrink:0"></span>':'')}
       <div class="av" style="width:38px;height:38px;border-radius:8px;background:var(--bg2);color:${tipoCor};font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${c.tipo==='expedicao'?'EXP':'REC'}</div>
       <div class="linfo"><div class="lname">${c.numero} · ${c.cliente_nome||'—'}</div>
-      <div class="lsub">${tipoLabel} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'sem data'} ${c.doc?'· DOC '+c.doc:''}</div>${c.status==='devolvida'&&c.motivo_devolucao?`<div class="lsub" style="color:var(--red-text);font-weight:600">↩ Devolvida: ${ecomEsc(c.motivo_devolucao)}</div>`:''}</div>
+      <div class="lsub">${tipoLabel} · ${c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'sem data'} ${c.doc?'· DOC '+c.doc:''}${c.unit_id&&capaUnidadeNome(c.unit_id)?' · <span style="color:var(--blue-text)">'+ecomEsc(capaUnidadeNome(c.unit_id))+'</span>':''}${c.tipo_operacao?' · '+ecomEsc(c.tipo_operacao):''}${_semTab?' · <span style="color:var(--red-text);font-weight:600">sem tabela de preço</span>':''}</div>${c.status==='devolvida'&&c.motivo_devolucao?`<div class="lsub" style="color:var(--red-text);font-weight:600">↩ Devolvida: ${ecomEsc(c.motivo_devolucao)}</div>`:''}</div>
       <div class="lright" style="display:flex;flex-direction:row;align-items:center;gap:6px">
         <span class="bdg" style="background:${st.bg};color:${st.c}">${st.l}</span>
         ${pode&&c.status==='devolvida'&&curPage==='fat-capas'?`<button class="btn btn-sm" onclick="event.stopPropagation();capaReenviar('${c.id}')">↻ Corrigida · reenviar</button><button class="btn btn-sm" onclick="event.stopPropagation();capaReenviarConfirmado('${c.id}')">✔ Está correto · reenviar</button>`:''}
@@ -57002,6 +57122,7 @@ function rCapasProcesso_i(){
     <span style="display:flex;align-items:center;gap:14px"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2);cursor:pointer"><input type="checkbox" ${capaOcultarInut?'checked':''} onchange="capaOcultarInut=this.checked;render()"> Ocultar inutilizadas</label>
     ${pode?'<button class="btn btn-p btn-sm" onclick="capaNovaModal()">+ Nova capa</button>':''}</span>
   </div>
+  ${capaSelBarra()}
   ${lista.length?lista.map(row).join(''):'<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><p>Nenhuma capa registrada</p></div>'}`;
 }
 
