@@ -3177,7 +3177,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.22';   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
+const PORTAL_VERSION = 'v1.8.23';   // v1.8.23: uma NF para vários pedidos (automático pela OC ou marcando os pedidos)
+//   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
 // v1.8.18 →   // v1.8.18: o portal diz o que falta para o cartão do motorista
@@ -4634,9 +4635,11 @@ async function nfChaveDoPdf(f){
   return null;
 }
 const nfBase = n => String(n||'').toLowerCase().replace(/\.(xml|pdf)$/,'').replace(/[_\- ]?danfe$/,'');
-window.nfEnviar = async function(files, pedidoId){
+window.nfEnviar = async function(files, pedidoId, grupoIds){
   const todos = Array.from(files||[]);
   const arr = todos.filter(f=>/\.xml$/i.test(f.name)||/xml/.test(f.type)), pdfs = todos.filter(f=>/\.pdf$/i.test(f.name)||/pdf/.test(f.type));
+  const _grupo = Array.isArray(grupoIds)&&grupoIds.length ? grupoIds : null;   // v1.8.23: uma nota para vários pedidos marcados
+  if(_grupo && arr.length!==1){ toast('Para ligar uma nota a vários pedidos, envie UM XML (e a DANFE em PDF, se tiver).'); return; }
   // v1.8.2: o resultado aparece numa caixa de diálogo
   const old = $('mNfRes'); if(old) old.remove();
   document.body.insertAdjacentHTML('beforeend', `<div id="mNfRes" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:560px"><div class="modal-h"><h3>Notas recebidas · ${todos.length} arquivo(s)</h3></div><div class="modal-b"><div id="nfRes" style="font-size:13px;line-height:1.8"><span class="hint">Processando…</span></div></div><div class="modal-f"><button class="btn btn-primary" onclick="$('mNfRes').remove()">Ok</button></div></div></div>`);
@@ -4646,9 +4649,15 @@ window.nfEnviar = async function(files, pedidoId){
   for(const f of arr){
     try{ const txt = await f.text();
       const mCh = txt.match(/<chNFe>(\d{44})<\/chNFe>/) || txt.match(/Id="NFe(\d{44})"/); if(mCh) chavePorBase[nfBase(f.name)] = mCh[1];
-      const { data, error } = await sb.rpc('portal_enviar_nf', { p_xml: txt, p_pedido: pedidoId || null });
+      let { data, error } = await sb.rpc('portal_enviar_nf', { p_xml: txt, p_pedido: _grupo ? null : (pedidoId || null) });
       if(error) throw error;
-      out.push(`${data.status==='divergente'||data.status==='sem_pedido'?'<span style="color:#b45309">!</span>':'<span style="color:#4d7a1a">✓</span>'} NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>':'ligada ao pedido '+esc(data.pedido||'')}`);
+      if(_grupo){   // v1.8.23: força a ligação com os pedidos marcados
+        const chG = (mCh && mCh[1]) || data.chave; if(!chG) throw new Error('não encontrei a chave da nota no XML');
+        const g = await sb.rpc('portal_nf_ligar_pedidos', { p_chave: chG, p_pedidos: _grupo }); if(g.error) throw g.error;
+        data = Object.assign({}, data, { status: g.data.status, pedido: g.data.pedidos, _n: g.data.qtd, _div: g.data.divergencias });
+        _nfSel.clear();
+      }
+      out.push(`${data.status==='divergente'||data.status==='sem_pedido'?'<span style="color:#b45309">!</span>':'<span style="color:#4d7a1a">✓</span>'} NF ${esc(data.numero||'')}: ${data.ja_enviada?'já tinha sido enviada · ':''}${data.status==='sem_pedido'?'pedido não encontrado (a MKLOG vai ligar)':data.status==='divergente'?'ligada ao pedido '+esc(data.pedido||'')+' · <b>divergente</b>'+(data._div?': '+esc(data._div):''):'ligada ao pedido '+esc(data.pedido||'')}`);
     }catch(err){ out.push(`${esc(f.name)}: <span style="color:#b91c1c">${esc(err.message||err)}</span>`); }
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
   }
@@ -4700,6 +4709,48 @@ window.portalVerCce = async function(pedidoId){
   try{ const c = nfCceDoPedido(pedidoId); if(!c){ toast('Nenhuma carta de correção neste pedido.'); return; }
     const { data:u, error:eU } = await sb.storage.from('portal-anexos').createSignedUrl(c.path, 600); if(eU) throw eU; window.open(u.signedUrl, '_blank');
   }catch(err){ toast('Não consegui abrir a carta: '+(err.message||err)); }
+};
+// v1.8.23: uma nota para vários pedidos — marcar os pedidos sem nota e enviar (ou escolher) UMA nota para todos
+window._nfSel = window._nfSel || new Set();
+window.nfSelToggle = function(id,on){ if(on) _nfSel.add(id); else _nfSel.delete(id); const b=$('nfSelBar'); if(b) b.innerHTML=nfSelBarHtml(); };
+window.nfSelBarHtml = function(){
+  const L=(state._vfAll||state.volFat||[]).filter(x=>_nfSel.has(x.id)&&!x.nf), k=L.length; if(!k) return '';
+  const vol=L.reduce((a,x)=>a+(+x.volumes||0),0);
+  return `<div style="display:flex;gap:8px;align-items:center;padding:8px 14px;background:#eff6ff;border-top:1px solid var(--border,#e5e5e5);flex-wrap:wrap"><b>${k} pedido(s) marcado(s) para a mesma nota</b>${vol?` <span class="hint">· ${vol} volume(s)</span>`:''}<button class="btn btn-primary" style="width:auto;padding:5px 12px" onclick="nfEscolherVarios()">Enviar uma NF para ${k===1?'o pedido':'os '+k+' pedidos'}</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px" onclick="nfUsarEnviada()">Usar uma nota já enviada</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px;margin-left:auto" onclick="_nfSel.clear();renderVolFat()">limpar</button></div>`;
+};
+window.nfSelIds = function(){ return (state._vfAll||state.volFat||[]).filter(x=>_nfSel.has(x.id)&&!x.nf).map(x=>x.id); };
+window.nfEscolherVarios = function(){
+  const ids=nfSelIds(); if(!ids.length){ toast('Marque os pedidos que a nota cobre.'); return; }
+  const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
+  i.onchange=()=>nfEnviar(i.files, null, ids); i.click();
+};
+window.nfRecarregar = async function(){
+  try{ const nf = await sb.rpc('portal_minhas_nfs'); state.nfs = nf.data||[]; const vf = await sb.rpc('portal_volumes_faturar'); state.volFat = vf.data||[]; }catch(_e){}
+  await cceCarregar(); renderVolFat(); renderNfBox();
+};
+window.nfUsarEnviada = async function(){
+  const ids=nfSelIds(); if(!ids.length){ toast('Marque os pedidos que a nota cobre.'); return; }
+  const old=$('mNfUsar'); if(old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="mNfUsar" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:620px"><div class="modal-h"><h3>Usar uma nota já enviada · ${ids.length} pedido(s)</h3></div><div class="modal-b"><div id="nfUsarLista" style="font-size:13px"><span class="hint">Carregando as notas…</span></div></div><div class="modal-f"><button class="btn btn-ghost" onclick="$('mNfUsar').remove()">Fechar</button></div></div></div>`);
+  try{
+    const q = await sb.rpc('portal_nfs_para_ligar'); if(q.error) throw q.error;
+    const N = q.data||[]; state._nfUsar = N; const box=$('nfUsarLista'); if(!box) return;
+    if(!N.length){ box.innerHTML='<span class="hint">Nenhuma nota enviada nos últimos 45 dias. Use "Enviar uma NF".</span>'; return; }
+    box.innerHTML = `<div class="hint" style="margin-bottom:8px">Escolha a nota. Os pedidos marcados passam a fazer parte dela, junto com os que ela já cobre.</div>`
+      + N.map((x,i)=>`<div onclick="nfUsarEscolher(${i})" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--border,#e5e5e5);border-radius:10px;margin-bottom:6px;cursor:pointer">
+          <div style="flex:1;min-width:0"><b>NF ${esc(x.numero||'')}</b> · ${esc(x.dest_nome||'—')}<div class="hint" style="font-size:11.5px">${x.volumes!=null?Number(x.volumes).toLocaleString('pt-BR')+' volume(s) · ':''}${x.pedidos?'já cobre '+esc(x.pedidos):'ainda sem pedido'} · enviada em ${new Date(x.created_at).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})}</div></div>
+          <span style="font-size:12px;color:#1e40af;white-space:nowrap">usar esta ›</span></div>`).join('');
+  }catch(err){ const box=$('nfUsarLista'); if(box) box.innerHTML='<span style="color:#b91c1c">Não consegui listar as notas: '+esc(err.message||err)+'</span>'; }
+};
+window.nfUsarEscolher = async function(i){
+  const x=(state._nfUsar||[])[i], ids=nfSelIds(); if(!x||!ids.length) return;
+  const box=$('nfUsarLista'); if(box) box.innerHTML='<span class="hint">Ligando a NF '+esc(x.numero||'')+' aos pedidos…</span>';
+  try{
+    const g = await sb.rpc('portal_nf_ligar_pedidos', { p_chave: x.chave, p_pedidos: ids }); if(g.error) throw g.error;
+    _nfSel.clear(); const m=$('mNfUsar'); if(m) m.remove();
+    toast('NF '+(g.data.numero||'')+' ligada a '+(g.data.pedidos||'')+(g.data.status==='divergente'?' · com divergência: confira na lista':''));
+    await nfRecarregar();
+  }catch(err){ if(box) box.innerHTML='<span style="color:#b91c1c">Não foi possível ligar: '+esc(err.message||err)+'</span>'; }
 };
 window.nfEscolher = function(pedidoId){
   const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
@@ -4863,25 +4914,30 @@ window.renderVolFat = function(){
           : soVol ? `<span style="color:#b45309">${dvg}</span><br>Pode ser corrigido com carta de correção (CC-e)`+lk('anexar carta de correção',`cceEscolher('${r.id}')`)
           : `<span style="color:#b91c1c">${dvg}</span>`;
         r._nfOk = !div || corrig;
-        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${rot}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}${['em_romaneio','carregado'].indexOf(sit)<0?` · <a href="#" style="color:#b91c1c" title="Tira a nota (XML e DANFE) deste pedido para enviar a certa" onclick="event.preventDefault();nfDesligar(${i})">desligar nota</a>`:''}</div>`; }   // v1.8.20
+        const _grp = L.filter(x=>x.nf && x.nf===r.nf && x.id!==r.id).map(x=>String(x.pedido||'').split(' · ')[0]);   // v1.8.23: outros pedidos da mesma nota
+        const _grpChip = _grp.length ? ` <span style="font-size:11px;font-weight:500;padding:1px 8px;border-radius:99px;background:#dbeafe;color:#1e40af;white-space:nowrap">nota de ${_grp.length+1} pedidos</span>` : '';
+        const _grpTxt = _grp.length ? `junto com ${esc(_grp.slice(0,4).join(', '))}${_grp.length>4?' e mais '+(_grp.length-4):''} · conferida pelo conjunto<br>` : '';
+        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${rot}</span>${_grpChip}<div class="hint" style="font-size:11.5px">${_grpTxt}${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}${['em_romaneio','carregado'].indexOf(sit)<0?` · <a href="#" style="color:#b91c1c" title="Tira a nota (XML e DANFE) deste pedido para enviar a certa" onclick="event.preventDefault();nfDesligar(${i})">desligar nota</a>`:''}</div>`; }   // v1.8.20
       else if(foraMult) nf = `<span class="hint" style="color:#9a3412">ajuste as quantidades para múltiplo do pacote e reenvie o pedido</span>`;
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
-      else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
+      else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button> <label style="font-size:11.5px;color:#475569;white-space:nowrap;cursor:pointer;margin-left:6px" title="Marque vários pedidos para enviar UMA nota para todos"><input type="checkbox" ${_nfSel.has(r.id)?'checked':''} onchange="nfSelToggle('${r.id}',this.checked)" style="vertical-align:-2px"> uma nota para vários</label>`;
       const apto=r.nf&&(r.nf_status!=='divergente'||r._nfOk)&&['conferido','separado','em_separacao'].includes(sit);
+      r._apto=!!apto;   // v1.8.23
       return `<tr>${podeVer('agd')?`<td>${apto?`<input type="checkbox" ${_qSel.has(r.id)?'checked':''} onchange="qSelToggle('${r.id}',this.checked)" title="Marcar para agendar">`:''}</td>`:''}<td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${foraMult?'#ffedd5':SIT[1]};color:${foraMult?'#9a3412':SIT[2]};white-space:nowrap">${foraMult?'itens fora do múltiplo':SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}${(()=>{ const rs=(state.rsvSol||{})[r.id]; if(!foraMult||!rs) return ''; if(rs.situacao==='pendente') return `<div style="font-size:11.5px;margin-top:4px;color:#1e40af"><b>⏳ Reserva manual aguardando aceite da MK Logística</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; if(rs.situacao==='recusada') return `<div style="font-size:11.5px;margin-top:4px;color:#b91c1c"><b>Reserva manual recusada</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; return ''; })()}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
       <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button>${(foraMult&&!(state.rsvSol||{})[r.id]?.situacao||foraMult&&(state.rsvSol||{})[r.id]?.situacao==='recusada')?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Pedir à MK Logística que reserve o RG fora do padrão (ex.: saco aberto)" onclick="pedSolicitarReserva(${i})">🔑 Reserva manual</button>`:''}${(!r.nf&&(semLista||semSaldo))?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px;color:#b91c1c" title="Excluir pedido (ainda não separado e sem nota)" onclick="pedExcluir(${i})">🗑</button>`:''}</td></tr>`; }).join('')}
     ${L.some(volPasa)?'':'<tr><td colspan="9" style="text-align:center;padding:18px;color:#64748b">Nenhum pedido com esses filtros · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a></td></tr>'}
-    </tbody></table></div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9
+    </tbody></table></div><div id="nfSelBar">${nfSelBarHtml()}</div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9 · v1.8.23
 };
 // v1.8.16: excluir pedido ainda não separado e sem nota fiscal (o empenho volta ao estoque; a MKLOG vê como excluído pelo portal)
 // v1.8.20: desligar a nota (XML + DANFE) ligada ao pedido errado — só antes do romaneio/carregamento
 window.nfDesligar = async function(i){
   const r=(state._vfAll||state.volFat||[])[i]; if(!r||!r.nf) return;
-  if(!confirm('Desligar a NF '+r.nf+' do pedido '+(String(r.pedido||'').split(' · ')[0])+'?\n\nO XML e a DANFE saem do pedido e voc\u00ea pode enviar a nota certa. A MK Logística fica sabendo.')) return;
+  const _outros=(state._vfAll||state.volFat||[]).filter(x=>x.nf&&x.nf===r.nf&&x.id!==r.id).map(x=>String(x.pedido||'').split(' · ')[0]);   // v1.8.23
+  if(!confirm('Desligar a NF '+r.nf+' do pedido '+(String(r.pedido||'').split(' · ')[0])+'?\n\n'+(_outros.length?'ATEN\u00c7\u00c3O: esta nota tamb\u00e9m cobre '+_outros.join(', ')+'. Ela sai de TODOS os pedidos.\n\n':'')+'O XML e a DANFE saem do pedido e voc\u00ea pode enviar a nota certa. A MK Logística fica sabendo.')) return;
   try{ const q=await sb.rpc('portal_desligar_nf',{p_pedido:r.id,p_autor:(state.user&&state.user.nome)||null}); if(q.error) throw q.error;
     toast('Nota desligada do pedido.'); try{ const vf=await sb.rpc('portal_volumes_faturar'); state.volFat=vf.data||[]; }catch(_e){} renderVolFat(); }
   catch(e){ toast('Não foi possível desligar: '+(e.message||e)); }
@@ -5186,7 +5242,15 @@ window.agdCancelar=async function(id){
 };
 // pelo quadro de pedidos: marcar e agendar coleta / adicionar a um agendamento
 window._qSel=window._qSel||new Set();
-window.qSelToggle=function(id,on){ if(on) _qSel.add(id); else _qSel.delete(id); const b=$('qSelBar'); if(b) b.innerHTML=qSelBarHtml(); };
+window.qSelToggle=function(id,on){
+  // v1.8.23: pedidos da mesma nota saem sempre juntos — marcar (ou desmarcar) um leva os outros
+  const L=state._vfAll||state.volFat||[], r=L.find(x=>x.id===id), grp=(r&&r.nf)?L.filter(x=>x.nf===r.nf):[];
+  if(grp.length>1){
+    const fora=grp.filter(x=>!x._apto);
+    if(on&&fora.length){ toast('A NF '+r.nf+' cobre também '+fora.map(x=>String(x.pedido||'').split(' · ')[0]).join(', ')+', que ainda não pode ser agendado. Os pedidos da mesma nota saem juntos.'); renderVolFat(); return; }
+    grp.forEach(x=>{ if(on) _qSel.add(x.id); else _qSel.delete(x.id); }); renderVolFat(); return;
+  }
+  if(on) _qSel.add(id); else _qSel.delete(id); const b=$('qSelBar'); if(b) b.innerHTML=qSelBarHtml(); };
 function qSelBarHtml(){ const k=_qSel.size; if(!k||!podeVer('agd')) return ''; return `<div style="display:flex;gap:8px;align-items:center;padding:8px 14px;background:#eff6ff;border-top:1px solid var(--border,#e5e5e5);flex-wrap:wrap"><b>${k} pedido(s) marcado(s)</b><button class="btn btn-primary" style="width:auto;padding:5px 12px" onclick="qAgendarNovo()">📅 Agendar coleta</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px" onclick="qAdicionarAgd()">➕ Adicionar a um agendamento</button><button class="btn btn-ghost" style="width:auto;padding:5px 12px;margin-left:auto" onclick="_qSel.clear();renderVolFat()">limpar</button></div>`; }
 window.qAgendarNovo=function(){ const sel=[..._qSel]; openAgd(); agdTipo('saida'); agd.peds=sel; agdPedsRender(); };
 window.qAdicionarAgd=async function(){
