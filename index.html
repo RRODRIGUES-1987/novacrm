@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1398 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1399 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1398';
+const APP_VERSION='v1.0.1399';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2831,6 +2831,9 @@ async function fcdCarregar(forcar){
   if(_fcdLoaded&&!forcar) return;
   try{ capasProcesso=await dbSelectAll('processo_capas','company_id=eq.'+company.id+'&order=created_at.desc')||[]; _fcdLoaded=true; }catch(e){}
 }
+// v1.0.1399: unidades da empresa e nome da unidade (a capa passa a gravar a unidade)
+function capaUnidades(){ var cid=company&&company.id; return (userUnits||[]).filter(function(u){ return !cid||u.company_id===cid; }); }
+function capaUnidadeNome(id){ if(!id) return ''; var u=(userUnits||[]).find(function(x){return x.id===id;}); return u?(u.name||''):''; }
 // v1.0.1352: capa/cliente da unidade selecionada (Itu não mostra Salto). Cliente sem unidade aparece em todas.
 function capaCliNaUnidade(cliId){ if(!activeUnit) return true; var cl=(clientes||[]).find(function(x){return x.id===cliId;}); return !cl||!cl.unit_id||cl.unit_id===activeUnit; }
 function capaNaUnidade(c){ if(!activeUnit||!c) return true; if(c.unit_id) return c.unit_id===activeUnit; return capaCliNaUnidade(c.cliente_id); }
@@ -5281,7 +5284,7 @@ function capaVerTela(c){
   if(c.status!=='faturada'&&c.status!=='inutilizada'&&!c.fatura_id&&capaPodeEditar()) acoes+='<button class="btn" style="color:var(--red-text)" onclick="capaInutilizar(\''+c.id+'\')">⊘ Inutilizar capa</button>';
   return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><button class="btn btn-sm" onclick="capaViewId=null;render()">← Voltar</button>'
     +'<div style="font-size:15px;font-weight:700">'+ecomEsc(c.numero)+' · '+ecomEsc(c.cliente_nome||'')+' · '+(c.tipo==='expedicao'?'Expedição':'Recebimento')+'</div>'
-    +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span><span style="margin-left:auto;display:flex;gap:6px">'+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 Capa em branco</button>'
+    +'<span class="bdg" style="background:'+st.bg+';color:'+st.c+'">'+st.l+'</span>'+(c.unit_id&&capaUnidadeNome(c.unit_id)?'<span class="bdg" style="background:var(--blue-bg);color:var(--blue-text)">'+ecomEsc(capaUnidadeNome(c.unit_id))+'</span>':'')+'<span style="margin-left:auto;display:flex;gap:6px">'+capaBtnEditarDados(c)+'<button class="btn btn-sm" onclick="capaGerarPdf(\''+c.id+'\')">📄 Capa em branco</button>'
     +(c.status!=='aberta'&&c.status!=='inutilizada'?'<button class="btn btn-sm btn-p" onclick="capaGerarPdf(\''+c.id+'\',true)">📄 Capa digital (preenchida)</button>':'')+'</span></div>'
     +capaCabecalhoHtml(c)
     +(c.status==='inutilizada'?'<div style="border:1px solid var(--border);background:var(--bg2);color:var(--text2);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:13px">⊘ Capa inutilizada: <b>'+ecomEsc(c.motivo_inutilizacao||'')+'</b></div>':'')
@@ -7805,6 +7808,7 @@ async function loadClienteContatos(clienteId){
               ${c.tipo_operacao?`<span class="bdg bb" style="font-size:10px">${c.tipo_operacao}</span>`:''}
               ${c.pagador_id&&c.pagador_id!==clienteId?`<span class="bdg" style="font-size:10px;background:var(--amber-bg);color:var(--amber-text)">pago por ${(clientes.find(x=>x.id===c.pagador_id)||{}).nome||'outro cliente'}</span>`:''}
               ${c.tabela_id?`<span class="bdg" style="font-size:10px;background:var(--bg2);color:var(--text2)">tabela: ${(tabelasTarifarias.find(t=>t.id===c.tabela_id)||{}).nome||'—'}</span>`:''}
+              ${c.unit_id?`<span class="bdg" style="font-size:10px;background:var(--blue-bg);color:var(--blue-text)">unidade: ${ecomEsc(capaUnidadeNome(c.unit_id)||'—')}</span>`:''}
               ${c.telefone?`<span>${c.telefone}</span>`:''}
               ${c.email?`<span>· ${c.email}</span>`:''}
             </div>
@@ -7862,13 +7866,17 @@ async function ccPagadorEditar(contatoId,clienteId){
     +opsCli.map(function(x){return '<option value="'+x.id+'"'+(c.pagador_id===x.id?' selected':'')+'>'+e(x.nome)+(x.cpf_cnpj?' · '+e(x.cpf_cnpj):'')+'</option>';}).join('')+'</select></div>'
     +'<div class="fg"><label class="fl">Tabela tarifária desta operação</label><select class="fi" id="ccp-tab"><option value="">— a tabela do cliente pagador —</option>'
     +tabs.map(function(t){return '<option value="'+t.id+'"'+(c.tabela_id===t.id?' selected':'')+'>'+e(t.nome||'')+(t.cliente_nome?' · '+e(t.cliente_nome):'')+'</option>';}).join('')+'</select></div>'
-    +'<div style="font-size:11.5px;color:var(--text3)">As capas desta operação continuam no depositante (extrato e movimentação), mas entram na fatura do pagador.</div>';
+    +'<div class="fg"><label class="fl">Unidade desta operação</label><select class="fi" id="ccp-unit"><option value="">— vale para todas as unidades —</option>'
+    +capaUnidades().map(function(u){return '<option value="'+u.id+'"'+(c.unit_id===u.id?' selected':'')+'>'+e(u.name||'')+'</option>';}).join('')+'</select></div>'   // v1.0.1399
+    +'<div style="font-size:11.5px;color:var(--text3)">As capas desta operação continuam no depositante (extrato e movimentação), mas entram na fatura do pagador. Com a unidade preenchida, a operação só aparece nas capas daquela unidade.</div>';
   portModal('Quem paga esta operação',inner,'ccPagadorSalvar(\''+contatoId+'\',\''+clienteId+'\')');
 }
 async function ccPagadorSalvar(contatoId,clienteId){
-  var pag=(ge('ccp-pag')||{}).value||null, tab=(ge('ccp-tab')||{}).value||null;
+  var pag=(ge('ccp-pag')||{}).value||null, tab=(ge('ccp-tab')||{}).value||null, uni=(ge('ccp-unit')||{}).value||null;
   portSaving();
-  try{ await dbUpdate('clientes_contatos',contatoId,{pagador_id:pag,tabela_id:tab}); portClose(); showToast('Operação atualizada.','green'); await loadClienteContatos(clienteId); }
+  try{ try{ await dbUpdate('clientes_contatos',contatoId,{pagador_id:pag,tabela_id:tab,unit_id:uni}); }
+       catch(xu){ if(/unit_id/.test(String(xu&&xu.message))){ if(uni) throw new Error('a unidade da operação ainda não existe no banco (rode o SQL da v1.0.1399)'); await dbUpdate('clientes_contatos',contatoId,{pagador_id:pag,tabela_id:tab}); } else throw xu; }
+    portClose(); showToast('Operação atualizada.','green'); await loadClienteContatos(clienteId); }
   catch(x){ portErr('Erro: '+(x.message||x)+(/pagador_id|tabela_id/.test(String(x.message))?' (rode o SQL da v1.0.1237)':'')); }
 }
 function capaPagadorInfo(){
@@ -57025,6 +57033,10 @@ function capaNovaModal(){
   if(!capaPodeEditar())return;
   const cid=company?.id;
   const cliOpts=clientes.filter(c=>c.company_id===cid&&(!activeUnit||!c.unit_id||c.unit_id===activeUnit)).map(c=>`<option value="${c.id}">${c.nome}${c.cpf_cnpj?' · '+c.cpf_cnpj:''}</option>`).join('');
+  // v1.0.1399: a capa grava a unidade — vem da unidade ativa; em "Consolidado" é preciso escolher
+  const _uns=capaUnidades(), _unIni=activeUnit||(_uns.length===1?_uns[0].id:'');
+  const unitOpts='<option value="">Selecione...</option>'+_uns.map(u=>`<option value="${u.id}"${u.id===_unIni?' selected':''}>${ecomEsc(u.name||'')}</option>`).join('');
+  window._capaCtt=null;
   portModal('Nova Capa de Processo',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label class="fl">Tipo *</label>
@@ -57032,7 +57044,9 @@ function capaNovaModal(){
           <option value="recebimento">Recebimento (entrada)</option>
           <option value="expedicao">Expedição (saída)</option>
         </select></div>
-      <div><label class="fl">Cliente *</label>
+      <div><label class="fl">Unidade *</label>
+        <select class="fi" id="capa-unit" onchange="capaCarregarContatos((ge('capa-cliente')||{}).value)">${unitOpts}</select></div>
+      <div style="grid-column:1/-1"><label class="fl">Cliente *</label>
         <select class="fi" id="capa-cliente" onchange="capaCarregarContatos(this.value)"><option value="">Selecione...</option>${cliOpts}</select></div>
       <div style="grid-column:1/-1"><label class="fl">Operação / Contato</label>
         <select class="fi" id="capa-operacao"><option value="">Selecione o cliente primeiro...</option></select>
@@ -57060,9 +57074,15 @@ async function capaCarregarContatos(clienteId){
   const sel=ge('capa-operacao');if(!sel)return;
   if(!clienteId){sel.innerHTML='<option value="">Selecione o cliente primeiro...</option>';return;}
   try{
-    const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=created_at.asc`);
-    if(!contatos.length){sel.innerHTML='<option value="">Nenhum contato/operação cadastrado</option>';return;}
-    sel.innerHTML='<option value="">Selecione...</option>'+contatos.map(c=>`<option value="${c.id}" data-tipo="${c.tipo_operacao||''}" data-pagador="${c.pagador_id||''}" data-tabela="${c.tabela_id||''}">${c.tipo_operacao?c.tipo_operacao+' — ':''}${c.nome}${c.cargo?' ('+c.cargo+')':''}${c.pagador_id&&c.pagador_id!==clienteId?' · pago por '+((clientes.find(x=>x.id===c.pagador_id)||{}).nome||'outro'):''}</option>`).join('');
+    const _todos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}&order=created_at.asc`);
+    // v1.0.1399: só as operações da unidade escolhida (operação sem unidade vale para todas)
+    const _un=(ge('capa-unit')||{}).value||'';
+    const contatos=_todos.filter(c=>!c.unit_id||!_un||c.unit_id===_un);
+    const _ehOp=c=>!!(String(c.tipo_operacao||'').trim()||c.tabela_id);
+    window._capaCtt={cli:clienteId,unit:_un,todos:_todos.length,opsTodas:_todos.filter(_ehOp).length,opsUnidade:contatos.filter(_ehOp).length};
+    if(!_todos.length){sel.innerHTML='<option value="">Nenhum contato/operação cadastrado</option>';capaPagadorInfo();return;}
+    if(!contatos.length){sel.innerHTML='<option value="">Nenhuma operação deste cliente nesta unidade</option>';capaPagadorInfo();return;}
+    sel.innerHTML='<option value="">Selecione...</option>'+contatos.map(c=>`<option value="${c.id}" data-tipo="${c.tipo_operacao||''}" data-pagador="${c.pagador_id||''}" data-tabela="${c.tabela_id||''}">${c.tipo_operacao?c.tipo_operacao+' — ':''}${c.nome}${c.cargo?' ('+c.cargo+')':''}${c.unit_id?' · '+ecomEsc(capaUnidadeNome(c.unit_id)):''}${c.pagador_id&&c.pagador_id!==clienteId?' · pago por '+((clientes.find(x=>x.id===c.pagador_id)||{}).nome||'outro'):''}</option>`).join('');
     sel.onchange=capaPagadorInfo; capaPagadorInfo();   // v1.0.1237
     var _tb=ge('capa-tipos-box'); if(_tb) _tb.innerHTML=capaTiposHtml('capa-n',clienteId,[]);   // v1.0.1254
   }catch(e){sel.innerHTML='<option value="">Erro ao carregar contatos</option>';}
@@ -57073,6 +57093,12 @@ async function capaSalvarNova(){
   const clienteId=ge('capa-cliente')?.value;
   const dataOp=ge('capa-data')?.value;
   if(!clienteId||!dataOp){portErr('Selecione o cliente e a data.');return;}
+  // v1.0.1399: unidade obrigatória; cliente com operações cadastradas precisa de uma operação da unidade
+  const unitId=(ge('capa-unit')||{}).value||null;
+  if(ge('capa-unit')&&!unitId){portErr('Escolha a unidade da capa.');return;}
+  const _ctt=(window._capaCtt&&window._capaCtt.cli===clienteId)?window._capaCtt:null, _unNome=capaUnidadeNome(unitId)||'esta unidade';
+  if(_ctt&&_ctt.opsTodas>0&&_ctt.opsUnidade===0){portErr('Este cliente não tem operação cadastrada em '+_unNome+'. Sem operação a capa nasce sem tabela de preço. Peça o cadastro ao comercial ou confira a unidade.');return;}
+  if(_ctt&&_ctt.opsUnidade>0&&!(ge('capa-operacao')||{}).value){portErr('Escolha a operação do cliente. É ela que define a tabela de preço desta capa.');return;}
   portSaving();
   const cli=clientes.find(c=>c.id===clienteId);
   // Busca tabela tarifária do cliente
@@ -57090,8 +57116,13 @@ async function capaSalvarNova(){
   const _pag=_pagId&&_pagId!==clienteId?clientes.find(c=>c.id===_pagId):null;
   const _tabPag=_pag?tabelasTarifarias.find(t=>t.status!=='pendente'&&(t.cliente_id===_pag.id||(t.cliente_nome&&t.cliente_nome.toLowerCase()===String(_pag.nome||'').toLowerCase()))):null;
 
+  // v1.0.1399: capa sem tabela de preço não tem serviços e não pode ser faturada — só nasce com confirmação
+  if(!(_tabOp||(_tabPag&&_tabPag.id)||(tabela&&tabela.id))){
+    const _okSemTab=await vConfirmar('Capa sem tabela de preço','Não encontrei tabela de preço para '+(cli?cli.nome:'este cliente')+' nesta operação. A capa vai nascer sem serviços e não poderá ser faturada até a tabela ser cadastrada. Confira se o cliente e a unidade estão certos.','Criar mesmo assim','var(--red-text)');
+    if(!_okSemTab){portErr('Capa não criada: cliente sem tabela de preço nesta operação.');return;}
+  }
   const numero=await capaReservarNumero(tipo);   // v1.0.1151
-  const dados={company_id:company?.id,numero,tipo,cliente_id:clienteId,cliente_nome:cli?.nome||null,
+  const dados={company_id:company?.id,unit_id:unitId,numero,tipo,cliente_id:clienteId,cliente_nome:cli?.nome||null,
     cliente_cnpj:cli?.cpf_cnpj||null,tipo_operacao:tipoOperacao,responsavel_id:responsavelId,
     tabela_id:(_tabOp||(_tabPag&&_tabPag.id)||tabela?.id)||null,data_operacao:dataOp,status:'aberta',
     pagador_id:_pag?_pag.id:null,pagador_nome:_pag?_pag.nome:null,
@@ -57103,7 +57134,8 @@ async function capaSalvarNova(){
     tipo_veiculo:ge('capa-veiculo')?.value||null,owner_id:cu?.id};
   try{
     let salvo;
-    try{ salvo=await dbInsert('processo_capas',dados); }
+    try{ try{ salvo=await dbInsert('processo_capas',dados); }
+      catch(_eU){ if(/unit_id/.test(String(_eU&&_eU.message))){ delete dados.unit_id; showToast('A unidade não foi gravada na capa: rode o SQL da v1.0.1399.','amber'); salvo=await dbInsert('processo_capas',dados); } else throw _eU; } }   // v1.0.1399: base sem a coluna ainda
     catch(_e0){ if(/pagador_|tipos_produto/.test(String(_e0&&_e0.message))){ delete dados.pagador_id; delete dados.pagador_nome; delete dados.tipos_produto; salvo=await dbInsert('processo_capas',dados); } else throw _e0; }   // v1.0.1237: base sem a coluna ainda
     const tabela=(dados.tabela_id&&tabelasTarifarias.find(t=>t.id===dados.tabela_id))||tabelaCli;
     if(salvo){
@@ -57390,7 +57422,7 @@ function capaBuildPdfDef(c, servicos, P){
         c.cliente_cnpj?{text:c.cliente_cnpj,fontSize:9,alignment:'center'}:{text:''}],margin:[0,8,0,0]},
       (function(){ var bc=(typeof capaBarcodeDataUrl==='function'&&!c._modelo)?capaBarcodeDataUrl(c.numero):null;   // v1.0.1047: código de barras para abrir a digitação
         return {stack:[{text:[{text:'IDENTIFICAÇÃO: MKFOR040   '},{text:'REV. 01'}],fontSize:Math.max(6,P.fonte_id-1)},
-          bc?{image:bc,width:128,height:22,margin:[0,2,0,0]}:{text:''},{text:(c.numero||'')+(PRE?'  ·  VIA DIGITAL':''),fontSize:P.fonte_id,bold:true}],margin:[0,3,0,0]}; })(),
+          bc?{image:bc,width:128,height:22,margin:[0,2,0,0]}:{text:''},{text:(c.numero||'')+(PRE?'  ·  VIA DIGITAL':''),fontSize:P.fonte_id,bold:true},(c.unit_id&&capaUnidadeNome(c.unit_id)?{text:capaUnidadeNome(c.unit_id),fontSize:Math.max(6,P.fonte_id-1)}:{text:''})],margin:[0,3,0,0]}; })(),
     ]]},
     layout:{hLineWidth:()=>1.2,vLineWidth:()=>1.2,hLineColor:()=>BORDA,vLineColor:()=>BORDA}
   };
@@ -57628,7 +57660,7 @@ function capaBuildHtml(c, servicos, P){
   <div class="topbar">
     <div>${LOGO?`<img src="${LOGO}" style="height:34px">`:'<b style="font-size:16px">MK log</b>'}</div>
     <div class="mid">${cabecalho}${c.cliente_cnpj?`<br><span style="font-size:9px;font-weight:400">${c.cliente_cnpj}</span>`:''}</div>
-    <div class="id">IDENTIFICAÇÃO: MKFOR040<br>REVISÃO: 01<br>${c.numero}</div>
+    <div class="id">IDENTIFICAÇÃO: MKFOR040<br>REVISÃO: 01<br>${c.numero}${c.unit_id&&capaUnidadeNome(c.unit_id)?'<br>'+capaUnidadeNome(c.unit_id):''}</div>
   </div>
 
   <div class="secao s-registro">DADOS DE REGISTRO</div>
