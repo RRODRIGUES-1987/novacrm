@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1396 | Gerado: 2026-11-18 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1397 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1396';
+const APP_VERSION='v1.0.1397';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -44782,7 +44782,7 @@ function wmsPedidoDetalhe(id){
   portModal(`Pedido ${p.numero_pedido}`,
     `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div><div style="font-size:13px;font-weight:600">${cli?.nome||'—'}</div>
-        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${(_wmsNfPed[p.id]||[]).length?' · NF '+(_wmsNfPed[p.id]).map(function(n){return n.numero+(n.status==='divergente'?' <span style="color:var(--amber-text)" title="'+String(n.divergencias||'').replace(/"/g,'')+'">⚠ divergente</span>':'');}).join(', '):''}${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div>${wmsOsAutoMotivo(p)?'<div style="margin-top:6px;border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:6px 9px;font-size:12px"><b>OS automática não gerada:</b> '+ecomEsc(wmsOsAutoMotivo(p))+'</div>':''}</div>
+        <div style="font-size:11px;color:var(--text3)">${itens.length} item(ns) · ${totQtd.toLocaleString('pt-BR')} unidades${(_wmsNfPed[p.id]||[]).length?' · NF '+(_wmsNfPed[p.id]).map(function(n){return n.numero+wmsNfSelo(n);}).join(', '):''}${p.volumes_calc_em?(p.volumes_previstos!=null?' · <b style="color:var(--blue-text)">'+p.volumes_previstos+' volume(s) p/ faturar</b>':' · <span style="color:var(--amber-text)">volumes: sem múltiplo em '+(p.volumes_pendentes||'?')+'</span>'):''}</div>${wmsOsAutoMotivo(p)?'<div style="margin-top:6px;border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:6px 9px;font-size:12px"><b>OS automática não gerada:</b> '+ecomEsc(wmsOsAutoMotivo(p))+'</div>':''}</div>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
@@ -55645,8 +55645,30 @@ function zplEtiquetaEmbarque(o){
 // v1.0.1243: notas de venda ligadas aos pedidos (para a etiqueta do cliente e o detalhe do pedido)
 var _wmsNfPed={};
 async function wmsNfPreload(){
-  try{ var L=(await dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,dest_cnpj,status,divergencias').catch(function(){ return dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=pedido_id,numero,dest_nome,status,divergencias'); }))||[];   // v1.0.1308: dest_cnpj se a coluna existir
-    var m={}; L.forEach(function(n){ if(!n.pedido_id) return; (m[n.pedido_id]=m[n.pedido_id]||[]).push(n); }); _wmsNfPed=m; }catch(e){}
+  try{ var L=(await dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=id,pedido_id,numero,dest_nome,dest_cnpj,status,divergencias').catch(function(){ return dbSelect('wms_pedido_nfs','company_id=eq.'+company.id+'&order=created_at.desc&limit=3000&select=id,pedido_id,numero,dest_nome,status,divergencias'); }))||[];   // v1.0.1308: dest_cnpj se a coluna existir
+    // v1.0.1397: carta de correção (CC-e) anexada pelo cliente no portal — a mais recente de cada nota
+    var C=(await dbSelect('wms_pedido_nf_cces','company_id=eq.'+company.id+'&order=created_at.desc&limit=2000&select=nf_id,path,nome,created_at,enviado_por').catch(function(){ return []; }))||[];
+    var cm={}; C.forEach(function(c){ if(!cm[c.nf_id]) cm[c.nf_id]=c; });
+    var m={}; L.forEach(function(n){ if(!n.pedido_id) return; n._cce=(n.id&&cm[n.id])||null; (m[n.pedido_id]=m[n.pedido_id]||[]).push(n); }); _wmsNfPed=m; }catch(e){}
+}
+// v1.0.1397: diferença só de volumes = laranja (o cliente corrige com carta de correção); com a carta anexada = verde
+function wmsNfSoVolumes(txt){ var p=String(txt||'').split(';').map(function(x){return x.trim();}).filter(Boolean); return p.length>0&&p.every(function(x){return /^volumes:/i.test(x);}); }
+function wmsNfSelo(n){
+  if(!n||n.status!=='divergente') return '';
+  var tt=String(n.divergencias||'').replace(/"/g,'').replace(/;\s*$/,'');
+  if(wmsNfSoVolumes(n.divergencias)){
+    if(n._cce) return ' <span style="color:var(--green-text)" title="'+tt+' · carta anexada em '+new Date(n._cce.created_at).toLocaleString('pt-BR')+(n._cce.enviado_por?' por '+String(n._cce.enviado_por).replace(/"/g,''):'')+'">✓ corrigida por CC-e</span> <a href="#" style="font-size:11px" onclick="event.preventDefault();event.stopPropagation();wmsCceAbrir(\''+String(n._cce.path).replace(/[^\w.\/\-]/g,'')+'\')">ver carta</a>';
+    return ' <span style="color:var(--amber-text)" title="'+tt+' · corrige com carta de correção (CC-e), anexada pelo cliente no portal">⚠ volumes diferentes</span>';
+  }
+  return ' <span style="color:var(--red-text)" title="'+tt+'">⚠ divergente</span>';
+}
+async function wmsCceAbrir(path){
+  try{
+    var r=await fetch(SB_URL+'/storage/v1/object/sign/portal-anexos/'+path.split('/').map(encodeURIComponent).join('/'),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},body:JSON.stringify({expiresIn:600})});
+    var j=await r.json().catch(function(){return {};}); var u=j.signedURL||j.signedUrl;
+    if(!r.ok||!u) throw new Error(j.message||j.error||('resposta '+r.status));
+    window.open(SB_URL+'/storage/v1'+u,'_blank');
+  }catch(e){ showToast('Não consegui abrir a carta de correção: '+(e.message||e),'red'); }
 }
 function wmsCliEtqModelo(cli){ var p=(cli&&cli.parametros)||{}; return (p.etiquetas&&p.etiquetas.modelo_embarque)||'padrao_mk'; }
 // ZPL da etiqueta 10x10 da CASCO (1 por produto em cada volume): cada campo num quadro, título pequeno + informação

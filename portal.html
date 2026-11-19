@@ -3177,7 +3177,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.21';   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
+const PORTAL_VERSION = 'v1.8.22';   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
+//   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
 // v1.8.18 →   // v1.8.18: o portal diz o que falta para o cartão do motorista
 // v1.8.17 →   // v1.8.17: cartão do motorista sem exigir a placa (informada até a doca); edição do motorista mantém a confirmação
@@ -4669,7 +4670,36 @@ window.nfEnviar = async function(files, pedidoId){
     if(res) res.innerHTML = out.map(x=>'<div>'+x+'</div>').join('');
   }
   try{ const nf = await sb.rpc('portal_minhas_nfs'); state.nfs = nf.data||[]; const vf = await sb.rpc('portal_volumes_faturar'); state.volFat = vf.data||[]; }catch(_e){}
+  await cceCarregar();
   renderVolFat(); renderNfBox();
+};
+// v1.8.22: carta de correção (CC-e) — diferença só de volumes pode ser corrigida por carta; o cliente anexa o PDF ou o XML no pedido
+window.nfSoVolumes = function(txt){ const p=String(txt||'').split(';').map(x=>x.trim()).filter(Boolean); return p.length>0 && p.every(x=>/^volumes:/i.test(x)); };
+window.nfCceDoPedido = function(pedidoId){ return (state.cces||[]).find(c=>c.pedido_id===pedidoId) || null; };
+window.cceCarregar = async function(){ try{ const q = await sb.rpc('portal_minhas_cces'); state.cces = (q && !q.error && q.data) || []; }catch(_e){ state.cces = state.cces || []; } };
+window.cceEscolher = function(pedidoId){
+  const i=document.createElement('input'); i.type='file'; i.accept='.pdf,application/pdf,.xml,text/xml';
+  i.onchange=()=>{ if(i.files && i.files[0]) cceEnviar(i.files[0], pedidoId); }; i.click();
+};
+window.cceEnviar = async function(f, pedidoId){
+  try{
+    const ext = /\.xml$/i.test(f.name) ? 'xml' : 'pdf';
+    if(!/\.(pdf|xml)$/i.test(f.name)){ toast('Envie a carta de correção em PDF ou XML.'); return; }
+    if(f.size > 10*1024*1024){ toast('Arquivo muito grande (limite de 10 MB).'); return; }
+    toast('Enviando a carta de correção…');
+    const path = `${state.depositanteId}/cce/${pedidoId}_${Date.now()}.${ext}`;
+    const { error:eU } = await sb.storage.from('portal-anexos').upload(path, f, { upsert:true, contentType: ext==='xml' ? 'text/xml' : 'application/pdf' });
+    if(eU) throw new Error('falha ao guardar o arquivo: '+eU.message);
+    const q = await sb.rpc('portal_nf_cce_anexar', { p_pedido: pedidoId, p_path: path, p_nome: f.name, p_autor: (state.user&&state.user.nome)||null });
+    if(q.error) throw q.error;
+    await cceCarregar(); renderVolFat();
+    toast('Carta de correção anexada à NF '+((q.data&&q.data.notas)||'')+'.');
+  }catch(err){ toast('Não consegui anexar a carta: '+(err.message||err)); }
+};
+window.portalVerCce = async function(pedidoId){
+  try{ const c = nfCceDoPedido(pedidoId); if(!c){ toast('Nenhuma carta de correção neste pedido.'); return; }
+    const { data:u, error:eU } = await sb.storage.from('portal-anexos').createSignedUrl(c.path, 600); if(eU) throw eU; window.open(u.signedUrl, '_blank');
+  }catch(err){ toast('Não consegui abrir a carta: '+(err.message||err)); }
 };
 window.nfEscolher = function(pedidoId){
   const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
@@ -4821,14 +4851,24 @@ window.renderVolFat = function(){
       const partes = String(r.pedido||'').split(' · '), ped1 = partes.shift(), ped2 = partes.join(' · ');
       const dt = new Date(r.criado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       let nf = '';
-      if(r.nf){ const div = r.nf_status==='divergente', cor = div ? '#b91c1c' : (r.danfe===false ? '#b45309' : '#4d7a1a');
-        const sub = div ? esc(r.nf_divergencias||'divergente') : (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''));
-        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${div?' · divergente':''}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}${['em_romaneio','carregado'].indexOf(sit)<0?` · <a href="#" style="color:#b91c1c" title="Tira a nota (XML e DANFE) deste pedido para enviar a certa" onclick="event.preventDefault();nfDesligar(${i})">desligar nota</a>`:''}</div>`; }   // v1.8.20
+      if(r.nf){ const div = r.nf_status==='divergente';
+        // v1.8.22: diferença só de volumes = laranja (corrige com carta de correção); com a carta anexada = verde
+        const soVol = div && nfSoVolumes(r.nf_divergencias), cce = soVol ? nfCceDoPedido(r.id) : null, corrig = !!cce;
+        const cor = div ? (corrig ? '#4d7a1a' : (soVol ? '#b45309' : '#b91c1c')) : (r.danfe===false ? '#b45309' : '#4d7a1a');
+        const rot = div ? (corrig ? ' · corrigida por carta de correção' : (soVol ? ' · volumes diferentes' : ' · divergente')) : '';
+        const dvg = esc(String(r.nf_divergencias||'divergente').replace(/;\s*$/,''));
+        const lk = (t,fn,st) => ` · <a href="#"${st?` style="${st}"`:''} onclick="event.preventDefault();${fn}">${t}</a>`;
+        const sub = !div ? (r.danfe===false ? 'ligada · falta a DANFE (PDF)' : 'ligada'+(r.danfe?' · DANFE ok':''))
+          : corrig ? dvg+' · carta anexada em '+new Date(cce.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+lk('ver carta',`portalVerCce('${r.id}')`)+lk('trocar carta',`cceEscolher('${r.id}')`)
+          : soVol ? `<span style="color:#b45309">${dvg}</span><br>Pode ser corrigido com carta de correção (CC-e)`+lk('anexar carta de correção',`cceEscolher('${r.id}')`)
+          : `<span style="color:#b91c1c">${dvg}</span>`;
+        r._nfOk = !div || corrig;
+        nf = `<span style="color:${cor};font-weight:600">● NF ${esc(r.nf)}${rot}</span><div class="hint" style="font-size:11.5px">${sub}${r.danfe?` · <a href="#" onclick="event.preventDefault();portalVerDanfe('${r.id}')">ver DANFE</a>`:''}${['em_romaneio','carregado'].indexOf(sit)<0?` · <a href="#" style="color:#b91c1c" title="Tira a nota (XML e DANFE) deste pedido para enviar a certa" onclick="event.preventDefault();nfDesligar(${i})">desligar nota</a>`:''}</div>`; }   // v1.8.20
       else if(foraMult) nf = `<span class="hint" style="color:#9a3412">ajuste as quantidades para múltiplo do pacote e reenvie o pedido</span>`;
       else if(semSaldo) nf = `<span class="hint">ajuste o pedido ou aguarde a entrada</span>`;
       else if(semLista) nf = `<span class="hint">aguardando a MKLOG gerar a separação</span>`;
       else nf = `<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="nfEscolher('${r.id}')">Enviar NF</button>`;
-      const apto=r.nf&&r.nf_status!=='divergente'&&['conferido','separado','em_separacao'].includes(sit);
+      const apto=r.nf&&(r.nf_status!=='divergente'||r._nfOk)&&['conferido','separado','em_separacao'].includes(sit);
       return `<tr>${podeVer('agd')?`<td>${apto?`<input type="checkbox" ${_qSel.has(r.id)?'checked':''} onchange="qSelToggle('${r.id}',this.checked)" title="Marcar para agendar">`:''}</td>`:''}<td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${foraMult?'#ffedd5':SIT[1]};color:${foraMult?'#9a3412':SIT[2]};white-space:nowrap">${foraMult?'itens fora do múltiplo':SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}${(()=>{ const rs=(state.rsvSol||{})[r.id]; if(!foraMult||!rs) return ''; if(rs.situacao==='pendente') return `<div style="font-size:11.5px;margin-top:4px;color:#1e40af"><b>⏳ Reserva manual aguardando aceite da MK Logística</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; if(rs.situacao==='recusada') return `<div style="font-size:11.5px;margin-top:4px;color:#b91c1c"><b>Reserva manual recusada</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; return ''; })()}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
@@ -5473,6 +5513,7 @@ function showDone(kind, protocolo, msg){
       podeVer('agd') ? sb.rpc('portal_janelas_disponiveis') : vazio ]);
     try{ const vf = podeVer('ped') ? await sb.rpc('portal_volumes_faturar') : {data:[]}; state.volFat = (vf && !vf.error && vf.data) || []; }catch(_e){ state.volFat = []; }   // v1.7.0
     try{ const nf = podeVer('ped') ? await sb.rpc('portal_minhas_nfs') : {data:[]}; state.nfs = (nf && !nf.error) ? (nf.data||[]) : null; }catch(_e){ state.nfs = null; }   // v1.7.2
+    if(podeVer('ped')) await cceCarregar();   // v1.8.22
     setTimeout(renderNfBox, 0);
     try{ const ra = podeVer('ped') ? await sb.rpc('portal_rastreio', { p_dias:30 }) : {data:[]}; state.rastreio = (ra && !ra.error && ra.data) || []; }catch(_e){ state.rastreio = []; }   // v1.7.3
     setTimeout(renderRastreio, 0);
