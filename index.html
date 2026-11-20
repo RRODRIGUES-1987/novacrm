@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1402 | Gerado: 2026-11-19 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1403 | Gerado: 2026-11-20 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1468,7 +1468,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1402';
+const APP_VERSION='v1.0.1403';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45387,6 +45387,50 @@ function wmsImpClienteOk(){
   return true;
 }
 
+// v1.0.1403: pedido da planilha que JÁ EXISTE deixa de ser ignorado às cegas — as linhas são comparadas com as gravadas.
+//   igual     → a planilha não pede nada além do que já está gravado: ignora (como antes)
+//   completar → pedido ainda "importado" e faltam linhas: inclui só as que faltam
+//   diferente → mesma linha com quantidade diferente: não mexe e avisa
+//   andamento → faltam linhas, mas o pedido já saiu de "importado": não mexe e avisa
+var wmsImpExist=null, wmsImpExistDe=null, wmsImpExistBusy=false;
+function wmsImpLinhaId(sku,end,oc,ocl){ return String(sku||'').trim()+'|'+String(end||'').trim().toUpperCase()+'|'+String(oc||'').trim()+'|'+String(ocl||'').trim(); }
+function wmsImpLinhaTxt(d){ return ecomEsc(String(d.sku||''))+' · '+Number(d.qtd||0).toLocaleString('pt-BR')+(d.endereco?' · '+ecomEsc(String(d.endereco)):''); }
+async function wmsImpConferirExistentes(){
+  const cid=company?.id, dadosRef=wmsImpDados, out={};
+  if(!dadosRef||!wmsImpCliente) return out;
+  const docs={}; dadosRef.forEach(d=>{(docs[d.documento]=docs[d.documento]||[]).push(d);});
+  const nums=Object.keys(docs), porId={};
+  (wmsPedidos||[]).forEach(p=>{ if(p.cliente_id===wmsImpCliente && docs[p.numero_pedido]) porId[p.id]=p; });
+  // o pedido pode ter sido importado por outra pessoa e ainda não estar na memória desta tela: confere no banco
+  for(let i=0;i<nums.length;i+=25){
+    const lote=nums.slice(i,i+25).map(n=>encodeURIComponent('"'+String(n).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"')).join(',');
+    try{ const r=await dbSelect('wms_pedidos','company_id=eq.'+cid+'&cliente_id=eq.'+wmsImpCliente+'&numero_pedido=in.('+lote+')'); (r||[]).forEach(p=>{ porId[p.id]=p; }); }catch(_e){}
+  }
+  const porNum={};
+  Object.values(porId).forEach(p=>{ const a=porNum[p.numero_pedido]; if(!a || (String(a.status)==='cancelado' && String(p.status)!=='cancelado')) porNum[p.numero_pedido]=p; });
+  const ids=Object.values(porNum).map(p=>p.id), itensDe={};
+  for(let i=0;i<ids.length;i+=40){
+    const r=await dbSelectAll('wms_pedido_itens','pedido_id=in.('+ids.slice(i,i+40).join(',')+')');
+    (r||[]).forEach(it=>{ (itensDe[it.pedido_id]=itensDe[it.pedido_id]||[]).push(it); });
+  }
+  const v2=wmsImpFormato==='v2';
+  Object.keys(porNum).forEach(num=>{
+    const ped=porNum[num], gravados=(itensDe[ped.id]||[]).filter(x=>String(x.status||'')!=='cancelado');
+    const resta={}, restaId={};
+    gravados.forEach(it=>{ const id=wmsImpLinhaId(it.sku,v2?it.endereco_origem:'',it.oc_cliente,it.oc_linha), k=id+'|'+Number(it.quantidade||0); resta[k]=(resta[k]||0)+1; });
+    const faltam=[];
+    docs[num].forEach(d=>{ const id=wmsImpLinhaId(d.sku,v2?d.endereco:'',d.oc,d.ocLinha), k=id+'|'+Number(d.qtd||0); if(resta[k]>0) resta[k]--; else faltam.push(d); });
+    Object.keys(resta).forEach(k=>{ if(resta[k]>0){ const id=k.slice(0,k.lastIndexOf('|')); restaId[id]=(restaId[id]||0)+resta[k]; } });
+    // linha que "falta" mas tem a MESMA identificação (produto + endereço/OC) de uma linha gravada com outra quantidade = quantidade alterada
+    const conflito=faltam.filter(d=>restaId[wmsImpLinhaId(d.sku,v2?d.endereco:'',d.oc,d.ocLinha)]>0);
+    let estado='igual';
+    if(faltam.length){ estado=String(ped.status||'')!=='importado'?'andamento':(conflito.length?'diferente':'completar'); }
+    out[num]={ped, estado, faltam, conflito, gravados, nGravadas:gravados.length};
+  });
+  if(wmsImpDados===dadosRef){ wmsImpExist=out; wmsImpExistDe=dadosRef; }
+  return out;
+}
+
 var wmsImpOsVerus=false;   // v1.0.1104: a OS é o número do VERUS (planilha da CASCO)
 async function wmsImpProcessar(input){
   wmsImpOsVerus=false;
@@ -45500,6 +45544,19 @@ function wmsImpRenderPreview(){
   // já existe pedido com esse número?
   const jaExiste=Object.keys(docs).filter(doc=>wmsPedidos.some(p=>p.cliente_id===wmsImpCliente&&p.numero_pedido===doc));
   const pendMult=wmsPendenciasMultiplo(dados,wmsImpCliente);   // v1.0.1257
+  // v1.0.1403: compara as linhas dos pedidos que já existem (a busca é no banco; quando termina, a prévia é redesenhada)
+  const exPronto=(wmsImpExistDe===dados && wmsImpExist);
+  if(!exPronto && !wmsImpExistBusy){ wmsImpExistBusy=true; wmsImpConferirExistentes().catch(function(){ if(wmsImpDados===dados){ wmsImpExist={}; wmsImpExistDe=dados; } }).then(function(){ wmsImpExistBusy=false; if(wmsImpDados===dados) wmsImpRenderPreview(); }); }
+  const exDe=function(est){ return exPronto?Object.keys(wmsImpExist).filter(function(n){ return wmsImpExist[n].estado===est; }):[]; };
+  const exIgual=exDe('igual'), exCompl=exDe('completar'), exDif=exDe('diferente'), exAnd=exDe('andamento');
+  const exLista=function(arr){ return arr.slice(0,5).map(function(n){ return ecomEsc(n); }).join(', ')+(arr.length>5?' +'+(arr.length-5):''); };
+  const nNovos=exPronto?Object.keys(docs).filter(function(n){ return !wmsImpExist[n]; }).length:(nDocs-jaExiste.length);
+  const exHtml=!exPronto
+    ? (jaExiste.length?'<div style="font-size:12px;color:var(--text2);background:var(--bg2);padding:8px 12px;border-radius:8px;margin-bottom:10px"><span class="spin"></span> Conferindo as linhas dos pedidos que já existem…</div>':'')
+    : ((exCompl.length?'<div style="font-size:12px;color:var(--blue-text,#1d4ed8);background:var(--blue-bg,rgba(14,165,233,.08));padding:8px 12px;border-radius:8px;margin-bottom:10px"><b>'+exCompl.length+' pedido(s) já existe(m) com linhas faltando</b> e será(ão) completado(s) com '+exCompl.reduce(function(s,n){ return s+wmsImpExist[n].faltam.length; },0)+' linha(s): '+exLista(exCompl)+'</div>':'')
+      +(exDif.length?'<div style="font-size:12px;color:var(--red-text);background:var(--red-bg,rgba(220,38,38,.08));padding:8px 12px;border-radius:8px;margin-bottom:10px"><b>'+exDif.length+' pedido(s) já existe(m) com quantidade diferente da planilha</b> — não serão alterados: '+exLista(exDif)+'</div>':'')
+      +(exAnd.length?'<div style="font-size:12px;color:var(--red-text);background:var(--red-bg,rgba(220,38,38,.08));padding:8px 12px;border-radius:8px;margin-bottom:10px"><b>'+exAnd.length+' pedido(s) já em andamento com linhas faltando</b> — não serão alterados: '+exLista(exAnd)+'</div>':'')
+      +(exIgual.length?'<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">'+exIgual.length+' pedido(s) já existe(m), iguais à planilha, e serão ignorados: '+exLista(exIgual)+'</div>':''));
 
   prev.innerHTML=`
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">
@@ -45519,10 +45576,10 @@ function wmsImpRenderPreview(){
         📍 <b>Formato com endereço de origem</b> (Excel do cliente). Linhas: <b style="color:${WMS_FRENTE_COR.baixa}">${nBaixa} nível baixo</b> · <b style="color:${WMS_FRENTE_COR.alta}">${nAlta} nível alto</b> · ${nPedFrentes} pedido(s) com as duas frentes.
         ${naoInt.length?`<br><span style="color:var(--amber-text)">${naoInt.length} endereço(s) fora do padrão (vão para o nível baixo): ${naoInt.slice(0,6).join(', ')}${naoInt.length>6?` +${naoInt.length-6}`:''}</span>`:''}
         <br><span style="color:var(--text3)">Ao gerar as listas, escolha <b>Pedido a pedido · 2 frentes</b> para separar por rota e equipamento.</span></div>`;})():''}
-    ${jaExiste.length?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px">${jaExiste.length} pedido(s) já existe(m) e serão ignorados: ${jaExiste.slice(0,5).join(', ')}${jaExiste.length>5?'...':''}</div>`:''}
+    ${exHtml}
     ${naoEnc.length?`<div style="font-size:12px;color:var(--text2);background:var(--bg2);padding:8px 12px;border-radius:8px;margin-bottom:10px">SKUs não cadastrados (itens serão importados como 'produto não encontrado'): ${naoEnc.slice(0,8).join(', ')}${naoEnc.length>8?` +${naoEnc.length-8}`:''}</div>`:''}
     ${wmsPendenciasMultiploHtml(pendMult,'Produtos sem unidades por caixa')}
-    <button class="btn btn-p" onclick="wmsImpSalvar()">Importar ${nDocs} pedido(s)</button>
+    <button class="btn btn-p" ${exPronto?'':'disabled'} onclick="wmsImpSalvar()">${exPronto?('Importar '+nNovos+' pedido(s)'+(exCompl.length?' e completar '+exCompl.length:'')):'Conferindo…'}</button>
   `;
 }
 
@@ -45539,11 +45596,42 @@ async function wmsImpSalvar(){
   const docs={};
   wmsImpDados.forEach(d=>{(docs[d.documento]=docs[d.documento]||[]).push(d);});
   let okPed=0,okItens=0,erros=0,ignorados=0;const okIds=[];
+  // v1.0.1403: situação dos pedidos que já existem, conferida no banco na hora de gravar
+  let exist={}; try{ exist=await wmsImpConferirExistentes(); }catch(_ex){ exist=null; }
+  if(exist===null){ if(btn){btn.disabled=false;btn.innerHTML='Tentar de novo';} wmsImpAviso('Não foi possível conferir os pedidos que já existem','A importação não foi feita. Verifique a conexão e tente de novo.','erro'); return; }
+  const complIds=[], complLista=[], difLista=[], andLista=[]; let complItens=0;
+  const montarItem=function(pedId,it){ const prod=skuMap[it.sku]; return {
+          company_id:cid, pedido_id:pedId, produto_id:prod?.id||null,
+          sku:it.sku, descricao:it.descricao||prod?.descricao||null,
+          quantidade:it.qtd, lote:null,
+          status:prod?'pendente':'produto_nao_encontrado',
+          ...(it.oc?{oc_cliente:it.oc,oc_linha:it.ocLinha||null}:{}), ...(it.itemCliente?{item_cliente:it.itemCliente}:{}),
+          ...(wmsImpFormato==='v2'?{endereco_origem:it.endereco||null,endereco_dep:it.end?.dep||null,endereco_nivel:it.end?.nivel||null,
+            endereco_rua:it.end?.rua||null,endereco_posicao:it.end?.posicao||null,numero_os:it.os||null}:{}),
+        }; };
+  const gravarItem=async function(o){ try{ return await dbInsert('wms_pedido_itens',o); }catch(_e2){ if(/oc_cliente|oc_linha|item_cliente/.test(String(_e2&&_e2.message))){ delete o.oc_cliente; delete o.oc_linha; delete o.item_cliente; return await dbInsert('wms_pedido_itens',o); } throw _e2; } };
   const totDocs=Object.keys(docs).length;let nDoc=0;
   for(const [doc,itens] of Object.entries(docs)){
     nDoc++;portProgress(nDoc-1,totDocs,'Importando pedidos…','Pedido '+doc+' · '+itens.length+' item(ns)');
     try{
-      // ignora se já existe
+      // v1.0.1403: pedido que já existe — compara as linhas em vez de ignorar às cegas
+      const ex=exist[doc];
+      if(ex){
+        if(ex.estado==='completar'){
+          const novos=[];
+          for(const it of ex.faltam){ const item=await gravarItem(montarItem(ex.ped.id,it)); if(item){ novos.push(Array.isArray(item)?item[0]:item); complItens++; } }
+          // memória da tela: o pedido e TODAS as suas linhas (as que já estavam + as novas), para os totais saírem certos
+          if(!wmsPedidos.some(p=>p.id===ex.ped.id)) wmsPedidos=[ex.ped,...wmsPedidos];
+          wmsPedidoItens=(wmsPedidoItens||[]).filter(i=>i.pedido_id!==ex.ped.id).concat(ex.gravados,novos);
+          try{ const tot=wmsCalcTotaisPedido(ex.ped.id,wmsImpCliente); await dbUpdate('wms_pedidos',ex.ped.id,tot); const pm=wmsPedidos.find(p=>p.id===ex.ped.id); if(pm) Object.assign(pm,tot); }catch(_t){}
+          await wmsPedidoHist(ex.ped.id,'itens_incluidos',novos.length+' linha(s) incluída(s) em nova importação: o pedido já existia com '+ex.nGravadas+' linha(s) e a planilha trouxe linhas que faltavam.');
+          complIds.push(ex.ped.id); complLista.push({doc,n:novos.length,antes:ex.nGravadas});
+        }
+        else if(ex.estado==='diferente') difLista.push({doc,linhas:ex.conflito});
+        else if(ex.estado==='andamento') andLista.push({doc,status:ex.ped.status,linhas:ex.faltam});
+        else ignorados++;
+        continue;
+      }
       if(wmsPedidos.some(p=>p.cliente_id===wmsImpCliente&&p.numero_pedido===doc)){ignorados++;continue;}
       const nDig=cli?.wms_digitos_pedido||5;
       const numCurto=wmsNumeroCurto(doc,nDig);
@@ -45557,17 +45645,7 @@ async function wmsImpSalvar(){
       if(pedObj){wmsPedidos=[pedObj,...wmsPedidos];okPed++;okIds.push(pedObj.id);}
       // itens (mantém separados, não soma)
       for(const it of itens){
-        const prod=skuMap[it.sku];
-        const _itObj={
-          company_id:cid, pedido_id:pedObj.id, produto_id:prod?.id||null,
-          sku:it.sku, descricao:it.descricao||prod?.descricao||null,
-          quantidade:it.qtd, lote:null,
-          status:prod?'pendente':'produto_nao_encontrado',
-          ...(it.oc?{oc_cliente:it.oc,oc_linha:it.ocLinha||null}:{}), ...(it.itemCliente?{item_cliente:it.itemCliente}:{}),   // v1.0.1243
-          ...(wmsImpFormato==='v2'?{endereco_origem:it.endereco||null,endereco_dep:it.end?.dep||null,endereco_nivel:it.end?.nivel||null,
-            endereco_rua:it.end?.rua||null,endereco_posicao:it.end?.posicao||null,numero_os:it.os||null}:{}),
-        };
-        let item; try{ item=await dbInsert('wms_pedido_itens',_itObj); }catch(_e2){ if(/oc_cliente|oc_linha|item_cliente/.test(String(_e2&&_e2.message))){ delete _itObj.oc_cliente; delete _itObj.oc_linha; delete _itObj.item_cliente; item=await dbInsert('wms_pedido_itens',_itObj); } else throw _e2; }   // v1.0.1243: base sem as colunas novas
+        const item=await gravarItem(montarItem(pedObj.id,it));   // v1.0.1403
         if(item){wmsPedidoItens=[Array.isArray(item)?item[0]:item,...wmsPedidoItens];okItens++;}
       }
       try{ if(pedObj&&pedObj.id) await wmsRpc('wms_pre_empenhar',{p_pedido:pedObj.id}); }catch(_pe){}   // v1.0.1253: pré-empenho na importação (parâmetro do depositante)      // calcula e grava os totais físicos do pedido
@@ -45586,27 +45664,34 @@ async function wmsImpSalvar(){
   prev.innerHTML=`<div style="background:var(--green-bg);color:var(--green-text);padding:14px;border-radius:8px;font-size:13px">
     ✓ Importação concluída: <b>${okPed} pedido(s)</b> e <b>${okItens} item(ns)</b>.
     ${autoVinc?`<br>🪧 ${autoVinc} pedido(s) amarrado(s) automaticamente a romaneio(s) que os aguardavam.`:''}
-    ${ignorados?`<br>${ignorados} pedido(s) já existente(s) ignorado(s).`:''}
+    ${complLista.length?`<br>➕ <b>${complLista.length} pedido(s) completado(s)</b> com ${complItens} linha(s) que faltavam.`:''}
+    ${ignorados?`<br>${ignorados} pedido(s) já existente(s), iguais à planilha, ignorado(s).`:''}
+    ${(difLista.length+andLista.length)?`<br><b style="color:var(--red-text)">${difLista.length+andLista.length} pedido(s) já existente(s) diferente(s) da planilha NÃO alterado(s)</b> — veja o aviso.`:''}
     ${erros?`<br>${erros} erro(s).`:''}
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-      ${okIds.length?`<button class="btn btn-p btn-sm" onclick="wmsImpGerarSeparacao()">⚙ Gerar separação dos ${okIds.length} importado(s)</button>`:''}
+      ${(okIds.length+complIds.length)?`<button class="btn btn-p btn-sm" onclick="wmsImpGerarSeparacao()">⚙ Gerar separação dos ${okIds.length+complIds.length} pedido(s)</button>`:''}
       <button class="btn btn-sm" onclick="portClose();pg('wms-pedidos')">Ver pedidos →</button>
     </div>
   </div>`;
   // v1.0.1108: resultado também no meio da tela, com as OSs geradas
   try{
     const novos=(wmsPedidos||[]).filter(x=>okIds.indexOf(x.id)>=0);
-    wmsImpAviso(erros?'Importação concluída com erro(s)':'Importação concluída',
+    const _pend=difLista.length+andLista.length;
+    const _lin=function(arr){ return arr.slice(0,12).map(function(d){ return '&bull; '+wmsImpLinhaTxt(d); }).join('<br>')+(arr.length>12?'<br>… +'+(arr.length-12)+' linha(s)':''); };
+    wmsImpAviso(erros?'Importação concluída com erro(s)':(_pend?'Importação concluída — '+_pend+' pedido(s) precisam de atenção':'Importação concluída'),
       '<b>'+okPed+'</b> pedido(s) e <b>'+okItens+'</b> item(ns) importado(s).'
+      +(complLista.length?'<div style="margin-top:8px"><b>'+complLista.length+' pedido(s) completado(s)</b> com '+complItens+' linha(s) que faltavam:<div style="font-size:12px;color:var(--text2)">'+complLista.map(function(c){ return '&#10133; '+ecomEsc(c.doc)+': tinha '+c.antes+' linha(s), entraram mais '+c.n; }).join('<br>')+'</div></div>':'')
+      +(difLista.length?'<div style="margin-top:10px;color:var(--red-text)"><b>'+difLista.length+' pedido(s) NÃO alterado(s) — quantidade diferente da planilha.</b> Confira e corrija no pedido:'+difLista.map(function(c){ return '<div style="font-size:12px;margin-top:4px"><b>'+ecomEsc(c.doc)+'</b> — na planilha:<br>'+_lin(c.linhas)+'</div>'; }).join('')+'</div>':'')
+      +(andLista.length?'<div style="margin-top:10px;color:var(--red-text)"><b>'+andLista.length+' pedido(s) NÃO alterado(s) — já em andamento.</b> Estas linhas da planilha ficaram de fora:'+andLista.map(function(c){ return '<div style="font-size:12px;margin-top:4px"><b>'+ecomEsc(c.doc)+'</b> (situação: '+ecomEsc(String(c.status||''))+')<br>'+_lin(c.linhas)+'</div>'; }).join('')+'</div>':'')
       +(novos.length?'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+novos.map(x=>'&#10003; OS <b>'+ecomEsc(x.numero_curto||x.numero_interno||'')+'</b> &larr; '+ecomEsc(x.numero_pedido||'')).join('<br>')+'</div>':'')
-      +(ignorados?'<div style="margin-top:8px;color:var(--amber-text)">'+ignorados+' pedido(s) já existente(s) ignorado(s).</div>':'')
+      +(ignorados?'<div style="margin-top:8px;color:var(--amber-text)">'+ignorados+' pedido(s) já existente(s), iguais à planilha, ignorado(s).</div>':'')
       +(autoVinc?'<div style="margin-top:8px">'+autoVinc+' pedido(s) amarrado(s) a romaneio(s) que os aguardavam.</div>':'')
       +(erros?'<div style="margin-top:8px;color:var(--red-text)">'+erros+' erro(s).</div>':'')
-      +(okIds.length?'<div style="margin-top:10px;font-size:12px;color:var(--text3)">Próximo passo: "Gerar separação" na tela da importação.</div>':''),
-      erros?'erro':(ignorados?'aviso':'ok'));
+      +((okIds.length+complIds.length)?'<div style="margin-top:10px;font-size:12px;color:var(--text3)">Próximo passo: "Gerar separação" na tela da importação.</div>':''),
+      (erros||_pend)?'erro':(ignorados?'aviso':'ok'));
   }catch(_e){}
-  wmsImpDados=null;
-  wmsImpUltimosIds=okIds;
+  wmsImpDados=null; wmsImpExist=null; wmsImpExistDe=null;
+  wmsImpUltimosIds=okIds.concat(complIds);   // v1.0.1403: os completados também seguem para a separação
 }
 // Atalho pós-importação: seleciona os pedidos recém-importados e abre o modal de gerar listas
 let wmsImpUltimosIds=[];
