@@ -503,6 +503,7 @@
         <button data-scr="home" onclick="showScreen('home')">Início</button>
         <button data-scr="ped" onclick="showScreen('ped')">Pedidos <span class="nb hide" id="nbPed"></span></button>
         <button data-scr="est" onclick="showScreen('est')">Estoque</button>
+        <button data-scr="cob" id="navCob" class="hide" onclick="showScreen('cob')">NFs de cobertura <span class="nb hide" id="nbCob"></span></button>
         <button data-scr="agd" onclick="showScreen('agd')">Agendamentos <span class="nb hide" id="nbAgd"></span></button>
         <button data-scr="rel" onclick="showScreen('rel')">Relatórios</button>
         <button data-scr="fin" onclick="showScreen('fin')">Faturas</button>
@@ -597,6 +598,12 @@
     </section>
 
     <!-- ===== TELA: ESTOQUE ===== -->
+    <!-- ===== TELA: NOTAS DE COBERTURA (v1.8.25) ===== -->
+    <section id="scrCob" class="hide">
+      <div class="screen-h"><h2>Notas de cobertura</h2></div>
+      <div id="listaCob"></div>
+    </section>
+
     <section id="scrEst" class="hide">
       <div class="screen-h"><h2>Estoque</h2><span class="op-ts" id="estTs"></span></div>
       <div class="est-tools">
@@ -3177,7 +3184,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.24';   // v1.8.24: não conformidades de verdade (cliente trata e encerra) e laudos por lote no estoque
+const PORTAL_VERSION = 'v1.8.25';   // v1.8.25: notas de cobertura (recebimento triangular) — pendências e envio do XML da remessa
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
@@ -3492,7 +3499,7 @@ async function loadDados(){
 
 /* ============================ NAVEGAÇÃO ============================ */
 // v1.6.3: permissões do acesso (agd, est, ped, rel, fin, nc); sem permissões gravadas = acesso completo; demonstração vê tudo
-function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; return state.perms.indexOf(k)>=0; }
+function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; if(k==='cob') return state.perms.indexOf('est')>=0||state.perms.indexOf('ped')>=0; return state.perms.indexOf(k)>=0; }
 // v1.6.4: home, atalhos e atendimento só com o que o acesso pode ver
 function aplicarPermsHome(){
   const card = id => { const e=$(id); return e ? e.closest('.sum-card') : null; };
@@ -3503,7 +3510,7 @@ function aplicarPermsHome(){
 }
 function showScreen(s){
   if(!podeVer(s)){ s='home'; }
-  const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
+  const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', cob:'Cob', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
   document.querySelectorAll('#topnav button').forEach(b=>b.classList.toggle('on', b.dataset.scr===(map[s]?s:'home')));
   if(s==='rel' && typeof relVoltar==='function'){ setTimeout(relVoltar,0); }
   Object.values(map).forEach(x=>$('scr'+x).classList.add('hide'));
@@ -3532,6 +3539,7 @@ function render(){
   // v1.1: menu do topo, detalhes dos indicadores, painel e estoque
   [['nbPed',abertosP.length],['nbAgd',futurosA.length],['nbNc',ncAbertas]].forEach(([id,n])=>{ const e=$(id); if(e){ e.textContent=n; e.classList.toggle('hide',!n); } });
   if(!DEMO && typeof renderNc==='function' && $('scrNc') && !$('scrNc').classList.contains('hide')) renderNc();   // v1.8.24
+  if(typeof cobBadge==='function') cobBadge();   // v1.8.25
   const emOp = abertosP.filter(p=>p.status==='em_operacao').length;
   if(_vf){ const c={}; _vf.forEach(r=>{ let k=r.situacao||'aguardando_separacao'; if(k==='aguardando_saldo'&&/não fecha pacote/.test(r.faltas||'')) k='fora_multiplo'; c[k]=(c[k]||0)+1; });   // v1.8.13
     const NOM={em_separacao:'em separação',separado:'separado(s)',conferido:'conferido(s)',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',fora_multiplo:'com itens fora do múltiplo',aguardando_separacao:'aguardando separação'};
@@ -4326,6 +4334,7 @@ function renderHomeDash(abertosP, futurosA, b, ncAbertas){
   if(podeVer('nc')){ (state.ncs||[]).filter(n=>n.status==='pendente_cliente').forEach(n=>{ at += `<button class="drow" onclick="openNc('${n.id}')"><span>${n.protocolo} aguarda sua resposta<div class="sub">${n.titulo}</div></span>${tagH('t-er','responder')}</button>`; });
     const ncMk2 = (state.ncs||[]).filter(n=>n.status==='pendente_mklog').length; if(ncMk2) at += `<button class="drow" onclick="showScreen('nc')"><span>${ncMk2} não conformidade(s) em tratamento pela MKLOG</span>${tagH('t-gr','acompanhar')}</button>`; }
   if(podeVer('ped')) state.pedidos.filter(p=>{const x=pedIndic(p); return x && !x.fechado && !x.onTime;}).forEach(p=>{ at += `<button class="drow" onclick="openDetalhe('ped','${p.id}')"><span>${p.protocolo} com prazo vencido</span>${tagH('t-er','ver')}</button>`; });
+  if(typeof cobAvisoHome==='function') at += cobAvisoHome();   // v1.8.25
   if(!at) at = '<div class="drow"><span class="sub">Nada pendente com você. 👍</span></div>';
   el.innerHTML = (podeVer('agd') ? `<div class="dcard"><h4><span class="live-dot"></span> Operação agora <button class="lnk" onclick="showScreen('op')">ver tudo ›</button></h4>${op}</div>
     <div class="dcard"><h4>Próximos agendamentos <button class="lnk" onclick="showScreen('agd')">ver todos ›</button></h4>${ag}</div>` : '')
@@ -5605,6 +5614,7 @@ function showDone(kind, protocolo, msg){
     if(ags && ags.error) console.warn('agendamentos:', ags.error.message);
     state.ncs = []; state.faturas = []; state.laudos = [];
     await ncCarregar(); await laudosCarregar();   // v1.8.24
+    state.coberturas = []; await cobCarregar();   // v1.8.25
     try{ const fz = podeVer('fin') ? await sb.rpc('portal_minhas_faturas') : {data:[]}; state.fatReal = (fz && !fz.error && fz.data) || []; if(fz&&fz.error) console.warn('faturas:', fz.error.message); }catch(_e){ state.fatReal = []; }   // v1.8.5
     const dl = $('skuList'); if(dl) dl.innerHTML = state.catalogo.map(c=>`<option value="${esc(c.sku)}">${esc(c.descricao||'')}</option>`).join('');
   };
@@ -5725,13 +5735,90 @@ function showDone(kind, protocolo, msg){
   };
   window.portalRecarregar = async function(){ try{ await loadDados(); render(); }catch(e){ alert(e.message||e); } };
 
+
+  /* ---------------- v1.8.25 · NOTAS DE COBERTURA (recebimento triangular) ---------------- */
+  const dBR = d => d ? new Date(String(d).length<=10?d+'T12:00':d).toLocaleDateString('pt-BR') : '—';
+  const cobPend = () => (state.coberturas||[]).filter(c=>c.status!=='coberta');
+  const cobFalta = c => (c.itens||[]).reduce((a,i)=>a+Math.max(0,(+i.qtd_recebida||0)-(+i.qtd_coberta||0)),0);
+  window.cobCarregar = async function(){
+    if(DEMO) return;
+    try{ if(!podeVer('cob')){ state.coberturas=[]; return; }
+      const q = await sb.rpc('portal_coberturas'); state.coberturas = (q && !q.error && Array.isArray(q.data)) ? q.data : []; if(q&&q.error) console.warn('coberturas:', q.error.message);
+    }catch(_e){ state.coberturas = state.coberturas||[]; }
+  };
+  window.cobBadge = function(){
+    const tem=(state.coberturas||[]).length>0, n=cobPend().length, b=$('navCob'), e=$('nbCob');
+    if(b) b.classList.toggle('hide', DEMO || !tem);     // o menu só aparece para quem tem recebimento triangular
+    if(e){ e.textContent=n; e.classList.toggle('hide',!n); }
+    if(!DEMO && $('scrCob') && !$('scrCob').classList.contains('hide')) renderCob();
+  };
+  window.cobAvisoHome = function(){
+    if(DEMO) return ''; const P=cobPend(); if(!P.length) return '';
+    const velha=Math.max(0,...P.map(c=>+c.dias||0));
+    return `<button class="drow" onclick="showScreen('cob')"><span>${P.length} recebimento(s) aguardando NF de cobertura<div class="sub">${nBR(P.reduce((a,c)=>a+cobFalta(c),0))} unidades a cobrir · a mais antiga há ${velha} dia(s)</div></span>${tagH('t-er','cobrir')}</button>`;
+  };
+  window.renderCob = function(){
+    const L=$('listaCob'); if(!L) return;
+    const C=state.coberturas||[], P=cobPend(), parc=P.filter(c=>c.status==='parcial').length, velha=P.length?Math.max(...P.map(c=>+c.dias||0)):0;
+    const th=t=>`<th style="background:#1e3a8a;color:#fff;text-align:left;padding:8px 10px;font-weight:600;white-space:nowrap">${t}</th>`, td='padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top';
+    const sit=c=>c.status==='coberta'?tagH('t-ok','coberta'):(c.status==='parcial'?tagH('t-wa','parcial'):tagH('t-er','sem NF'));
+    L.innerHTML=`<div class="hint" style="margin-bottom:10px">Recebimentos que chegaram com a nota do fornecedor e precisam da sua NF de remessa. Envie o XML da remessa: o sistema identifica a nota do fornecedor e baixa a pendência na hora.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
+        ${[[P.length-parc,'sem NF de cobertura','#b91c1c'],[parc,'com cobertura parcial','#b45309'],[nBR(P.reduce((a,c)=>a+cobFalta(c),0)),'unidades a cobrir',''],[P.length?velha+' dia(s)':'—','pendência mais antiga','']]
+          .map(k=>`<div style="background:var(--hover);border-radius:10px;padding:10px 14px"><b style="display:block;font-size:22px;${k[2]?'color:'+k[2]:''}">${k[0]}</b><span class="hint">${k[1]}</span></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <button class="btn btn-primary" style="width:auto;padding:8px 14px" onclick="cobEscolher()">⬆ Enviar NFs de remessa (XML)</button>
+        <button class="btn btn-ghost" style="width:auto;padding:8px 14px" onclick="cobExportar()">Exportar</button>
+        <span class="hint">Pode enviar vários XMLs de uma vez.</span></div>
+      <div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+        ${['NF fornecedor','Fornecedor','Recebida em','Produto','Recebido','Coberto','A cobrir','Dias','Situação',''].map(th).join('')}</tr></thead><tbody>
+      ${C.map(c=>{ const its=c.itens||[], rem=c.remessas||[], n=Math.max(1,its.length);
+        return its.map((i,k)=>{ const falta=Math.max(0,(+i.qtd_recebida||0)-(+i.qtd_coberta||0));
+          return `<tr>${k===0?`<td rowspan="${n}" style="${td};font-weight:700">${esc(c.nf_numero||'')}${rem.length?`<div class="hint" style="font-weight:400">remessa ${rem.map(r=>esc(r.numero||'')).join(', ')}</div>`:''}</td><td rowspan="${n}" style="${td}">${esc(c.fornecedor||'—')}</td><td rowspan="${n}" style="${td};white-space:nowrap">${dBR(c.recebida_em)}</td>`:''}
+            <td style="${td}"><span class="mono">${esc(i.sku)}</span><div class="hint">${esc(i.descricao||'')}</div></td>
+            <td style="${td};text-align:right">${nBR(i.qtd_recebida)}</td><td style="${td};text-align:right">${nBR(i.qtd_coberta)}</td>
+            <td style="${td};text-align:right;font-weight:700;${falta?'color:#b91c1c':''}">${falta?nBR(falta):'—'}</td>
+            ${k===0?`<td rowspan="${n}" style="${td};text-align:right">${c.status==='coberta'?'—':(+c.dias||0)}</td><td rowspan="${n}" style="${td}">${sit(c)}</td>
+            <td rowspan="${n}" style="${td}">${c.status==='coberta'?'':`<button class="btn btn-ghost" style="width:auto;padding:4px 10px;white-space:nowrap" onclick="cobEscolher('${c.id}')">Enviar NF</button>`}</td>`:''}</tr>`; }).join(''); }).join('')
+        || '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">Nenhum recebimento aguardando nota de cobertura.</td></tr>'}
+      </tbody></table></div>`;
+  };
+  window.cobEscolher = function(coberturaId){
+    const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml'; if(!coberturaId) i.multiple=true;
+    i.onchange=()=>{ if(i.files && i.files.length) cobEnviar(Array.from(i.files), coberturaId||null); }; i.click();
+  };
+  window.cobEnviar = async function(files, coberturaId){
+    $('detTitle').textContent='Notas de remessa · '+files.length+' arquivo(s)';
+    $('detBody').innerHTML='<div id="cobRes" style="font-size:13px;line-height:1.7"><span class="hint">Lendo os XMLs…</span></div>'; openModal('mDet');
+    const out=[];
+    for(const f of files){
+      try{
+        if(!/\.xml$/i.test(f.name)) throw new Error('não é um XML');
+        const q = await sb.rpc('portal_cobertura_enviar', { p_xml: await f.text(), p_cobertura: coberturaId, p_autor:(state.user&&state.user.nome)||null });
+        if(q.error) throw q.error;
+        const r=q.data||{}, dv=Array.isArray(r.divergencias)?r.divergencias:[];
+        out.push(`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>Remessa ${esc(r.remessa||'')}</b> → NF ${esc(r.nf_fornecedor||'')} de ${esc(r.fornecedor||'—')} ${r.status==='coberta'?tagH('t-ok','coberta'):tagH('t-wa','cobertura parcial')}
+          ${dv.map(d=>`<div class="hint" style="color:#b45309">• ${esc(d.sku||'')}: ${esc(d.msg||'')}</div>`).join('')}</div>`);
+      }catch(err){ out.push(`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(f.name)}</b> ${tagH('t-er','não aceita')}<div class="hint" style="color:#b91c1c">${esc(err.message||String(err))}</div></div>`); }
+      const res=$('cobRes'); if(res) res.innerHTML=out.join('');
+    }
+    await cobCarregar(); cobBadge();
+  };
+  window.cobExportar = function(){
+    const q = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"', n = v => String(+v||0).replace('.',',');
+    const linhas=[]; (state.coberturas||[]).forEach(c=>(c.itens||[]).forEach(i=>linhas.push([q(c.nf_numero),q(c.fornecedor),q(dBR(c.recebida_em)),q(i.sku),q(i.descricao),n(i.qtd_recebida),n(i.qtd_coberta),n(Math.max(0,(+i.qtd_recebida||0)-(+i.qtd_coberta||0))),c.status==='coberta'?'':n(c.dias),q(c.status==='coberta'?'coberta':(c.status==='parcial'?'parcial':'sem NF')),q((c.remessas||[]).map(r=>r.numero).join(', '))].join(';'))));
+    const csv=[['NF fornecedor','Fornecedor','Recebida em','Codigo','Descricao','Recebido','Coberto','A cobrir','Dias','Situacao','NF de remessa'].map(q).join(';')].concat(linhas).join('\r\n');
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+    a.download='notas_de_cobertura_'+String(state.depositante||'cliente').replace(/\W+/g,'_')+'_'+hoje()+'.csv'; document.body.appendChild(a); a.click(); a.remove();
+  };
+
   /* ---------------- v1.8.24 · NÃO CONFORMIDADES (real) e LAUDOS POR LOTE ---------------- */
   const NC_TIPOS = {avaria:'Avaria',divergencia:'Divergência',validade:'Validade',laudo_ausente:'Laudo ausente',etiqueta:'Etiqueta',outros:'Outros'};
   const L_TIPOS = {laudo:'Laudo',certificado:'Certificado',revalidacao:'Carta de revalidação'};
   const ncStNome = s => ({pendente_cliente:'Aguarda sua tratativa',pendente_mklog:'Com a MKLOG',encerrada:'Encerrada'}[s]||s);
   const ncRetido = n => !!(n.veiculo_retido && !n.veiculo_liberado_em && n.status!=='encerrada');
   const ncHa = d => { const m=Math.max(0,Math.round((Date.now()-new Date(d).getTime())/60000)); return m<60?(m+' min'):(m<2880?(Math.floor(m/60)+' h '+(m%60)+' min'):(Math.floor(m/1440)+' dias')); };
-  const dBR = d => d ? new Date(String(d).length<=10?d+'T12:00':d).toLocaleDateString('pt-BR') : '—';
   window.ncCarregar = async function(){
     if(DEMO) return;
     try{ if(!podeVer('nc')){ state.ncs=[]; return; }
