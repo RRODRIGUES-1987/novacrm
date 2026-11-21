@@ -3177,7 +3177,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.23';   // v1.8.23: uma NF para vários pedidos (automático pela OC ou marcando os pedidos)
+const PORTAL_VERSION = 'v1.8.24';   // v1.8.24: não conformidades de verdade (cliente trata e encerra) e laudos por lote no estoque
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
@@ -3531,6 +3531,7 @@ function render(){
   $('cntNc').textContent=ncAbertas; $('cntNc').classList.toggle('hide', !ncAbertas);
   // v1.1: menu do topo, detalhes dos indicadores, painel e estoque
   [['nbPed',abertosP.length],['nbAgd',futurosA.length],['nbNc',ncAbertas]].forEach(([id,n])=>{ const e=$(id); if(e){ e.textContent=n; e.classList.toggle('hide',!n); } });
+  if(!DEMO && typeof renderNc==='function' && $('scrNc') && !$('scrNc').classList.contains('hide')) renderNc();   // v1.8.24
   const emOp = abertosP.filter(p=>p.status==='em_operacao').length;
   if(_vf){ const c={}; _vf.forEach(r=>{ let k=r.situacao||'aguardando_separacao'; if(k==='aguardando_saldo'&&/não fecha pacote/.test(r.faltas||'')) k='fora_multiplo'; c[k]=(c[k]||0)+1; });   // v1.8.13
     const NOM={em_separacao:'em separação',separado:'separado(s)',conferido:'conferido(s)',em_romaneio:'em carregamento',aguardando_saldo:'aguardando saldo',fora_multiplo:'com itens fora do múltiplo',aguardando_separacao:'aguardando separação'};
@@ -5602,7 +5603,8 @@ function showDone(kind, protocolo, msg){
     state.agendamentos = (ags && !ags.error ? (ags.data||[]) : []).map(a=>({ ...a, criado_em:a.created_at, anexos:[], cartao:a.protocolo }));
     state.janelasView = (jan && !jan.error ? (jan.data||[]) : []);
     if(ags && ags.error) console.warn('agendamentos:', ags.error.message);
-    state.ncs = []; state.faturas = [];
+    state.ncs = []; state.faturas = []; state.laudos = [];
+    await ncCarregar(); await laudosCarregar();   // v1.8.24
     try{ const fz = podeVer('fin') ? await sb.rpc('portal_minhas_faturas') : {data:[]}; state.fatReal = (fz && !fz.error && fz.data) || []; if(fz&&fz.error) console.warn('faturas:', fz.error.message); }catch(_e){ state.fatReal = []; }   // v1.8.5
     const dl = $('skuList'); if(dl) dl.innerHTML = state.catalogo.map(c=>`<option value="${esc(c.sku)}">${esc(c.descricao||'')}</option>`).join('');
   };
@@ -5707,7 +5709,8 @@ function showDone(kind, protocolo, msg){
     $('estTs').textContent = 'Posição de ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     $('estRows').innerHTML = L.map(e=>{
       const tag = e.disponivel<=0 ? tagH('t-er','esgotado') : (e.disponivel < e.saco*2 ? tagH('t-wa','baixo') : '');
-      return `<tr><td class="mono">${esc(e.sku)}</td><td>${esc(e.descricao||'')}</td><td class="num">${e.saco>1?nBR(e.saco):'—'}</td><td class="num"><b>${nBR(e.fisico)}</b></td>
+      const _nl = laudosDoSku(e.sku).length;   // v1.8.24
+      return `<tr><td class="mono">${esc(e.sku)}</td><td>${esc(e.descricao||'')}${_nl?` <a href="#" onclick="openLaudos('${esc(e.sku)}');return false" style="white-space:nowrap;font-size:12px;color:#1e40af">📄 ${_nl} laudo${_nl>1?'s':''}</a>`:''}</td><td class="num">${e.saco>1?nBR(e.saco):'—'}</td><td class="num"><b>${nBR(e.fisico)}</b></td>
         <td class="num">${nBR(e.caixas_fechadas)}${e.caixa_padrao?` <small style="color:var(--muted)">× ${nBR(e.caixa_padrao)}</small>`:''}</td><td class="num">${e.saco>1?nBR(e.sacos_avulsos):'—'}</td>
         <td class="num">${nBR(e.empenhado)}</td><td class="num">${nBR(e.em_pedidos)}</td><td class="num"><b>${nBR(e.disponivel)}</b> ${tag}</td></tr>`; }).join('')
       || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">Nenhum produto encontrado.</td></tr>';
@@ -5721,6 +5724,132 @@ function showDone(kind, protocolo, msg){
     a.download = 'estoque_'+String(state.depositante||'cliente').replace(/\W+/g,'_')+'_'+hoje()+'.csv'; document.body.appendChild(a); a.click(); a.remove();
   };
   window.portalRecarregar = async function(){ try{ await loadDados(); render(); }catch(e){ alert(e.message||e); } };
+
+  /* ---------------- v1.8.24 · NÃO CONFORMIDADES (real) e LAUDOS POR LOTE ---------------- */
+  const NC_TIPOS = {avaria:'Avaria',divergencia:'Divergência',validade:'Validade',laudo_ausente:'Laudo ausente',etiqueta:'Etiqueta',outros:'Outros'};
+  const L_TIPOS = {laudo:'Laudo',certificado:'Certificado',revalidacao:'Carta de revalidação'};
+  const ncStNome = s => ({pendente_cliente:'Aguarda sua tratativa',pendente_mklog:'Com a MKLOG',encerrada:'Encerrada'}[s]||s);
+  const ncRetido = n => !!(n.veiculo_retido && !n.veiculo_liberado_em && n.status!=='encerrada');
+  const ncHa = d => { const m=Math.max(0,Math.round((Date.now()-new Date(d).getTime())/60000)); return m<60?(m+' min'):(m<2880?(Math.floor(m/60)+' h '+(m%60)+' min'):(Math.floor(m/1440)+' dias')); };
+  const dBR = d => d ? new Date(String(d).length<=10?d+'T12:00':d).toLocaleDateString('pt-BR') : '—';
+  window.ncCarregar = async function(){
+    if(DEMO) return;
+    try{ if(!podeVer('nc')){ state.ncs=[]; return; }
+      const q = await sb.rpc('portal_ncs'); if(q.error){ console.warn('ncs:', q.error.message); state.ncs=[]; return; }
+      state.ncs = (Array.isArray(q.data)?q.data:[]).map(n=>({...n, referencia:n.referencia||'—'}));
+    }catch(_e){ state.ncs = state.ncs||[]; }
+  };
+  window.laudosCarregar = async function(){
+    if(DEMO) return;
+    try{ if(!(podeVer('est')||podeVer('ped'))){ state.laudos=[]; return; }
+      const q = await sb.rpc('portal_laudos'); state.laudos = (q && !q.error && q.data) || []; if(q&&q.error) console.warn('laudos:', q.error.message);
+    }catch(_e){ state.laudos = state.laudos||[]; }
+  };
+  window.laudosDoSku = sku => (state.laudos||[]).filter(l=>String(l.sku).trim()===String(sku).trim());
+  window.portalArquivo = async function(path){
+    try{ const { data:u, error:eU } = await sb.storage.from('portal-anexos').createSignedUrl(path, 600); if(eU) throw eU; window.open(u.signedUrl, '_blank'); }
+    catch(err){ toast('Não consegui abrir o arquivo: '+(err.message||err)); }
+  };
+  window.openLaudos = function(sku){
+    const L = laudosDoSku(sku), e = (state.estoqueReal||[]).find(x=>String(x.sku).trim()===String(sku).trim());
+    $('detTitle').textContent = 'Laudos · '+sku;
+    $('detBody').innerHTML = `<div class="hint" style="margin-bottom:10px">${esc((e&&e.descricao)||'')}</div>
+      <div class="tbl-wrap" style="overflow:auto"><table class="tbl" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Lote(s)','Documento','Nova validade','Anexado em',''].map(t=>`<th style="background:#1e3a8a;color:#fff;text-align:left;padding:8px 10px;font-weight:600">${t}</th>`).join('')}</tr></thead><tbody>
+      ${L.map(l=>`<tr><td style="padding:8px 10px;border-bottom:1px solid var(--line)">${esc((l.lotes||[]).join(', ')||'—')}</td><td style="padding:8px 10px;border-bottom:1px solid var(--line)">${esc(L_TIPOS[l.tipo]||l.tipo)}${l.fornecedor?`<div class="hint">${esc(l.fornecedor)}</div>`:''}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--line)">${dBR(l.nova_validade)}</td><td style="padding:8px 10px;border-bottom:1px solid var(--line)">${dBR(l.created_at)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--line)"><button class="btn btn-ghost" style="width:auto;padding:4px 10px" data-p="${esc(l.path)}" onclick="portalArquivo(this.dataset.p)">Baixar</button></td></tr>`).join('')}
+      </tbody></table></div>`;
+    openModal('mDet');
+  };
+  const _ncOrig = { renderNc: window.renderNc, openNc: window.openNc };
+  window.renderNc = function(){
+    if(DEMO) return _ncOrig.renderNc();
+    const L=$('listaNc'); if(!L) return;
+    const rows=[...(state.ncs||[])].sort((a,b)=>(ncRetido(b)?1:0)-(ncRetido(a)?1:0) || (a.status==='encerrada'?1:0)-(b.status==='encerrada'?1:0) || String(b.criado_em||'').localeCompare(String(a.criado_em||'')));
+    const ret=rows.filter(ncRetido).length, comigo=rows.filter(n=>n.status==='pendente_cliente').length;
+    L.innerHTML = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        ${ret?`<span class="badge" style="background:#b91c1c;color:#fff">🚚 ${ret} veículo(s) retido(s)</span>`:''}
+        ${comigo?`<span class="badge b-pendente_cliente">${comigo} aguardando sua tratativa</span>`:''}
+        <span style="flex:1"></span><button class="btn btn-ghost" style="width:auto;padding:6px 12px" onclick="ncNova()">+ Abrir não conformidade</button></div>`
+      + (rows.length ? '' : '<div class="empty">Nenhuma não conformidade registrada. 🎉</div>');
+    rows.forEach(n=>{
+      const b=document.createElement('button'); b.className='item'; b.onclick=()=>openNc(n.id);
+      if(ncRetido(n)) b.style.borderColor='#b91c1c';
+      b.innerHTML=`<div class="dir sai">⚠</div>
+        <div class="mid"><div class="l1"><span class="proto">${esc(n.protocolo||'')}</span>
+        <span class="badge b-${n.status}">${ncStNome(n.status)}</span>${ncRetido(n)?` <span class="badge" style="background:#b91c1c;color:#fff">🚚 veículo retido${n.placa?' · '+esc(n.placa):''} · há ${ncHa(n.criado_em)}</span>`:''}</div>
+        <div class="l2">${esc(NC_TIPOS[n.tipo]||n.tipo||'')} · ${esc(n.titulo||'')} · aberta em ${dBR(n.criado_em)}${n.prazo&&n.status!=='encerrada'?' · prazo '+dBR(n.prazo):''}</div></div>
+        <div style="color:var(--muted)">›</div>`;
+      L.appendChild(b);
+    });
+  };
+  window.openNc = function(id){
+    if(DEMO) return _ncOrig.openNc(id);
+    const n=(state.ncs||[]).find(x=>x.id===id); if(!n) return;
+    const evs=n.eventos||[], aberta=n.status!=='encerrada';
+    $('detTitle').textContent=n.protocolo||'Não conformidade';
+    $('detBody').innerHTML=(ncRetido(n)?`<div style="background:#b91c1c;color:#fff;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-weight:700">🚚 Veículo retido na planta${n.placa?' · placa '+esc(n.placa):''} · há ${ncHa(n.criado_em)}</div>`
+        :(n.veiculo_retido&&n.veiculo_liberado_em?`<div style="background:#dcfce7;color:#166534;border-radius:10px;padding:8px 14px;margin-bottom:12px">🚚 Veículo liberado em ${new Date(n.veiculo_liberado_em).toLocaleString('pt-BR')}</div>`:''))
+      +`<div class="detail-grid">
+        <div style="grid-column:1/-1"><div class="k">Assunto</div><div class="v">${esc(n.titulo||'')}</div>${n.descricao?`<div class="hint" style="white-space:pre-wrap;margin-top:4px">${esc(n.descricao)}</div>`:''}</div>
+        <div><div class="k">Situação</div><div class="v"><span class="badge b-${n.status}">${ncStNome(n.status)}</span></div></div>
+        <div><div class="k">Tipo</div><div class="v">${esc(NC_TIPOS[n.tipo]||n.tipo||'—')}</div></div>
+        <div><div class="k">Aberta em</div><div class="v">${dBR(n.criado_em)}</div></div>
+        <div><div class="k">Prazo</div><div class="v">${dBR(n.prazo)}</div></div>
+        <div><div class="k">Referência</div><div class="v">${esc(n.referencia||'—')}</div></div>
+        <div><div class="k">Produto · lote · quantidade</div><div class="v">${esc([n.sku,n.lote,n.quantidade!=null?Number(n.quantidade).toLocaleString('pt-BR'):null].filter(Boolean).join(' · ')||'—')}</div></div>
+      </div>`
+      +(evs.length?`<label>Histórico</label><ul class="tl">`+evs.map(e=>`<li>
+        <div class="ev" style="white-space:pre-wrap">${esc(e.evento||'')}</div>
+        ${(Array.isArray(e.anexos)?e.anexos:[]).map(a=>`<a href="#" data-p="${esc(a.path)}" onclick="portalArquivo(this.dataset.p);return false" style="margin-right:10px;font-size:12px;color:#1e40af">📎 ${esc(a.nome||'arquivo')}</a>`).join('')}
+        <div class="meta">${new Date(e.criado_em).toLocaleString('pt-BR')} · ${e.autor_tipo==='mklog'?'MKLOG':(esc(e.autor_nome||'')||'Você')}</div></li>`).join('')+'</ul>':'<div class="hint">Sem eventos registrados.</div>')
+      +(aberta?`<label>Sua tratativa</label><textarea id="ncTxt" rows="3" style="width:100%" placeholder="Descreva a decisão: segregar, devolver, liberar, descartar…"></textarea>
+        <input type="file" id="ncArq" multiple accept="image/*,.pdf" style="margin-top:6px">
+        <div id="ncErr" class="hint" style="color:#b91c1c;display:none;margin-top:6px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn btn-primary" style="width:auto;padding:8px 14px" onclick="ncResponder('${n.id}',false,false)">Enviar tratativa</button>
+          <button class="btn btn-ghost" style="width:auto;padding:8px 14px" onclick="ncResponder('${n.id}',true,false)">Enviar e encerrar</button>
+          ${ncRetido(n)?`<button class="btn btn-ghost" style="width:auto;padding:8px 14px;border-color:#166534;color:#166534" onclick="ncResponder('${n.id}',false,true)">🚚 Liberar veículo</button>`:''}
+        </div>`:(n.tratativa?`<label>Tratativa</label><div class="hint" style="white-space:pre-wrap">${esc(n.tratativa)}</div>`:''));
+    openModal('mDet');
+  };
+  window.ncResponder = async function(id, encerrar, liberar){
+    const erro = m => { const e=$('ncErr'); if(e){ e.style.display='block'; e.textContent=m; } };
+    const txt = ($('ncTxt')?.value||'').trim(), files = Array.from($('ncArq')?.files||[]);
+    if(!txt && !files.length && !liberar){ erro(encerrar?'Escreva a tratativa antes de encerrar.':'Escreva a tratativa ou anexe um arquivo.'); return; }
+    try{
+      toast('Enviando…');
+      const anexos=[];
+      for(let i=0;i<files.length;i++){ const f=files[i]; if(f.size>10*1024*1024) throw new Error('arquivo muito grande (limite de 10 MB): '+f.name);
+        const nome=String(f.name).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9._-]+/g,'_').slice(-80);
+        const path=`${state.depositanteId}/nc/${id}/${Date.now()}_${i}_${nome}`;
+        const { error:eU } = await sb.storage.from('portal-anexos').upload(path, f, { upsert:true, contentType:f.type||'application/octet-stream' });
+        if(eU) throw new Error('falha ao guardar o arquivo: '+eU.message);
+        anexos.push({path, nome:f.name}); }
+      const q = await sb.rpc('portal_nc_responder', { p_nc:id, p_texto:txt||null, p_anexos:anexos, p_autor:(state.user&&state.user.nome)||null, p_encerrar:!!encerrar, p_liberar_veiculo:!!liberar });
+      if(q.error) throw q.error;
+      await ncCarregar(); render();
+      if(encerrar){ closeModal('mDet'); toast('Não conformidade encerrada.'); } else { openNc(id); toast(liberar?'Veículo liberado.':'Tratativa enviada à MKLOG.'); }
+    }catch(err){ erro('Não consegui enviar: '+(err.message||err)); }
+  };
+  window.ncNova = function(){
+    $('detTitle').textContent='Abrir não conformidade';
+    $('detBody').innerHTML=`<label>Tipo</label><select id="ncnTipo" style="width:100%">${Object.keys(NC_TIPOS).map(k=>`<option value="${k}">${NC_TIPOS[k]}</option>`).join('')}</select>
+      <label>Assunto</label><input id="ncnTit" maxlength="160" style="width:100%" placeholder="Ex.: pallet com avaria na entrega">
+      <label>Descrição</label><textarea id="ncnDesc" rows="3" style="width:100%"></textarea>
+      <label>Referência (NF, pedido, lote)</label><input id="ncnRef" style="width:100%">
+      <div id="ncErr" class="hint" style="color:#b91c1c;display:none;margin-top:6px"></div>
+      <div style="margin-top:12px"><button class="btn btn-primary" style="width:auto;padding:8px 14px" onclick="ncNovaSalvar()">Abrir não conformidade</button></div>`;
+    openModal('mDet');
+  };
+  window.ncNovaSalvar = async function(){
+    const tit=($('ncnTit')?.value||'').trim(); if(!tit){ const e=$('ncErr'); e.style.display='block'; e.textContent='Informe o assunto.'; return; }
+    try{ const q = await sb.rpc('portal_nc_abrir', { p_tipo:$('ncnTipo').value, p_titulo:tit, p_descricao:($('ncnDesc').value||'').trim()||null, p_referencia:($('ncnRef').value||'').trim()||null, p_autor:(state.user&&state.user.nome)||null });
+      if(q.error) throw q.error;
+      await ncCarregar(); closeModal('mDet'); toast('Não conformidade '+((q.data&&q.data.protocolo)||'')+' aberta.');
+    }catch(err){ const e=$('ncErr'); e.style.display='block'; e.textContent='Não consegui abrir: '+(err.message||err); }
+  };
+
 
   /* ---------------- PEDIDO DE SAÍDA (real) ---------------- */
   window.openPedido = function(){
