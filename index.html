@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1404 | Gerado: 2026-11-21 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1406 | Gerado: 2026-11-22 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1472,7 +1472,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1404';
+const APP_VERSION='v1.0.1406';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -45897,6 +45897,7 @@ async function qNcAcao(id,acao){
       if(n.veiculo_retido&&!n.veiculo_liberado_em){ upd.veiculo_liberado_em=upd.encerrada_em; upd.veiculo_liberado_por=autor||'MKLOG'; } evs.push({evento:'Não conformidade encerrada pela MKLOG',anexos:[]}); }
     if(acao==='reabrir'){ upd.status='pendente_mklog'; upd.encerrada_em=null; upd.encerrada_por_tipo=null; upd.encerrada_por_nome=null; evs.push({evento:'Não conformidade reaberta pela MKLOG',anexos:[]}); }
     await dbUpdate('wms_ncs',id,upd);
+    if(upd.veiculo_liberado_em) await wmsOcFecharDaNc(id);   // v1.0.1405
     for(var k=0;k<evs.length;k++) await dbInsert('wms_nc_eventos',{company_id:company.id,nc_id:id,evento:evs[k].evento,autor_tipo:'mklog',autor_nome:autor,anexos:evs[k].anexos});
     Object.assign(n,upd);
     if(curPage==='wms-ncs'){ var c=ge('content'); if(c) c.innerHTML=rWmsNcs(); }
@@ -46009,6 +46010,199 @@ async function qLaudosImprimir(){
   if(b){ b.disabled=false; b.innerHTML='🖨 Imprimir os '+paths.length+' laudo(s)'; }
 }
 function qPedTemLaudo(cliId){ var c=(clientes||[]).find(function(x){return x.id===cliId;}); return !!(c&&(c.parametros||{}).laudos_lote); }
+
+// ══════════════════════════════════════════════════════════
+//  v1.0.1405 · OCORRÊNCIAS DO VEÍCULO (Carga/Descarga)
+//  Ocorrência aberta retém o veículo: a saída não é liberada. O tempo parado por conta do cliente
+//  (aguardando NF, não conformidade, outra tratativa) é abonado no tempo de operação.
+// ══════════════════════════════════════════════════════════
+var _oc={lista:[],motivos:[],ok:false,erro:''};   // v1.0.1406: motivos vêm do cadastro
+function wmsOcNome(o){ return (o&&o.motivo_nome)||OC_MOTIVOS[o&&o.motivo]||(o&&o.motivo)||'—'; }
+var OC_MOTIVOS={aguardando_nf:'Aguardando NF do cliente',nao_conformidade:'Não conformidade',tratativa_cliente:'Outra tratativa do cliente',outro:'Outro (MKLOG ou transportadora)'};
+var OC_RESP={cliente:'Cliente',mklog:'MKLOG',transportadora:'Transportadora'};
+// ocorrências abertas de um veículo; em qualquer falha devolve vazio (nunca trava a operação por erro de leitura)
+async function wmsOcAbertas(eventoId){
+  if(!eventoId) return [];
+  try{ var r=await sbFetch('GET','/rest/v1/wms_evento_ocorrencias?evento_id=eq.'+eventoId+'&fim_em=is.null&retem=is.true&order=inicio_em.asc',null,tok); return (r.ok&&Array.isArray(r.data))?r.data:[]; }catch(_e){ return []; }
+}
+// minutos parados em ocorrências com abono (já encerradas), para o tempo com abono
+async function wmsOcMinCliente(eventoId){
+  if(!eventoId) return 0;
+  try{ var r=await sbFetch('GET','/rest/v1/wms_evento_ocorrencias?evento_id=eq.'+eventoId+'&abona=is.true&fim_em=not.is.null&select=inicio_em,fim_em',null,tok);
+    return ((r.ok&&Array.isArray(r.data))?r.data:[]).reduce(function(a,o){ return a+Math.max(0,Math.round((new Date(o.fim_em).getTime()-new Date(o.inicio_em).getTime())/60000)); },0); }catch(_e){ return 0; }
+}
+// usado antes de liberar a saída: mostra o motivo no centro da tela e devolve true se o veículo está retido
+async function wmsOcBloqueia(eventoId,placa){
+  var L=await wmsOcAbertas(eventoId); if(!L.length) return false;
+  qJanela('q-oc-bloq','🚚 Saída bloqueada'+(placa?' · '+qEsc(placa):''),
+    '<div style="margin-bottom:10px">Este veículo tem <b>'+L.length+' ocorrência(s) aberta(s)</b>. A saída só é liberada depois de encerrar.</div>'
+    +L.map(function(o){ return '<div style="border-left:3px solid var(--red-text);padding:4px 0 4px 10px;margin-bottom:8px"><b>'+qEsc(wmsOcNome(o))+'</b> · com '+qEsc(OC_RESP[o.responsavel]||o.responsavel)+' · há '+qHa(o.inicio_em)+(o.descricao?'<div style="color:var(--text2)">'+qEsc(o.descricao)+'</div>':'')+'</div>'; }).join(''),
+    '<button class="btn" onclick="ge(\'q-oc-bloq\').remove();_expView=\'ocorr\';pg(\'wms-expedicao\')">Ver ocorrências</button><button class="btn btn-p" onclick="ge(\'q-oc-bloq\').remove()">OK</button>','520px');
+  return true;
+}
+async function wmsOcCarregar(){
+  var box=ge('wms-exp-oc'); if(!box) return;
+  _oc.erro='';
+  try{
+    var r=await sbFetch('GET','/rest/v1/wms_evento_ocorrencias?company_id=eq.'+company.id+'&or=(fim_em.is.null,inicio_em.gte.'+new Date(Date.now()-36*3600000).toISOString()+')&order=inicio_em.desc&limit=300',null,tok);
+    if(!r.ok) throw new Error((r.data&&r.data.message)||('erro '+r.status));
+    _oc.lista=Array.isArray(r.data)?r.data:[];
+    var m=await sbFetch('GET','/rest/v1/wms_ocorrencia_motivos?company_id=eq.'+company.id+'&order=ordem.asc,nome.asc',null,tok);
+    _oc.motivos=(m.ok&&Array.isArray(m.data))?m.data:[];
+  }catch(e){ _oc.lista=[]; _oc.erro=/wms_evento_ocorrencias|schema cache|404/i.test(String(e.message))?'A tabela de ocorrências ainda não existe neste banco.':('Erro ao carregar: '+(e.message||e)); }
+  _oc.ok=true; box=ge('wms-exp-oc'); if(box) box.innerHTML=wmsOcHtml();
+}
+function wmsOcHtml(){
+  var evs=(wmsEventos||[]).filter(function(e){ return e.status==='aberto' && (!activeUnit||!e.unit_id||e.unit_id===activeUnit); });
+  var abertas=_oc.lista.filter(function(o){return !o.fim_em;}), fechadas=_oc.lista.filter(function(o){return !!o.fim_em;});
+  var docaNome=function(id){ var d=(typeof wmsDocas!=='undefined'&&wmsDocas||[]).find(function(x){return x.id===id;}); return d?(d.nome||d.codigo||''):''; };
+  var h=(_oc.erro?'<div style="background:var(--red-bg,#fee2e2);color:var(--red-text);padding:10px 14px;border-radius:8px;margin-bottom:12px">'+qEsc(_oc.erro)+'</div>':'')
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><b style="font-size:15px">Veículos na casa</b>'
+    +(abertas.length?qTag('🚚 '+abertas.length+' ocorrência(s) aberta(s)','var(--red-text)','#fff'):qTag('nenhum veículo retido','var(--green-bg)','var(--green-text)'))
+    +'<span style="flex:1"></span><button class="btn btn-sm" onclick="wmsOcMotivos()">⚙ Motivos</button><button class="btn btn-sm" onclick="wmsOcCarregar()">↻ Atualizar</button></div>'
+    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:16px"><table style="width:100%;border-collapse:collapse"><thead><tr>'
+    +['Placa','Depositante','Operação','Chegada','Situação',''].map(function(t){return '<th style="'+Q_TH+'">'+t+'</th>';}).join('')+'</tr></thead><tbody>'
+    +(evs.map(function(e){ var oc=abertas.filter(function(o){return o.evento_id===e.id;});
+        return '<tr'+(oc.length?' style="background:var(--red-bg,#fee2e2)"':'')+'><td style="'+Q_TD+';font-weight:700">'+qEsc(e.placa||'—')+'</td><td style="'+Q_TD+'">'+qEsc(qCli(e.cliente_id))+'</td>'
+          +'<td style="'+Q_TD+'">'+(e.movimento==='descarga'?'Descarga':'Carga')+(docaNome(e.doca_id)?' · '+qEsc(docaNome(e.doca_id)):'')+'</td><td style="'+Q_TD+';white-space:nowrap">'+qDataHora(e.chegada_em)+'</td>'
+          +'<td style="'+Q_TD+'">'+(oc.length?oc.map(function(o){ return '<div style="margin-bottom:4px">'+(o.retem===false?qTag('aberta há '+qHa(o.inicio_em),'var(--amber-bg)','var(--amber-text)'):qTag('retido há '+qHa(o.inicio_em),'var(--red-text)','#fff'))+' <b>'+qEsc(wmsOcNome(o))+'</b> · com '+qEsc(OC_RESP[o.responsavel]||o.responsavel)
+              +(o.descricao?'<div style="font-size:12px;color:var(--text2)">'+qEsc(o.descricao)+'</div>':'')+' <button class="btn btn-sm" style="margin-top:3px" onclick="wmsOcEncerrar(\''+o.id+'\')">✓ Encerrar ocorrência</button></div>'; }).join(''):'<span style="color:var(--text3)">sem ocorrência</span>')+'</td>'
+          +'<td style="'+Q_TD+'"><button class="btn btn-sm" onclick="wmsOcNova(\''+e.id+'\')">⚠ Ocorrência</button></td></tr>'; }).join('')
+      ||'<tr><td colspan="6" style="'+Q_TD+';text-align:center;color:var(--text3);padding:24px">Nenhum veículo em operação nesta unidade.</td></tr>')
+    +'</tbody></table></div>';
+  // ocorrência aberta de veículo que não está mais na lista da tela (outra unidade ou lista desatualizada)
+  var soltas=abertas.filter(function(o){ return !evs.some(function(e){return e.id===o.evento_id;}); });
+  if(soltas.length) h+='<div style="font-size:12px;font-weight:700;color:var(--text3);margin-bottom:6px">OUTRAS OCORRÊNCIAS ABERTAS</div>'
+    +soltas.map(function(o){ return '<div style="border:1px solid var(--border);border-radius:9px;padding:8px 12px;margin-bottom:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>'+qEsc(o.placa||'—')+'</b><span>'+qEsc(qCli(o.cliente_id))+'</span><span>'+qEsc(wmsOcNome(o))+' · há '+qHa(o.inicio_em)+'</span><span style="flex:1"></span><button class="btn btn-sm" onclick="wmsOcEncerrar(\''+o.id+'\')">✓ Encerrar</button></div>'; }).join('');
+  if(fechadas.length) h+='<div style="font-size:12px;font-weight:700;color:var(--text3);margin:14px 0 6px">ENCERRADAS NAS ÚLTIMAS 36 HORAS</div>'
+    +'<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr>'+['Placa','Depositante','Motivo','Com quem','Início','Duração'].map(function(t){return '<th style="'+Q_TH+'">'+t+'</th>';}).join('')+'</tr></thead><tbody>'
+    +fechadas.map(function(o){ var m=Math.max(0,Math.round((new Date(o.fim_em).getTime()-new Date(o.inicio_em).getTime())/60000));
+        return '<tr><td style="'+Q_TD+';font-weight:700">'+qEsc(o.placa||'—')+'</td><td style="'+Q_TD+'">'+qEsc(qCli(o.cliente_id))+'</td><td style="'+Q_TD+'">'+qEsc(wmsOcNome(o))+'</td><td style="'+Q_TD+'">'+qEsc(OC_RESP[o.responsavel]||o.responsavel)+'</td><td style="'+Q_TD+'">'+qDataHora(o.inicio_em)+'</td><td style="'+Q_TD+'">'+Math.floor(m/60)+'h'+String(m%60).padStart(2,'0')+(o.abona?' '+qTag('abonado','var(--amber-bg)','var(--amber-text)'):'')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+  return h;
+}
+function wmsOcNova(eventoId){
+  var e=(wmsEventos||[]).find(function(x){return x.id===eventoId;}); if(!e) return;
+  var M=(_oc.motivos||[]).filter(function(m){return m.ativo!==false;});
+  if(!M.length){ showToast('Nenhum motivo de ocorrência cadastrado. Abra "Motivos" e cadastre.','amber'); return; }
+  var corpo='<div style="background:var(--bg2);border-radius:8px;padding:8px 12px;margin-bottom:10px"><b>'+qEsc(e.placa||'sem placa')+'</b> · '+qEsc(qCli(e.cliente_id))+' · '+(e.movimento==='descarga'?'descarga':'carga')+' · chegou '+qDataHora(e.chegada_em)+'</div>'
+    +'<div style="display:grid;grid-template-columns:3fr 2fr;gap:10px"><div><label class="fl">Motivo *</label><select class="fi" id="oc-mot" onchange="wmsOcMotivoSel()">'+M.map(function(m){return '<option value="'+m.id+'">'+qEsc(m.nome)+'</option>';}).join('')+'</select></div>'
+    +'<div><label class="fl">Responsável *</label><select class="fi" id="oc-resp">'+Object.keys(OC_RESP).map(function(k){return '<option value="'+k+'">'+OC_RESP[k]+'</option>';}).join('')+'</select></div></div>'
+    +'<div style="margin-top:10px"><label class="fl">Descrição *</label><input class="fi" id="oc-desc" maxlength="200" placeholder="Ex.: pedido de 28 pallets e o veículo comporta 26"></div>'
+    +'<div id="oc-info" style="font-size:12px;color:var(--text2);margin-top:10px;line-height:1.6;background:var(--bg2);border-radius:8px;padding:8px 12px"></div>';
+  window._ocEv=eventoId;
+  qJanela('q-oc-nova','Nova ocorrência do veículo',corpo,'<button class="btn" onclick="ge(\'q-oc-nova\').remove()">Cancelar</button><button class="btn btn-p" id="oc-salvar" onclick="wmsOcSalvar()">Abrir ocorrência</button>','620px');
+  wmsOcMotivoSel();
+}
+function wmsOcMotivoSel(){
+  var m=(_oc.motivos||[]).find(function(x){return x.id===(ge('oc-mot')?.value);}); if(!m) return;
+  var r=ge('oc-resp'); if(r) r.value=m.responsavel||'cliente';
+  var i=ge('oc-info'); if(i) i.innerHTML=(m.retem?'🚚 <b>Retém o veículo:</b> a saída fica bloqueada até encerrar.':'O veículo <b>não</b> fica retido: é só o registro.')
+    +'<br>'+(m.abona?'⏱ <b>Abona o tempo:</b> o período parado sai do tempo de operação com abono, e o responsável pelo agendamento é avisado por e-mail.':'O tempo parado <b>não</b> é abonado.')
+    +(m.abre_nc?'<br>⚠ <b>Abre não conformidade</b> para o cliente tratar pelo portal.':'');
+}
+// quem recebe o aviso de abono: quem fez o agendamento no portal + o grupo de notificação do depositante marcado para ocorrências
+async function wmsOcDestinatarios(e){
+  var L=[], add=function(x){ x=String(x||'').trim().toLowerCase(); if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x) && L.indexOf(x)<0) L.push(x); };
+  try{ if(e.romaneio_id){ var a=await dbSelect('portal_agendamentos','romaneio_id=eq.'+e.romaneio_id+'&select=criado_por&limit=1')||[];
+      if(a[0]&&a[0].criado_por){ var u=await dbSelect('portal_usuarios','or=(id.eq.'+a[0].criado_por+',auth_user_id.eq.'+a[0].criado_por+')&select=email')||[]; u.forEach(function(x){ add(x.email); }); } } }catch(_e){}
+  var c=(clientes||[]).find(function(x){return x.id===e.cliente_id;});
+  (Array.isArray(c&&c.notif_operacional)?c.notif_operacional:[]).forEach(function(p){ if((p.eventos||[]).indexOf('ocorrencia')>=0) add(p.email); });
+  return L;
+}
+async function wmsOcEmail(e,oc,prot){
+  var para=await wmsOcDestinatarios(e); if(!para.length) return {para:[],erro:'sem destinatário'};
+  var cli=qCli(e.cliente_id), linha=function(k,v){ return '<tr><td style="padding:6px 12px;color:#666;font-size:13px">'+k+'</td><td style="padding:6px 12px;font-size:13px"><b>'+qEsc(v)+'</b></td></tr>'; };
+  var html='<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">'
+    +'<div style="background:#1e3a8a;color:#fff;padding:14px 18px;border-radius:10px 10px 0 0;font-size:16px;font-weight:700">MK Logística · ocorrência com veículo</div>'
+    +'<div style="border:1px solid #e5e5e5;border-top:none;border-radius:0 0 10px 10px;padding:16px 18px">'
+    +'<p style="font-size:14px;margin:0 0 12px">Registramos uma ocorrência na operação do veículo abaixo.'+(oc.retem?' <b>O veículo está retido</b> até a solução.':'')+'</p>'
+    +'<table style="border-collapse:collapse;width:100%;background:#f7f7f5;border-radius:8px">'+linha('Depositante',cli)+linha('Placa',e.placa||'—')+linha('Operação',e.movimento==='descarga'?'Recebimento (descarga)':'Expedição (carga)')
+    +linha('Motivo',oc.motivo_nome)+linha('Com quem está',OC_RESP[oc.responsavel]||oc.responsavel)+linha('Descrição',oc.descricao||'—')+linha('Início',qDataHora(oc.inicio_em||new Date().toISOString()))+(prot?linha('Não conformidade',prot):'')+'</table>'
+    +'<p style="font-size:13px;color:#444;margin:14px 0 0">O tempo em que o veículo ficar parado por este motivo será <b>abonado</b> do tempo de operação. Acompanhe pelo Portal do Cliente.</p>'
+    +'</div></div>';
+  try{
+    var r=await fetch(SB_URL+'/functions/v1/send-email',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+      body:JSON.stringify({from:'MK Logística · Operação <noreply@mklogistica.com>',to:para,subject:'Ocorrência com veículo '+(e.placa||'')+' · '+oc.motivo_nome+' · '+cli,html:html})});
+    var j=await r.json().catch(function(){return {};});
+    if(!r.ok||(j&&(j.error||j.ok===false))) return {para:para,erro:String((j&&(j.error||j.message))||('HTTP '+r.status))};
+    return {para:para,erro:null};
+  }catch(err){ return {para:para,erro:String(err.message||err)}; }
+}
+async function wmsOcSalvar(){
+  var e=(wmsEventos||[]).find(function(x){return x.id===window._ocEv;}); if(!e) return;
+  var m=(_oc.motivos||[]).find(function(x){return x.id===(ge('oc-mot')?.value);}), resp=ge('oc-resp')?.value||'cliente', desc=(ge('oc-desc')?.value||'').trim();
+  if(!m) return qErro('q-oc-nova','Escolha o motivo.');
+  if(!desc) return qErro('q-oc-nova','Descreva a ocorrência.');
+  var b=ge('oc-salvar'); if(b){ b.disabled=true; b.innerHTML='<span class="spin"></span> Salvando…'; }
+  try{
+    var autor=coletorAutor(), ncId=null, prot='';
+    if(m.abre_nc){
+      if(!e.cliente_id) throw new Error('este veículo não tem depositante: não dá para abrir a não conformidade');
+      var s=await dbInsert('wms_ncs',{company_id:company.id,unit_id:e.unit_id||activeUnit||null,cliente_id:e.cliente_id,tipo:'outros',titulo:desc,referencia:'Veículo '+(e.placa||''),
+        status:resp==='cliente'?'pendente_cliente':'pendente_mklog',veiculo_retido:!!m.retem,placa:(e.placa||'').toUpperCase()||null,aberta_por_tipo:'mklog',aberta_por_nome:autor});
+      var nc=Array.isArray(s)?s[0]:s; if(!nc||!nc.id) throw new Error('a não conformidade não foi gravada');
+      ncId=nc.id; prot=nc.protocolo||'';
+      await dbInsert('wms_nc_eventos',{company_id:company.id,nc_id:nc.id,evento:'Não conformidade aberta pela MKLOG'+(m.retem?' — veículo retido na planta'+(e.placa?' (placa '+e.placa+')':''):''),autor_tipo:'mklog',autor_nome:autor,anexos:[]});
+      if(typeof _q!=='undefined'&&_q.ok) _q.ncs=[nc].concat(_q.ncs);
+    }
+    var dados={company_id:company.id,evento_id:e.id,cliente_id:e.cliente_id||null,placa:e.placa||null,motivo:m.codigo||'outro',motivo_id:m.id,motivo_nome:m.nome,
+      responsavel:resp,retem:!!m.retem,abona:!!m.abona,descricao:desc,nc_id:ncId,aberta_por:autor};
+    var so=await dbInsert('wms_evento_ocorrencias',dados); var oc=Array.isArray(so)?so[0]:so;
+    ge('q-oc-nova')?.remove();
+    var aviso='Ocorrência aberta'+(prot?' · '+prot:'')+'.'+(m.retem?' A saída do veículo está bloqueada.':'');
+    if(m.abona){   // v1.0.1406: ocorrência com abono avisa o responsável pelo agendamento
+      var em=await wmsOcEmail(e,Object.assign({},dados,oc||{}),prot);
+      if(em.para.length && !em.erro){ aviso+=' E-mail enviado a '+em.para.join(', ')+'.'; if(oc&&oc.id){ try{ await dbUpdate('wms_evento_ocorrencias',oc.id,{email_para:em.para.join(', '),email_em:new Date().toISOString()}); }catch(_e){} } }
+      else if(!em.para.length) aviso+=' E-mail NÃO enviado: o veículo não tem agendamento do portal e o depositante não tem ninguém marcado para "Ocorrência de veículo com abono" em Notificações.';
+      else aviso+=' E-mail NÃO enviado ('+em.erro+').';
+    }
+    qJanela('q-oc-ok','Ocorrência registrada','<div style="line-height:1.6">'+qEsc(aviso)+'</div>','<button class="btn btn-p" onclick="ge(\'q-oc-ok\').remove()">OK</button>','520px');
+    wmsOcCarregar();
+  }catch(err){ if(b){ b.disabled=false; b.textContent='Abrir ocorrência'; } qErro('q-oc-nova','Erro: '+(err.message||err)); }
+}
+// cadastro de motivos
+function wmsOcMotivos(){
+  var M=_oc.motivos||[], ck=function(id,campo,v){ return '<input type="checkbox" '+(v?'checked':'')+' onchange="wmsOcMotivoSet(\''+id+'\',\''+campo+'\',this.checked)">'; };
+  var corpo='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr>'
+    +['Motivo','Responsável padrão','Retém veículo','Abona tempo','Abre NC','Ativo'].map(function(t,i){return '<th style="'+Q_TH+(i>1?';text-align:center':'')+'">'+t+'</th>';}).join('')+'</tr></thead><tbody>'
+    +(M.map(function(m){ return '<tr'+(m.ativo===false?' style="opacity:.5"':'')+'><td style="'+Q_TD+'"><input class="fi" value="'+qEsc(m.nome)+'" style="min-width:220px" onchange="wmsOcMotivoSet(\''+m.id+'\',\'nome\',this.value)"></td>'
+        +'<td style="'+Q_TD+'"><select class="fi" onchange="wmsOcMotivoSet(\''+m.id+'\',\'responsavel\',this.value)">'+Object.keys(OC_RESP).map(function(k){return '<option value="'+k+'" '+(m.responsavel===k?'selected':'')+'>'+OC_RESP[k]+'</option>';}).join('')+'</select></td>'
+        +'<td style="'+Q_TD+';text-align:center">'+ck(m.id,'retem',m.retem)+'</td><td style="'+Q_TD+';text-align:center">'+ck(m.id,'abona',m.abona)+'</td><td style="'+Q_TD+';text-align:center">'+ck(m.id,'abre_nc',m.abre_nc)+'</td><td style="'+Q_TD+';text-align:center">'+ck(m.id,'ativo',m.ativo!==false)+'</td></tr>'; }).join('')
+      ||'<tr><td colspan="6" style="'+Q_TD+';text-align:center;color:var(--text3);padding:20px">Nenhum motivo cadastrado.</td></tr>')
+    +'</tbody></table></div>'
+    +'<div style="display:flex;gap:8px;margin-top:12px;align-items:center"><input class="fi" id="ocm-novo" placeholder="Novo motivo. Ex.: Lacre divergente" style="flex:1"><button class="btn btn-p" onclick="wmsOcMotivoNovo()">+ Incluir</button></div>'
+    +'<div style="font-size:12px;color:var(--text3);margin-top:10px;line-height:1.5"><b>Retém veículo:</b> bloqueia a saída enquanto a ocorrência estiver aberta. <b>Abona tempo:</b> o período parado sai do tempo de operação com abono e o responsável pelo agendamento recebe e-mail. <b>Abre NC:</b> gera a não conformidade para o cliente tratar no portal. As mudanças valem para as próximas ocorrências.</div>';
+  qJanela('q-oc-mot','Motivos de ocorrência',corpo,'<button class="btn btn-p" onclick="ge(\'q-oc-mot\').remove()">Fechar</button>','860px');
+}
+async function wmsOcMotivoSet(id,campo,valor){
+  var m=(_oc.motivos||[]).find(function(x){return x.id===id;}); if(!m) return;
+  if(campo==='nome'){ valor=String(valor||'').trim(); if(!valor){ showToast('O motivo precisa de um nome.','red'); wmsOcMotivos(); return; } }
+  var o={}; o[campo]=valor;
+  try{ await dbUpdate('wms_ocorrencia_motivos',id,o); m[campo]=valor; if(campo==='ativo') wmsOcMotivos(); }
+  catch(e){ showToast('Não consegui salvar: '+(/duplicate|unique/i.test(String(e.message))?'já existe um motivo com esse nome':(e.message||e)),'red'); wmsOcMotivos(); }
+}
+async function wmsOcMotivoNovo(){
+  var nome=(ge('ocm-novo')?.value||'').trim(); if(!nome){ showToast('Escreva o nome do motivo.','amber'); return; }
+  try{ var s=await dbInsert('wms_ocorrencia_motivos',{company_id:company.id,nome:nome,responsavel:'cliente',retem:true,abona:false,abre_nc:false,ordem:200+(_oc.motivos||[]).length});
+    var m=Array.isArray(s)?s[0]:s; if(m) _oc.motivos=(_oc.motivos||[]).concat([m]); wmsOcMotivos(); }
+  catch(e){ showToast('Não consegui incluir: '+(/duplicate|unique/i.test(String(e.message))?'já existe um motivo com esse nome':(e.message||e)),'red'); }
+}
+async function wmsOcEncerrar(id){
+  var o=_oc.lista.find(function(x){return x.id===id;}); if(!o) return;
+  if(!(await vConfirmar('Encerrar ocorrência','<b>'+qEsc(o.placa||'')+'</b> · '+qEsc(wmsOcNome(o))+'<br>O veículo deixa de estar retido por este motivo.'+(o.nc_id?'<br>A não conformidade continua aberta para a tratativa; só o veículo é liberado.':''),'Encerrar'))) return;
+  try{
+    var agora=new Date().toISOString(), autor=coletorAutor();
+    await dbUpdate('wms_evento_ocorrencias',id,{fim_em:agora,encerrada_por:autor});
+    if(o.nc_id){ try{ await dbUpdate('wms_ncs',o.nc_id,{veiculo_liberado_em:agora,veiculo_liberado_por:autor||'MKLOG',updated_at:agora});
+      await dbInsert('wms_nc_eventos',{company_id:company.id,nc_id:o.nc_id,evento:'Veículo liberado pela MKLOG'+(o.placa?' (placa '+o.placa+')':''),autor_tipo:'mklog',autor_nome:autor,anexos:[]});
+      if(typeof _q!=='undefined'){ var n=_q.ncs.find(function(x){return x.id===o.nc_id;}); if(n){ n.veiculo_liberado_em=agora; n.veiculo_liberado_por=autor; } } }catch(_e){} }
+    showToast('Ocorrência encerrada.','green'); wmsOcCarregar();
+  }catch(e){ showToast('Não consegui encerrar: '+(e.message||e),'red'); }
+}
+// a NC liberou o veículo (ou foi encerrada): fecha a ocorrência ligada a ela
+async function wmsOcFecharDaNc(ncId){
+  try{ await sbFetch('PATCH','/rest/v1/wms_evento_ocorrencias?nc_id=eq.'+ncId+'&fim_em=is.null',{fim_em:new Date().toISOString(),encerrada_por:coletorAutor()},tok); }catch(_e){}
+}
 
 // Atalho pós-importação: seleciona os pedidos recém-importados e abre o modal de gerar listas
 let wmsImpUltimosIds=[];
@@ -48558,7 +48752,7 @@ async function wmsPortalTransp(cid){
 }
 
 // ═══ v1.0.1215 · GRUPO DE NOTIFICAÇÃO OPERACIONAL (por depositante) ═══
-var WN_EVENTOS=[['saldo','Pedido travado por saldo'],['cancelado','Pedido cancelado após importar'],['integracao','Erro na integração'],['portaria','Veículo na portaria sem agendamento'],['ondas','Ondas de separação geradas']];   // v1.0.1219: ondas
+var WN_EVENTOS=[['saldo','Pedido travado por saldo'],['cancelado','Pedido cancelado após importar'],['integracao','Erro na integração'],['portaria','Veículo na portaria sem agendamento'],['ondas','Ondas de separação geradas'],['ocorrencia','Ocorrência de veículo com abono']];   // v1.0.1406   // v1.0.1219: ondas
 var _wn={cid:null,lista:null};
 function wmsCliTabNotif(c){
   if(_wn.cid!==c.id){ _wn={cid:c.id,lista:(Array.isArray(c.notif_operacional)?c.notif_operacional:[]).map(function(x){return Object.assign({eventos:[]},x);})}; }
@@ -50960,7 +51154,7 @@ function gerarEtiquetaEmbarque(palletId){
 //  WMS · EXPEDIÇÃO / EMBARQUE (4ª conferência + pool de prismas)
 // ══════════════════════════════════════════════════════════════════
 let wmsExpTab='embarque';
-var _expView='docas'; // 'docas' | 'patio' | 'agenda'
+var _expView='docas'; // 'docas' | 'patio' | 'agenda' | 'ocorr' (v1.0.1405)
 function wmsExpSetView(v){_expView=v;if(curPage==='wms-expedicao')render();}
 function rWmsExpedicao(){
   // barra de alternância docas <-> pátio (unificação)
@@ -50968,8 +51162,10 @@ function rWmsExpedicao(){
     +'<button class="btn btn-sm'+(_expView==='docas'?' btn-p':'')+'" onclick="wmsExpSetView(\'docas\')">🚪 Docas</button>'
     +'<button class="btn btn-sm'+(_expView==='patio'?' btn-p':'')+'" onclick="wmsExpSetView(\'patio\')">🅿️ Pátio</button>'
     +'<button class="btn btn-sm'+(_expView==='agenda'?' btn-p':'')+'" onclick="wmsExpSetView(\'agenda\')">📅 Agendamentos <span id="exp-agd-n" style="display:none;margin-left:4px;background:#f59e0b;color:#fff;border-radius:99px;padding:0 7px;font-size:11px;font-weight:700"></span></button>'
+    +'<button class="btn btn-sm'+(_expView==='ocorr'?' btn-p':'')+'" onclick="wmsExpSetView(\'ocorr\')">⚠ Ocorrências</button>'   // v1.0.1405
     +'</div>';
   setTimeout(wmsExpAgdContar,40);   // v1.0.1347: bolinha com os agendamentos do portal aguardando confirmação
+  if(_expView==='ocorr'){ setTimeout(wmsOcCarregar,30); return toggle+'<div id="wms-exp-oc"><div style="padding:30px;text-align:center;color:var(--text3)">Buscando as ocorrências…</div></div>'; }   // v1.0.1405
   if(_expView==='agenda'){ setTimeout(wmsExpAgdCarregar,30); return toggle+'<div id="wms-exp-agd"><div style="padding:30px;text-align:center;color:var(--text3)">Buscando os agendamentos…</div></div>'; }
   return toggle+(_expView==='patio'?rWmsPatio():wmsExpDocasBody());
 }
@@ -53287,6 +53483,7 @@ function wmsSaidaFoto(input){
 async function wmsSaidaConfirmar(){
   if(!_saiTermo)return portErr('Bipe o termo de liberação.');
   if(!_saiFoto)return portErr('Tire a foto do baú antes de confirmar.');
+  if(_saiTermo.evento_id){ var _ocT=await wmsOcAbertas(_saiTermo.evento_id); if(_ocT.length) return portErr('Saída BLOQUEADA: o veículo tem '+_ocT.length+' ocorrência(s) aberta(s) ('+_ocT.map(function(o){return wmsOcNome(o);}).join(', ')+'). Encerre em Carga/Descarga › Ocorrências.'); }   // v1.0.1405
   portSaving();
   try{
     var quem=(profile&&profile.full_name)||cu?.email||null, agora=new Date().toISOString();
@@ -56152,6 +56349,8 @@ async function wmsSaidaRenderStatus(romId){
 }
 async function wmsLiberarSaida(rom){
   if(!rom)return;
+  // v1.0.1405: veículo com ocorrência aberta não sai
+  var _evOc=wmsEventoDoRomaneio(rom.id); if(_evOc && await wmsOcBloqueia(_evOc.id,_evOc.placa||rom.placa)) return;
   window._saidaRom=null;
   try{ var _pds=(wmsPedidos||[]).filter(function(x){return x.romaneio_id===rom.id;}); for(var _i=0;_i<_pds.length;_i++){ await wmsRegistrarLeituras('saida',[{sku:null,tipo_volume:'veiculo',quantidade:1,unico:true}],{pedido_id:_pds[_i].id,unit_id:rom.unit_id,modo:'bipe'}); } }catch(_ls){}   // v1.0.1244: rastreio
   var prisma=(wmsPrismas||[]).find(function(p){return p.romaneio_id===rom.id && p.status==='ocupado';});
@@ -56171,6 +56370,9 @@ async function wmsLiberarSaida(rom){
     var agora=new Date().toISOString();
     var totalMin=_min(ev.chegada_em, agora);                                   // sem abono (chegada -> saída)
     var comMin=ev.agendamento_em?_min(ev.agendamento_em, agora):null;          // com abono (agendado -> saída); só se houver agendamento
+    // v1.0.1405: o tempo parado por conta do cliente (ocorrências encerradas) também é abonado
+    var _parado=await wmsOcMinCliente(ev.id);
+    if(_parado>0){ var _baseAb=(comMin!=null && totalMin!=null)?Math.min(comMin,totalMin):totalMin; if(_baseAb!=null) comMin=Math.max(0,_baseAb-_parado); }
     var cli=(clientes||[]).find(function(c){return c.id===(ev.cliente_id||rom.cliente_id);});
     var ent=(ev.movimento==='descarga');
     var cSem=cli?(ent?cli.op_contrato_sem_abono_entrada:cli.op_contrato_sem_abono_saida):null;
