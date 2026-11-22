@@ -506,8 +506,8 @@
       <nav class="topnav" id="topnav">
         <button data-scr="home" onclick="showScreen('home')">Início</button>
         <button data-scr="ped" onclick="showScreen('ped')">Pedidos <span class="nb hide" id="nbPed"></span></button>
-        <button data-scr="est" onclick="showScreen('est')">Estoque</button>
-        <button data-scr="cob" id="navCob" class="hide" onclick="showScreen('cob')">NFs de cobertura <span class="nb hide" id="nbCob"></span></button>
+        <button data-scr="est" onclick="showScreen('est')">Estoque <span class="nb hide" id="nbCob" style="background:#b45309" title="NFs de cobertura pendentes"></span></button>
+        <button data-scr="cob" id="navCob" class="hide" style="display:none" onclick="showScreen('cob')">NFs de cobertura</button>
         <button data-scr="kpi" id="navKpi" class="hide" onclick="showScreen('kpi')">Indicadores</button>
         <button data-scr="agd" onclick="showScreen('agd')">Agendamentos <span class="nb hide" id="nbAgd"></span></button>
         <button data-scr="rel" onclick="showScreen('rel')">Relatórios</button>
@@ -612,7 +612,6 @@
     <!-- ===== TELA: NOTAS DE COBERTURA (v1.8.25) ===== -->
     <section id="scrCob" class="hide">
       <div class="screen-h"><h2>Notas de cobertura</h2></div>
-      <div id="listaCob"></div>
     </section>
 
     <section id="scrEst" class="hide">
@@ -3196,7 +3195,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.31';   // v1.8.31: indicadores fecham no dia anterior; veículos retidos agora ficam em Agendamentos
+const PORTAL_VERSION = 'v1.8.33';   // v1.8.33: aging do estoque em barras, com percentual do total e quantidade   // v1.8.32: NFs de cobertura viram submenu do Estoque; produto com cobertura pendente fica com a linha destacada
+// const PORTAL_VERSION_ANT = 'v1.8.31';   // v1.8.31: indicadores fecham no dia anterior; veículos retidos agora ficam em Agendamentos
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
@@ -3517,7 +3517,7 @@ async function loadDados(){
 
 /* ============================ NAVEGAÇÃO ============================ */
 // v1.6.3: permissões do acesso (agd, est, ped, rel, fin, nc); sem permissões gravadas = acesso completo; demonstração vê tudo
-function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; if(k==='cob') return state.perms.indexOf('est')>=0||state.perms.indexOf('ped')>=0; if(k==='kpi') k='rel'; return state.perms.indexOf(k)>=0; }
+function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; if(k==='cob') return state.perms.indexOf('est')>=0; if(k==='kpi') k='rel'; return state.perms.indexOf(k)>=0; }
 // v1.6.4: home, atalhos e atendimento só com o que o acesso pode ver
 function aplicarPermsHome(){
   const card = id => { const e=$(id); return e ? e.closest('.sum-card') : null; };
@@ -3528,6 +3528,7 @@ function aplicarPermsHome(){
 }
 function showScreen(s){
   if(!podeVer(s)){ s='home'; }
+  if(s==='cob' && !DEMO){ state.estAba='cob'; s='est'; }   // v1.8.32: cobertura é submenu do Estoque
   const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', cob:'Cob', kpi:'Kpi', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
   document.querySelectorAll('#topnav button').forEach(b=>b.classList.toggle('on', b.dataset.scr===(map[s]?s:'home')));
   if(s==='rel' && typeof relVoltar==='function'){ setTimeout(relVoltar,0); }
@@ -5717,15 +5718,38 @@ function showDone(kind, protocolo, msg){
     const S = $('scrEst'); if(!S || S.dataset.real==='1') return;
     S.dataset.real='1';
     S.innerHTML = `<div class="screen-h"><h2>Estoque</h2><span class="op-ts" id="estTs"></span></div>
+      <div id="estAbas" style="display:none;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--line)"></div>
+      <div id="estCobBox" class="hide"><div id="listaCob"></div></div>
+      <div id="estPosBox">
       <div class="est-tools">
         <input type="search" id="estBusca" placeholder="Buscar por código ou descrição" oninput="renderEstoque()">
         <label class="ck"><input type="checkbox" id="estSoSaldo" checked onchange="renderEstoque()"> Só com saldo</label>
+        <label class="ck" id="estSoPendLb" style="display:none;color:#b45309"><input type="checkbox" id="estSoPend" onchange="renderEstoque()"> Só pendentes de cobertura</label>
         <button class="btn btn-ghost" style="width:auto;padding:9px 16px" onclick="portalRecarregar()">Atualizar</button>
         <button class="btn btn-primary" style="width:auto;padding:9px 16px" onclick="exportEstoque()">Exportar Excel (CSV)</button>
       </div>
       <div class="est-kpis" id="estKpis"></div>
       <div class="tbl-wrap"><table class="tbl"><thead id="estHead"></thead><tbody id="estRows"></tbody></table></div>
-      <div class="hint" id="estHint" style="margin-top:8px"></div>`;
+      <div class="hint" id="estHint" style="margin-top:8px"></div>
+      </div>`;
+  }
+  // v1.8.32: pendência de NF de cobertura por produto (o saldo continua contando; só fica sinalizado)
+  const estCod = s => String(s==null?'':s).trim().replace(/^0+(?=.)/,'').toUpperCase();
+  function estPendMapa(){
+    const M={}; (state.coberturas||[]).forEach(c=>{ if(c.status==='coberta') return; (c.itens||[]).forEach(i=>{ const f=Math.max(0,(+i.qtd_recebida||0)-(+i.qtd_coberta||0)); if(!f) return; const k=estCod(i.sku); (M[k]=M[k]||{qtd:0,nfs:[]}); M[k].qtd+=f; if(c.nf_numero && M[k].nfs.indexOf(c.nf_numero)<0) M[k].nfs.push(c.nf_numero); }); });
+    return M;
+  }
+  window.estAbaSel = function(a, sku){ state.estAba = a; state.cobFiltro = sku||null; if($('scrEst') && $('scrEst').classList.contains('hide')) showScreen('est'); else renderEstoque(); };
+  function estAbas(){
+    const B=$('estAbas'); if(!B) return 'pos';
+    const tem = podeVer('cob') && (state.coberturas||[]).length>0;
+    if(!tem) state.estAba='pos';
+    const aba = state.estAba==='cob' ? 'cob' : 'pos', n = (state.coberturas||[]).filter(c=>c.status!=='coberta').length;
+    B.style.display = tem ? 'flex' : 'none';
+    const bt=(k,t)=>`<button onclick="estAbaSel('${k}')" style="background:none;border:none;border-bottom:3px solid ${aba===k?'#1e3a8a':'transparent'};padding:8px 14px;font:inherit;font-weight:${aba===k?700:500};color:${aba===k?'#1e3a8a':'var(--muted)'};cursor:pointer;margin-bottom:-1px">${t}</button>`;
+    B.innerHTML = bt('pos','Posição de estoque') + bt('cob','NFs de cobertura'+(n?` <span style="background:#b45309;color:#fff;font-size:10.5px;min-width:18px;height:18px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;margin-left:4px">${n}</span>`:''));
+    $('estPosBox').classList.toggle('hide', aba==='cob'); $('estCobBox').classList.toggle('hide', aba!=='cob');
+    return aba;
   }
   // v1.8.27: as colunas do estoque seguem a operação do cliente
   function estPerfil(){
@@ -5737,21 +5761,30 @@ function showDone(kind, protocolo, msg){
   }
   function estFiltrados(){
     const q=($('estBusca')?.value||'').toLowerCase().trim(), so=$('estSoSaldo')?$('estSoSaldo').checked:true;
-    return (state.estoqueReal||[]).filter(e=>(!q||(e.sku+' '+(e.descricao||'')).toLowerCase().includes(q)) && (!so||e.fisico>0||e.em_pedidos>0));
+    const PM = estPendMapa(), sp = !!($('estSoPend') && $('estSoPend').checked) && Object.keys(PM).length>0;
+    return (state.estoqueReal||[]).filter(e=>(!q||(e.sku+' '+(e.descricao||'')).toLowerCase().includes(q)) && (!so||e.fisico>0||e.em_pedidos>0) && (!sp||PM[estCod(e.sku)]));
   }
   window.renderEstoque = function(){
     if(DEMO) return _orig.renderEstoque();
     estMontar(); if(!$('estRows')) return;
+    if(estAbas()==='cob'){ renderCob(); return; }
+    const PM = estPendMapa(), temPend = Object.keys(PM).length>0;
+    { const lb=$('estSoPendLb'); if(lb) lb.style.display = temPend ? '' : 'none'; }
     const L = estFiltrados(), T = k => L.reduce((a,e)=>a+(+e[k]||0),0);
     const P = estPerfil(), nCol = 7 + (P.temSaco ? 2 : 0);
     $('estHead').innerHTML = `<tr><th>Código</th><th>Descrição</th>${P.temSaco?'<th class="num">Saco</th>':''}<th class="num">Em estoque</th><th class="num">${esc(P.colUn)}</th>${P.temSaco?'<th class="num">Sacos avulsos</th>':''}<th class="num">Empenhado</th><th class="num">Em pedidos abertos</th><th class="num">Disponível</th></tr>`;
     $('estHint').textContent = 'Disponível = em estoque − empenhado em pedidos − pedidos em aberto ainda sem empenho − pedidos enviados pelo portal aguardando a MKLOG. Quantidades em ' + P.peca + '.' + (P.temSaco ? ' "Sacos avulsos" são os sacos de caixas abertas.' : '');
+    if(temPend){ const h=document.createElement('div'); h.style.cssText='margin-top:4px;color:#b45309;font-weight:600'; h.textContent='Linhas nesta cor: produto com saldo recebido aguardando NF de cobertura. O saldo está no armazém e conta no estoque normalmente.'; $('estHint').appendChild(h); }
     $('estKpis').innerHTML = `<div><b>${nBR(L.length)}</b>produtos</div><div><b>${nBR(T('caixas_fechadas'))}</b>${esc(P.kpiUn)}</div><div><b>${nBR(T('fisico'))}</b>${P.peca} em estoque</div><div><b>${nBR(T('empenhado')+T('em_pedidos'))}</b>em pedidos</div><div><b style="color:var(--green,#4d7a1a)">${nBR(T('disponivel'))}</b>disponível</div>`;
     $('estTs').textContent = 'Posição de ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const nPend = L.filter(e=>PM[estCod(e.sku)]).length;
+    if(temPend) $('estKpis').insertAdjacentHTML('beforeend', `<div style="cursor:pointer" onclick="estAbaSel('cob')" title="Abrir as NFs de cobertura"><b style="color:#b45309">${nBR(nPend)}</b><span style="color:#b45309">com cobertura pendente</span></div>`);
     $('estRows').innerHTML = L.map(e=>{
+      const pd = PM[estCod(e.sku)], pcor = pd ? ' style="color:#b45309"' : '';
+      const ptag = pd ? ` <a href="#" onclick="estAbaSel('cob','${esc(e.sku)}');return false" title="NF do fornecedor ${esc(pd.nfs.join(', '))} — clique para ver e enviar a remessa" style="white-space:nowrap;font-size:11.5px;font-weight:700;color:#fff;background:#b45309;border-radius:9px;padding:1px 8px;text-decoration:none">cobertura pendente · ${nBR(pd.qtd)}</a>` : '';
       const tag = e.disponivel<=0 ? tagH('t-er','esgotado') : (P.temSaco && e.disponivel < e.saco*2 ? tagH('t-wa','baixo') : '');
       const _nl = laudosDoSku(e.sku).length;   // v1.8.24
-      return `<tr><td class="mono">${esc(e.sku)}</td><td class="desc">${esc(e.descricao||'')}${_nl?` <a href="#" onclick="openLaudos('${esc(e.sku)}');return false" style="white-space:nowrap;font-size:12px;color:#1e40af">📄 ${_nl} laudo${_nl>1?'s':''}</a>`:''}</td>${P.temSaco?`<td class="num">${e.saco>1?nBR(e.saco):'—'}</td>`:''}<td class="num"><b>${nBR(e.fisico)}</b></td>
+      return `<tr${pcor}><td class="mono"${pcor}>${esc(e.sku)}</td><td class="desc"${pcor}>${esc(e.descricao||'')}${ptag}${_nl?` <a href="#" onclick="openLaudos('${esc(e.sku)}');return false" style="white-space:nowrap;font-size:12px;color:#1e40af">📄 ${_nl} laudo${_nl>1?'s':''}</a>`:''}</td>${P.temSaco?`<td class="num">${e.saco>1?nBR(e.saco):'—'}</td>`:''}<td class="num"><b>${nBR(e.fisico)}</b></td>
         <td class="num">${nBR(e.caixas_fechadas)}${P.temSaco&&e.caixa_padrao?` <small style="color:var(--muted)">× ${nBR(e.caixa_padrao)}</small>`:''}</td>${P.temSaco?`<td class="num">${e.saco>1?nBR(e.sacos_avulsos):'—'}</td>`:''}
         <td class="num">${nBR(e.empenhado)}</td><td class="num">${nBR(e.em_pedidos)}</td><td class="num"><b>${nBR(e.disponivel)}</b> ${tag}</td></tr>`; }).join('')
       || `<tr><td colspan="${nCol}" style="text-align:center;color:var(--muted);padding:24px">Nenhum produto encontrado.</td></tr>`;
@@ -5760,11 +5793,13 @@ function showDone(kind, protocolo, msg){
     if(DEMO) return _orig.exportEstoque();
     const L = estFiltrados(), q = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"', n = v => String(+v||0).replace('.',',');
     const P = estPerfil(), semAc = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const PMx = estPendMapa(), temPx = Object.keys(PMx).length>0;
     const cab = P.temSaco ? ['Codigo','Descricao','Pecas por saco','Em estoque',semAc(P.colUn),'Pecas por caixa','Sacos avulsos','Empenhado','Em pedidos abertos','Disponivel']
                           : ['Codigo','Descricao','Em estoque',semAc(P.colUn),'Empenhado','Em pedidos abertos','Disponivel'];
+    if(temPx) cab.push('Pendente de cobertura');
     const csv = [cab.map(q).join(';')]
       .concat(L.map(e=>(P.temSaco ? [q(e.sku),q(e.descricao),n(e.saco),n(e.fisico),n(e.caixas_fechadas),n(e.caixa_padrao),n(e.sacos_avulsos),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)]
-                                  : [q(e.sku),q(e.descricao),n(e.fisico),n(e.caixas_fechadas),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)]).join(';'))).join('\r\n');
+                                  : [q(e.sku),q(e.descricao),n(e.fisico),n(e.caixas_fechadas),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)]).concat(temPx ? [n((PMx[estCod(e.sku)]||{}).qtd)] : []).join(';'))).join('\r\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
     a.download = 'estoque_'+String(state.depositante||'cliente').replace(/\W+/g,'_')+'_'+hoje()+'.csv'; document.body.appendChild(a); a.click(); a.remove();
   };
@@ -5861,8 +5896,11 @@ function showDone(kind, protocolo, msg){
             <tr><td style="${td};text-align:left"><b>Total</b></td><td style="${td}"><b>${nBR(m.veic)}</b></td><td style="${td}"><b>${kpiHm(m.tmo_bruto)}</b></td><td style="${td}"><b>${kpiHm(m.tmo_abono)}</b></td></tr></tbody></table></div>
           <div class="hint" style="margin-top:6px">Sem abono: da chegada à saída. Com abono: desconta a chegada antes do horário de check-in e o tempo parado em ocorrências com abono (veja o quadro de ocorrências do mês). ${nBR(m.veic_com_abono)} veículo(s) tiveram abono no mês.</div></div>
         <div><div class="hint" style="margin-bottom:6px">Aging do estoque em pallets · posição de ${m.parcial?(m.ate?dBR(m.ate):'ontem'):'fim de '+kpiMesNome(m.mes,true)}</div>
-          <div style="display:flex;height:30px;border-radius:8px;overflow:hidden">${ag.map((v,i)=>{ const p=agT?(+v/agT*100):0; return p>0?`<div title="${faixas[i]}: ${nBR(v)} pallets" style="width:${p}%;background:${cores[i]};color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap">${p>=9?Math.round(p)+'%':''}</div>`:''; }).join('')}</div>
-          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;margin-top:8px;font-size:12px">${ag.map((v,i)=>`<div><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${cores[i]};margin-right:6px"></span>${faixas[i]}: <b>${nBR(v)}</b> <span class="hint">(${agT?kpiDec(+v/agT*100):'0,0'}%)</span></div>`).join('')}</div>
+          <div style="display:grid;gap:10px">${(()=>{ const mx=Math.max(1,...ag.map(v=>+v||0)); return ag.map((v,i)=>{ const p=agT?(+v/agT*100):0, w=(+v||0)/mx*100;
+            return `<div style="display:grid;grid-template-columns:92px minmax(0,1fr) 128px;gap:10px;align-items:center;font-size:13px"><span>${faixas[i]}</span>
+              <div style="background:var(--hover);border-radius:6px;height:26px;overflow:hidden"><div style="width:${w}%;min-width:${+v?3:0}px;height:100%;background:${cores[i]};border-radius:6px"></div></div>
+              <span style="text-align:right;white-space:nowrap"><b style="font-size:15px">${kpiDec(p)}%</b> <span class="hint">· ${nBR(v)}</span></span></div>`; }).join(''); })()}</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><span class="hint">Total em estoque</span><span><b>${nBR(agT)}</b> <span class="hint">pallets · 100%</span></span></div>
           <div class="hint" style="margin-top:6px">${p90==null?'':kpiDec(p90)+'% do estoque está há mais de 90 dias armazenado.'}</div></div>
       </div>
       ${(()=>{ const O=m.ocorrencias||[]; if(!O.length) return ''; const tn=O.reduce((a,x)=>a+(+x.n||0),0), tm=O.reduce((a,x)=>a+(+x.min||0),0), ta=O.filter(x=>x.abona).reduce((a,x)=>a+(+x.min||0),0);
@@ -5893,11 +5931,11 @@ function showDone(kind, protocolo, msg){
     // v1.8.28: o menu aparece só para quem tem registros (recebimento triangular / não conformidade) e permissão para ver
     const menu=(scr,on)=>{ const b=document.querySelector('#topnav button[data-scr="'+scr+'"]'); if(b){ b.classList.toggle('hide',!on); b.style.display=on?'':'none'; } };
     if(DEMO){ const b=$('navCob'); if(b) b.classList.add('hide'); }
-    else { menu('cob', podeVer('cob') && (state.coberturas||[]).length>0); menu('nc', podeVer('nc') && (state.ncs||[]).length>0); menu('kpi', podeVer('kpi') && kpiMeses().length>0);
+    else { menu('cob', false); menu('nc', podeVer('nc') && (state.ncs||[]).length>0); menu('kpi', podeVer('kpi') && kpiMeses().length>0);
       if($('scrKpi') && !$('scrKpi').classList.contains('hide')) renderKpi(); }
     if(typeof renderRetidos==='function') renderRetidos();   // v1.8.31
     if(e){ e.textContent=n; e.classList.toggle('hide',!n); }
-    if(!DEMO && $('scrCob') && !$('scrCob').classList.contains('hide')) renderCob();
+    if(!DEMO && $('scrEst') && !$('scrEst').classList.contains('hide')) renderEstoque();   // v1.8.32: submenu e sinalização do estoque
   };
   window.cobAvisoHome = function(){
     if(DEMO) return ''; const P=cobPend(); if(!P.length) return '';
@@ -5906,7 +5944,8 @@ function showDone(kind, protocolo, msg){
   };
   window.renderCob = function(){
     const L=$('listaCob'); if(!L) return;
-    const C=state.coberturas||[], P=cobPend(), parc=P.filter(c=>c.status==='parcial').length, velha=P.length?Math.max(...P.map(c=>+c.dias||0)):0;
+    const CT=state.coberturas||[], fS=state.cobFiltro?estCod(state.cobFiltro):null;
+    const C=fS?CT.filter(c=>(c.itens||[]).some(i=>estCod(i.sku)===fS)):CT, P=cobPend(), parc=P.filter(c=>c.status==='parcial').length, velha=P.length?Math.max(...P.map(c=>+c.dias||0)):0;
     const th=t=>`<th style="background:#1e3a8a;color:#fff;text-align:left;padding:8px 10px;font-weight:600;white-space:nowrap">${t}</th>`, td='padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top';
     const sit=c=>c.status==='coberta'?tagH('t-ok','coberta'):(c.status==='parcial'?tagH('t-wa','parcial'):tagH('t-er','sem NF'));
     L.innerHTML=`<div class="hint" style="margin-bottom:10px">Recebimentos que chegaram com a nota do fornecedor e precisam da sua NF de remessa. Envie o XML da remessa: o sistema identifica a nota do fornecedor e baixa a pendência na hora.</div>
@@ -5917,7 +5956,8 @@ function showDone(kind, protocolo, msg){
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
         <button class="btn btn-primary" style="width:auto;padding:8px 14px" onclick="cobEscolher()">⬆ Enviar NFs de remessa (XML)</button>
         <button class="btn btn-ghost" style="width:auto;padding:8px 14px" onclick="cobExportar()">Exportar</button>
-        <span class="hint">Pode enviar vários XMLs de uma vez.</span></div>
+        <span class="hint">Pode enviar vários XMLs de uma vez.</span>
+        ${fS?`<span style="margin-left:auto;background:#fef3c7;color:#92400e;border-radius:14px;padding:4px 12px;font-size:12.5px">Produto ${esc(state.cobFiltro)} · <a href="#" onclick="estAbaSel('cob');return false" style="color:#92400e;font-weight:700">ver todas</a></span>`:''}</div>
       <div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
         ${['NF fornecedor','Fornecedor','Recebida em','Produto','Recebido','Coberto','A cobrir','Dias','Situação',''].map(th).join('')}</tr></thead><tbody>
       ${C.map(c=>{ const its=c.itens||[], rem=c.remessas||[], n=Math.max(1,its.length);
