@@ -380,6 +380,10 @@
   table.tbl td.num,table.tbl th.num{text-align:right}
   /* v1.8.16: quadro de pedidos na altura da tela — a rolagem lateral fica sempre visível, sem descer a página */
   #volFat .tbl-wrap{max-height:calc(100vh - 230px);border:none;box-shadow:none;border-radius:0}
+  #scrEst .tbl-wrap{max-height:calc(100vh - 300px);min-height:220px}
+  #scrEst table.tbl{min-width:0}
+  #scrEst table.tbl th{position:sticky;top:0;z-index:1}
+  #scrEst table.tbl td.desc{white-space:normal;min-width:220px}
   #volFat table.tbl{min-width:760px}
   #volFat table.tbl thead th{position:sticky;top:0;z-index:2}
   #volFat table.tbl td{white-space:normal;vertical-align:top}
@@ -3184,7 +3188,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.26';   // v1.8.26: Sair encerra a sessão de verdade antes de recarregar (antes voltava logado no mesmo usuário)
+const PORTAL_VERSION = 'v1.8.27';   // v1.8.27: estoque com colunas conforme a operação do cliente (pallets ou caixas/sacos) e cabeçalho fixo com rolagem visível
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
@@ -5504,6 +5508,7 @@ function showDone(kind, protocolo, msg){
   window.portalUnidadeAplicar = async function(){
     let un = 'Pallets'; try{ const { data } = await sb.rpc('portal_unidade_armazenagem'); if(data) un = String(data); }catch(_e){}
     document.querySelectorAll('.un-arm').forEach(el=>el.textContent=un); document.querySelectorAll('.un-arm-min').forEach(el=>el.textContent=un.toLowerCase());
+    state.unArm = un; try{ if($('estRows')) renderEstoque(); }catch(_e){}   // v1.8.27
   };
   window.portalEmpresaSeletor = function(){
     const a = state.acesso, el = $('hdrDep'); if(!el) return;
@@ -5708,10 +5713,16 @@ function showDone(kind, protocolo, msg){
         <button class="btn btn-primary" style="width:auto;padding:9px 16px" onclick="exportEstoque()">Exportar Excel (CSV)</button>
       </div>
       <div class="est-kpis" id="estKpis"></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>Código</th><th>Descrição</th><th class="num">Saco</th><th class="num">Em estoque</th><th class="num">Caixas fechadas</th><th class="num">Sacos avulsos</th><th class="num">Empenhado</th><th class="num">Em pedidos abertos</th><th class="num">Disponível</th>
-      </tr></thead><tbody id="estRows"></tbody></table></div>
-      <div class="hint" style="margin-top:8px">Disponível = em estoque − empenhado em pedidos − pedidos em aberto ainda sem empenho − pedidos enviados pelo portal aguardando a MKLOG. Quantidades em peças; "sacos avulsos" são os sacos de caixas abertas.</div>`;
+      <div class="tbl-wrap"><table class="tbl"><thead id="estHead"></thead><tbody id="estRows"></tbody></table></div>
+      <div class="hint" id="estHint" style="margin-top:8px"></div>`;
+  }
+  // v1.8.27: as colunas do estoque seguem a operação do cliente
+  function estPerfil(){
+    const R = state.estoqueReal||[], temSaco = R.some(e=>(+e.saco||0)>1), temPadrao = R.some(e=>(+e.caixa_padrao||0)>0);
+    const un = state.unArm || (temSaco ? 'Caixas' : 'Pallets'), fem = /as$/i.test(un);
+    return { temSaco, temPadrao, un, peca: temSaco ? 'peças' : 'unidades',
+             colUn: temSaco ? (un + (fem ? ' fechadas' : ' fechados')) : un,
+             kpiUn: un.toLowerCase() + (temSaco ? (fem ? ' fechadas' : ' fechados') : ' armazenados') };
   }
   function estFiltrados(){
     const q=($('estBusca')?.value||'').toLowerCase().trim(), so=$('estSoSaldo')?$('estSoSaldo').checked:true;
@@ -5721,21 +5732,28 @@ function showDone(kind, protocolo, msg){
     if(DEMO) return _orig.renderEstoque();
     estMontar(); if(!$('estRows')) return;
     const L = estFiltrados(), T = k => L.reduce((a,e)=>a+(+e[k]||0),0);
-    $('estKpis').innerHTML = `<div><b>${nBR(L.length)}</b>produtos</div><div><b>${nBR(T('caixas_fechadas'))}</b>caixas fechadas</div><div><b>${nBR(T('fisico'))}</b>peças em estoque</div><div><b>${nBR(T('empenhado')+T('em_pedidos'))}</b>em pedidos</div><div><b style="color:var(--green,#4d7a1a)">${nBR(T('disponivel'))}</b>disponível</div>`;
+    const P = estPerfil(), nCol = 7 + (P.temSaco ? 2 : 0);
+    $('estHead').innerHTML = `<tr><th>Código</th><th>Descrição</th>${P.temSaco?'<th class="num">Saco</th>':''}<th class="num">Em estoque</th><th class="num">${esc(P.colUn)}</th>${P.temSaco?'<th class="num">Sacos avulsos</th>':''}<th class="num">Empenhado</th><th class="num">Em pedidos abertos</th><th class="num">Disponível</th></tr>`;
+    $('estHint').textContent = 'Disponível = em estoque − empenhado em pedidos − pedidos em aberto ainda sem empenho − pedidos enviados pelo portal aguardando a MKLOG. Quantidades em ' + P.peca + '.' + (P.temSaco ? ' "Sacos avulsos" são os sacos de caixas abertas.' : '');
+    $('estKpis').innerHTML = `<div><b>${nBR(L.length)}</b>produtos</div><div><b>${nBR(T('caixas_fechadas'))}</b>${esc(P.kpiUn)}</div><div><b>${nBR(T('fisico'))}</b>${P.peca} em estoque</div><div><b>${nBR(T('empenhado')+T('em_pedidos'))}</b>em pedidos</div><div><b style="color:var(--green,#4d7a1a)">${nBR(T('disponivel'))}</b>disponível</div>`;
     $('estTs').textContent = 'Posição de ' + new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     $('estRows').innerHTML = L.map(e=>{
-      const tag = e.disponivel<=0 ? tagH('t-er','esgotado') : (e.disponivel < e.saco*2 ? tagH('t-wa','baixo') : '');
+      const tag = e.disponivel<=0 ? tagH('t-er','esgotado') : (P.temSaco && e.disponivel < e.saco*2 ? tagH('t-wa','baixo') : '');
       const _nl = laudosDoSku(e.sku).length;   // v1.8.24
-      return `<tr><td class="mono">${esc(e.sku)}</td><td>${esc(e.descricao||'')}${_nl?` <a href="#" onclick="openLaudos('${esc(e.sku)}');return false" style="white-space:nowrap;font-size:12px;color:#1e40af">📄 ${_nl} laudo${_nl>1?'s':''}</a>`:''}</td><td class="num">${e.saco>1?nBR(e.saco):'—'}</td><td class="num"><b>${nBR(e.fisico)}</b></td>
-        <td class="num">${nBR(e.caixas_fechadas)}${e.caixa_padrao?` <small style="color:var(--muted)">× ${nBR(e.caixa_padrao)}</small>`:''}</td><td class="num">${e.saco>1?nBR(e.sacos_avulsos):'—'}</td>
+      return `<tr><td class="mono">${esc(e.sku)}</td><td class="desc">${esc(e.descricao||'')}${_nl?` <a href="#" onclick="openLaudos('${esc(e.sku)}');return false" style="white-space:nowrap;font-size:12px;color:#1e40af">📄 ${_nl} laudo${_nl>1?'s':''}</a>`:''}</td>${P.temSaco?`<td class="num">${e.saco>1?nBR(e.saco):'—'}</td>`:''}<td class="num"><b>${nBR(e.fisico)}</b></td>
+        <td class="num">${nBR(e.caixas_fechadas)}${P.temSaco&&e.caixa_padrao?` <small style="color:var(--muted)">× ${nBR(e.caixa_padrao)}</small>`:''}</td>${P.temSaco?`<td class="num">${e.saco>1?nBR(e.sacos_avulsos):'—'}</td>`:''}
         <td class="num">${nBR(e.empenhado)}</td><td class="num">${nBR(e.em_pedidos)}</td><td class="num"><b>${nBR(e.disponivel)}</b> ${tag}</td></tr>`; }).join('')
-      || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">Nenhum produto encontrado.</td></tr>';
+      || `<tr><td colspan="${nCol}" style="text-align:center;color:var(--muted);padding:24px">Nenhum produto encontrado.</td></tr>`;
   };
   window.exportEstoque = function(){
     if(DEMO) return _orig.exportEstoque();
     const L = estFiltrados(), q = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"', n = v => String(+v||0).replace('.',',');
-    const csv = [['Codigo','Descricao','Pecas por saco','Em estoque','Caixas fechadas','Pecas por caixa','Sacos avulsos','Empenhado','Em pedidos abertos','Disponivel'].map(q).join(';')]
-      .concat(L.map(e=>[q(e.sku),q(e.descricao),n(e.saco),n(e.fisico),n(e.caixas_fechadas),n(e.caixa_padrao),n(e.sacos_avulsos),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)].join(';'))).join('\r\n');
+    const P = estPerfil(), semAc = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const cab = P.temSaco ? ['Codigo','Descricao','Pecas por saco','Em estoque',semAc(P.colUn),'Pecas por caixa','Sacos avulsos','Empenhado','Em pedidos abertos','Disponivel']
+                          : ['Codigo','Descricao','Em estoque',semAc(P.colUn),'Empenhado','Em pedidos abertos','Disponivel'];
+    const csv = [cab.map(q).join(';')]
+      .concat(L.map(e=>(P.temSaco ? [q(e.sku),q(e.descricao),n(e.saco),n(e.fisico),n(e.caixas_fechadas),n(e.caixa_padrao),n(e.sacos_avulsos),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)]
+                                  : [q(e.sku),q(e.descricao),n(e.fisico),n(e.caixas_fechadas),n(e.empenhado),n(e.em_pedidos),n(e.disponivel)]).join(';'))).join('\r\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
     a.download = 'estoque_'+String(state.depositante||'cliente').replace(/\W+/g,'_')+'_'+hoje()+'.csv'; document.body.appendChild(a); a.click(); a.remove();
   };
