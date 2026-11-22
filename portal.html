@@ -508,6 +508,7 @@
         <button data-scr="ped" onclick="showScreen('ped')">Pedidos <span class="nb hide" id="nbPed"></span></button>
         <button data-scr="est" onclick="showScreen('est')">Estoque</button>
         <button data-scr="cob" id="navCob" class="hide" onclick="showScreen('cob')">NFs de cobertura <span class="nb hide" id="nbCob"></span></button>
+        <button data-scr="kpi" id="navKpi" class="hide" onclick="showScreen('kpi')">Indicadores</button>
         <button data-scr="agd" onclick="showScreen('agd')">Agendamentos <span class="nb hide" id="nbAgd"></span></button>
         <button data-scr="rel" onclick="showScreen('rel')">Relatórios</button>
         <button data-scr="fin" onclick="showScreen('fin')">Faturas</button>
@@ -602,6 +603,12 @@
     </section>
 
     <!-- ===== TELA: ESTOQUE ===== -->
+    <!-- ===== TELA: INDICADORES MENSAIS (v1.8.29) ===== -->
+    <section id="scrKpi" class="hide">
+      <div class="screen-h"><h2>Indicadores</h2></div>
+      <div id="kpiBox"></div>
+    </section>
+
     <!-- ===== TELA: NOTAS DE COBERTURA (v1.8.25) ===== -->
     <section id="scrCob" class="hide">
       <div class="screen-h"><h2>Notas de cobertura</h2></div>
@@ -3188,7 +3195,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.27';   // v1.8.27: estoque com colunas conforme a operação do cliente (pallets ou caixas/sacos) e cabeçalho fixo com rolagem visível
+const PORTAL_VERSION = 'v1.8.29';   // v1.8.29: indicadores mensais (TMO sem e com abono, pico de armazenagem, aging, NCs, cobertura) e veículos retidos
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
 // v1.8.19 →   // v1.8.19: solicitar reserva manual de RG (pedido fora do múltiplo)
@@ -3509,7 +3516,7 @@ async function loadDados(){
 
 /* ============================ NAVEGAÇÃO ============================ */
 // v1.6.3: permissões do acesso (agd, est, ped, rel, fin, nc); sem permissões gravadas = acesso completo; demonstração vê tudo
-function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; if(k==='cob') return state.perms.indexOf('est')>=0||state.perms.indexOf('ped')>=0; return state.perms.indexOf(k)>=0; }
+function podeVer(k){ if(DEMO || !state.perms) return true; if(k==='home'||k==='mot') return true; if(k==='op') k='agd'; if(k==='cob') return state.perms.indexOf('est')>=0||state.perms.indexOf('ped')>=0; if(k==='kpi') k='rel'; return state.perms.indexOf(k)>=0; }
 // v1.6.4: home, atalhos e atendimento só com o que o acesso pode ver
 function aplicarPermsHome(){
   const card = id => { const e=$(id); return e ? e.closest('.sum-card') : null; };
@@ -3520,7 +3527,7 @@ function aplicarPermsHome(){
 }
 function showScreen(s){
   if(!podeVer(s)){ s='home'; }
-  const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', cob:'Cob', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
+  const map = {home:'Home', op:'Op', ped:'Ped', est:'Est', cob:'Cob', kpi:'Kpi', agd:'Agd', rel:'Rel', fin:'Fin', nc:'Nc', mot:'Mot'};   // v1.6.2: Motorista
   document.querySelectorAll('#topnav button').forEach(b=>b.classList.toggle('on', b.dataset.scr===(map[s]?s:'home')));
   if(s==='rel' && typeof relVoltar==='function'){ setTimeout(relVoltar,0); }
   Object.values(map).forEach(x=>$('scr'+x).classList.add('hide'));
@@ -4345,6 +4352,7 @@ function renderHomeDash(abertosP, futurosA, b, ncAbertas){
     const ncMk2 = (state.ncs||[]).filter(n=>n.status==='pendente_mklog').length; if(ncMk2) at += `<button class="drow" onclick="showScreen('nc')"><span>${ncMk2} não conformidade(s) em tratamento pela MKLOG</span>${tagH('t-gr','acompanhar')}</button>`; }
   if(podeVer('ped')) state.pedidos.filter(p=>{const x=pedIndic(p); return x && !x.fechado && !x.onTime;}).forEach(p=>{ at += `<button class="drow" onclick="openDetalhe('ped','${p.id}')"><span>${p.protocolo} com prazo vencido</span>${tagH('t-er','ver')}</button>`; });
   if(typeof cobAvisoHome==='function') at += cobAvisoHome();   // v1.8.25
+  if(typeof kpiAvisoHome==='function') at += kpiAvisoHome();   // v1.8.29
   if(!at) at = '<div class="drow"><span class="sub">Nada pendente com você. 👍</span></div>';
   el.innerHTML = (podeVer('agd') ? `<div class="dcard"><h4><span class="live-dot"></span> Operação agora <button class="lnk" onclick="showScreen('op')">ver tudo ›</button></h4>${op}</div>
     <div class="dcard"><h4>Próximos agendamentos <button class="lnk" onclick="showScreen('agd')">ver todos ›</button></h4>${ag}</div>` : '')
@@ -5626,6 +5634,7 @@ function showDone(kind, protocolo, msg){
     state.ncs = []; state.faturas = []; state.laudos = [];
     await ncCarregar(); await laudosCarregar();   // v1.8.24
     state.coberturas = []; await cobCarregar();   // v1.8.25
+    state.kpi = null; state.retidos = []; await kpiCarregar();   // v1.8.29
     try{ const fz = podeVer('fin') ? await sb.rpc('portal_minhas_faturas') : {data:[]}; state.fatReal = (fz && !fz.error && fz.data) || []; if(fz&&fz.error) console.warn('faturas:', fz.error.message); }catch(_e){ state.fatReal = []; }   // v1.8.5
     const dl = $('skuList'); if(dl) dl.innerHTML = state.catalogo.map(c=>`<option value="${esc(c.sku)}">${esc(c.descricao||'')}</option>`).join('');
   };
@@ -5636,6 +5645,7 @@ function showDone(kind, protocolo, msg){
     document.querySelectorAll('#topnav button').forEach(b=>{ b.style.display = (REAL_TELAS.includes(b.dataset.scr) && podeVer(b.dataset.scr)) ? '' : 'none'; });   // v1.6.4: e só o que o acesso pode ver
     aplicarPermsHome();
     $('whoUpd').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+' · estoque conferido agora';
+    try{ cobBadge(); }catch(_e){}   // v1.8.28: menus que dependem de haver registros
   };
 
   /* ---------------- PÁGINA DA TRANSPORTADORA (link ?t=) · v1.6.8 ---------------- */
@@ -5760,8 +5770,102 @@ function showDone(kind, protocolo, msg){
   window.portalRecarregar = async function(){ try{ await loadDados(); render(); }catch(e){ alert(e.message||e); } };
 
 
-  /* ---------------- v1.8.25 · NOTAS DE COBERTURA (recebimento triangular) ---------------- */
+
+  /* ---------------- v1.8.29 · INDICADORES MENSAIS e VEÍCULOS RETIDOS ---------------- */
   const dBR = d => d ? new Date(String(d).length<=10?d+'T12:00':d).toLocaleDateString('pt-BR') : '—';
+  const KPI_MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const KPI_MOT = {aguardando_nf:'Aguardando NF do cliente', nao_conformidade:'Não conformidade', tratativa_cliente:'Tratativa do cliente', outro:'Outro'};
+  const kpiHm = m => { if(m==null||m==='') return '—'; m=Math.round(+m); return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'); };
+  const kpiPct = (a,b) => b ? (Math.round(a/b*1000)/10) : null;
+  const kpiDec = v => v==null ? '—' : Number(v).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+  const kpiMesNome = (k,longo) => { const [a,m]=String(k).split('-'); return longo ? (['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][+m-1]+'/'+a) : KPI_MES[+m-1]; };
+  // meses a partir do primeiro com movimento
+  window.kpiMeses = function(){
+    const M=(state.kpi&&state.kpi.meses)||[]; const i=M.findIndex(m=>(+m.receb||0)+(+m.exped||0)+(+m.veic||0)>0);
+    return i<0 ? [] : M.slice(i);
+  };
+  window.kpiCarregar = async function(){
+    if(DEMO) return;
+    try{ if(!podeVer('kpi')){ state.kpi=null; state.retidos=[]; return; }
+      const todas = state.kpiTodas !== false;
+      const q = await sb.rpc('portal_indicadores', { p_todas: todas });
+      if(q.error){ console.warn('indicadores:', q.error.message); state.kpi=null; } else { state.kpi=q.data||null; if(state.kpi && !state.kpi.master) state.kpiTodas=false; }
+      const r = await sb.rpc('portal_veiculos_retidos', { p_todas: todas }); state.retidos = (r && !r.error && Array.isArray(r.data)) ? r.data : [];
+    }catch(_e){ state.kpi = state.kpi||null; }
+  };
+  window.kpiVisao = async function(v){ state.kpiTodas = (v==='todas'); const b=$('kpiBox'); if(b) b.style.opacity='.5'; await kpiCarregar(); if(b) b.style.opacity=''; renderKpi(); };
+  window.kpiMesSel = function(v){ state.kpiMes = v; renderKpi(); };
+  window.kpiAvisoHome = function(){
+    if(DEMO) return ''; const R=state.retidos||[]; if(!R.length) return '';
+    return `<button class="drow" onclick="showScreen('kpi')"><span>${R.length} veículo(s) retido(s) na operação<div class="sub">${R.map(x=>esc(x.placa||'')+' · '+esc(KPI_MOT[x.motivo]||x.motivo)).join(' | ')}</div></span>${tagH('t-er','ver')}</button>`;
+  };
+  window.renderKpi = function(){
+    const B=$('kpiBox'); if(!B) return;
+    const M=kpiMeses(), K=state.kpi||{};
+    if(!M.length){ B.innerHTML='<div class="empty">Ainda não há movimento para montar os indicadores.</div>'; return; }
+    const fechados=M.filter(m=>!m.parcial);
+    if(!state.kpiMes || !M.some(m=>m.mes===state.kpiMes)) state.kpiMes=(fechados.length?fechados[fechados.length-1]:M[M.length-1]).mes;
+    const ix=M.findIndex(m=>m.mes===state.kpiMes), m=M[ix], ant=ix>0?M[ix-1]:null;
+    const th=t=>`<th style="background:#1e3a8a;color:#fff;text-align:right;padding:8px 10px;font-weight:600;white-space:nowrap">${t}</th>`, td='padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap';
+    const varia=(a,b,menorMelhor)=>{ if(ant==null||a==null||b==null||!+b) return ''; const d=Math.round((a-b)/b*100); if(!d) return `<small class="hint">igual a ${kpiMesNome(ant.mes)}</small>`; const bom=menorMelhor?d<0:d>0; return `<small style="color:${bom?'#166534':'#b91c1c'}">${d>0?'+':''}${d}% sobre ${kpiMesNome(ant.mes)}</small>`; };
+    const ag=m.aging||[0,0,0,0], agT=ag.reduce((a,b)=>a+(+b||0),0), p90=kpiPct(+ag[3]||0,agT), pz=kpiPct(+m.no_prazo||0,+m.exped||0);
+    const card=(v,l,s,cor)=>`<div style="background:var(--hover);border-radius:10px;padding:10px 14px"><b style="display:block;font-size:21px;${cor?'color:'+cor:''}">${v}</b><span class="hint">${l}</span>${s?'<br>'+s:''}</div>`;
+    const R=state.retidos||[];
+    const cores=['#0F6E56','#1D9E75','#BA7517','#A32D2D'], faixas=['até 30 dias','31 a 60','61 a 90','acima de 90'];
+    const linhas=[
+      ['Pico de armazenagem (pallets)', x=>nBR(x.pico), null, x=>+x.pico||0, v=>nBR(Math.round(v))],
+      ['TMO sem abono', x=>kpiHm(x.tmo_bruto), null, x=>x.tmo_bruto==null?null:+x.tmo_bruto, v=>kpiHm(v)],
+      ['TMO com abono', x=>kpiHm(x.tmo_abono), null, x=>x.tmo_abono==null?null:+x.tmo_abono, v=>kpiHm(v)],
+      ['Veículos atendidos', x=>nBR(x.veic), x=>+x.veic||0, x=>+x.veic||0, v=>nBR(Math.round(v))],
+      ['Recebimentos concluídos', x=>nBR(x.receb), x=>+x.receb||0, x=>+x.receb||0, v=>nBR(Math.round(v))],
+      ['Pedidos expedidos', x=>nBR(x.exped), x=>+x.exped||0, x=>+x.exped||0, v=>nBR(Math.round(v))],
+      ['Expedidos no prazo', x=>{ const p=kpiPct(+x.no_prazo||0,+x.exped||0); return p==null?'—':kpiDec(p)+'%'; }, null, x=>kpiPct(+x.no_prazo||0,+x.exped||0), v=>kpiDec(v)+'%'],
+      ['NCs abertas', x=>nBR(x.nc_abertas), x=>+x.nc_abertas||0, x=>+x.nc_abertas||0, v=>kpiDec(v)],
+      ['NCs encerradas', x=>nBR(x.nc_encerradas), x=>+x.nc_encerradas||0, x=>+x.nc_encerradas||0, v=>kpiDec(v)],
+      ['Estoque acima de 90 dias', x=>{ const a=x.aging||[0,0,0,0], t=a.reduce((s,y)=>s+(+y||0),0), p=kpiPct(+a[3]||0,t); return p==null?'—':kpiDec(p)+'%'; }, null, x=>{ const a=x.aging||[0,0,0,0], t=a.reduce((s,y)=>s+(+y||0),0); return kpiPct(+a[3]||0,t); }, v=>kpiDec(v)+'%'],
+      ['Dias médios para cobrir NF', x=>kpiDec(x.cob_dias), null, x=>x.cob_dias==null?null:+x.cob_dias, v=>kpiDec(v)],
+    ];
+    B.innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <select onchange="kpiMesSel(this.value)" style="width:auto">${M.slice().reverse().map(x=>`<option value="${x.mes}" ${x.mes===m.mes?'selected':''}>${kpiMesNome(x.mes,true)}${x.parcial?' (parcial)':''}</option>`).join('')}</select>
+        ${K.master?`<select onchange="kpiVisao(this.value)" style="width:auto"><option value="todas" ${state.kpiTodas!==false?'selected':''}>Todas as plantas</option><option value="uma" ${state.kpiTodas===false?'selected':''}>${esc(K.planta||'Esta planta')}</option></select>`:`<span class="hint">${esc(K.planta||'')}</span>`}
+        <span class="hint">${state.kpiTodas!==false&&K.master?'Soma das '+((K.plantas||[]).length)+' plantas do grupo. Para ver outra planta sozinha, troque a empresa no topo.':''}</span></div>
+      ${R.length?`<div style="border:1px solid #b91c1c;border-radius:10px;padding:10px 14px;margin-bottom:12px"><b style="color:#b91c1c">🚚 ${R.length} veículo(s) retido(s) agora</b>
+        <div style="overflow:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${['Placa','Planta','Operação','Motivo','Desde','Retido há','Com quem'].map(t=>th(t).replace('text-align:right','text-align:left')).join('')}</tr></thead><tbody>
+        ${R.map(x=>`<tr><td style="${td};text-align:left;font-weight:700">${esc(x.placa||'')}</td><td style="${td};text-align:left">${esc(x.planta||'')}</td><td style="${td};text-align:left">${x.movimento==='descarga'?'Recebimento':'Expedição'}</td>
+          <td style="${td};text-align:left;white-space:normal">${x.nc_protocolo?`<a href="#" onclick="showScreen('nc');return false" style="color:#1e40af">${esc(x.nc_protocolo)}</a> · `:''}${esc(KPI_MOT[x.motivo]||x.motivo)}${x.descricao?`<div class="hint">${esc(x.descricao)}</div>`:''}</td>
+          <td style="${td};text-align:left">${new Date(x.desde).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td style="${td};text-align:left;font-weight:700;color:#b91c1c">${kpiHm(x.minutos)}</td>
+          <td style="${td};text-align:left">${x.responsavel==='cliente'?tagH('t-wa','cliente'):tagH('t-gr',esc(x.responsavel==='mklog'?'MKLOG':'transportadora'))}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+        ${card(nBR(m.pico),'pico de armazenagem (pallets)',`<small class="hint">em ${m.pico_dia?dBR(m.pico_dia):'—'}</small>`)}
+        ${card(kpiHm(m.tmo_bruto),'TMO sem abono',`<small class="hint">com abono: <b>${kpiHm(m.tmo_abono)}</b></small><br>`+varia(m.tmo_bruto==null?null:+m.tmo_bruto, ant&&ant.tmo_bruto!=null?+ant.tmo_bruto:null, true))}
+        ${card(nBR(m.veic),'veículos atendidos',`<small class="hint">${nBR(m.veic_desc)} recebimentos · ${nBR(m.veic_carga)} expedições</small>`)}
+        ${card(nBR(m.exped),'pedidos expedidos',varia(+m.exped,ant?+ant.exped:null,false))}
+        ${card(pz==null?'—':kpiDec(pz)+'%','expedidos no prazo',`<small class="hint">${nBR((+m.exped||0)-(+m.no_prazo||0))} fora do prazo</small>`)}
+        ${card(nBR(m.receb),'recebimentos concluídos',varia(+m.receb,ant?+ant.receb:null,false))}
+        ${card(nBR(m.nc_abertas)+' / '+nBR(m.nc_encerradas),'NCs abertas / encerradas',`<small class="hint">tratativa média ${m.nc_dias==null?'—':kpiDec(m.nc_dias)+' dia(s)'}</small>`)}
+        ${card(m.cob_dias==null?'—':kpiDec(m.cob_dias)+' dias','média para cobrir NF',`<small class="hint">${nBR(m.cob_n)} nota(s) coberta(s) no mês</small>`)}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px">
+        <div><div class="hint" style="margin-bottom:6px">Tempo médio do veículo na planta (TMO) · ${kpiMesNome(m.mes,true)}</div>
+          <div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${th('Operação').replace('text-align:right','text-align:left')}${th('Veículos')}${th('Sem abono')}${th('Com abono')}</tr></thead><tbody>
+            <tr><td style="${td};text-align:left">Recebimento</td><td style="${td}">${nBR(m.veic_desc)}</td><td style="${td}">${kpiHm(m.tmo_desc_bruto)}</td><td style="${td}"><b>${kpiHm(m.tmo_desc_abono)}</b></td></tr>
+            <tr><td style="${td};text-align:left">Expedição</td><td style="${td}">${nBR(m.veic_carga)}</td><td style="${td}">${kpiHm(m.tmo_carga_bruto)}</td><td style="${td}"><b>${kpiHm(m.tmo_carga_abono)}</b></td></tr>
+            <tr><td style="${td};text-align:left"><b>Total</b></td><td style="${td}"><b>${nBR(m.veic)}</b></td><td style="${td}"><b>${kpiHm(m.tmo_bruto)}</b></td><td style="${td}"><b>${kpiHm(m.tmo_abono)}</b></td></tr></tbody></table></div>
+          <div class="hint" style="margin-top:6px">Sem abono: da chegada à saída. Com abono: desconta a chegada antes do horário de check-in e o tempo parado por conta do cliente (aguardando NF, não conformidade ou outra tratativa). ${nBR(m.veic_com_abono)} veículo(s) tiveram abono no mês.</div></div>
+        <div><div class="hint" style="margin-bottom:6px">Aging do estoque em pallets · posição de ${m.parcial?'hoje':'fim de '+kpiMesNome(m.mes,true)}</div>
+          <div style="display:flex;height:30px;border-radius:8px;overflow:hidden">${ag.map((v,i)=>{ const p=agT?(+v/agT*100):0; return p>0?`<div title="${faixas[i]}: ${nBR(v)} pallets" style="width:${p}%;background:${cores[i]};color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap">${p>=9?Math.round(p)+'%':''}</div>`:''; }).join('')}</div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;margin-top:8px;font-size:12px">${ag.map((v,i)=>`<div><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${cores[i]};margin-right:6px"></span>${faixas[i]}: <b>${nBR(v)}</b> <span class="hint">(${agT?kpiDec(+v/agT*100):'0,0'}%)</span></div>`).join('')}</div>
+          <div class="hint" style="margin-top:6px">${p90==null?'':kpiDec(p90)+'% do estoque está há mais de 90 dias armazenado.'}</div></div>
+      </div>
+      <div class="hint" style="margin-bottom:6px">Mês a mês</div>
+      <div style="overflow:auto;border:1px solid var(--line);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${th('Indicador').replace('text-align:right','text-align:left')}${M.map(x=>th(kpiMesNome(x.mes)+(x.parcial?'*':''))).join('')}${th('Total')}${th('Média')}</tr></thead><tbody>
+        ${linhas.map(L=>{ const base=fechados.length?fechados:M, vals=base.map(L[3]).filter(v=>v!=null), med=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+          return `<tr><td style="${td};text-align:left">${L[0]}</td>${M.map(x=>`<td style="${td}${x.mes===m.mes?';font-weight:700':''}">${L[1](x)}</td>`).join('')}<td style="${td}">${L[2]?nBR(M.reduce((a,x)=>a+L[2](x),0)):'—'}</td><td style="${td}">${med==null?'—':L[4](med)}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <div class="hint" style="margin-top:6px">* mês em andamento. A média considera só os meses fechados.</div>`;
+  };
+
+  /* ---------------- v1.8.25 · NOTAS DE COBERTURA (recebimento triangular) ---------------- */
   const cobPend = () => (state.coberturas||[]).filter(c=>c.status!=='coberta');
   const cobFalta = c => (c.itens||[]).reduce((a,i)=>a+Math.max(0,(+i.qtd_recebida||0)-(+i.qtd_coberta||0)),0);
   window.cobCarregar = async function(){
@@ -5771,8 +5875,12 @@ function showDone(kind, protocolo, msg){
     }catch(_e){ state.coberturas = state.coberturas||[]; }
   };
   window.cobBadge = function(){
-    const tem=(state.coberturas||[]).length>0, n=cobPend().length, b=$('navCob'), e=$('nbCob');
-    if(b) b.classList.toggle('hide', DEMO || !tem);     // o menu só aparece para quem tem recebimento triangular
+    const n=cobPend().length, e=$('nbCob');
+    // v1.8.28: o menu aparece só para quem tem registros (recebimento triangular / não conformidade) e permissão para ver
+    const menu=(scr,on)=>{ const b=document.querySelector('#topnav button[data-scr="'+scr+'"]'); if(b){ b.classList.toggle('hide',!on); b.style.display=on?'':'none'; } };
+    if(DEMO){ const b=$('navCob'); if(b) b.classList.add('hide'); }
+    else { menu('cob', podeVer('cob') && (state.coberturas||[]).length>0); menu('nc', podeVer('nc') && (state.ncs||[]).length>0); menu('kpi', podeVer('kpi') && kpiMeses().length>0);
+      if($('scrKpi') && !$('scrKpi').classList.contains('hide')) renderKpi(); }
     if(e){ e.textContent=n; e.classList.toggle('hide',!n); }
     if(!DEMO && $('scrCob') && !$('scrCob').classList.contains('hide')) renderCob();
   };
