@@ -3195,7 +3195,7 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.33';   // v1.8.33: aging do estoque em barras, com percentual do total e quantidade   // v1.8.32: NFs de cobertura viram submenu do Estoque; produto com cobertura pendente fica com a linha destacada
+const PORTAL_VERSION = 'v1.8.34';   // v1.8.34: planilha de pedidos não diz mais "concluído" quando algum pedido falhou   // v1.8.33: aging do estoque em barras, com percentual do total e quantidade   // v1.8.32: NFs de cobertura viram submenu do Estoque; produto com cobertura pendente fica com a linha destacada
 // const PORTAL_VERSION_ANT = 'v1.8.31';   // v1.8.31: indicadores fecham no dia anterior; veículos retidos agora ficam em Agendamentos
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
@@ -4600,17 +4600,21 @@ window.plImportar = async function(files){
 };
 window.plEnviar = async function(){
   const L=window._plLidos||[], res=$('plRes'), bt=$('plGo'); if(bt){ bt.disabled=true; bt.textContent='Enviando…'; }
-  const out=[];
+  const out=[]; let nErr=0;
   if(res) res.innerHTML='<div class="hint">Enviando 1 de '+L.length+'…</div>';
   for(const r of L){
     try{ const { data, error } = await sb.rpc('portal_importar_pedido', { p_documento:r.doc, p_itens:r.itens, p_arquivo:r.arquivo });
       if(error) throw error;
       out.push(data.ignorado?`${esc(r.doc)}: <span class="hint">${esc(data.motivo)}</span>`:`<b>${esc(r.doc)}</b> → OS ${esc(data.os)} · ${data.itens} item(ns)${data.volumes!=null?' · <b>'+data.volumes+' volume(s) para faturar</b>':''}${data.nao_cadastrados?' · <span style="color:#b45309">'+data.nao_cadastrados+' produto(s) não cadastrado(s): '+esc(data.skus_nao_cadastrados)+'</span>':''}${data.fora_do_multiplo?'<div style="color:#b91c1c;margin-top:2px">⚠ Quantidade fora do múltiplo do pacote — a separação fica parada até ajustar: '+esc(data.fora_do_multiplo)+'</div>':''}`);
-    }catch(e){ out.push(`${esc(r.doc)}: <span style="color:#b91c1c">${esc(e.message||e)}</span>`); }
+    }catch(e){ nErr++; const m=String(e.message||e), lento=/statement timeout|canceling statement/i.test(m);
+      out.push(`${esc(r.doc)}: <span style="color:#b91c1c"><b>não foi gravado</b> — ${lento?'o sistema demorou mais que o limite para gravar':esc(m)}</span>`); }
     if(res) res.innerHTML=out.map(x=>'<div style="margin-top:4px">'+x+'</div>').join('');
   }
-  if(bt){ bt.textContent='Concluído'; }
-  if(res) res.insertAdjacentHTML('beforeend','<div style="margin-top:8px;font-weight:600">✓ Envio concluído. Os pedidos já aparecem no quadro "Volumes para faturamento".</div>');
+  const nOk=L.length-nErr;
+  if(bt){ if(nErr){ bt.disabled=false; bt.textContent='Enviar de novo'; } else bt.textContent='Concluído'; }
+  if(res) res.insertAdjacentHTML('beforeend', nErr
+    ? `<div style="margin-top:8px;font-weight:600;color:#b91c1c">${nErr} de ${L.length} pedido(s) não foram gravados.</div><div class="hint" style="margin-top:4px">Nada desses pedidos ficou pela metade: pode clicar em "Enviar de novo" sem risco de duplicar${nOk?' (os que já entraram são ignorados)':''}. Se o erro continuar, avise a MKLOG.</div>`
+    : '<div style="margin-top:8px;font-weight:600">✓ Envio concluído. Os pedidos já aparecem no quadro "Volumes para faturamento".</div>');
   try{ const vf=await sb.rpc('portal_volumes_faturar'); state.volFat=vf.data||[]; renderVolFat(); }catch(_e){}
 };
 window.renderRastreio = function(){
