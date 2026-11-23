@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1406 | Gerado: 2026-11-22 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1407 | Gerado: 2026-11-23 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1340,6 +1340,7 @@ const TELAS=[
   {id:'financeiro-dashboard',  label:'Financeiro · Dashboard',                  modulo:'Financeiro'},
   {id:'faturamento',           label:'Financeiro · Faturamento',                modulo:'Financeiro'},
   {id:'fat-capas',             label:'WMS · Capas de processo (criar e imprimir)', modulo:'WMS'},
+  {id:'fat-capas-editar',      label:'WMS · Capas de processo (editar dados e observações)', modulo:'WMS'},   // v1.0.1407
   {id:'fat-programacao',       label:'Financeiro · Programação de Faturamento', modulo:'Financeiro'},
   {id:'fat-capas-digitar',     label:'Financeiro · Capas de processo (digitação)', modulo:'Financeiro'},
   {id:'fat-armazenagem',       label:'Financeiro · Armazenagem (extrato)',        modulo:'Financeiro'},   // v1.0.1071
@@ -1472,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1406';
+const APP_VERSION='v1.0.1407';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5206,7 +5207,8 @@ function capaCabecalhoHtml(c){   // v1.0.1068
   return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);margin-bottom:12px">'
     +cel('Data da operação',c.data_operacao?new Date(c.data_operacao+'T00:00').toLocaleDateString('pt-BR'):'')+cel('Transportadora',c.transportadora)+cel('Motorista',c.motorista)+cel('RG',c.rg)
     +cel('Placa cavalo / carreta',[c.placa_cavalo,c.placa_carreta].filter(Boolean).join(' / '))+cel('DOC',c.doc)+cel('Lacre',c.lacre)+cel('Origem',c.origem)
-    +cel('Tipo de veículo',c.tipo_veiculo)+cel('Tipo de operação',c.tipo_operacao)+cel('Responsável',respNome)+(Array.isArray(c.responsaveis)&&c.responsaveis.length?cel('Responsáveis (financeiro)',c.responsaveis.join(', ')):'')+'</div>';
+    +cel('Tipo de veículo',c.tipo_veiculo)+cel('Tipo de operação',c.tipo_operacao)+cel('Responsável',respNome)+(Array.isArray(c.responsaveis)&&c.responsaveis.length?cel('Responsáveis (financeiro)',c.responsaveis.join(', ')):'')
+    +(Array.isArray(c.documentos)&&c.documentos.length?cel('Documentos vinculados',c.documentos.map(capaDocRot).join(', ')):'')+'</div>';   // v1.0.1407
 }
 // v1.0.1281: lançamentos por tipo de produto (uma capa, detalhe por tipo)
 function capaLancTipoMontar(d){
@@ -5261,7 +5263,7 @@ function capaResumoHtml(c,resp,servs,lanc){   // v1.0.1283: lanc (vários tipos)
     (servs||[]).forEach(function(s,ix){ h+=linha(s.servico+(s.unidade_cobranca?' <small style="color:var(--text3)">('+ecomEsc(s.unidade_cobranca)+')</small>':''),resp['serv_'+ix]); });
   }
   h+='</div></div>';
-  if(resp.observacoes) h+='<div style="margin-top:10px">'+linha('Observações',resp.observacoes)+'</div>';
+  if(resp.observacoes) h+=capaObsTabela(resp.observacoes);   // v1.0.1407
   var soma=(Number(resp.qtd_pbr)||0)+(Number(resp.qtd_chep)||0)+(Number(resp.qtd_outros)||0), pm=porTipo?lanc.filter(function(L){return !L.sem_movimento;}).reduce(function(a,L){return a+(+L.pallets_movimentados||0);},0):(Number(resp.pallets_movimentados)||0);
   if(soma!==pm) h='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ PBR + CHEP + Outros = '+soma+', mas os pallets '+(exp?'expedidos':'descarregados')+' são '+pm+'.</div>'+h;
   return h;
@@ -5418,12 +5420,81 @@ async function capaReenviar(id){
 }
 // ══════════════ CAPAS · ESTORNO E INUTILIZAÇÃO (v1.0.1067) ══════════════
 // v1.0.1169: editar os dados de registro da capa (data, DOC, NF, motorista, placas…) até a capa entrar numa fatura
-function capaPodeEditarDados(c){ return !!c && capaPodeEditar() && !c.fatura_id && c.status!=='faturada' && c.status!=='inutilizada'; }
+// v1.0.1407: permissão própria (Torre) para editar dados de registro e lançar observação — sem estorno nem inutilização
+function capaPodeEditarReg(){ return capaPodeEditar()||canDo('fat-capas-editar','pode_editar')||canDo('fat-capas-editar','pode_criar'); }
+function capaPodeEditarDados(c){ return !!c && capaPodeEditarReg() && !c.fatura_id && c.status!=='faturada' && c.status!=='inutilizada'; }
+function capaPodeObs(c){ return !!c && capaPodeEditarReg() && c.status!=='inutilizada'; }
+var CAPA_OBS_MOTIVOS=['Acerto fiscal','Cancelamento','Complemento','Outros'];
+function capaObsNova(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeObs(c)){ showToast('Sem permissão para lançar observação nesta capa.','amber'); return; }
+  portModal('Nova observação · '+ecomEsc(c.numero),
+    '<div><label class="fl">Motivo *</label><select class="fi" id="capa-o-motivo"><option value="">Selecione…</option>'+CAPA_OBS_MOTIVOS.map(function(m){ return '<option>'+ecomEsc(m)+'</option>'; }).join('')+'</select></div>'
+    +'<div style="margin-top:10px"><label class="fl">Observação *</label><textarea class="fi" id="capa-o-txt" rows="4" maxlength="600" placeholder="Descreva a ocorrência"></textarea></div>'
+    +'<div class="lsub" style="color:var(--text3);margin-top:8px">Fica registrada com a data e o seu nome. Não pode ser apagada depois.</div>',
+    'capaObsSalvar(\''+c.id+'\')',{saveLabel:'Gravar',width:'480px'});
+}
+async function capaObsSalvar(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
+  if(!capaPodeObs(c)){ portErr('Sem permissão para lançar observação nesta capa.'); return; }
+  var mo=String((ge('capa-o-motivo')||{}).value||'').trim(), tx=String((ge('capa-o-txt')||{}).value||'').replace(/\s+/g,' ').replace(/·/g,'-').trim();
+  if(!mo){ portErr('Escolha o motivo.'); return; }
+  if(tx.length<3){ portErr('Descreva a observação.'); return; }
+  portSaving();
+  try{ var up={observacoes:capaRegObs(c,'Observação ['+mo+']: '+tx)}; await dbUpdate('processo_capas',c.id,up); Object.assign(c,up); portClose(); showToast('Observação registrada na capa '+c.numero+'.','green'); render(); }
+  catch(e){ portErr('Erro: '+(e.message||e)); }
+}
+// quadro das observações: uma linha por registro (data · texto · autor)
+function capaObsTabela(txt){
+  var L=String(txt||'').split('\n').map(function(s){return s.trim();}).filter(Boolean); if(!L.length) return '';
+  var th='background:#1e3a8a;color:#fff;text-align:left;padding:7px 10px;font-weight:600;font-size:12px;white-space:nowrap', td='padding:7px 10px;border-top:1px solid var(--border);font-size:12.5px;vertical-align:top';
+  var tag=function(t,dest){ return '<span style="display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;white-space:nowrap;background:'+(dest?'var(--blue-bg)':'var(--bg2)')+';color:'+(dest?'var(--blue-text)':'var(--text2)')+'">'+ecomEsc(t)+'</span>'; };
+  var rows=L.map(function(s){
+    var m=s.match(/^(\d{2}\/\d{2}\/\d{4},?\s+\d{2}:\d{2})(?::\d{2})?\s+·\s+([\s\S]*)\s+·\s*([^·]*)$/), quando='', corpo=s, quem='', motivo='';
+    if(m){ quando=m[1].replace(',',''); corpo=m[2]; quem=m[3]; var o=corpo.match(/^Observação \[(.+?)\]:\s*([\s\S]*)$/); if(o){ motivo=o[1]; corpo=o[2]; } }
+    return {quando:quando,motivo:motivo,corpo:corpo,quem:quem,sis:!!m&&!motivo};
+  }).reverse();
+  return '<div style="margin-top:12px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">OBSERVAÇÕES</div>'
+    +'<div style="border:1px solid var(--border);border-radius:10px;overflow:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="'+th+'">Data</th><th style="'+th+'">Motivo</th><th style="'+th+'">Observação</th><th style="'+th+'">Quem</th></tr></thead><tbody>'
+    +rows.map(function(r){ return '<tr><td style="'+td+';white-space:nowrap">'+(r.quando?ecomEsc(r.quando):'—')+'</td><td style="'+td+'">'+(r.motivo?tag(r.motivo,true):tag(r.sis?'Sistema':'Digitação',false))+'</td><td style="'+td+';overflow-wrap:anywhere">'+ecomEsc(r.corpo)+'</td><td style="'+td+';white-space:nowrap">'+(r.quem?ecomEsc(r.quem):'—')+'</td></tr>'; }).join('')
+    +'</tbody></table></div></div>';
+}
+// documentos vinculados à capa (OS/pedido na expedição, entrada no recebimento)
+var _capaDocs=[];
+function capaDocRot(d){ return (d&&d.tipo==='entrada'?'':'OS ')+String((d&&d.numero)||''); }
+function capaDocChips(){
+  return (_capaDocs.length?_capaDocs.map(function(d,i){ return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;background:var(--bg2);border:1px solid var(--border);font-size:12.5px">'+ecomEsc(capaDocRot(d))+'<a href="#" title="Retirar da capa" style="color:var(--red-text);text-decoration:none;font-weight:700" onclick="capaDocDel('+i+');return false">✕</a></span>'; }).join('')
+    :'<span style="font-size:12.5px;color:var(--text3)">Nenhum documento vinculado.</span>');
+}
+function capaDocDel(i){ _capaDocs.splice(i,1); var b=ge('capa-e-docs'); if(b) b.innerHTML=capaDocChips(); }
+async function capaDocAdd(id){
+  var c=(capasProcesso||[]).find(function(x){return x.id===id;}), inp=ge('capa-e-doc-novo'), av=ge('capa-e-doc-av'); if(!c||!inp) return;
+  var msg=function(t,cor){ if(av){ av.style.color=cor||'var(--red-text)'; av.textContent=t; } };
+  var n=String(inp.value||'').trim().replace(/^#/,'').replace(/[,()"*\\]/g,''); if(!n){ msg('Informe o número.'); return; }
+  msg('Procurando…','var(--text3)');
+  try{
+    var exp=c.tipo==='expedicao', q=encodeURIComponent('"'+n+'"'), achados=[];
+    if(exp){
+      var P=await dbSelect('wms_pedidos','cliente_id=eq.'+c.cliente_id+'&or=(numero_curto.eq.'+q+',numero_pedido.eq.'+q+')&select=id,numero_pedido,numero_curto,status&limit=6')||[];
+      achados=P.filter(function(p){ return ['excluido','cancelado'].indexOf(p.status)<0; }).map(function(p){ return {tipo:'pedido',id:p.id,numero:String(p.numero_curto||p.numero_pedido||'')}; });
+    } else {
+      var qi=encodeURIComponent('"*'+n+'*"');
+      var E=await dbSelect('wms_entradas','depositante_id=eq.'+c.cliente_id+'&or=(numero_entrada.ilike.'+qi+',nf_numero.eq.'+q+')&select=id,numero_entrada,nf_numero,status&order=created_at.desc&limit=6')||[];
+      achados=E.map(function(e){ return {tipo:'entrada',id:e.id,numero:String(e.numero_entrada||e.nf_numero||'')}; });
+    }
+    if(!achados.length){ msg((exp?'Não achei OS/pedido':'Não achei entrada')+' "'+n+'" deste cliente.'); return; }
+    if(achados.length>1){ msg('Há '+achados.length+' documentos com "'+n+'" ('+achados.map(function(a){return a.numero;}).join(', ')+'). Informe o número completo.'); return; }
+    if(_capaDocs.some(function(d){ return d.id===achados[0].id; })){ msg('Este documento já está na capa.'); return; }
+    _capaDocs.push(achados[0]); inp.value=''; msg('Incluído: '+capaDocRot(achados[0])+'. Clique em Salvar para gravar.','var(--green-text,#059669)');
+    var b=ge('capa-e-docs'); if(b) b.innerHTML=capaDocChips();
+  }catch(e){ msg('Erro ao procurar: '+(e.message||e)); }
+}
 function capaBtnEditarDados(c){
-  if(!c||!capaPodeEditar()) return '';
+  if(!c||!capaPodeEditarReg()) return '';
   var ok=capaPodeEditarDados(c);
   return '<button class="btn btn-sm"'+(ok?' onclick="capaEditarDados(\''+c.id+'\')"':' disabled title="Capa já faturada ou inutilizada — os dados de registro não podem mais ser alterados"')+'>✏ Editar dados</button>'
-    +(capaPodeEditarFiscal(c)?'<button class="btn btn-sm" onclick="capaEditarFiscal(\''+c.id+'\')" title="NF, valor da NF e DOC/OS — também depois de conferida ou faturada">✏ NF · valor · DOC</button>':'');   // v1.0.1354
+    +(capaPodeEditarFiscal(c)?'<button class="btn btn-sm" onclick="capaEditarFiscal(\''+c.id+'\')" title="NF, valor da NF e DOC/OS — também depois de conferida ou faturada">✏ NF · valor · DOC</button>':'')   // v1.0.1354
+    +(capaPodeObs(c)?'<button class="btn btn-sm" onclick="capaObsNova(\''+c.id+'\')" title="Registrar uma observação com motivo (cancelamento, acerto fiscal, complemento…)">＋ Observação</button>':'');   // v1.0.1407
 }
 // v1.0.1354: NF, valor da NF e DOC/OS editáveis a qualquer momento (cobertura fiscal, DOC/OS cancelado, complemento),
 // entrada e saída, inclusive depois de faturada — só admin, ADM e financeiro. Cada troca fica nas observações; a fatura já emitida não muda.
@@ -5489,7 +5560,14 @@ function capaEditarDados(id){
   var v=function(k){ return ecomEsc(c[k]==null?'':String(c[k])); };
   var exp=c.tipo==='expedicao';
   // v1.0.1196: troca do tipo (Recebimento ⇄ Expedição) — só em capa aberta ou devolvida
-  var podeTipo=c.status==='aberta'||c.status==='devolvida';
+  var _soReg=!capaPodeEditar();   // v1.0.1407
+  var podeTipo=(c.status==='aberta'||c.status==='devolvida')&&!_soReg;
+  _capaDocs=(Array.isArray(c.documentos)?c.documentos:[]).map(function(d){ return {tipo:d.tipo,id:d.id,numero:d.numero}; });
+  var docsHtml='<div style="grid-column:1/-1;border:1px solid var(--blue-text);border-radius:10px;padding:10px 12px"><label class="fl">Documentos da capa ('+(c.tipo==='expedicao'?'OS / pedidos':'entradas')+')</label>'
+    +'<div id="capa-e-docs" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px">'+capaDocChips()+'</div>'
+    +'<div style="display:flex;gap:8px"><input class="fi" id="capa-e-doc-novo" placeholder="'+(c.tipo==='expedicao'?'Número da OS ou do pedido':'Número da entrada ou da NF')+'" onkeydown="if(event.key===\'Enter\'){event.preventDefault();capaDocAdd(\''+c.id+'\');}"><button type="button" class="btn" onclick="capaDocAdd(\''+c.id+'\')">Incluir</button></div>'
+    +'<div id="capa-e-doc-av" style="font-size:12px;margin-top:6px;min-height:16px"></div>'
+    +'<div style="font-size:11.5px;color:var(--text3)">Só documentos deste cliente. Cada inclusão ou retirada fica registrada nas observações.</div></div>';
   var tipoHtml='<div style="grid-column:1/-1;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg2)">'
     +'<label class="fl">Tipo da capa</label><div style="display:flex;gap:18px;padding:4px 0">'
     +['recebimento','expedicao'].map(function(t){ return '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:'+(podeTipo?'pointer':'not-allowed')+'"><input type="radio" name="capa-e-tipo" value="'+t+'"'+(c.tipo===t?' checked':'')+(podeTipo?'':' disabled')+' onchange="ge(\'capa-e-tipo-av\').style.display=(this.value!==\''+c.tipo+'\')?\'block\':\'none\'"> '+(t==='expedicao'?'Expedição':'Recebimento')+'</label>'; }).join('')+'</div>'
@@ -5506,7 +5584,7 @@ function capaEditarDados(id){
   }
   // v1.0.1400: unidade e operação da capa (a operação define a tabela de preço)
   var _uoHtml='<div style="grid-column:1/-1;border:1px solid var(--blue-text);border-radius:10px;padding:10px 12px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
-    +'<div><label class="fl">Unidade</label><select class="fi" id="capa-e-unit" onchange="capaUnOpCarregar(\'capa-e\',\''+c.cliente_id+'\',\''+(c.responsavel_id||'')+'\')"><option value="">— sem unidade (vale a do cliente) —</option>'
+    +'<div><label class="fl">Unidade</label><select class="fi" id="capa-e-unit"'+(_soReg?' disabled':'')+' onchange="capaUnOpCarregar(\'capa-e\',\''+c.cliente_id+'\',\''+(c.responsavel_id||'')+'\')"><option value="">— sem unidade (vale a do cliente) —</option>'
       +capaUnidades().map(function(u){ return '<option value="'+u.id+'"'+(c.unit_id===u.id?' selected':'')+'>'+ecomEsc(u.name||'')+'</option>'; }).join('')+'</select></div>'
     +'<div><label class="fl">Operação</label><select class="fi" id="capa-e-op"'+(podeTipo?'':' disabled')+'><option value="">Carregando…</option></select></div></div>'
     +'<div style="font-size:11.5px;color:var(--text3);margin-top:6px">'+(podeTipo?'Trocar a operação troca a tabela de preço: os serviços passam a ser os da nova tabela e as quantidades já digitadas são zeradas. Depois, reimprima a capa.':'Capa já digitada: a operação só muda depois de estornar a digitação. A unidade pode ser trocada.')
@@ -5527,6 +5605,7 @@ function capaEditarDados(id){
     +'<div><label class="fl">Tipo de veículo</label><select class="fi" id="capa-e-tipo_veiculo"><option value="">—</option>'
       +CAPA_VEICULOS.map(function(t){ return '<option value="'+ecomEsc(t)+'"'+(t===c.tipo_veiculo?' selected':'')+'>'+ecomEsc(t)+'</option>'; }).join('')
       +(c.tipo_veiculo&&CAPA_VEICULOS.indexOf(c.tipo_veiculo)<0?'<option selected value="'+v('tipo_veiculo')+'">'+v('tipo_veiculo')+'</option>':'')+'</select></div>'
+    +docsHtml
     +'</div><div class="lsub" style="color:var(--text3);margin-top:10px">Cada alteração fica registrada nas observações da capa. A data vale para o extrato e a armazenagem.</div>',
     'capaSalvarDados(\''+c.id+'\')',{saveLabel:'Salvar'});
 }
@@ -5557,12 +5636,19 @@ async function capaSalvarDados(id){
   }
   // v1.0.1400: unidade e operação
   var _uEl=ge('capa-e-unit'), _oEl=ge('capa-e-op'), _uo=null;
-  var _unNovo=_uEl?(_uEl.value||null):(c.unit_id||null), trocaUn=!!_uEl&&_unNovo!==(c.unit_id||null);
+  var _unNovo=(_uEl&&!_uEl.disabled)?(_uEl.value||null):(c.unit_id||null), trocaUn=!!_uEl&&!_uEl.disabled&&_unNovo!==(c.unit_id||null);
+  if(!capaPodeEditar()&&(trocaTipo||trocaMat)){ portErr('Seu acesso não permite trocar o tipo da capa nem os tipos de produto.'); return; }   // v1.0.1407
   var _opOk=!!_oEl&&!_oEl.disabled&&_oEl.getAttribute('data-ok')==='1', _opNovo=_opOk?(_oEl.value||null):(c.responsavel_id||null), trocaOp=_opOk&&!!_opNovo&&_opNovo!==(c.responsavel_id||null);
   if(trocaOp&&trocaTipo){ portErr('Troque o tipo da capa e a operação em duas etapas: salve um e depois o outro.'); return; }
   if(trocaUn||trocaOp){
     try{ _uo=await capaUnOpPlano(c,trocaUn?_unNovo:undefined,trocaOp?_opNovo:undefined); }catch(eU){ portErr(String(eU.message||eU)); return; }
     Object.assign(novo,_uo.novo); mud=mud.concat(_uo.mud);
+  }
+  // v1.0.1407: documentos vinculados
+  if(ge('capa-e-docs')){
+    var _dAnt=(Array.isArray(c.documentos)?c.documentos:[]), _idA=_dAnt.map(function(d){return d.id;}), _idN=_capaDocs.map(function(d){return d.id;});
+    var _inc=_capaDocs.filter(function(d){ return _idA.indexOf(d.id)<0; }), _ret=_dAnt.filter(function(d){ return _idN.indexOf(d.id)<0; });
+    if(_inc.length||_ret.length){ novo.documentos=_capaDocs.slice(); mud.push('Documentos'+(_inc.length?' incluído(s) '+_inc.map(capaDocRot).join(', '):'')+(_inc.length&&_ret.length?' e':'')+(_ret.length?' retirado(s) '+_ret.map(capaDocRot).join(', '):'')); }
   }
   if(!mud.length&&!trocaTipo){ portClose(); return; }
   portSaving();
@@ -5597,7 +5683,11 @@ async function capaSalvarDados(id){
     render();
   }catch(e){ portErr('Erro: '+(e.message||e)); }
 }
-function capaRegObs(c,txt){ return ((c.observacoes?c.observacoes+'\n':'')+new Date().toLocaleString('pt-BR')+' · '+txt+' · '+((profile&&profile.full_name)||(cu&&cu.email)||'')).slice(0,4000); }
+function capaRegObs(c,txt){
+  var s=(c.observacoes?c.observacoes+'\n':'')+new Date().toLocaleString('pt-BR')+' · '+String(txt).replace(/\n/g,' ')+' · '+((profile&&profile.full_name)||(cu&&cu.email)||'');
+  if(s.length>4000){ s=s.slice(-4000); var k=s.indexOf('\n'); if(k>=0&&k<s.length-1) s=s.slice(k+1); }   // v1.0.1407: sai a mais antiga, nunca a que acabou de entrar
+  return s;
+}
 async function capaEstornarConferencia(id){
   var c=(capasProcesso||[]).find(function(x){return x.id===id;}); if(!c) return;
   if(!capaPodeConferir()){ alert('Só quem confere capas pode estornar a conferência.'); return; }
@@ -36173,7 +36263,7 @@ const CAPA_STATUS={   // v1.0.1066: pendente de conferência, conferida e devolv
   faturada:{l:'Faturada', bg:'var(--bg2)', c:'var(--text2)'},
   inutilizada:{l:'Inutilizada', bg:'var(--bg2)', c:'var(--text3)'},   // v1.0.1067
 };
-const CAPA_VEICULOS=['Carreta','Truck/Toco','Van/Utilitário','Container 20','Container 40','Moto'];
+const CAPA_VEICULOS=['Carreta','Bitrem','Rodotrem','Truck/Toco','Van/Utilitário','Container 20','Container 40','Moto'];
 const CAPA_CARGA=['Paletizada','Batida','Paletizada/Batida'];
 
 function capaPodeEditar(){return['admin','adm','financeiro','gestor'].includes(profile?.role||'')||canDo('fat-capas','pode_criar');}
