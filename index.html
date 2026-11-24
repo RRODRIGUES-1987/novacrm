@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1410 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1411 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1410';
+const APP_VERSION='v1.0.1411';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -39887,12 +39887,31 @@ async function wmsOsAutoSemLista(p,motivo){
 }
 function wmsOsAutoMotivo(p){ var par=(p&&p.parametros)||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } } return (p&&(p.status==='importado'||p.status==='aguardando_saldo')&&par.os_auto_motivo)?String(par.os_auto_motivo):''; }
 setInterval(function(){ wmsOsAutoTick(); },60000);
+// v1.0.1411 · CANAL DE VENDA — depositante com clientes.parametros.vendedores_prioritarios (ex.: ["SITE"]):
+//   os pedidos desse depositante são empenhados na ordem vendedor prioritário → data do pedido → número.
+//   Os pedidos dos outros depositantes ficam exatamente na posição em que estavam.
+function wmsPedPrioLista(clienteId){ var c=(clientes||[]).find(function(x){return x.id===clienteId;}); var pr=(c&&c.parametros)||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } var l=pr.vendedores_prioritarios; return Array.isArray(l)?l.map(function(x){return String(x).trim().toUpperCase();}).filter(Boolean):[]; }
+function wmsPedPrioChave(p){
+  var par=(p&&p.parametros)||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } }
+  var l=wmsPedPrioLista(p.cliente_id), v=String(par.vendedor||'').trim().toUpperCase(), c=String(par.vendedor_codigo||'').trim();
+  var prio=((v&&l.indexOf(v)>=0)||(c&&l.indexOf(c)>=0))?0:1;
+  var num=String(p.numero_pedido||''); if(/^\d+$/.test(num)) num=('000000000000'+num).slice(-12);
+  return prio+'|'+String(p.data_pedido||String(p.created_at||'').slice(0,10))+'|'+num;
+}
+function wmsPedPrioOrdenar(peds){
+  var pos=[], sel=[];
+  (peds||[]).forEach(function(p,i){ if(wmsPedPrioLista(p.cliente_id).length){ pos.push(i); sel.push(p); } });
+  if(sel.length<2) return peds;
+  sel=sel.map(function(p,i){ return {p:p,k:wmsPedPrioChave(p),i:i}; }).sort(function(a,b){ return a.k<b.k?-1:(a.k>b.k?1:a.i-b.i); });
+  var out=peds.slice(); pos.forEach(function(ix,j){ out[ix]=sel[j].p; });
+  return out;
+}
 async function wmsGerarListas(tipo,opts){
   // v1.0.1320: modo automático (OS automática ao importar e empenhar) — sem tela, sem mexer na seleção nem no modal do usuário
   const _auto=!!(opts&&opts.auto);
   const portSaving=_auto?function(){}:window.portSaving, portProgress=_auto?function(){}:window.portProgress, portClose=_auto?function(){}:window.portClose, portModal=_auto?function(){}:window.portModal, portErr=_auto?function(m){ console.warn('[OS auto]',m); window._osAutoErro=String(m||''); }:window.portErr;
   const ids=_auto?(opts.ids||[]):[...wmsPedSelecionados];
-  const peds=wmsPedidos.filter(p=>ids.includes(p.id));
+  const peds=wmsPedPrioOrdenar(wmsPedidos.filter(p=>ids.includes(p.id)));   // v1.0.1411: na falta, vendedor prioritário empenha primeiro
   if(!peds.length){portClose();return {criadas:[],pulados:[]};}
   const cid=company?.id;
   // v1.0.1257: nenhum item pode virar mais de WMS_MAX_BIPES_ITEM bipes — resolve-se no cadastro, não gerando
