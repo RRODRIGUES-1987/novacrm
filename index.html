@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1413 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1414 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1413';
+const APP_VERSION='v1.0.1414';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -43837,6 +43837,37 @@ async function wmsEtiquetaPalletImprimir(ids){
     await wmsPalletEvento(lista[j].id,'ajuste',{observacao:'Etiqueta impressa'});
   }
 }
+// v1.0.1414 · MODELO DE ETIQUETA DE PALLET POR DEPOSITANTE — cada cliente tem o seu padrão.
+//   clientes.parametros.etiqueta_pallet_modelo: 'padrao' (sem parâmetro: a etiqueta de sempre) · 'conta_caixas' (Biobalance).
+//   Para um modelo novo: entra uma chave aqui e o HTML dele; o padrão nunca muda para quem não pediu.
+var WMS_ETQ_PALLET_MODELOS={padrao:'Padrão VERUS',conta_caixas:'Conta de caixas (x cx × múltiplo + quebra)'};
+function wmsEtqPalletModelo(depId){ var c=(clientes||[]).find(function(x){return x.id===depId;}), pr=(c&&c.parametros)||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } var m=String(pr.etiqueta_pallet_modelo||'padrao'); return WMS_ETQ_PALLET_MODELOS[m]?m:'padrao'; }
+// modelo "conta_caixas": quantidade com a conta (x cx × múltiplo = total) e a caixa de quebra na linha de baixo; QR maior; lote/fabricação/validade numa linha
+function wmsEtqPalletContaHtml(it,pl,o){
+  var esc=o.esc, fmt=function(n){ return Number(n||0).toLocaleString('pt-BR'); };
+  var tot=Number(it.qtd_fiscal!=null?it.qtd_fiscal:it.qtd_controle)||0;
+  var pr=(wmsProdutos||[]).find(function(x){return x.id===it.produto_id;})||{}, f=Number(pr.fator_conversao)||0;
+  var q;
+  if(f>1&&tot>=f){
+    var cx=Math.floor(tot/f), resto=+(tot-cx*f).toFixed(4), un=esc(it.un_fiscal||it.un_controle||'UN');
+    q='<div class="ql"><span class="qc">'+fmt(cx)+' cx × '+fmt(f)+' un</span><span class="qr2">= '+fmt(cx*f)+'</span></div>'
+      +(resto>0?'<div class="ql"><span class="qq">+ 1 cx × '+fmt(resto)+' un <span class="qn">(quebra)</span></span><span class="qr2">= '+fmt(resto)+'</span></div>':'')
+      +'<div class="ql qt"><span class="lb">TOTAL</span><span class="qtot">'+fmt(tot)+' <span class="un">'+un+'</span></span></div>';
+  } else q='<div class="qtd">'+fmt(tot)+' <span class="un">'+esc(it.un_fiscal||it.un_controle||'UN')+'</span></div>';
+  return '<div class="etq mc"><div class="in">'
+    +'<div class="tit">ETIQUETA PALLET</div>'
+    +'<div class="bx dep"><div class="lb">DEPOSITANTE</div><div class="v1">'+esc(o.depNome||'—')+'</div></div>'
+    +'<div class="row2"><div class="bx"><div class="lb">DOC. ENTRADA</div><div class="v2">'+esc(o.doc||'—')+'</div></div><div class="bx"><div class="lb">ROMANEIO</div><div class="v2">'+esc(o.rom||'—')+'</div></div></div>'
+    +'<div class="item">'
+      +'<div class="skurow"><span class="sku">'+esc(it.sku||'—')+'</span><span class="lb">SKU</span></div>'
+      +'<div class="desc">'+esc((it.descricao||'').slice(0,60))+'</div>'
+      +'<div class="qbox"><div class="lb">QUANTIDADE</div>'+q+'</div>'
+      +'<div class="grid3"><div><div class="lb">LOTE</div><div class="lote">'+esc(it.lote||'—')+'</div></div><div><div class="lb">FABRICAÇÃO</div><div class="dt">'+o.dbr(it.data_fabricacao)+'</div></div><div><div class="lb">VALIDADE</div><div class="dt">'+o.dbr(it.validade)+'</div></div></div>'
+    +'</div>'
+    +'<div class="rodrg"><div class="bx rgbx"><div class="lb">RG DO PALLET</div><div class="rg">'+o.rg+'</div><div class="imp">VERUS · '+esc(o.agora)+' · '+esc(o.quem)+'</div></div>'
+      +(o.qr?('<img class="qr" src="'+o.qr+'">'):'<div class="qr"></div>')+'</div>'
+    +'</div></div>';
+}
 async function wmsEtiquetaPalletHtml(pl){
   if(typeof wmsPalletEhDev==='function'&&wmsPalletEhDev(pl)) return wmsEtiquetaDevHtml(pl);   // v1.0.1380: RG de devolução reimprime no layout DEV
   var palletId=pl.id;
@@ -43851,6 +43882,10 @@ async function wmsEtiquetaPalletHtml(pl){
   var dbr=function(d){ if(!d)return '—'; var s=String(d).slice(0,10).split('-'); return s.length===3?(s[2]+'/'+s[1]+'/'+s[0]):String(d); };
   var agora=new Date().toLocaleString('pt-BR');
   var quem=profile?.full_name||cu?.email||'—';
+  if(wmsEtqPalletModelo(pl.depositante_id)==='conta_caixas'){   // v1.0.1414: modelo do depositante
+    var _o={esc:esc,dbr:dbr,rg:rg,qr:qr,agora:agora,quem:quem,depNome:dep&&dep.nome,doc:doc&&doc.numero_entrada,rom:rom&&rom.numero};
+    return itens.map(function(it){ return wmsEtqPalletContaHtml(it,pl,_o); }).join('');
+  }
   var etiquetas=itens.map(function(it){
     return '<div class="etq"><div class="in">'
       +'<div class="tit">ETIQUETA PALLET</div>'
@@ -43906,6 +43941,9 @@ function wmsEtiquetaPalletPrint(etiquetas,titulo){
     +'.rgbx{flex:1}.rg{font-size:13pt;font-weight:bold;font-family:monospace;letter-spacing:1px}'
     +'.qr{width:17mm;height:17mm;flex-shrink:0}'
     +'.ft{border-top:0.3mm solid #000;padding-top:0.8mm;margin-top:1.4mm;text-align:center;font-size:5.5pt;color:#555}'
+    +'.mc .in{border:0.4mm solid #000;overflow:hidden}.mc .desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mc .item{min-height:0}'
+    +'.mc .qbox{padding:.6mm 2mm;border-bottom:0.2mm dotted #888}.mc .ql{display:flex;justify-content:space-between;align-items:baseline;line-height:1.1}.mc .qc{font-size:12pt;font-weight:bold}.mc .qq{font-size:9.5pt;font-weight:bold}.mc .qn{font-size:7pt;font-weight:normal}.mc .qr2{font-size:10pt}.mc .qt{border-top:0.3mm solid #000;margin-top:.4mm;padding-top:.2mm}.mc .qtot{font-size:13pt;font-weight:bold}'
+    +'.mc .grid3{display:flex;gap:2mm;padding:.6mm 2mm}.mc .grid3>div:first-child{flex:1.3}.mc .grid3>div{flex:1}.mc .rodrg{margin-top:1mm}.mc .qr{width:22mm;height:22mm}.mc .imp{font-size:5.5pt;color:#555;margin-top:.6mm}'
     +'</style></head><body>'+etiquetas+'</body></html>';
   var old=ge('pallet-print-frame'); if(old)old.remove();
   var ifr=document.createElement('iframe');
