@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1412 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1413 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1412';
+const APP_VERSION='v1.0.1413';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37096,7 +37096,7 @@ function wmsSelBarHtml(sc){
   return '<div id="wms-'+sc+'-selbar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:9px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
     +'<span id="wms-'+sc+'-seltxt" style="font-size:12px;font-weight:700;color:var(--blue-text)"></span>'
     +'<div style="display:flex;gap:8px">'
-    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: consolidada por produto + lote e por pedido (depositante com saldo no VERUS)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtqChaoListas([..._wmsSel.sep])" title="Etiqueta 10×10 de chão: código do produto + lote dos itens das listas marcadas">&#127991; Etiquetas de chão</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
+    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: consolidada por produto + lote e por pedido (depositante com saldo no VERUS)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
       +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
       +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
@@ -37997,18 +37997,74 @@ function wmsEtqChaoPrint(etiquetas){
   var dd=ifr.contentDocument||ifr.contentWindow.document; dd.open(); dd.write(html); dd.close();
   setTimeout(function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(e){} setTimeout(function(){ ifr.remove(); },3000); },700);
 }
-// etiquetas dos produtos + lotes empenhados nas listas marcadas (uma por lote)
-async function wmsEtqChaoListas(listaIds){
-  listaIds=[...new Set(listaIds||[])];
-  if(!listaIds.length){ showToast('Marque as listas','amber'); return; }
-  var d; try{ d=await wmsOndaDados(listaIds); }catch(e){ showToast('Erro: '+(e.message||e),'red'); return; }
-  var vistos={}, et=[];
-  var cliId=(d.peds[0]||{}).cliente_id, cli=(clientes||[]).find(function(c){return c.id===cliId;})||{};
-  var pre=wmsEtqChaoPrefixo(cliId), ls=d.linhas.slice().sort(function(a,b){return a.end.localeCompare(b.end,'pt-BR',{numeric:true});});
-  for(var i=0;i<ls.length;i++){ var l=ls[i]; if(vistos[l.end]) continue; vistos[l.end]=1; et.push(await wmsEtqChaoHtml(cli.nome,l.sku,l.lote,pre)); }
-  if(!et.length){ showToast('Nenhum lote empenhado nas listas marcadas','amber'); return; }
-  wmsEtqChaoPrint(et.join(''));
-  showToast(et.length+' etiqueta(s) de chão','green');
+// ═══ v1.0.1413 · ETIQUETAS DE CHÃO — relatório próprio (WMS › Estoque): produto + lote com saldo, com controle de impressão
+//   (wms_etq_chao_impressoes). Por padrão mostra só o que nunca foi impresso; reimpressão desmarcando o filtro.
+var _etqChao={cli:null,soNovas:true,linhas:[],sel:{}};
+function wmsEtqChaoDeps(){
+  var cid=company?.id, set={};
+  (wmsPallets||[]).forEach(function(p){ if(p.company_id===cid&&p.status!=='morto'&&p.status!=='expedido'&&p.depositante_id) set[p.depositante_id]=1; });
+  return Object.keys(set).map(function(id){ var c=(clientes||[]).find(function(x){return x.id===id;}); return {id:id,nome:(c&&c.nome)||'—'}; }).sort(function(a,b){return String(a.nome).localeCompare(String(b.nome));});
+}
+async function wmsEtqChaoModal(cliId){
+  var deps=wmsEtqChaoDeps();
+  if(!deps.length){ showToast('Nenhum depositante com estoque','amber'); return; }
+  if(!cliId) cliId=_etqChao.cli||(typeof _estoque!=='undefined'&&_estoque.fDep)||((deps.find(function(d){return wmsSaldoVerus(d.id);})||deps[0]).id);
+  _etqChao.cli=cliId;
+  var opts=deps.map(function(d){ return '<option value="'+d.id+'" '+(d.id===cliId?'selected':'')+'>'+ecomEsc(d.nome)+'</option>'; }).join('');
+  if(!document.querySelector('.portaria-modal #etq-chao-body')){
+    portModal('&#127991; Etiquetas de ch&atilde;o',
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select class="fi" id="etq-chao-cli" style="width:220px" onchange="wmsEtqChaoModal(this.value)">'+opts+'</select>'
+      +'<label style="font-size:12px;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="etq-chao-novas" '+(_etqChao.soNovas?'checked':'')+' onchange="_etqChao.soNovas=this.checked;wmsEtqChaoRender(true)"> S&oacute; as que nunca foram impressas</label></div>'
+      +'<div id="etq-chao-body" style="font-size:12px;color:var(--text3)">Carregando…</div>',
+      'wmsEtqChaoImprimirSel()',{saveLabel:'Imprimir',width:'680px'});
+  } else { var s=ge('etq-chao-cli'); if(s) s.innerHTML=opts; var b=ge('etq-chao-body'); if(b) b.innerHTML='Carregando…'; }
+  try{
+    var cid=company?.id;
+    var pals=await dbSelectAll('wms_pallets','company_id=eq.'+cid+'&depositante_id=eq.'+cliId+'&status=not.in.(morto,expedido)&select=id');
+    var cont=await wmsSelIn('wms_pallet_conteudo','pallet_id',pals.map(function(p){return p.id;}),'status=eq.ativo&select=sku,lote,qtd_fiscal,qtd_controle&order=sku');
+    var imp=[]; try{ imp=await dbSelectAll('wms_etq_chao_impressoes','cliente_id=eq.'+cliId+'&select=sku,lote,impresso_em,impresso_por_nome&order=impresso_em.desc'); }catch(_e){ imp=null; }
+    var ult={}; (imp||[]).forEach(function(r){ var k=wmsEndChao(r.sku,r.lote); if(!ult[k]) ult[k]=r; });
+    var ag={};
+    cont.forEach(function(c){ var k=wmsEndChao(c.sku,c.lote); if(!ag[k]) ag[k]={end:k,sku:String(c.sku||'').trim(),lote:String(c.lote||'').trim(),saldo:0,imp:ult[k]||null}; ag[k].saldo+=Number(c.qtd_fiscal!=null?c.qtd_fiscal:c.qtd_controle)||0; });
+    _etqChao.linhas=Object.values(ag).filter(function(l){return l.saldo>0;}).sort(function(a,b){return a.end.localeCompare(b.end,'pt-BR',{numeric:true});});
+    _etqChao.semTabela=(imp===null);
+    _etqChao.sel={}; _etqChao.linhas.forEach(function(l){ if(!l.imp) _etqChao.sel[l.end]=1; });
+    wmsEtqChaoRender(false);
+  }catch(e){ var bb=ge('etq-chao-body'); if(bb) bb.innerHTML='<span style="color:var(--red-text)">Erro: '+ecomEsc(e.message||e)+'</span>'; }
+}
+function wmsEtqChaoRender(){
+  var b=ge('etq-chao-body'); if(!b) return;
+  var L=_etqChao.linhas, vis=_etqChao.soNovas?L.filter(function(l){return !l.imp;}):L, nImp=L.filter(function(l){return l.imp;}).length;
+  var card=function(t,v,cor){ return '<div style="flex:1;background:var(--bg2);border-radius:9px;padding:8px 11px"><div style="font-size:10.5px;color:var(--text3)">'+t+'</div><div style="font-size:20px;font-weight:800;color:'+(cor||'var(--text)')+'">'+v+'</div></div>'; };
+  var nSel=vis.filter(function(l){return _etqChao.sel[l.end];}).length, todos=vis.length&&nSel===vis.length;
+  b.innerHTML=(_etqChao.semTabela?'<div style="background:var(--amber-bg);color:var(--amber-text);padding:7px 10px;border-radius:8px;margin-bottom:8px">O controle de impressão ainda não foi ativado no banco: as etiquetas imprimem, mas não ficam registradas.</div>':'')
+    +'<div style="display:flex;gap:8px;margin-bottom:10px">'+card('Produto + lote com saldo',L.length)+card('Já impressas',nImp,'var(--green-text)')+card('Sem etiqueta',L.length-nImp,(L.length-nImp)?'var(--amber-text)':'var(--text3)')+'</div>'
+    +(vis.length?'<div style="max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:9px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1e3a8a;color:#fff;position:sticky;top:0">'
+      +'<th style="padding:6px 8px;width:30px"><input type="checkbox" '+(todos?'checked':'')+' onchange="wmsEtqChaoTodos(this.checked)"></th><th style="padding:6px 8px;text-align:left">ENDEREÇO (CÓDIGO-LOTE)</th><th style="padding:6px 8px;text-align:right">SALDO</th><th style="padding:6px 8px;text-align:left">SITUAÇÃO</th></tr></thead><tbody>'
+      +vis.map(function(l){ return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px"><input type="checkbox" '+(_etqChao.sel[l.end]?'checked':'')+' onchange="wmsEtqChaoMarca(\''+l.end.replace(/'/g,'')+'\',this.checked)"></td>'
+        +'<td style="padding:6px 8px;font-family:monospace;font-weight:700">'+ecomEsc(l.end)+'</td><td style="padding:6px 8px;text-align:right">'+l.saldo.toLocaleString('pt-BR')+'</td>'
+        +'<td style="padding:6px 8px">'+(l.imp?'<span style="color:var(--text3)">Impressa '+new Date(l.imp.impresso_em).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})+(l.imp.impresso_por_nome?' · '+ecomEsc(l.imp.impresso_por_nome):'')+'</span>':'<span style="color:var(--amber-text);font-weight:700">Nunca impressa</span>')+'</td></tr>'; }).join('')
+      +'</tbody></table></div>'
+      :'<div style="padding:20px;text-align:center;color:var(--text3)">'+(_etqChao.soNovas&&L.length?'Todas as etiquetas deste depositante já foram impressas. Desmarque o filtro para reimprimir.':'Sem saldo para este depositante.')+'</div>');
+  var sv=ge('port-modal-save'); if(sv){ sv.disabled=!nSel; sv.textContent=nSel?('Imprimir '+nSel+' etiqueta(s)'):'Imprimir'; }
+}
+function wmsEtqChaoMarca(end,on){ if(on) _etqChao.sel[end]=1; else delete _etqChao.sel[end]; wmsEtqChaoRender(); }
+function wmsEtqChaoTodos(on){ var vis=_etqChao.soNovas?_etqChao.linhas.filter(function(l){return !l.imp;}):_etqChao.linhas; vis.forEach(function(l){ if(on) _etqChao.sel[l.end]=1; else delete _etqChao.sel[l.end]; }); wmsEtqChaoRender(); }
+async function wmsEtqChaoImprimirSel(){
+  var vis=_etqChao.soNovas?_etqChao.linhas.filter(function(l){return !l.imp;}):_etqChao.linhas;
+  var alvo=vis.filter(function(l){return _etqChao.sel[l.end];});
+  if(!alvo.length){ portErr('Marque as etiquetas para imprimir'); return; }
+  var sv=ge('port-modal-save'); if(sv){ sv.disabled=true; sv.textContent='Gerando…'; }
+  var cli=(clientes||[]).find(function(c){return c.id===_etqChao.cli;})||{}, pre=wmsEtqChaoPrefixo(_etqChao.cli), h='';
+  for(var i=0;i<alvo.length;i++) h+=await wmsEtqChaoHtml(cli.nome,alvo[i].sku,alvo[i].lote,pre);
+  wmsEtqChaoPrint(h);
+  if(!_etqChao.semTabela){
+    var quem=profile?.full_name||cu?.email||'', agora=new Date().toISOString();
+    try{ await sbFetch('POST','/rest/v1/wms_etq_chao_impressoes',alvo.map(function(l){ return {company_id:company?.id,cliente_id:_etqChao.cli,sku:l.sku,lote:l.lote,impresso_em:agora,impresso_por:cu?.id||null,impresso_por_nome:quem}; }),tok); }catch(_e){}
+    alvo.forEach(function(l){ l.imp={impresso_em:agora,impresso_por_nome:quem}; delete _etqChao.sel[l.end]; });
+  }
+  showToast(alvo.length+' etiqueta(s) de chão enviadas para impressão','green');
+  wmsEtqChaoRender();
 }
 
 function wmsListasPdfSelecionadas(){wmsListasPdfIds([..._wmsSel.sep]);}
@@ -53131,7 +53187,7 @@ function rWmsEstoque(){
     +(_estoque.carregado?'<button class="btn" onclick="estoqueLimpar()">Limpar</button>':'')
     +'</div>';
 
-  var header='<div class="sechdr"><div class="swrap" style="font-weight:700">Estoque</div></div>'
+  var header='<div class="sechdr" style="display:flex;justify-content:space-between;align-items:center"><div class="swrap" style="font-weight:700">Estoque</div><button class="btn btn-sm" onclick="wmsEtqChaoModal()" title="Etiqueta 10×10 de chão: código do produto + lote (com controle de impressão)">&#127991; Etiquetas de chão</button></div>'
     +'<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Saldo apurado pelos RGs de pallet endereçados. Aplique um filtro e clique em <b>Consultar</b> para carregar.</div>';
 
   // Estado inicial (zerado) ou carregando
