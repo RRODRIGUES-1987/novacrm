@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1411 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1412 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1411';
+const APP_VERSION='v1.0.1412';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37096,7 +37096,7 @@ function wmsSelBarHtml(sc){
   return '<div id="wms-'+sc+'-selbar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:9px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
     +'<span id="wms-'+sc+'-seltxt" style="font-size:12px;font-weight:700;color:var(--blue-text)"></span>'
     +'<div style="display:flex;gap:8px">'
-    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
+    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: consolidada por produto + lote e por pedido (depositante com saldo no VERUS)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtqChaoListas([..._wmsSel.sep])" title="Etiqueta 10×10 de chão: código do produto + lote dos itens das listas marcadas">&#127991; Etiquetas de chão</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
       +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
       +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
@@ -37852,6 +37852,165 @@ async function wmsListaPdf(listaId){
   pdfMake.createPdf(wmsFolhaDoc(content)).open();
 }
 // Lote: todas as listas marcadas na tela de Separação, em ordem de número, num PDF só
+// ═══ v1.0.1412 · ONDA (consolidada por produto + lote) e ETIQUETA DE CHÃO — depositante com saldo no VERUS (Biobalance)
+//   Imprime, a partir das listas marcadas (pedido a pedido, já empenhadas), as folhas no modelo da PE:
+//   • capa da onda (por transportadora e o total a retirar de cada produto + lote);
+//   • uma folha CONSOLIDADA por produto + lote com os pedidos de código único (endereço = etiqueta de chão);
+//   • uma folha POR PEDIDO para os pedidos com mais de um código (ou mais de um lote).
+//   A etiqueta de chão (10×10) identifica o produto e o lote; o código dela (produto-lote) é o endereço na folha.
+//   O código da onda fica gravado no pedido (parametros.onda) — é o que o checkout vai usar para abrir a folha.
+function wmsEndChao(sku,lote){ return String(sku||'').trim()+'-'+(String(lote||'').trim()||'SEM-LOTE'); }
+function wmsDataBr(d){ if(!d) return '—'; var s=String(d).slice(0,10).split('-'); return s.length===3?(s[2]+'/'+s[1]+'/'+s[0]):String(d); }
+async function wmsSelIn(tab,col,ids,extra){
+  var out=[]; ids=[...new Set((ids||[]).filter(Boolean))];
+  for(var i=0;i<ids.length;i+=120){ var r=await dbSelect(tab,col+'=in.('+ids.slice(i,i+120).join(',')+')'+(extra?'&'+extra:'')); out=out.concat(r||[]); }
+  return out;
+}
+// lê do banco o que foi empenhado nas listas: pedido → linhas (produto, lote, qtd)
+async function wmsOndaDados(listaIds){
+  var vincs=await wmsSelIn('wms_lista_pedidos','lista_id',listaIds,'select=lista_id,pedido_id&order=lista_id');
+  var pedIds=[...new Set(vincs.map(function(v){return v.pedido_id;}))];
+  if(!pedIds.length) return {peds:[],linhas:[]};
+  var peds=await wmsSelIn('wms_pedidos','id',pedIds,'select=id,cliente_id,numero_pedido,data_pedido,destinatario_nome,cidade,uf,transportadora,status,parametros&order=numero_pedido');
+  var res=await wmsSelIn('wms_reservas','pedido_id',pedIds,'status=in.(reservada,consumida)&select=id,pedido_id,pedido_item_id,conteudo_id,pallet_id,sku,qtd&order=pedido_id');
+  var conts={}; (await wmsSelIn('wms_pallet_conteudo','id',res.map(function(r){return r.conteudo_id;}),'select=id,sku,descricao,lote,validade&order=id')).forEach(function(c){conts[c.id]=c;});
+  var pals={}; (await wmsSelIn('wms_pallets','id',res.map(function(r){return r.pallet_id;}),'select=id,rg,endereco_codigo&order=id')).forEach(function(p){pals[p.id]=p;});
+  var listaDe={}; vincs.forEach(function(v){ var l=(wmsListasSeparacao||[]).find(function(x){return x.id===v.lista_id;}); listaDe[v.pedido_id]=(l&&l.numero_lista)||''; });
+  var por={};
+  res.forEach(function(r){
+    var c=conts[r.conteudo_id]||{}, sku=String(c.sku||r.sku||'').trim(), lote=String(c.lote||'').trim(), k=r.pedido_id+'|'+sku+'|'+lote;
+    if(!por[k]) por[k]={pedido_id:r.pedido_id,sku:sku,descricao:c.descricao||'',lote:lote,validade:c.validade||null,end:wmsEndChao(sku,lote),rg:(pals[r.pallet_id]||{}).rg,qtd:0};
+    por[k].qtd+=Number(r.qtd||0);
+  });
+  peds.forEach(function(p){ p._lista=listaDe[p.id]||''; var par=p.parametros||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } } p._par=par; });
+  return {peds:peds,linhas:Object.values(por)};
+}
+function wmsOndaTranspOrd(a,b){ var ta=String(a.transportadora||'~'), tb=String(b.transportadora||'~'); if(ta!==tb) return ta<tb?-1:1; return String(a.numero_pedido||'').localeCompare(String(b.numero_pedido||''),'pt-BR',{numeric:true}); }
+async function wmsOndaImprimir(listaIds){
+  listaIds=[...new Set(listaIds||[])];
+  if(!listaIds.length){ showToast('Marque as listas da onda','amber'); return; }
+  var cls=[...new Set(listaIds.map(function(id){ var l=(wmsListasSeparacao||[]).find(function(x){return x.id===id;}); return l&&l.cliente_id; }).filter(Boolean))];
+  if(cls.length>1){ showToast('A onda é de um depositante só: marque listas do mesmo depositante','amber'); return; }
+  showToast('Montando a onda…','blue');
+  var d; try{ d=await wmsOndaDados(listaIds); }catch(e){ showToast('Erro ao ler a onda: '+(e.message||e),'red'); return; }
+  var esc=ecomEsc, peds=d.peds.filter(function(p){ return !['cancelado','cancelada','excluido'].includes(String(p.status||'')); });
+  var linhasDe={}; d.linhas.forEach(function(l){ (linhasDe[l.pedido_id]=linhasDe[l.pedido_id]||[]).push(l); });
+  peds=peds.filter(function(p){ return (linhasDe[p.id]||[]).length; });
+  if(!peds.length){ showToast('As listas marcadas não têm estoque empenhado (pedido a pedido com saldo no VERUS)','amber'); return; }
+  // código da onda: reaproveita se todos os pedidos já estão na mesma onda; senão cria e grava no pedido
+  var ondas=[...new Set(peds.map(function(p){return p._par.onda||'';}))];
+  var onda=(ondas.length===1&&ondas[0])?ondas[0]:null;
+  if(!onda){
+    var t=new Date(); onda='OND'+String(t.getDate()).padStart(2,'0')+String(t.getMonth()+1).padStart(2,'0')+String(t.getHours()).padStart(2,'0')+String(t.getMinutes()).padStart(2,'0');
+    for(var i=0;i<peds.length;i+=10){
+      await Promise.all(peds.slice(i,i+10).map(function(p){ var np=Object.assign({},p._par,{onda:onda,onda_em:new Date().toISOString()}); p._par=np; return dbUpdate('wms_pedidos',p.id,{parametros:np}).catch(function(){}); }));
+    }
+  }
+  var cli=(clientes||[]).find(function(c){return c.id===cls[0];})||{};
+  var single=[], multi=[];
+  peds.forEach(function(p){ (linhasDe[p.id].length===1?single:multi).push(p); });
+  // consolidadas: produto + lote
+  var agg={};
+  single.forEach(function(p){ var l=linhasDe[p.id][0], k=l.end;
+    if(!agg[k]) agg[k]={sku:l.sku,descricao:l.descricao,lote:l.lote,validade:l.validade,end:l.end,rg:l.rg,total:0,dist:[]};
+    agg[k].total+=l.qtd; agg[k].dist.push({p:p,qtd:l.qtd}); });
+  var chaves=Object.keys(agg).sort(function(a,b){ return a.localeCompare(b,'pt-BR',{numeric:true}); });
+  var sheets=[];
+  // capa
+  var porT={}, totUn=0, retirar={};
+  peds.forEach(function(p){ var t=p.transportadora||'Sem transportadora'; porT[t]=porT[t]||{p:0,u:0}; porT[t].p++;
+    linhasDe[p.id].forEach(function(l){ porT[t].u+=l.qtd; totUn+=l.qtd; retirar[l.end]=retirar[l.end]||{l:l,q:0,n:0}; retirar[l.end].q+=l.qtd; retirar[l.end].n++; }); });
+  var capa='<div class="sheet"><div class="sheet-title">Onda de Separação &mdash; Capa</div>'
+    +'<div class="sheet-hd"><div class="sheet-hd-info"><div><b style="font-size:16px">'+esc(cli.nome||'')+'</b></div><div>'+listaIds.length+' lista(s) · '+new Date().toLocaleString('pt-BR')+'</div></div>'+ecomFolhaBarcode(onda)+'</div>'
+    +'<div class="capa-totais"><div class="capa-tot"><div class="capa-tot-lbl">Pedidos</div><div class="capa-tot-num">'+peds.length+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Unidades</div><div class="capa-tot-num">'+totUn+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Folhas consolidadas</div><div class="capa-tot-num">'+chaves.length+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Folhas por pedido</div><div class="capa-tot-num">'+multi.length+'</div></div></div>'
+    +'<table><thead><tr><th>Transportadora</th><th style="text-align:center">Pedidos</th><th style="text-align:center">Unidades</th></tr></thead><tbody>'
+    +Object.keys(porT).sort().map(function(t){ return '<tr><td>'+esc(t)+'</td><td style="text-align:center">'+porT[t].p+'</td><td style="text-align:center">'+porT[t].u+'</td></tr>'; }).join('')+'</tbody></table>'
+    +'<div style="font-size:11px;color:#555;margin:12px 0 2px">Retirar do chão (total da onda por produto e lote):</div>'
+    +'<table><thead><tr><th>Endereço (etiqueta de chão)</th><th>Lote</th><th style="text-align:center">Pedidos</th><th style="text-align:center">Qtd</th><th style="width:36px">&#10003;</th></tr></thead><tbody>'
+    +Object.keys(retirar).sort(function(a,b){return a.localeCompare(b,'pt-BR',{numeric:true});}).map(function(k){ var r=retirar[k]; return '<tr><td style="font-family:monospace;font-weight:700">'+esc(k)+'</td><td><b>'+esc(r.l.lote||'—')+'</b></td><td style="text-align:center">'+r.n+'</td><td style="text-align:center;font-weight:700">'+r.q+'</td><td></td></tr>'; }).join('')
+    +'</tbody></table></div>';
+  sheets.push(capa);
+  chaves.forEach(function(k){ var a=agg[k];
+    a.dist.sort(function(x,y){ return String(x.p.numero_pedido||'').localeCompare(String(y.p.numero_pedido||''),'pt-BR',{numeric:true}); });
+    sheets.push('<div class="sheet"><div class="sheet-title">Lista de Separa&ccedil;&atilde;o &mdash; Consolidada</div>'
+      +'<div class="sheet-hd"><div class="sheet-hd-info"><div><b style="font-size:16px">SKU: '+esc(a.sku)+'</b></div><div>'+esc(a.descricao||'')+'</div>'
+      +'<div style="margin-top:3px"><b>Lote:</b> <b style="font-size:16px">'+esc(a.lote||'—')+'</b></div>'
+      +'<div><b>Endere&ccedil;o:</b> <b style="font-family:monospace">'+esc(a.end)+'</b> (etiqueta de ch&atilde;o)</div><div><b>Onda:</b> '+esc(onda)+'</div></div>'
+      +ecomFolhaBarcode(onda+'-'+a.end)+'</div>'
+      +'<div style="font-size:11px;color:#555;margin-bottom:2px">Distribui&ccedil;&atilde;o (pedidos de c&oacute;digo &uacute;nico):</div>'
+      +'<table><thead><tr><th>Endere&ccedil;o</th><th>Pedido</th><th>Destinat&aacute;rio</th><th>Qtd</th></tr></thead><tbody>'
+      +a.dist.map(function(x){ return '<tr><td style="font-family:monospace;font-weight:700">'+esc(a.end)+'</td><td>'+esc(x.p.numero_pedido||'')+'</td><td>'+esc(x.p.destinatario_nome||'')+'</td><td style="text-align:center;width:44px">'+x.qtd+'</td></tr>'; }).join('')
+      +'</tbody></table><div class="tot-vol"><span class="tot-vol-lbl">Total de volumes:</span><span class="tot-vol-num">'+a.total+'</span></div></div>'); });
+  multi.sort(wmsOndaTranspOrd).forEach(function(p){
+    var ls=linhasDe[p.id].slice().sort(function(a,b){return a.end.localeCompare(b.end,'pt-BR',{numeric:true});});
+    var tv=ls.reduce(function(s,l){return s+l.qtd;},0);
+    sheets.push('<div class="sheet"><div class="sheet-title">Lista de Separa&ccedil;&atilde;o &mdash; Por pedido</div>'
+      +'<div class="sheet-hd"><div class="sheet-hd-info"><div><b style="font-size:15px">Pedido '+esc(p.numero_pedido||'')+'</b> &middot; '+esc(p._lista)+' &middot; '+esc(onda)+'</div>'
+      +'<div>Vendedor: '+esc(p._par.vendedor||'—')+(p.data_pedido?' &middot; pedido de '+wmsDataBr(p.data_pedido):'')+'</div>'
+      +'<div style="margin-top:3px"><b>Destinat&aacute;rio:</b> '+esc(p.destinatario_nome||'')+(p.cidade?' &middot; '+esc(p.cidade)+(p.uf?'/'+esc(p.uf):''):'')+'</div>'
+      +'<div><b>Transportadora:</b> '+esc(p.transportadora||'—')+'</div></div>'+ecomFolhaBarcode(String(p.numero_pedido||''))+'</div>'
+      +'<table><thead><tr><th>Endere&ccedil;o</th><th>SKU</th><th>Produto</th><th>Lote</th><th>Qtd</th><th>&#10003;</th></tr></thead><tbody>'
+      +ls.map(function(l){ return '<tr><td style="font-family:monospace;font-weight:700">'+esc(l.end)+'</td><td>'+esc(l.sku)+'</td><td>'+esc(l.descricao||'')+'</td><td><b>'+esc(l.lote||'—')+'</b></td><td style="text-align:center;width:44px">'+l.qtd+'</td><td style="width:36px"></td></tr>'; }).join('')
+      +'</tbody></table><div class="tot-vol"><span class="tot-vol-lbl">Total de volumes:</span><span class="tot-vol-num">'+tv+'</span></div></div>'); });
+  ecomPrintDoc('Onda '+onda+' · '+(cli.nome||''), sheets, false, false);
+  showToast('Onda '+onda+' · '+peds.length+' pedidos · '+chaves.length+' folha(s) consolidada(s) e '+multi.length+' por pedido','green');
+}
+// ─── ETIQUETA DE CHÃO (10×10): código do produto + lote, sem descrição e sem validade (para não haver interpretação).
+//   Os dígitos que realmente diferenciam os produtos do depositante saem grandes; o começo comum (ex.: 903) sai pequeno.
+//   Leitura por QR code (celular): o QR carrega "código-lote", o mesmo texto do endereço nas folhas.
+function wmsEtqChaoPrefixo(cliId){
+  var skus=(wmsProdutos||[]).filter(function(p){return p.cliente_id===cliId&&p.sku;}).map(function(p){return String(p.sku).trim();});
+  if(skus.length<2) return '';
+  var pre=skus[0]; skus.forEach(function(s){ var i=0; while(i<pre.length&&i<s.length&&pre[i]===s[i]) i++; pre=pre.slice(0,i); });
+  var minLen=Math.min.apply(null,skus.map(function(s){return s.length;}));
+  if(pre.length>minLen-2) pre=pre.slice(0,Math.max(0,minLen-2));
+  return pre;
+}
+function wmsEtqChaoFonte(txt,larguraMm,maxPt){ var n=Math.max(1,String(txt||'').length); return Math.max(14,Math.min(maxPt,Math.floor(larguraMm/(0.235*n)))); }
+async function wmsEtqChaoHtml(cliNome,sku,lote,prefixo){
+  var esc=ecomEsc, code=wmsEndChao(sku,lote), qr='';
+  try{ qr=await wmsQrDataUrl(code); }catch(_e){}
+  sku=String(sku||'').trim(); var pre=(prefixo&&sku.indexOf(prefixo)===0)?prefixo:'', fim=sku.slice(pre.length), lt=String(lote||'').trim()||'SEM LOTE';
+  return '<div class="etq"><div class="in">'
+    +'<div class="tit">'+esc(String(cliNome||'').toUpperCase().slice(0,28))+'</div>'
+    +'<div class="bx"><div class="lb">C&Oacute;DIGO DO PRODUTO</div><div class="sku">'+(pre?'<span class="pre">'+esc(pre)+'</span>':'')+'<span style="font-size:'+wmsEtqChaoFonte(fim,pre?72:84,60)+'pt">'+esc(fim)+'</span></div></div>'
+    +'<div class="bx"><div class="lb">LOTE</div><div class="lote" style="font-size:'+wmsEtqChaoFonte(lt,84,50)+'pt">'+esc(lt)+'</div></div>'
+    +'<div class="baixo"><div class="code">'+esc(code)+'</div>'+(qr?'<img src="'+qr+'">':'')+'</div>'
+    +'</div></div>';
+}
+function wmsEtqChaoPrint(etiquetas){
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas de chão</title><style>'
+    +'@page{size:100mm 100mm;margin:0}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}'
+    +'.etq{width:100mm;height:100mm;padding:2.5mm;page-break-after:always;overflow:hidden}.etq:last-child{page-break-after:auto}'
+    +'.in{border:0.4mm solid #000;height:100%;padding:2.5mm;display:flex;flex-direction:column;gap:1.6mm}'
+    +'.tit{background:#000;color:#fff;text-align:center;font-size:12pt;font-weight:bold;letter-spacing:3px;padding:1mm}'
+    +'.bx{border:0.3mm solid #000;padding:1mm 2mm}.lb{font-size:6.5pt;color:#555;letter-spacing:.5px}'
+    +'.sku{font-family:monospace;font-weight:bold;line-height:1;white-space:nowrap}.pre{font-size:16pt;color:#444;margin-right:1.5mm}'
+    +'.lote{font-family:monospace;font-weight:bold;line-height:1.05;white-space:nowrap;overflow:hidden}'
+    +'.baixo{flex:1;display:flex;align-items:flex-end;justify-content:space-between;gap:2mm;min-height:0}.baixo img{width:31mm;height:31mm}.code{font-family:monospace;font-size:8pt;color:#333;word-break:break-all}'
+    +'</style></head><body>'+etiquetas+'</body></html>';
+  var old=ge('chao-print-frame'); if(old) old.remove();
+  var ifr=document.createElement('iframe'); ifr.id='chao-print-frame';
+  ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
+  document.body.appendChild(ifr);
+  var dd=ifr.contentDocument||ifr.contentWindow.document; dd.open(); dd.write(html); dd.close();
+  setTimeout(function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(e){} setTimeout(function(){ ifr.remove(); },3000); },700);
+}
+// etiquetas dos produtos + lotes empenhados nas listas marcadas (uma por lote)
+async function wmsEtqChaoListas(listaIds){
+  listaIds=[...new Set(listaIds||[])];
+  if(!listaIds.length){ showToast('Marque as listas','amber'); return; }
+  var d; try{ d=await wmsOndaDados(listaIds); }catch(e){ showToast('Erro: '+(e.message||e),'red'); return; }
+  var vistos={}, et=[];
+  var cliId=(d.peds[0]||{}).cliente_id, cli=(clientes||[]).find(function(c){return c.id===cliId;})||{};
+  var pre=wmsEtqChaoPrefixo(cliId), ls=d.linhas.slice().sort(function(a,b){return a.end.localeCompare(b.end,'pt-BR',{numeric:true});});
+  for(var i=0;i<ls.length;i++){ var l=ls[i]; if(vistos[l.end]) continue; vistos[l.end]=1; et.push(await wmsEtqChaoHtml(cli.nome,l.sku,l.lote,pre)); }
+  if(!et.length){ showToast('Nenhum lote empenhado nas listas marcadas','amber'); return; }
+  wmsEtqChaoPrint(et.join(''));
+  showToast(et.length+' etiqueta(s) de chão','green');
+}
+
 function wmsListasPdfSelecionadas(){wmsListasPdfIds([..._wmsSel.sep]);}
 // Romaneio da lista = romaneio do primeiro pedido das suas tarefas
 function wmsRomDaLista(l){
