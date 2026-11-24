@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1408 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1409 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1408';
+const APP_VERSION='v1.0.1409';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -42680,6 +42680,15 @@ function entStatusBadge(st){
 }
 // ---- Importar XML de NF-e -> pré-preenche Documento de Entrada ----
 function _xmlText(node,tag){var e=node&&node.getElementsByTagName(tag)[0];return e?(e.textContent||'').trim():'';}
+// v1.0.1409: lote do item da NF — rastreabilidade oficial (rastro) primeiro; para o depositante com o parâmetro
+// "nf_lote_inf_adicional", o lote vem na informação adicional do item (infAdProd)
+function _xmlLoteItem(det,dep){
+  var r=det&&det.getElementsByTagName('rastro')[0], o={lote:'',data_fabricacao:'',validade:''};
+  if(r){ o.lote=_xmlText(r,'nLote'); o.data_fabricacao=_xmlText(r,'dFab').slice(0,10); o.validade=_xmlText(r,'dVal').slice(0,10); }
+  if(!o.lote&&dep&&recParam(dep.id,'nf_lote_inf_adicional')){ var t=_xmlText(det,'infAdProd').replace(/\s+/g,' ').trim(); if(t&&t.length<=40) o.lote=t; }
+  return o;
+}
+function _xmlNItem(det,i){ var n=det.getAttribute('nItem'); if(!n){ var k=det.firstElementChild; while(k){ if((k.localName||k.nodeName)==='nItem'){ n=(k.textContent||'').trim(); break; } k=k.nextElementSibling; } } return n||String(i+1); }
 function _soDigitos(v){return (v||'').replace(/\D/g,'');}
 function wmsEntImportarXml(input){
   var files=input.files; if(!files||!files.length)return;
@@ -42727,14 +42736,14 @@ function wmsEntParseXml(xml){
     var cProd=_xmlText(prod,'cProd'), xProd=_xmlText(prod,'xProd'), ean=_xmlText(prod,'cEAN'); if(ean==='SEM GTIN')ean='';
     var qCom=_xmlText(prod,'qCom'), uCom=_xmlText(prod,'uCom');
     var vUn=parseFloat(_xmlText(prod,'vUnCom'))||0, vTot=parseFloat(_xmlText(prod,'vProd'))||0;
-    var nItem=dets[i].getAttribute('nItem')||String(i+1);
+    var nItem=_xmlNItem(dets[i],i), _lt=_xmlLoteItem(dets[i],dep);
     var prodsDep=(wmsProdutos||[]).filter(function(pr){return pr.company_id===cid && (!dep||pr.cliente_id===dep.id);});
     var match=null;
     if(ean)match=prodsDep.find(function(pr){return pr.ean&&_soDigitos(pr.ean)===_soDigitos(ean);});
     if(!match&&dep){var dp=(wmsProdutoDepara||[]).find(function(d){return d.depositante_id===dep.id&&String(d.cod_fornecedor)===String(cProd);});if(dp)match=prodsDep.find(function(pr){return pr.id===dp.produto_id;});}
     if(!match)match=prodsDep.find(function(pr){return String(pr.sku||'')===String(cProd);});
     if(!match)match=prodsDep.find(function(pr){return (pr.descricao||'').toLowerCase()===xProd.toLowerCase();});
-    itens.push({cProd:cProd,xProd:xProd,qtd:parseFloat(qCom)||0,unidade:uCom,valor_unitario:vUn,valor_total:vTot,item_nf:nItem,produto_id:match?match.id:'',casado:!!match});
+    itens.push({cProd:cProd,xProd:xProd,qtd:parseFloat(qCom)||0,unidade:uCom,valor_unitario:vUn,valor_total:vTot,item_nf:nItem,lote:_lt.lote,data_fabricacao:_lt.data_fabricacao,validade:_lt.validade,produto_id:match?match.id:'',casado:!!match});
   }
   return {emitNome:emitNome,emitCnpj:emitCnpj,nNF:nNF,serie:serie,dhEmi:dhEmi,chave:chave,dep:dep||null,itens:itens};
 }
@@ -42755,7 +42764,7 @@ async function wmsEntImportLote(files){
       var obj=Object.assign({company_id:cid,unit_id:activeUnit||null,numero_entrada:numero,depositante_id:I.dep.id,remetente:I.emitNome,data_prevista:I.dhEmi||null,status:'previsto',ref_documento:'NF '+I.nNF+'/'+I.serie,observacao:'Importado de XML (lote) · chave '+I.chave+(I.tipoChegada==='compra_terceiro'?(' · compra de terceiro: '+I.fornNome):''),owner_id:cu?.id||null},wmsEntCamposDoXml(I));
       var salvo=await dbInsert('wms_entradas',obj); var row=Array.isArray(salvo)?salvo[0]:salvo;
       for(var i=0;i<I.itens.length;i++){var it=I.itens[i];
-        await dbInsert('wms_entrada_itens',{company_id:cid,entrada_id:row.id,produto_id:it.produto_id,sku:it.cProd,descricao:it.xProd,qtd_prevista:it.qtd,unidade:it.unidade||null,valor_unitario:it.valor_unitario||null,valor_total:it.valor_total||null,item_nf:it.item_nf||null,owner_id:cu?.id||null});
+        await dbInsert('wms_entrada_itens',{company_id:cid,entrada_id:row.id,produto_id:it.produto_id,sku:it.cProd,descricao:it.xProd,qtd_prevista:it.qtd,unidade:it.unidade||null,valor_unitario:it.valor_unitario||null,valor_total:it.valor_total||null,item_nf:it.item_nf||null,lote:it.lote||null,data_fabricacao:it.data_fabricacao||null,validade:it.validade||null,owner_id:cu?.id||null});
       }
       wmsEntradas=[row,...wmsEntradas]; ok++;
     }catch(e){falhas.push('NF '+I.nNF+': erro ao gravar ('+(e.message||e)+')');}
@@ -42820,7 +42829,7 @@ function wmsEntProcessaXml(xml){
     var ean=_xmlText(prod,'cEAN'); if(ean==='SEM GTIN')ean='';
     var qCom=_xmlText(prod,'qCom'), uCom=_xmlText(prod,'uCom'), ncm=_xmlText(prod,'NCM');
     var vUn=parseFloat(_xmlText(prod,'vUnCom'))||0, vTot=parseFloat(_xmlText(prod,'vProd'))||0;
-    var nItem=dets[i].getAttribute('nItem')||String(i+1);
+    var nItem=_xmlNItem(dets[i],i), _lt=_xmlLoteItem(dets[i],dep);
     // casa produto: por ean, senão por sku/cod == cProd (dentro do depositante)
     var prodsDep=(wmsProdutos||[]).filter(function(pr){return pr.company_id===cid && (!dep||pr.cliente_id===dep.id);});
     var match=null, via='';
@@ -42837,6 +42846,7 @@ function wmsEntProcessaXml(xml){
     if(!match){match=prodsDep.find(function(pr){return (pr.descricao||'').toLowerCase()===xProd.toLowerCase();});if(match)via='desc';}
     itens.push({cProd:cProd,xProd:xProd,ean:ean,ncm:ncm,qtd:parseFloat(qCom)||0,unidade:uCom,
       valor_unitario:vUn,valor_total:vTot,item_nf:nItem,
+      lote:_lt.lote,data_fabricacao:_lt.data_fabricacao,validade:_lt.validade,
       produto_id:match?match.id:'', casado:!!match, via:via});
   }
   _entImport={emitNome:emitNome,emitCnpj:emitCnpj,destCnpj:destCnpj,destNome:destNome,
@@ -43240,7 +43250,7 @@ async function wmsEntradaSalvar(){
     // grava itens
     for(var i=0;i<_entEdit.itens.length;i++){
       var it=_entEdit.itens[i]; if(!it.produto_id)continue;
-      await dbInsert('wms_entrada_itens',{company_id:cid,entrada_id:entradaId,produto_id:it.produto_id,sku:it.sku||null,descricao:it.descricao||null,qtd_prevista:it.qtd_prevista?Number(it.qtd_prevista):null,lote:it.lote||null,data_fabricacao:it.data_fabricacao||null,validade:it.validade||null,owner_id:cu?.id||null});
+      await dbInsert('wms_entrada_itens',{company_id:cid,entrada_id:entradaId,produto_id:it.produto_id,sku:it.sku||null,descricao:it.descricao||null,qtd_prevista:it.qtd_prevista?Number(it.qtd_prevista):null,lote:it.lote||null,data_fabricacao:it.data_fabricacao||null,validade:it.validade||null,item_nf:it.item_nf||null,unidade:it.unidade||null,valor_unitario:it.valor_unitario||null,valor_total:it.valor_total||null,owner_id:cu?.id||null});
     }
     portClose(); showToast('Documento de entrada salvo.','green');
     if(curPage==='wms-entradas')render();
@@ -43360,6 +43370,7 @@ async function wmsEntGerarDoXml(){
       await dbInsert('wms_entrada_itens',{company_id:cid,entrada_id:row.id,produto_id:it.produto_id,
         sku:it.cProd,descricao:it.xProd,qtd_prevista:it.qtd,unidade:it.unidade||null,
         valor_unitario:it.valor_unitario||null,valor_total:it.valor_total||null,item_nf:it.item_nf||null,
+        lote:it.lote||null,data_fabricacao:it.data_fabricacao||null,validade:it.validade||null,
         owner_id:cu?.id||null});
     }
     wmsEntradas=[row,...wmsEntradas];
@@ -43943,22 +43954,42 @@ function wmsConfEntItensDoPallet(palletId){
 // O documento fala em unidade FISCAL; o conferente conta em unidade de
 // CONTROLE (caixa, fardo, rolo...). O saldo é apurado em fiscal e exibido
 // em controle, para ninguém precisar de calculadora na doca.
+// v1.0.1409: quando o documento informa LOTE, o saldo é por produto + lote (a NF traz o mesmo código em várias linhas).
+// Lote conferido que não está no documento vira uma linha "fora da nota" (previsto 0) e entra como divergência.
+function wmsConfLoteN(v){ return String(v==null?'':v).trim().toUpperCase(); }
+function wmsConfLoteCtrl(controles){ var c=controles; if(typeof c==='string'){ try{ c=JSON.parse(c); }catch(e){ c={}; } } c=c||{}; for(var k in c){ if(String(k).toLowerCase().indexOf('lote')>=0) return wmsConfLoteN(c[k]); } return ''; }
 function wmsConfEntSaldo(romaneioId,entradaId,itens){
-  var col={};
+  var its=itens||[], pk=function(x){return x.produto_id||x.sku;};
+  var temLote={}, docLotes={};
+  its.forEach(function(it){ if(wmsConfLoteN(it.lote)) temLote[pk(it)]=1; });
+  its.forEach(function(it){ var k=pk(it); if(temLote[k]) (docLotes[k]=docLotes[k]||{})[wmsConfLoteN(it.lote)]=1; });
+  var col={}, fora={};
   wmsConfEntPallets(romaneioId,entradaId).forEach(function(p){
     wmsConfEntItensDoPallet(p.id).forEach(function(i){
-      var k=i.produto_id||i.sku;
-      col[k]=(col[k]||0)+(Number(i.qtd_fiscal!=null?i.qtd_fiscal:i.quantidade)||0);
+      var k=pk(i), q=(Number(i.qtd_fiscal!=null?i.qtd_fiscal:i.quantidade)||0);
+      if(docLotes[k]){
+        var l=wmsConfLoteCtrl(i.controles);
+        if(docLotes[k][l]) col[k+'|'+l]=(col[k+'|'+l]||0)+q;
+        else { var fk=k+'|'+l; if(!fora[fk]) fora[fk]={produto_id:i.produto_id,sku:i.sku,descricao:i.descricao,lote:l,q:0}; fora[fk].q+=q; }
+      } else col[k]=(col[k]||0)+q;
     });
   });
-  return (itens||[]).map(function(it){
-    var k=it.produto_id||it.sku, c=col[k]||0, prev=Number(it.qtd_prevista)||0;
-    var u=wmsProdUnidades(it.produto_id);
-    return {produto_id:it.produto_id, sku:it.sku, descricao:it.descricao,
+  var out=[], visto={};
+  its.forEach(function(it){
+    var k=pk(it), porLote=!!docLotes[k], l=wmsConfLoteN(it.lote), kk=porLote?(k+'|'+l):k, prev=Number(it.qtd_prevista)||0;
+    if(porLote&&visto[kk]){ visto[kk].previsto+=prev; visto[kk].saldo+=prev; return; }   // mesma linha produto+lote repetida: soma
+    var c=col[kk]||0, u=wmsProdUnidades(it.produto_id);
+    var row={produto_id:it.produto_id, sku:it.sku, descricao:it.descricao,
             previsto:prev, conferido:c, saldo:prev-c,
             un:u, converte:(u.fator>1 && u.unControle!==u.unFiscal),
-            lote:it.lote, data_fabricacao:it.data_fabricacao, validade:it.validade};
+            lote:it.lote, data_fabricacao:it.data_fabricacao, validade:it.validade, porLote:porLote};
+    if(porLote) visto[kk]=row;
+    out.push(row);
   });
+  Object.keys(fora).forEach(function(fk){ var f=fora[fk], u=wmsProdUnidades(f.produto_id);
+    out.push({produto_id:f.produto_id, sku:f.sku, descricao:f.descricao, previsto:0, conferido:f.q, saldo:-f.q,
+              un:u, converte:(u.fator>1 && u.unControle!==u.unFiscal), lote:f.lote||'(sem lote)', porLote:true, fora:true}); });
+  return out;
 }
 // Formata uma quantidade FISCAL na língua do conferente: "50 CX + 5 UN"
 function wmsFmtQtd(qtdFiscal,u){
@@ -43981,6 +44012,14 @@ function wmsConfEntSugereCtrl(atr,item){
   return '';
 }
 // Painel no detalhe do romaneio
+// v1.0.1409: a conferência abre com a descarga concluída; para o depositante com o parâmetro
+// "conferencia_durante_descarga", abre já com a descarga iniciada (caminhão ainda na doca)
+function wmsConfEntDescarga(romId,st){ return (wmsDescargas||[]).filter(function(d){return d.romaneio_id===romId&&d.status===st;})[0]||null; }
+function wmsConfEntLiberada(r){
+  if(!r) return false;
+  if(wmsConfEntDescarga(r.id,'concluida')) return true;
+  return !!wmsConfEntDescarga(r.id,'em_andamento') && recParam(r.depositante_id||r.cliente_id,'conferencia_durante_descarga');
+}
 function wmsConfEntResumoRom(r){
   var desc=(wmsDescargas||[]).filter(function(d){return d.romaneio_id===r.id && d.status==='concluida';})[0];
   var pallets=wmsConfEntPallets(r.id,null);
@@ -43994,7 +44033,7 @@ function wmsConfEntResumoRom(r){
     +'</div></div>'
     +'<div style="font-size:11px;color:var(--text3)">'
     +(desc?('Descarga concluída · <b>'+ref+'</b> pallet(s)/volume(s) descarregado(s) <span style="opacity:.7">(referência)</span> · <b>'+pallets.length+'</b> pallet(s) montado(s) na conferência')
-          :'A conferência fica disponível após a descarga.')
+          :(wmsConfEntLiberada(r)?'Descarga em andamento · conferência liberada com o veículo na doca. Encerre a descarga antes de encerrar a conferência.':'A conferência fica disponível após a descarga.'))
     +'</div>'
     +'<div style="font-size:11px;color:var(--text3);margin-top:5px">Abra um documento abaixo em <b>Conferir</b> para montar os pallets.</div>'
     +'</div>';
@@ -44033,11 +44072,13 @@ function wmsConfEntListaModal(){
     var apoio=conv?('<div style="font-size:9px;color:var(--text3)">'+wmsFmtQtd(val,u)+'</div>'):'';
     return '<td style="padding:6px 8px;text-align:center;font-size:12px'+(cor?';font-weight:700;color:'+cor:'')+'">'+fisc+apoio+'</td>';
   };
+  var temLoteDoc=saldo.some(function(s){return s.porLote;});   // v1.0.1409
   var saldoRows=saldo.map(function(s){
     var cor=s.saldo>0?'var(--amber-text)':(s.saldo<0?'var(--red-text)':'var(--green-text)');
-    return '<tr style="'+(s.saldo<=0?'opacity:.6':'')+'">'
+    return '<tr style="'+(s.fora?'background:var(--red-bg,#fee2e2)':(s.saldo<=0?'opacity:.6':''))+'">'
       +'<td style="padding:6px 8px;font-size:12px;font-weight:700">'+esc(s.sku||'—')+'</td>'
       +'<td style="padding:6px 8px;font-size:11px;color:var(--text2)">'+esc((s.descricao||'').slice(0,26))+'</td>'
+      +(temLoteDoc?'<td style="padding:6px 8px;font-size:12px;font-family:monospace;white-space:nowrap">'+(s.porLote?esc(s.lote||'—'):'—')+(s.fora?' <span style="font-family:inherit;font-size:10px;font-weight:700;color:var(--red-text)">fora da nota</span>':'')+'</td>':'')
       +cel(s.previsto,s.un,s.converte,'')
       +cel(s.conferido,s.un,s.converte,'')
       +(s.saldo===0?'<td style="padding:6px 8px;text-align:center;font-size:12px;font-weight:700;color:var(--green-text)">✓</td>'
@@ -44069,10 +44110,11 @@ function wmsConfEntListaModal(){
     +'<thead><tr style="background:var(--bg2)">'
     +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text3)">SKU</th>'
     +'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text3)">DESCRIÇÃO</th>'
+    +(temLoteDoc?'<th style="padding:6px 8px;text-align:left;font-size:10px;color:var(--text3)">LOTE</th>':'')
     +'<th style="padding:6px 8px;text-align:center;font-size:10px;color:var(--text3)">PREVISTO</th>'
     +'<th style="padding:6px 8px;text-align:center;font-size:10px;color:var(--text3)">CONFERIDO</th>'
     +'<th style="padding:6px 8px;text-align:center;font-size:10px;color:var(--text3)">SALDO</th>'
-    +'</tr></thead><tbody>'+(saldoRows||'<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3);font-size:12px">Documento sem itens.</td></tr>')+'</tbody></table>'
+    +'</tr></thead><tbody>'+(saldoRows||'<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text3);font-size:12px">Documento sem itens.</td></tr>')+'</tbody></table>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 5px">'
     +'<div style="font-weight:600;font-size:12px">Pallets montados <span style="font-size:11px;color:var(--text3);font-weight:400">· '+pallets.length+'</span></div>'
     +(temSaldo?'<button class="btn btn-sm btn-primary" onclick="wmsConfEntNovoPallet()">+ Abrir pallet</button>':'')
@@ -44095,11 +44137,11 @@ function wmsConfEntSaldoLinha(){
   var ctx=_confEntCtx; if(!ctx)return [];
   var base=wmsConfEntSaldo(ctx.romaneio_id,ctx.entrada_id,ctx.itens);
   return base.map(function(s){
-    var noPallet=_confEntPalletItens.filter(function(i){return (i.produto_id||i.sku)===(s.produto_id||s.sku);})
+    var noPallet=_confEntPalletItens.filter(function(i){return (i.produto_id||i.sku)===(s.produto_id||s.sku) && (!s.porLote||wmsConfLoteCtrl(i.controles)===wmsConfLoteN(s.fora&&s.lote==='(sem lote)'?'':s.lote));})
                                     .reduce(function(a,i){return a+(Number(i.qtdFiscal)||0);},0);
     return {produto_id:s.produto_id,sku:s.sku,descricao:s.descricao,previsto:s.previsto,
             un:s.un,converte:s.converte,lote:s.lote,data_fabricacao:s.data_fabricacao,
-            validade:s.validade,saldo:s.saldo-noPallet};
+            validade:s.validade,saldo:s.saldo-noPallet,porLote:s.porLote,fora:s.fora};
   });
 }
 // ═══════════════════════════════════════════════════════════════════
@@ -44430,19 +44472,22 @@ function wmsConfEntLinhaRefresh(){
   }
 }
 // identifica o produto e monta os campos de controle na própria linha
-function wmsConfEntLinhaIdentifica(codigo){
+function wmsConfEntLinhaLote(i){ var q=ge('cep-qtd'); if(q) q.value=''; wmsConfEntLinhaIdentifica((ge('cep-cod')||{}).value,i); }   // v1.0.1409
+function wmsConfEntLinhaIdentifica(codigo,pick){
   var ctx=_confEntCtx; if(!ctx)return;
   var cfg=ctx.cfg, saldo=wmsConfEntSaldoLinha().filter(function(s){return s.saldo>0;});
   var raw=wmsLeituraLimpa(codigo), cod=wmsNorm(raw);
   var hint=ge('cep-hint'), ctrl=ge('cep-ctrl');
   if(!cod){_confEntLinhaProd=null;if(ctrl)ctrl.innerHTML='';if(hint)hint.innerHTML='Informe o código para carregar os itens de controle.';return;}
-  var achou=null;
+  var achou=null, cands=[];
   for(var i=0;i<saldo.length;i++){
     var s=saldo[i];
     var prod=(wmsProdutos||[]).find(function(p){return p.id===s.produto_id;});
-    if(wmsNorm(s.sku)===cod || (prod&&wmsNorm(prod.sku)===cod)){achou=s;break;}
-    if(cfg.usaEtiq && prod && wmsEtiquetaTipoCasa(raw,prod)){achou=s;break;}
+    if(wmsNorm(s.sku)===cod || (prod&&wmsNorm(prod.sku)===cod) || (cfg.usaEtiq && prod && wmsEtiquetaTipoCasa(raw,prod))){
+      if(!cands.length || ((cands[0].produto_id||cands[0].sku)===(s.produto_id||s.sku) && s.porLote)) cands.push(s);
+    }
   }
+  achou=cands[Math.min(pick||0,Math.max(0,cands.length-1))]||null;
   if(!achou){
     _confEntLinhaProd=null; if(ctrl)ctrl.innerHTML='';
     wmsBeep(true); if(navigator.vibrate)navigator.vibrate([80,50,80]);
@@ -44466,7 +44511,9 @@ function wmsConfEntLinhaIdentifica(codigo){
       unsel.value='C'; unbox.style.display='';
     } else { unsel.innerHTML=''; unbox.style.display='none'; }
   }
-  if(hint)hint.innerHTML='<span style="color:var(--green-text);font-weight:700">✓</span> '+esc((p&&(p.descricao||p.nome))||achou.descricao||'—')
+  var _lotesHtml=(cands.length>1||achou.porLote)?('<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><span style="font-size:11px;color:var(--text2)">'+(cands.length>1?'Lotes da nota — toque no que está conferindo:':'Lote da nota:')+'</span>'
+    +cands.map(function(c,ci){ var on=c===achou; return '<button type="button" onclick="wmsConfEntLinhaLote('+ci+')" style="padding:5px 10px;border-radius:99px;font:inherit;font-size:12px;cursor:pointer;border:1px solid '+(on?'#1e3a8a':'var(--border)')+';background:'+(on?'#1e3a8a':'var(--bg)')+';color:'+(on?'#fff':'var(--text)')+'"><b>'+esc(c.lote||'sem lote')+'</b> · saldo '+c.saldo+'</button>'; }).join('')+'</div>'):'';
+  if(hint)hint.innerHTML=_lotesHtml+'<span style="color:var(--green-text);font-weight:700">✓</span> '+esc((p&&(p.descricao||p.nome))||achou.descricao||'—')
     +' · saldo <b>'+achou.saldo+' '+esc(u.unFiscal)+'</b>'
     +(achou.converte?(' <span style="color:var(--text3)">('+wmsFmtQtd(achou.saldo,u)+')</span>'):'')
     +(qp?(' · pallet <b>'+qp+' '+esc(u.unControle)+'</b>'+(ocAtual.pct?(' · '+ocAtual.pct+'% cheio, cabem <b>'+cabe+'</b>'):'')):'');
@@ -44482,8 +44529,8 @@ function wmsConfEntLinhaIdentifica(codigo){
   if(ctrl){
     var ats=wmsAtributosDoProduto(achou.produto_id);
     if(!ats.length){ctrl.innerHTML='';return;}
-    var it=(ctx.itens||[]).find(function(x){return x.produto_id===achou.produto_id;});
-    var sugere=cfg.sugestao==='codigo_qtd_ctrl';
+    var it=(ctx.itens||[]).find(function(x){return x.produto_id===achou.produto_id && (!achou.porLote||wmsConfLoteN(x.lote)===wmsConfLoteN(achou.lote));});
+    var sugere=cfg.sugestao==='codigo_qtd_ctrl'||achou.porLote;   // v1.0.1409: o lote escolhido sempre preenche o campo
     ctrl.innerHTML=ats.map(function(a){
       var v=sugere?wmsConfEntSugereCtrl(a,it):'';
       var tipo=a.tipo==='data'?'date':(a.tipo==='numero'?'number':'text');
@@ -44551,9 +44598,23 @@ function wmsConfEntLinhaIncluir(){
   var qtdFiscal=emControle?(s.converte?qtd*u.fator:qtd):qtd;
   var qtdControle=emControle?qtd:(s.converte?qtd/u.fator:qtd);
   var unTxt=emControle?(s.converte?u.unControle:u.unFiscal):u.unFiscal;
-  if(qtdFiscal>s.saldo){
-    if(ctx.cfg.bloqueia){showToast('⛔ Excede o saldo de '+s.sku+' (saldo '+wmsFmtQtd(s.saldo,u)+').','red');return;}
-    showToast('⚠ Acima do saldo de '+s.sku+' — divergência registrada.','amber');
+  // v1.0.1409: documento com lote — vale o lote informado na linha
+  if(s.porLote){
+    var _atL=wmsAtributosDoProduto(s.produto_id).filter(function(a){return String(a.nome||'').toLowerCase().indexOf('lote')>=0;})[0];
+    var _elL=_atL?ge('cep-a-'+_atL.id):null, _ltD=wmsConfLoteN(_elL?_elL.value:s.lote);
+    if(_ltD && _ltD!==wmsConfLoteN(s.lote)){
+      var _outro=wmsConfEntSaldoLinha().filter(function(x){return (x.produto_id||x.sku)===(s.produto_id||s.sku)&&x.porLote&&!x.fora&&wmsConfLoteN(x.lote)===_ltD;})[0];
+      if(_outro) s=_outro;
+      else{
+        if(ctx.cfg.bloqueia){ wmsBeep(true); showToast('⛔ O lote '+_ltD+' não está na nota para '+s.sku+'.','red'); if(_elL)_elL.focus(); return; }
+        showToast('⚠ Lote '+_ltD+' não está na nota — divergência registrada.','amber');
+        s=Object.assign({},s,{saldo:0,lote:_ltD,foraNota:true});
+      }
+    }
+  }
+  if(!s.foraNota&&qtdFiscal>s.saldo){
+    if(ctx.cfg.bloqueia){showToast('⛔ Excede o saldo de '+s.sku+(s.porLote?' lote '+(s.lote||''):'')+' (saldo '+wmsFmtQtd(s.saldo,u)+').','red');return;}
+    showToast('⚠ Acima do saldo de '+s.sku+(s.porLote?' lote '+(s.lote||''):'')+' — divergência registrada.','amber');
   }
   // TRAVA: capacidade do pallet. Vale para pallet mono OU misto — o que não
   // pode é a soma das frações passar de 1 pallet físico. Se o fabricante
@@ -44587,6 +44648,7 @@ function wmsConfEntLinhaIncluir(){
     var elA=erroData.atr?ge('cep-a-'+erroData.atr.id):null; if(elA)elA.focus();
     return;
   }
+  if(s.porLote&&!wmsConfLoteCtrl(controles)&&s.lote) controles['Lote']=String(s.lote);   // v1.0.1409: o lote da nota acompanha o item mesmo sem o controle marcado no produto
   _confEntPalletItens.push({produto_id:s.produto_id,sku:s.sku,descricao:s.descricao,
     qtd:qtd,unidade:unTxt,qtdFiscal:qtdFiscal,qtdControle:qtdControle,
     unControle:u.unControle,unFiscal:u.unFiscal,fator:s.converte?u.fator:1,controles:controles});
@@ -44712,6 +44774,7 @@ async function wmsConfEntEncerrar(){
   var ctx=_confEntCtx; if(!ctx)return;
   var pallets=wmsConfEntPallets(ctx.romaneio_id,ctx.entrada_id);
   if(!pallets.length){showToast('Monte ao menos um pallet antes de encerrar.','amber');return;}
+  if(wmsConfEntDescarga(ctx.romaneio_id,'em_andamento')&&!wmsConfEntDescarga(ctx.romaneio_id,'concluida')){ showToast('A descarga ainda está em andamento. Conclua a descarga antes de encerrar a conferência.','amber'); return; }   // v1.0.1409
   var saldo=wmsConfEntSaldo(ctx.romaneio_id,ctx.entrada_id,ctx.itens);
   var divs=saldo.filter(function(s){return Math.abs(s.saldo)>0.0001;});
   var d=(wmsEntradas||[]).find(function(x){return x.id===ctx.entrada_id;});
@@ -44727,7 +44790,7 @@ async function wmsConfEntEncerrar(){
     return;
   }
   // divergência -> pendência na fila de aprovação
-  var resumo=divs.map(function(s){return s.sku+': '+(s.saldo>0?('falta '+wmsFmtQtd(s.saldo,s.un)):('sobra '+wmsFmtQtd(Math.abs(s.saldo),s.un)));}).join(' · ');
+  var resumo=divs.map(function(s){return s.sku+(s.porLote?' lote '+(s.lote||'—'):'')+': '+(s.fora?'lote fora da nota, ':'')+(s.saldo>0?('falta '+wmsFmtQtd(s.saldo,s.un)):('sobra '+wmsFmtQtd(Math.abs(s.saldo),s.un)));}).join(' · ');
   if(!confirm('Encerrar com DIVERGÊNCIA?\n\n'+resumo+'\n\nO documento NÃO é alterado. A diferença vai para aprovação do líder, que ao aprovar a move para o endereço DIVERGENCIA do galpão.'))return;
   try{
     var cid=company?.id;
@@ -44737,7 +44800,7 @@ async function wmsConfEntEncerrar(){
       tipo:'entrada',resultado:'divergencia',auditoria_status:'pendente',
       conferente_id:cu?.id||null,conferente_nome:profile?.full_name||cu?.email||null,
       divergencias:JSON.stringify(divs.map(function(s){
-        return {sku:s.sku,descricao:s.descricao,esperado:s.previsto,conferido:s.conferido,diferenca:-s.saldo,produto_id:s.produto_id};
+        return {sku:s.sku,descricao:s.descricao,esperado:s.previsto,conferido:s.conferido,diferenca:-s.saldo,produto_id:s.produto_id,lote:s.porLote?(s.lote||null):undefined,fora_da_nota:s.fora||undefined};
       })),
       observacao:'Conferência de entrada · '+pallets.length+' pallet(s) · '+resumo,
       owner_id:cu?.id||null});
@@ -49792,7 +49855,7 @@ function wmsConfEntradaBody(){
   var base=(wmsRomaneios||[]).filter(function(r){
     if(r.company_id!==cid||r.movimento!=='entrada')return false;
     if(activeUnit&&r.unit_id!==activeUnit)return false;
-    return (wmsDescargas||[]).some(function(d){return d.romaneio_id===r.id&&d.status==='concluida';});
+    return wmsConfEntLiberada(r);   // v1.0.1409
   });
   // progresso por romaneio = itens conferidos / previstos (todos os documentos)
   var stat=function(r){
