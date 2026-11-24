@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1407 | Gerado: 2026-11-23 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1408 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1407';
+const APP_VERSION='v1.0.1408';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5466,9 +5466,15 @@ function capaDocChips(){
   return (_capaDocs.length?_capaDocs.map(function(d,i){ return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;background:var(--bg2);border:1px solid var(--border);font-size:12.5px">'+ecomEsc(capaDocRot(d))+'<a href="#" title="Retirar da capa" style="color:var(--red-text);text-decoration:none;font-weight:700" onclick="capaDocDel('+i+');return false">✕</a></span>'; }).join('')
     :'<span style="font-size:12.5px;color:var(--text3)">Nenhum documento vinculado.</span>');
 }
-function capaDocDel(i){ _capaDocs.splice(i,1); var b=ge('capa-e-docs'); if(b) b.innerHTML=capaDocChips(); }
-async function capaDocAdd(id){
-  var c=(capasProcesso||[]).find(function(x){return x.id===id;}), inp=ge('capa-e-doc-novo'), av=ge('capa-e-doc-av'); if(!c||!inp) return;
+function capaDocPinta(){ ['capa-e-docs','capa-n-docs'].forEach(function(k){ var b=ge(k); if(b) b.innerHTML=capaDocChips(); }); }
+function capaDocDel(i){ _capaDocs.splice(i,1); capaDocPinta(); }
+// v1.0.1408: mesma busca usada na abertura da capa (cliente e tipo vêm do formulário)
+function capaDocAddNova(){ capaDocAdd(null,{cliente_id:(ge('capa-cliente')||{}).value||'',tipo:(ge('capa-tipo')||{}).value||'recebimento'},'capa-n'); }
+function capaDocNovaLimpar(){ _capaDocs=[]; capaDocPinta(); var a=ge('capa-n-doc-av'); if(a) a.textContent=''; var i=ge('capa-n-doc-novo'); if(i) i.placeholder=((ge('capa-tipo')||{}).value==='expedicao')?'Número da OS ou do pedido':'Número da entrada ou da NF'; }
+async function capaDocAdd(id,ctx,pref){
+  pref=pref||'capa-e';
+  var c=ctx||(capasProcesso||[]).find(function(x){return x.id===id;}), inp=ge(pref+'-doc-novo'), av=ge(pref+'-doc-av'); if(!c||!inp) return;
+  if(!c.cliente_id){ if(av){ av.style.color='var(--red-text)'; av.textContent='Escolha o cliente primeiro.'; } return; }
   var msg=function(t,cor){ if(av){ av.style.color=cor||'var(--red-text)'; av.textContent=t; } };
   var n=String(inp.value||'').trim().replace(/^#/,'').replace(/[,()"*\\]/g,''); if(!n){ msg('Informe o número.'); return; }
   msg('Procurando…','var(--text3)');
@@ -5485,8 +5491,8 @@ async function capaDocAdd(id){
     if(!achados.length){ msg((exp?'Não achei OS/pedido':'Não achei entrada')+' "'+n+'" deste cliente.'); return; }
     if(achados.length>1){ msg('Há '+achados.length+' documentos com "'+n+'" ('+achados.map(function(a){return a.numero;}).join(', ')+'). Informe o número completo.'); return; }
     if(_capaDocs.some(function(d){ return d.id===achados[0].id; })){ msg('Este documento já está na capa.'); return; }
-    _capaDocs.push(achados[0]); inp.value=''; msg('Incluído: '+capaDocRot(achados[0])+'. Clique em Salvar para gravar.','var(--green-text,#059669)');
-    var b=ge('capa-e-docs'); if(b) b.innerHTML=capaDocChips();
+    _capaDocs.push(achados[0]); inp.value=''; msg('Incluído: '+capaDocRot(achados[0])+(ctx?'.':'. Clique em Salvar para gravar.'),'var(--green-text,#059669)');
+    capaDocPinta();
   }catch(e){ msg('Erro ao procurar: '+(e.message||e)); }
 }
 function capaBtnEditarDados(c){
@@ -5955,110 +5961,235 @@ async function capaReenviarConfirmado(id){
 // ══════════════ FINANCEIRO · ARMAZENAGEM (EXTRATO DIA A DIA) (v1.0.1071) ══════════════
 // Sai das capas conferidas (a partir de 01/10/2026): recebimento soma os pallets armazenados e o valor da NF;
 // expedição subtrai os pallets expedidos e o valor da NF. Abertura digitada só no primeiro mês.
+// v1.0.1408: tudo por OPERAÇÃO do cliente (subfatura), com ajustes manuais e histórico.
 var ARMZ_INICIO='2026-10-01';
-var armzCli='', armzMes='', armzMeses={}, _armzLoaded=false;
+// v1.0.1408: extrato POR OPERAÇÃO do cliente (cada operação é uma subfatura) + ajustes manuais com histórico
+var armzCli='', armzMes='', armzOp='', armzMeses={}, armzAjustes=[], armzOps={}, _armzLoaded=false, _armzSemAj=false;
+function armzK(cli,op,m){ return cli+'|'+(op||'')+'|'+m; }
 async function armzCarregar(){
-  try{ var r=await dbSelect('armazenagem_meses','company_id=eq.'+company.id)||[]; armzMeses={}; r.forEach(function(x){ armzMeses[x.cliente_id+'|'+x.competencia]=x; }); }catch(e){ armzMeses={}; }
+  try{ var r=await dbSelect('armazenagem_meses','company_id=eq.'+company.id)||[]; armzMeses={}; r.forEach(function(x){ armzMeses[armzK(x.cliente_id,x.operacao_id,x.competencia)]=x; }); }catch(e){ armzMeses={}; }
+  try{ armzAjustes=await dbSelectAll('armazenagem_ajustes','company_id=eq.'+company.id+'&order=data.asc,created_at.asc')||[]; _armzSemAj=false; }catch(e2){ armzAjustes=[]; _armzSemAj=true; }
   _armzLoaded=true;
 }
+// operações do cliente (clientes_contatos com tipo de operação ou tabela) — é por elas que a fatura se divide
+function armzOpsDe(cli){ return armzOps[cli]; }
+async function armzOpsCarregar(cli){
+  try{ var L=await dbSelect('clientes_contatos','cliente_id=eq.'+cli+'&order=created_at.asc')||[];
+    armzOps[cli]=L.filter(function(x){ return !!(String(x.tipo_operacao||'').trim()||x.tabela_id); }).map(function(x){ return {id:x.id,nome:String(x.tipo_operacao||x.nome||'').trim()||'Operação'}; });
+  }catch(e){ armzOps[cli]=[]; }
+}
+function armzOpNome(cli,op){ var o=(armzOpsDe(cli)||[]).find(function(x){return x.id===op;}); return o?o.nome:''; }
+// operação da capa: '' = cliente sem operações (extrato único) · null = capa sem operação válida
+function armzCapaOp(c,ops){ if(!ops||!ops.length) return ''; return ops.some(function(o){return o.id===c.responsavel_id;})?c.responsavel_id:null; }
 function armzMesAnterior(m){ var a=Number(m.slice(0,4)), mm=Number(m.slice(5,7))-1; if(mm<1){ mm=12; a--; } return a+'-'+String(mm).padStart(2,'0'); }
 function armzUltimoDia(m){ return new Date(Number(m.slice(0,4)),Number(m.slice(5,7)),0).getDate(); }
-function armzCapasDoMes(cli,m){
+function armzCapasCli(cli,m){
   var ini=m+'-01', fim=m+'-'+String(armzUltimoDia(m)).padStart(2,'0');
   return (capasProcesso||[]).filter(function(c){ return c.cliente_id===cli&&c.data_operacao&&c.data_operacao>=ARMZ_INICIO&&c.data_operacao>=ini&&c.data_operacao<=fim&&c.status!=='inutilizada'; });
 }
+function armzCapasDoMes(cli,m,op){
+  var ops=armzOpsDe(cli)||[], L=armzCapasCli(cli,m);
+  if(!ops.length) return L;
+  return L.filter(function(c){ return armzCapaOp(c,ops)===(op||''); });
+}
+function armzSemOp(cli,m){ var ops=armzOpsDe(cli)||[]; if(!ops.length) return []; return armzCapasCli(cli,m).filter(function(c){ return armzCapaOp(c,ops)===null; }); }
+// apelido digitado (responsáveis do financeiro) diferente da operação da capa — só aviso; quem manda é a operação
+function armzDiverg(cli,m){
+  var ops=armzOpsDe(cli)||[]; if(!ops.length) return [];
+  var nz=function(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); };
+  return armzCapasCli(cli,m).filter(function(c){ var op=armzCapaOp(c,ops); if(!op) return false; var R=Array.isArray(c.responsaveis)?c.responsaveis:[]; if(!R.length) return false;
+    var no=nz(armzOpNome(cli,op)); return !R.some(function(r){ return nz(r)===no; }); });
+}
+function armzAjustesDe(cli,op,m,comEstornados){
+  return (armzAjustes||[]).filter(function(a){ return a.cliente_id===cli&&String(a.operacao_id||'')===(op||'')&&String(a.data||'').slice(0,7)===m&&(comEstornados||!a.estornado_em); });
+}
 // abertura do mês: digitada (primeiro mês) ou o saldo final do mês anterior
-function armzAbertura(cli,m,prof){
-  var reg=armzMeses[cli+'|'+m];
+function armzAbertura(cli,m,prof,op){
+  var reg=armzMeses[armzK(cli,op,m)];
   if(reg&&reg.fechado&&reg.fechamento){ var f=typeof reg.fechamento==='string'?JSON.parse(reg.fechamento):reg.fechamento; if(f&&f.abertura) return {pallets:Number(f.abertura.pallets)||0,valor:Number(f.abertura.valor)||0,fonte:'fechado'}; }
   if(reg&&reg.abertura_pallets!=null) return {pallets:Number(reg.abertura_pallets)||0,valor:Number(reg.abertura_valor)||0,fonte:'digitada'};
   if(m<=ARMZ_INICIO.slice(0,7)||(prof||0)>24) return {pallets:0,valor:0,fonte:'vazia'};
-  var ant=armzCalcular(cli,armzMesAnterior(m),(prof||0)+1);
+  var ant=armzCalcular(cli,armzMesAnterior(m),(prof||0)+1,op);
   return {pallets:ant.fim.pallets,valor:ant.fim.valor,fonte:'anterior'};
 }
-function armzCalcular(cli,m,prof){
-  var ab=armzAbertura(cli,m,prof), capas=armzCapasDoMes(cli,m), ok=['conferida','faturada'];
+function armzCalcular(cli,m,prof,op){
+  var ab=armzAbertura(cli,m,prof,op), capas=armzCapasDoMes(cli,m,op), ok=['conferida','faturada'], ajs=armzAjustesDe(cli,op,m,false);
   var pend=capas.filter(function(c){return ok.indexOf(c.status)<0;});
-  var nd=armzUltimoDia(m), dias=[], saldo=ab.pallets, valor=ab.valor, pico={pallets:-Infinity,dia:null}, picoV={valor:-Infinity,dia:null}, totE=0, totS=0;
+  var nd=armzUltimoDia(m), dias=[], saldo=ab.pallets, valor=ab.valor, pico={pallets:-Infinity,dia:null}, picoV={valor:-Infinity,dia:null}, totE=0, totS=0, totAj=0, totAjV=0;
   for(var d=1;d<=nd;d++){
     var ds=m+'-'+String(d).padStart(2,'0');
     var doDia=capas.filter(function(c){return c.data_operacao===ds&&ok.indexOf(c.status)>=0;});
-    var e=0,s=0,dv=0;
+    var e=0,s=0,dv=0,aj=0,ajv=0;
     doDia.forEach(function(c){ if(c.tipo==='expedicao'){ s+=Number(c.pallets_movimentados)||0; dv-=Number(c.valor_nf)||0; } else { e+=Number(c.pallets_pbr)||0; dv+=Number(c.valor_nf)||0; } });
-    var abD=saldo; saldo=abD+e-s; valor=Math.round((valor+dv)*100)/100; totE+=e; totS+=s;
+    ajs.forEach(function(a){ if(String(a.data).slice(0,10)===ds){ aj+=Number(a.pallets)||0; ajv+=Number(a.valor)||0; } });
+    var abD=saldo; saldo=abD+e-s+aj; valor=Math.round((valor+dv+ajv)*100)/100; totE+=e; totS+=s; totAj+=aj; totAjV=Math.round((totAjV+ajv)*100)/100;
     if(saldo>pico.pallets){ pico={pallets:saldo,dia:ds}; }
     if(valor>picoV.valor){ picoV={valor:valor,dia:ds}; }
-    dias.push({dia:ds,abertura:abD,entradas:e,saidas:s,saldo:saldo,valor:valor,capas:doDia.length});
+    dias.push({dia:ds,abertura:abD,entradas:e,saidas:s,ajuste:aj,ajuste_valor:ajv,saldo:saldo,valor:valor,capas:doDia.length});
   }
-  return {abertura:ab,dias:dias,totE:totE,totS:totS,fim:{pallets:saldo,valor:valor},pico:pico,picoV:picoV,pend:pend};
+  return {abertura:ab,dias:dias,totE:totE,totS:totS,totAj:totAj,totAjV:totAjV,fim:{pallets:saldo,valor:valor},pico:pico,picoV:picoV,pend:pend,nCapas:capas.length,nAj:ajs.length};
 }
 function armzMesesOpcoes(){ var out=[], m=ARMZ_INICIO.slice(0,7), h=new Date(), atual=h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0'); if(atual<m) atual=m;
   while(m<=atual){ out.push(m); var a=Number(m.slice(0,4)), mm=Number(m.slice(5,7))+1; if(mm>12){ mm=1; a++; } m=a+'-'+String(mm).padStart(2,'0'); } return out; }
 function armzNomeMes(m){ return new Date(Number(m.slice(0,4)),Number(m.slice(5,7))-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); }
+function armzCliSel(v){ armzCli=v; armzOp=''; render(); }
+function armzOpSel(v){ armzOp=v||''; render(); }
+var ARMZ_TH='background:#1e3a8a;color:#fff;font-weight:600;font-size:11px;letter-spacing:.3px';
+function armzAvisos(cli,m){
+  var so=armzSemOp(cli,m), dv=armzDiverg(cli,m), h='';
+  var lista=function(L){ return L.slice(0,10).map(function(c){ return ecomEsc(c.numero||''); }).join(', ')+(L.length>10?'…':''); };
+  if(so.length) h+='<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+so.length+' capa(s) do mês <b>sem operação</b>: '+lista(so)+'. Elas não entram em nenhuma subfatura e o mês não fecha enquanto não forem corrigidas (abra a capa › Editar dados › Operação).</div>';
+  if(dv.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+dv.length+' capa(s) com o responsável digitado diferente da operação: '+lista(dv)+'. O extrato segue a <b>operação</b> da capa; confira se estão na subfatura certa.</div>';
+  return h;
+}
 function rFatArmazenagem(){
   if(!_fcdLoaded||!_armzLoaded){ setTimeout(async function(){ if(!_fcdLoaded) await fcdCarregar(); if(!_armzLoaded) await armzCarregar(); if(curPage==='fat-armazenagem') render(); },0); return '<div style="padding:30px;text-align:center;color:var(--text3)">Carregando…</div>'; }
   var meses=armzMesesOpcoes(); if(!armzMes||meses.indexOf(armzMes)<0) armzMes=meses[meses.length-1];
   var clis=(clientes||[]).filter(function(c){ return c.ativo!==false; }).sort(function(a,b){return String(a.nome||'').localeCompare(String(b.nome||''));});
+  var tit='<div class="page-header"><div class="page-title">Armazenagem · extrato</div></div>';
+  var ops=armzCli?armzOpsDe(armzCli):[];
+  if(armzCli&&ops===undefined){ var _c=armzCli; setTimeout(async function(){ await armzOpsCarregar(_c); if(curPage==='fat-armazenagem') render(); },0); }
+  if(ops&&ops.length===1&&!armzOp) armzOp=ops[0].id;
+  if(ops&&armzOp&&!ops.some(function(o){return o.id===armzOp;})) armzOp='';
   var cab='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
-    +'<select class="fi" style="width:auto;min-width:260px" onchange="armzCli=this.value;render()"><option value="">Selecione o cliente…</option>'+clis.map(function(c){return '<option value="'+c.id+'"'+(c.id===armzCli?' selected':'')+'>'+ecomEsc(c.nome)+'</option>';}).join('')+'</select>'
+    +'<select class="fi" style="width:auto;min-width:260px" onchange="armzCliSel(this.value)"><option value="">Selecione o cliente…</option>'+clis.map(function(c){return '<option value="'+c.id+'"'+(c.id===armzCli?' selected':'')+'>'+ecomEsc(c.nome)+'</option>';}).join('')+'</select>'
+    +(ops&&ops.length?'<select class="fi" style="width:auto;min-width:200px" onchange="armzOpSel(this.value)">'+(ops.length>1?'<option value="">Todas as operações</option>':'')+ops.map(function(o){return '<option value="'+o.id+'"'+(o.id===armzOp?' selected':'')+'>'+ecomEsc(o.nome)+'</option>';}).join('')+'</select>':'')
     +'<select class="fi" style="width:auto" onchange="armzMes=this.value;render()">'+meses.map(function(m){return '<option value="'+m+'"'+(m===armzMes?' selected':'')+'>'+armzNomeMes(m)+'</option>';}).join('')+'</select></div>';
-  if(!armzCli) return '<div class="page-header"><div class="page-title">Armazenagem · extrato</div></div>'+cab+'<div style="color:var(--text3);font-size:13px">Escolha o cliente e o mês. O extrato sai das capas conferidas, a partir de 01/10/2026.</div>';
-  var R=armzCalcular(armzCli,armzMes), reg=armzMeses[armzCli+'|'+armzMes], fechado=!!(reg&&reg.fechado);
+  if(!armzCli) return tit+cab+'<div style="color:var(--text3);font-size:13px">Escolha o cliente e o mês. O extrato sai das capas conferidas, a partir de 01/10/2026, separado por operação do cliente.</div>';
+  if(ops===undefined) return tit+cab+'<div style="padding:30px;text-align:center;color:var(--text3)">Carregando as operações do cliente…</div>';
+  var semTab=_armzSemAj?'<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">Os ajustes ainda não estão disponíveis nesta base (falta o SQL da v1.0.1408).</div>':'';
   var nf=function(v){ return Number(v||0).toLocaleString('pt-BR'); }, nv=function(v){ return 'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var sn=function(v){ v=Number(v||0); return v?((v>0?'+':'−')+nf(Math.abs(v))):'0'; };
+  // ── visão "Todas as operações": uma linha por subfatura
+  if(ops.length>1&&!armzOp){
+    var col0='grid-template-columns:1.3fr repeat(6,1fr) 1.5fr 1fr', T={ab:0,e:0,s:0,aj:0,f:0,v:0};
+    var h0=tit+cab+semTab+armzAvisos(armzCli,armzMes)
+      +'<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+col0+';gap:8px;padding:8px 12px;text-align:right;'+ARMZ_TH+'"><span style="text-align:left">OPERAÇÃO</span><span>ABERTURA</span><span>(+) ENTRADAS</span><span>(−) SAÍDAS</span><span>AJUSTES</span><span>SALDO FINAL</span><span>PICO</span><span>VALOR EM ESTOQUE</span><span style="text-align:center">SITUAÇÃO</span></div>';
+    ops.forEach(function(o){
+      var R=armzCalcular(armzCli,armzMes,0,o.id), reg=armzMeses[armzK(armzCli,o.id,armzMes)], fech=!!(reg&&reg.fechado);
+      var vazio=R.abertura.fonte==='vazia'&&!R.nCapas&&!R.nAj;
+      var sit=fech?['fechado','var(--green-bg)','var(--green-text)']:(vazio?['sem movimento','var(--bg2)','var(--text3)']:(R.abertura.fonte==='vazia'?['sem abertura','var(--red-bg,#fee2e2)','var(--red-text)']:['aberto','var(--bg2)','var(--text2)']));
+      T.ab+=R.abertura.pallets; T.e+=R.totE; T.s+=R.totS; T.aj+=R.totAj; T.f+=R.fim.pallets; T.v=Math.round((T.v+R.fim.valor)*100)/100;
+      h0+='<div style="display:grid;'+col0+';gap:8px;padding:7px 12px;border-top:1px solid var(--border);text-align:right;font-size:12.5px'+(vazio?';color:var(--text3)':'')+'">'
+        +'<span style="text-align:left"><a href="#" onclick="armzOpSel(\''+o.id+'\');return false" style="color:var(--blue-text);font-weight:600;text-decoration:none">'+ecomEsc(o.nome)+'</a></span>'
+        +'<span>'+nf(R.abertura.pallets)+'</span><span>'+nf(R.totE)+'</span><span>'+nf(R.totS)+'</span><span>'+sn(R.totAj)+'</span><span><b>'+nf(R.fim.pallets)+'</b></span>'
+        +'<span>'+(vazio?'—':nf(R.pico.pallets))+'</span><span>'+nv(R.fim.valor)+'</span>'
+        +'<span style="text-align:center"><span style="padding:2px 9px;border-radius:99px;font-size:11.5px;background:'+sit[1]+';color:'+sit[2]+'">'+sit[0]+'</span></span></div>';
+    });
+    h0+='<div style="display:grid;'+col0+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">TOTAL DO CLIENTE</span><span>'+nf(T.ab)+'</span><span>'+nf(T.e)+'</span><span>'+nf(T.s)+'</span><span>'+sn(T.aj)+'</span><span>'+nf(T.f)+'</span><span>—</span><span>'+nv(T.v)+'</span><span></span></div></div>'
+      +'<div style="font-size:12px;color:var(--text3);margin-top:8px">Cada operação é uma subfatura, com abertura, pico e fechamento próprios. O pico não é somado entre operações. Clique na operação para ver o dia a dia, lançar a abertura e os ajustes.</div>';
+    return h0;
+  }
+  // ── visão de uma operação (ou do cliente inteiro, quando ele não tem operações cadastradas)
+  var op=ops.length?armzOp:'', opNome=op?armzOpNome(armzCli,op):'';
+  var R=armzCalcular(armzCli,armzMes,0,op), reg=armzMeses[armzK(armzCli,op,armzMes)], fechado=!!(reg&&reg.fechado);
   var podeAbertura=!fechado&&(R.abertura.fonte==='digitada'||R.abertura.fonte==='vazia'||armzMes===ARMZ_INICIO.slice(0,7));
-  var h='<div class="page-header"><div class="page-title">Armazenagem · extrato</div></div>'+cab;
-  h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:10px;font-size:13px">Saldo de abertura em '+new Date(armzMes+'-01T00:00').toLocaleDateString('pt-BR')+': '
-    +(podeAbertura?'<input id="armz-ab-p" class="fi" style="width:110px;display:inline-block;text-align:right" value="'+(R.abertura.pallets||'')+'" placeholder="pallets"> pallets · valor <input id="armz-ab-v" class="fi" style="width:170px;display:inline-block;text-align:right" value="'+(R.abertura.valor?Number(R.abertura.valor).toLocaleString('pt-BR',{minimumFractionDigits:2}):'')+'" placeholder="R$"> <button class="btn btn-sm" onclick="armzSalvarAbertura()">Salvar abertura</button>'
+  var h=tit+cab+semTab+armzAvisos(armzCli,armzMes);
+  h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:10px;font-size:13px">Saldo de abertura'+(opNome?' da <b>'+ecomEsc(opNome)+'</b>':'')+' em '+new Date(armzMes+'-01T00:00').toLocaleDateString('pt-BR')+': '
+    +(podeAbertura?'<input id="armz-ab-p" class="fi" style="width:110px;display:inline-block;text-align:right" value="'+(R.abertura.pallets||'')+'" placeholder="pallets"> pallets · valor <input id="armz-ab-v" class="fi" style="width:170px;display:inline-block;text-align:right" value="'+(R.abertura.valor?Number(R.abertura.valor).toLocaleString('pt-BR',{minimumFractionDigits:2}):'')+'" placeholder="R$ em estoque"> <button class="btn btn-sm" onclick="armzSalvarAbertura()">Salvar abertura</button>'+(reg&&reg.abertura_em?'<span style="color:var(--text3);font-size:11.5px">lançada por '+ecomEsc(reg.abertura_por_nome||'')+' em '+new Date(reg.abertura_em).toLocaleString('pt-BR')+'</span>':'')
       :'<b>'+nf(R.abertura.pallets)+'</b> pallets · <b>'+nv(R.abertura.valor)+'</b> <span style="color:var(--text3);font-size:12px">('+(R.abertura.fonte==='anterior'?'saldo final do mês anterior':(R.abertura.fonte==='fechado'?'mês fechado':'digitada'))+')</span>')
     +(fechado?'<span style="margin-left:auto;padding:4px 10px;border-radius:99px;background:var(--green-bg);color:var(--green-text);font-weight:600;font-size:12px">🔒 Mês fechado</span>':'')+'</div>';
-  if(R.pend.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+R.pend.length+' capa(s) do mês ainda não conferida(s) e fora do extrato: '+R.pend.slice(0,8).map(function(c){return c.numero+' ('+((CAPA_STATUS[c.status]||{}).l||c.status)+')';}).join(', ')+'. O mês só fecha com todas conferidas.</div>';
-  var col='grid-template-columns:90px 1fr 1fr 1fr 1fr 1.4fr';
-  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+col+';gap:8px;padding:8px 12px;font-size:10.5px;color:var(--text3);background:var(--bg2);text-align:right"><span style="text-align:left">DIA</span><span>SALDO ABERTURA</span><span>(+) ENTRADAS</span><span>(−) SAÍDAS</span><span>SALDO FINAL</span><span>VALOR EM ESTOQUE</span></div>';
+  if(R.pend.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+R.pend.length+' capa(s) do mês ainda não conferida(s) e fora do extrato: '+R.pend.slice(0,8).map(function(c){return c.numero+' ('+((CAPA_STATUS[c.status]||{}).l||c.status)+')';}).join(', ')+(R.pend.length>8?'…':'')+'</div>';
+  var col='grid-template-columns:90px 1fr 1fr 1fr 1fr 1fr 1.4fr';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+col+';gap:8px;padding:8px 12px;text-align:right;'+ARMZ_TH+'"><span style="text-align:left">DIA</span><span>SALDO ABERTURA</span><span>(+) ENTRADAS</span><span>(−) SAÍDAS</span><span>AJUSTES</span><span>SALDO FINAL</span><span>VALOR EM ESTOQUE</span></div>';
   R.dias.forEach(function(d){ var pk=d.dia===R.pico.dia, sem=['dom','sáb'].indexOf(new Date(d.dia+'T00:00').toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''))>=0;
-    h+='<div style="display:grid;'+col+';gap:8px;padding:6px 12px;border-top:1px solid var(--border);text-align:right;font-size:12.5px'+(pk?';background:var(--blue-bg);color:var(--blue-text);font-weight:600':(sem&&!d.capas?';color:var(--text3)':''))+'">'
-      +'<span style="text-align:left">'+new Date(d.dia+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',weekday:'short'})+'</span><span>'+nf(d.abertura)+'</span><span>'+(d.entradas?nf(d.entradas):'0')+'</span><span>'+(d.saidas?nf(d.saidas):'0')+'</span><span>'+nf(d.saldo)+(pk?' ▲':'')+'</span><span>'+nv(d.valor)+(d.dia===R.picoV.dia?' ▲':'')+'</span></div>'; });
-  h+='<div style="display:grid;'+col+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">MÊS</span><span>'+nf(R.abertura.pallets)+'</span><span>'+nf(R.totE)+'</span><span>'+nf(R.totS)+'</span><span>'+nf(R.fim.pallets)+'</span><span>'+nv(R.fim.valor)+'</span></div></div>';
+    h+='<div style="display:grid;'+col+';gap:8px;padding:6px 12px;border-top:1px solid var(--border);text-align:right;font-size:12.5px'+(pk?';background:var(--blue-bg);color:var(--blue-text);font-weight:600':(sem&&!d.capas&&!d.ajuste?';color:var(--text3)':''))+'">'
+      +'<span style="text-align:left">'+new Date(d.dia+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',weekday:'short'})+'</span><span>'+nf(d.abertura)+'</span><span>'+(d.entradas?nf(d.entradas):'0')+'</span><span>'+(d.saidas?nf(d.saidas):'0')+'</span><span>'+sn(d.ajuste)+'</span><span>'+nf(d.saldo)+(pk?' ▲':'')+'</span><span>'+nv(d.valor)+(d.dia===R.picoV.dia?' ▲':'')+'</span></div>'; });
+  h+='<div style="display:grid;'+col+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">MÊS</span><span>'+nf(R.abertura.pallets)+'</span><span>'+nf(R.totE)+'</span><span>'+nf(R.totS)+'</span><span>'+sn(R.totAj)+'</span><span>'+nf(R.fim.pallets)+'</span><span>'+nv(R.fim.valor)+'</span></div></div>';
+  // ajustes do mês (histórico: nada é apagado; estorno fica registrado)
+  var AJ=armzAjustesDe(armzCli,op,armzMes,true);
+  h+='<div style="display:flex;align-items:center;gap:10px;margin:14px 0 6px"><b style="font-size:13px">Ajustes do mês</b><span style="font-size:12px;color:var(--text3)">créditos e débitos vêm das capas; aqui entram só correções, sempre com motivo</span>'
+    +(!fechado&&!_armzSemAj?'<button class="btn btn-sm" style="margin-left:auto" onclick="armzAjusteNovo()">＋ Ajuste</button>':'')+'</div>';
+  if(AJ.length){ var ca='grid-template-columns:90px 90px 150px 1fr 190px 90px';
+    h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+ca+';gap:8px;padding:7px 12px;'+ARMZ_TH+'"><span>DATA</span><span style="text-align:right">PALLETS</span><span style="text-align:right">VALOR</span><span>MOTIVO</span><span>LANÇADO POR</span><span></span></div>'
+      +AJ.map(function(a){ var est=!!a.estornado_em;
+        return '<div style="display:grid;'+ca+';gap:8px;padding:7px 12px;border-top:1px solid var(--border);font-size:12.5px'+(est?';color:var(--text3)':'')+'"><span'+(est?' style="text-decoration:line-through"':'')+'>'+new Date(String(a.data).slice(0,10)+'T00:00').toLocaleDateString('pt-BR')+'</span>'
+          +'<span style="text-align:right'+(est?';text-decoration:line-through':'')+'">'+sn(a.pallets)+'</span><span style="text-align:right'+(est?';text-decoration:line-through':'')+'">'+(Number(a.valor)?((Number(a.valor)>0?'+':'−')+nv(Math.abs(a.valor))):'—')+'</span>'
+          +'<span style="overflow-wrap:anywhere">'+ecomEsc(a.motivo||'')+(est?'<div style="font-size:11.5px">Estornado por '+ecomEsc(a.estornado_por_nome||'')+' em '+new Date(a.estornado_em).toLocaleString('pt-BR')+'</div>':'')+'</span>'
+          +'<span>'+ecomEsc(a.criado_por_nome||'')+'<div style="font-size:11.5px;color:var(--text3)">'+(a.created_at?new Date(a.created_at).toLocaleString('pt-BR'):'')+'</div></span>'
+          +'<span style="text-align:right">'+(!est&&!fechado?'<button class="btn btn-sm" style="font-size:11px" onclick="armzAjusteEstornar(\''+a.id+'\')">Estornar</button>':'')+'</span></div>'; }).join('')+'</div>';
+  } else h+='<div style="font-size:12.5px;color:var(--text3)">Nenhum ajuste lançado neste mês.</div>';
   h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">'
     +'<span style="padding:8px 12px;border-radius:10px;background:var(--blue-bg);color:var(--blue-text);font-size:13px">Pico: <b>'+nf(R.pico.pallets)+'</b> pallets em '+(R.pico.dia?new Date(R.pico.dia+'T00:00').toLocaleDateString('pt-BR'):'—')+' · Pico de valor: <b>'+nv(R.picoV.valor)+'</b> em '+(R.picoV.dia?new Date(R.picoV.dia+'T00:00').toLocaleDateString('pt-BR'):'—')+'</span>'
     +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn" onclick="armzPdf()">📄 Extrato (PDF)</button>'
-    +(fechado?((profile&&profile.role==='admin')?'<button class="btn" onclick="armzReabrir()">🔓 Reabrir o mês</button>':''):'<button class="btn btn-p" onclick="armzFechar()">🔒 Fechar o mês</button>')+'</span></div>';
+    +(fechado?((profile&&profile.role==='admin')?'<button class="btn" onclick="armzReabrir()">🔓 Reabrir o mês</button>':''):'<button class="btn btn-p" onclick="armzFechar()">🔒 Fechar o mês'+(opNome?' · '+ecomEsc(opNome):'')+'</button>')+'</span></div>';
   return h;
 }
-function armzNum(v){ var s=String(v==null?'':v).replace(/[R$\s]/g,''); if(/,\d{1,2}$/.test(s)) s=s.replace(/\./g,'').replace(',','.'); else s=s.replace(/[.,](?=\d{3}\b)/g,''); var n=Number(s); return isNaN(n)?null:n; }
+function armzNum(v){ var s=String(v==null?'':v).replace(/[R$\s]/g,'').replace(/−/g,'-'); if(s==='') return null; if(/,\d{1,2}$/.test(s)) s=s.replace(/\./g,'').replace(',','.'); else s=s.replace(/[.,](?=\d{3}\b)/g,''); var n=Number(s); return isNaN(n)?null:n; }
+function armzOpAtual(){ var ops=armzOpsDe(armzCli)||[]; return ops.length?armzOp:''; }
+function armzQuem(){ return (profile&&profile.full_name)||(cu&&cu.email)||''; }
 async function armzGravar(obj){
-  var r=await sbFetch('POST','/rest/v1/armazenagem_meses?on_conflict=company_id,cliente_id,competencia',Object.assign({company_id:company.id,cliente_id:armzCli,competencia:armzMes},obj),tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+  var op=armzOpAtual();
+  var r=await sbFetch('POST','/rest/v1/armazenagem_meses?on_conflict=company_id,cliente_id,operacao_id,competencia',Object.assign({company_id:company.id,cliente_id:armzCli,operacao_id:op,competencia:armzMes},obj),tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
   if(!r.ok) throw new Error((r.data&&r.data.message)||('HTTP '+r.status));
-  var row=Array.isArray(r.data)?r.data[0]:r.data; if(row) armzMeses[armzCli+'|'+armzMes]=row;
+  var row=Array.isArray(r.data)?r.data[0]:r.data; if(row) armzMeses[armzK(armzCli,op,armzMes)]=row;
 }
 async function armzSalvarAbertura(){
   var p=armzNum(ge('armz-ab-p').value), v=armzNum(ge('armz-ab-v').value);
-  if(p==null||v==null){ alert('Informe os pallets e o valor da abertura.'); return; }
-  try{ await armzGravar({abertura_pallets:p,abertura_valor:v}); showToast('Saldo de abertura salvo.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+  if(p==null||v==null){ showToast('Informe os pallets e o valor da abertura.','amber'); return; }
+  var reg=armzMeses[armzK(armzCli,armzOpAtual(),armzMes)], hist=(reg&&Array.isArray(reg.abertura_hist))?reg.abertura_hist.slice():[];
+  if(reg&&reg.abertura_pallets!=null&&(Number(reg.abertura_pallets)!==p||Number(reg.abertura_valor)!==v)) hist.push({pallets:Number(reg.abertura_pallets),valor:Number(reg.abertura_valor),por:reg.abertura_por_nome||'',em:reg.abertura_em||null,trocado_por:armzQuem(),trocado_em:new Date().toISOString()});
+  try{ await armzGravar({abertura_pallets:p,abertura_valor:v,abertura_por_nome:armzQuem(),abertura_em:new Date().toISOString(),abertura_hist:hist}); showToast('Saldo de abertura salvo.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+function armzAjusteNovo(){
+  var hoje=hojeLocalISO(), ini=armzMes+'-01', fim=armzMes+'-'+String(armzUltimoDia(armzMes)).padStart(2,'0'), d=(hoje>=ini&&hoje<=fim)?hoje:fim, opNome=armzOpNome(armzCli,armzOpAtual());
+  portModal('Novo ajuste'+(opNome?' · '+ecomEsc(opNome):''),
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'
+    +'<div><label class="fl">Data *</label><input class="fi" type="date" id="armz-aj-data" min="'+ini+'" max="'+fim+'" value="'+d+'"></div>'
+    +'<div><label class="fl">Pallets (+ ou −)</label><input class="fi" id="armz-aj-p" style="text-align:right" placeholder="ex.: -3"></div>'
+    +'<div><label class="fl">Valor em estoque (+ ou −)</label><input class="fi" id="armz-aj-v" style="text-align:right" placeholder="ex.: -12.500,00"></div>'
+    +'<div style="grid-column:1/-1"><label class="fl">Motivo *</label><textarea class="fi" id="armz-aj-m" rows="3" maxlength="400" placeholder="Por que o saldo está sendo corrigido"></textarea></div></div>'
+    +'<div class="lsub" style="color:var(--text3);margin-top:8px">Use sinal de menos para reduzir o saldo. O ajuste entra no dia informado e fica no histórico com o seu nome; se estiver errado, estorne e lance outro.</div>',
+    'armzAjusteSalvar()',{saveLabel:'Lançar ajuste',width:'560px'});
+}
+async function armzAjusteSalvar(){
+  var d=String((ge('armz-aj-data')||{}).value||''), p=armzNum((ge('armz-aj-p')||{}).value), v=armzNum((ge('armz-aj-v')||{}).value), m=String((ge('armz-aj-m')||{}).value||'').replace(/\s+/g,' ').trim();
+  if(!d||d.slice(0,7)!==armzMes){ portErr('A data precisa ser de '+armzNomeMes(armzMes)+'.'); return; }
+  if(!(p||0)&&!(v||0)){ portErr('Informe os pallets e/ou o valor do ajuste.'); return; }
+  if(m.length<5){ portErr('Descreva o motivo do ajuste.'); return; }
+  portSaving();
+  try{ var row=await dbInsert('armazenagem_ajustes',{company_id:company.id,cliente_id:armzCli,operacao_id:armzOpAtual(),data:d,pallets:p||0,valor:v||0,motivo:m,criado_por:(cu&&cu.id)||null,criado_por_nome:armzQuem()});
+    row=Array.isArray(row)?row[0]:row; if(row) armzAjustes.push(row); else await armzCarregar();
+    portClose(); showToast('Ajuste lançado.','green'); render();
+  }catch(e){ portErr('Erro: '+(e.message||e)); }
+}
+async function armzAjusteEstornar(id){
+  var a=(armzAjustes||[]).find(function(x){return x.id===id;}); if(!a) return;
+  if(!(await vConfirmar('Estornar ajuste','O ajuste de '+new Date(String(a.data).slice(0,10)+'T00:00').toLocaleDateString('pt-BR')+' deixa de contar no extrato, mas continua no histórico como estornado.','Estornar','var(--red-text)'))) return;
+  try{ var up={estornado_em:new Date().toISOString(),estornado_por:(cu&&cu.id)||null,estornado_por_nome:armzQuem()}; await dbUpdate('armazenagem_ajustes',id,up); Object.assign(a,up); showToast('Ajuste estornado.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 async function armzFechar(){
-  var R=armzCalcular(armzCli,armzMes);
-  if(R.pend.length){ alert('Há '+R.pend.length+' capa(s) do mês ainda não conferida(s). Confira antes de fechar.'); return; }
-  if(!confirm('Fechar '+armzNomeMes(armzMes)+'? Os números ficam congelados (pico '+R.pico.pallets+' pallets).')) return;
-  try{ await armzGravar({fechado:true,fechado_em:new Date().toISOString(),fechado_por:cu&&cu.id,fechamento:{abertura:R.abertura,entradas:R.totE,saidas:R.totS,fim:R.fim,pico:R.pico,pico_valor:R.picoV,dias:R.dias}}); showToast('Mês fechado.','green'); render(); }catch(e){ alert('Erro: '+(e.message||e)); }
+  var op=armzOpAtual(), R=armzCalcular(armzCli,armzMes,0,op), so=armzSemOp(armzCli,armzMes);
+  if(so.length){ showToast('Há '+so.length+' capa(s) do mês sem operação. Corrija antes de fechar.','amber'); return; }
+  if(R.pend.length){ showToast('Há '+R.pend.length+' capa(s) do mês ainda não conferida(s). Confira antes de fechar.','amber'); return; }
+  if(!(await vConfirmar('Fechar o mês','Fechar '+armzNomeMes(armzMes)+(op?' da operação <b>'+ecomEsc(armzOpNome(armzCli,op))+'</b>':'')+'? Os números ficam congelados (pico de '+R.pico.pallets+' pallets).','Fechar o mês'))) return;
+  try{ await armzGravar({fechado:true,fechado_em:new Date().toISOString(),fechado_por:cu&&cu.id,fechamento:{abertura:R.abertura,entradas:R.totE,saidas:R.totS,ajustes:R.totAj,ajustes_valor:R.totAjV,fim:R.fim,pico:R.pico,pico_valor:R.picoV,dias:R.dias}}); showToast('Mês fechado.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
-async function armzReabrir(){ if(!confirm('Reabrir o mês? O extrato volta a ser calculado das capas.')) return; try{ await armzGravar({fechado:false}); render(); }catch(e){ alert('Erro: '+(e.message||e)); } }
+async function armzReabrir(){ if(!(await vConfirmar('Reabrir o mês','O extrato volta a ser calculado das capas e dos ajustes.','Reabrir'))) return; try{ await armzGravar({fechado:false}); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); } }
 async function armzPdf(){
-  if(typeof pdfMake==='undefined'){ alert('Biblioteca de PDF ainda carregando, tente de novo.'); return; }
-  var R=armzCalcular(armzCli,armzMes), cli=(clientes||[]).find(function(c){return c.id===armzCli;})||{};
-  var reg=armzMeses[armzCli+'|'+armzMes]; if(reg&&reg.fechado&&reg.fechamento){ var f=typeof reg.fechamento==='string'?JSON.parse(reg.fechamento):reg.fechamento; if(f&&f.dias){ R=Object.assign({},R,{abertura:f.abertura,totE:f.entradas,totS:f.saidas,fim:f.fim,pico:f.pico,picoV:f.pico_valor,dias:f.dias}); } }
+  if(typeof pdfMake==='undefined'){ showToast('Biblioteca de PDF ainda carregando, tente de novo.','amber'); return; }
+  var op=armzOpAtual(), opNome=op?armzOpNome(armzCli,op):'';
+  var R=armzCalcular(armzCli,armzMes,0,op), cli=(clientes||[]).find(function(c){return c.id===armzCli;})||{};
+  var reg=armzMeses[armzK(armzCli,op,armzMes)]; if(reg&&reg.fechado&&reg.fechamento){ var f=typeof reg.fechamento==='string'?JSON.parse(reg.fechamento):reg.fechamento; if(f&&f.dias){ R=Object.assign({},R,{abertura:f.abertura,totE:f.entradas,totS:f.saidas,totAj:f.ajustes||0,fim:f.fim,pico:f.pico,picoV:f.pico_valor,dias:f.dias}); } }
   var nf=function(v){ return Number(v||0).toLocaleString('pt-BR'); }, nv=function(v){ return 'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var dt=function(d){ return d?new Date(d+'T00:00').toLocaleDateString('pt-BR'):'—'; };
-  var body=[[{text:'Dia',bold:true},{text:'Saldo abertura',bold:true,alignment:'right'},{text:'(+) Entradas',bold:true,alignment:'right'},{text:'(−) Saídas',bold:true,alignment:'right'},{text:'Saldo final',bold:true,alignment:'right'},{text:'Valor em estoque',bold:true,alignment:'right'}]];
-  R.dias.forEach(function(d){ var pk=d.dia===R.pico.dia; body.push([dt(d.dia),{text:nf(d.abertura),alignment:'right'},{text:nf(d.entradas),alignment:'right'},{text:nf(d.saidas),alignment:'right'},{text:nf(d.saldo)+(pk?' ▲':''),alignment:'right',bold:pk},{text:nv(d.valor),alignment:'right',bold:d.dia===R.picoV.dia}]); });
-  body.push([{text:'MÊS',bold:true},{text:nf(R.abertura.pallets),alignment:'right',bold:true},{text:nf(R.totE),alignment:'right',bold:true},{text:nf(R.totS),alignment:'right',bold:true},{text:nf(R.fim.pallets),alignment:'right',bold:true},{text:nv(R.fim.valor),alignment:'right',bold:true}]);
+  var sn=function(v){ v=Number(v||0); return v?((v>0?'+':'-')+nf(Math.abs(v))):'0'; };
+  var dt=function(d){ return d?new Date(String(d).slice(0,10)+'T00:00').toLocaleDateString('pt-BR'):'—'; };
+  var hc=function(t,al){ return {text:t,bold:true,color:'#ffffff',alignment:al||'left'}; };
+  var body=[[hc('Dia'),hc('Saldo abertura','right'),hc('(+) Entradas','right'),hc('(−) Saídas','right'),hc('Ajustes','right'),hc('Saldo final','right'),hc('Valor em estoque','right')]];
+  R.dias.forEach(function(d){ var pk=d.dia===R.pico.dia; body.push([dt(d.dia),{text:nf(d.abertura),alignment:'right'},{text:nf(d.entradas),alignment:'right'},{text:nf(d.saidas),alignment:'right'},{text:sn(d.ajuste),alignment:'right'},{text:nf(d.saldo)+(pk?' ▲':''),alignment:'right',bold:pk},{text:nv(d.valor),alignment:'right',bold:d.dia===R.picoV.dia}]); });
+  body.push([{text:'MÊS',bold:true},{text:nf(R.abertura.pallets),alignment:'right',bold:true},{text:nf(R.totE),alignment:'right',bold:true},{text:nf(R.totS),alignment:'right',bold:true},{text:sn(R.totAj),alignment:'right',bold:true},{text:nf(R.fim.pallets),alignment:'right',bold:true},{text:nv(R.fim.valor),alignment:'right',bold:true}]);
+  var AJ=armzAjustesDe(armzCli,op,armzMes,false), extra=[];
+  if(AJ.length){ var ba=[[hc('Data'),hc('Pallets','right'),hc('Valor','right'),hc('Motivo'),hc('Lançado por')]];
+    AJ.forEach(function(a){ ba.push([dt(a.data),{text:sn(a.pallets),alignment:'right'},{text:Number(a.valor)?((Number(a.valor)>0?'+':'-')+nv(Math.abs(a.valor))):'—',alignment:'right'},a.motivo||'',a.criado_por_nome||'']); });
+    extra=[{text:'Ajustes do mês',bold:true,margin:[0,12,0,4]},{table:{headerRows:1,widths:[55,50,80,'*',110],body:ba},layout:{fillColor:function(i){ return i===0?'#1e3a8a':null; },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}}]; }
   var def={pageSize:'A4',pageMargins:[28,30,28,30],defaultStyle:{fontSize:8.5},content:[
-    {text:'Extrato de armazenagem',fontSize:15,bold:true},{text:(cli.nome||'')+' · '+armzNomeMes(armzMes),fontSize:11,margin:[0,2,0,10]},
-    {table:{headerRows:1,widths:[60,'*','*','*','*',110],body:body},layout:{fillColor:function(i){ return i===0?'#e5e7eb':(i===body.length-1?'#f3f4f6':null); },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}},
+    {text:'Extrato de armazenagem',fontSize:15,bold:true},{text:(cli.nome||'')+(opNome?' · operação '+opNome:'')+' · '+armzNomeMes(armzMes),fontSize:11,margin:[0,2,0,10]},
+    {table:{headerRows:1,widths:[55,'*','*','*','*','*',105],body:body},layout:{fillColor:function(i){ return i===0?'#1e3a8a':(i===body.length-1?'#f3f4f6':null); },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}},
     {text:'Pico de armazenagem: '+nf(R.pico.pallets)+' pallets em '+dt(R.pico.dia),bold:true,margin:[0,10,0,2]},
     {text:'Pico de valor em estoque: '+nv(R.picoV.valor)+' em '+dt(R.picoV.dia),bold:true}
-  ]};
+  ].concat(extra)};
   var url=await capaPdfBlobUrl(def);
-  capaPdfViewer(url,'Extrato de armazenagem · '+(cli.nome||'')+' · '+armzNomeMes(armzMes),'Demonstração para autorização do faturamento','extrato-armazenagem-'+armzMes+'.pdf');
+  capaPdfViewer(url,'Extrato de armazenagem · '+(cli.nome||'')+(opNome?' · '+opNome:'')+' · '+armzNomeMes(armzMes),'Demonstração para autorização do faturamento','extrato-armazenagem-'+(opNome?opNome.replace(/[^A-Za-z0-9]+/g,'_')+'-':'')+armzMes+'.pdf');
 }
 // ══════════════ CP · LOMBADA DE MEDIÇÃO (v1.0.1072) ══════════════
 function cpMedPendente(cp){ return !!(cp&&cp.depende_medicao&&cp.medicao_status!=='aprovada'); }
@@ -57855,18 +57986,18 @@ function capaNovaModal(){
   // v1.0.1399: a capa grava a unidade — vem da unidade ativa; em "Consolidado" é preciso escolher
   const _uns=capaUnidades(), _unIni=activeUnit||(_uns.length===1?_uns[0].id:'');
   const unitOpts='<option value="">Selecione...</option>'+_uns.map(u=>`<option value="${u.id}"${u.id===_unIni?' selected':''}>${ecomEsc(u.name||'')}</option>`).join('');
-  window._capaCtt=null;
+  window._capaCtt=null; _capaDocs=[];   // v1.0.1408
   portModal('Nova Capa de Processo',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><label class="fl">Tipo *</label>
-        <select class="fi" id="capa-tipo" onchange="var l=ge('capa-nf-lbl'); if(l) l.textContent=this.value==='expedicao'?'NF de saída':'NF de entrada';">
+        <select class="fi" id="capa-tipo" onchange="var l=ge('capa-nf-lbl'); if(l) l.textContent=this.value==='expedicao'?'NF de saída':'NF de entrada'; capaDocNovaLimpar();">
           <option value="recebimento">Recebimento (entrada)</option>
           <option value="expedicao">Expedição (saída)</option>
         </select></div>
       <div><label class="fl">Unidade *</label>
         <select class="fi" id="capa-unit" onchange="capaCarregarContatos((ge('capa-cliente')||{}).value)">${unitOpts}</select></div>
       <div style="grid-column:1/-1"><label class="fl">Cliente *</label>
-        <select class="fi" id="capa-cliente" onchange="capaCarregarContatos(this.value)"><option value="">Selecione...</option>${cliOpts}</select></div>
+        <select class="fi" id="capa-cliente" onchange="capaCarregarContatos(this.value);capaDocNovaLimpar()"><option value="">Selecione...</option>${cliOpts}</select></div>
       <div style="grid-column:1/-1"><label class="fl">Operação / Contato</label>
         <select class="fi" id="capa-operacao"><option value="">Selecione o cliente primeiro...</option></select>
         <div id="capa-pagador-info" style="margin-top:4px"></div>
@@ -57884,6 +58015,14 @@ function capaNovaModal(){
       <div><label class="fl">Lacre</label><input class="fi" id="capa-lacre"></div>
       <div><label class="fl">Tipo de veículo</label>
         <select class="fi" id="capa-veiculo"><option value="">—</option>${CAPA_VEICULOS.map(v=>`<option value="${v}">${v}</option>`).join('')}</select></div>
+      <div style="grid-column:1/-1;border:1px solid var(--blue-text);border-radius:10px;padding:10px 12px"><label class="fl">Documentos da capa (opcional)</label>
+        <div id="capa-n-docs" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px">${capaDocChips()}</div>
+        <div style="display:flex;gap:8px"><input class="fi" id="capa-n-doc-novo" placeholder="Número da entrada ou da NF" onkeydown="if(event.key==='Enter'){event.preventDefault();capaDocAddNova();}"><button type="button" class="btn" onclick="capaDocAddNova()">Incluir</button></div>
+        <div id="capa-n-doc-av" style="font-size:12px;margin-top:6px;min-height:16px"></div></div>
+      <div style="grid-column:1/-1;border:1px solid var(--border);border-radius:10px;padding:10px 12px"><label class="fl">Observação (opcional)</label>
+        <div style="display:grid;grid-template-columns:200px 1fr;gap:8px;margin-top:6px">
+          <select class="fi" id="capa-n-obs-motivo"><option value="">Motivo…</option>${CAPA_OBS_MOTIVOS.map(m=>`<option>${m}</option>`).join('')}</select>
+          <input class="fi" id="capa-n-obs-txt" maxlength="600" placeholder="Descreva a ocorrência"></div></div>
     </div>
     <div class="lsub" style="color:var(--text3);margin-top:10px">Os serviços do cliente serão puxados da tabela tarifária. Dados da carga e serviços são preenchidos à mão no PDF e digitados depois.</div>`,
     'capaSalvarNova()',{saveLabel:'Criar e gerar PDF'});
@@ -57929,6 +58068,10 @@ async function capaSalvarNova(){
   const responsavelId=opSel?.value||null;
   const tipoOperacao=opSel?.selectedOptions?.[0]?.getAttribute('data-tipo')||null;
   const _tiposCapa=capaTiposLer('capa-n');   // v1.0.1254
+  // v1.0.1408: observação com motivo já na abertura
+  const _obsMo=String((ge('capa-n-obs-motivo')||{}).value||'').trim(), _obsTx=String((ge('capa-n-obs-txt')||{}).value||'').replace(/\s+/g,' ').replace(/·/g,'-').trim();
+  if(_obsTx&&!_obsMo){ portErr('Escolha o motivo da observação.'); return; }
+  if(_obsMo&&_obsTx.length<3){ portErr('Descreva a observação, ou deixe o motivo em branco.'); return; }
   if(wmsTiposProduto(clienteId).length&&!_tiposCapa.length){ portErr('Marque o(s) tipo(s) de produto da capa.'); return; }
   // v1.0.1237: quem paga e qual tabela vêm da operação (sem pagador = o próprio cliente)
   const _pagId=opSel?.selectedOptions?.[0]?.getAttribute('data-pagador')||null, _tabOp=opSel?.selectedOptions?.[0]?.getAttribute('data-tabela')||null;
@@ -57951,6 +58094,8 @@ async function capaSalvarNova(){
     origem:ge('capa-origem')?.value||null,rg:ge('capa-rg')?.value||null,
     lacre:ge('capa-lacre')?.value||null,doc:ge('capa-doc')?.value||null,nf_numero:ge('capa-nf')?.value||null,
     tipo_veiculo:ge('capa-veiculo')?.value||null,owner_id:cu?.id};
+  if(_capaDocs.length) dados.documentos=_capaDocs.slice();
+  if(_obsMo&&_obsTx) dados.observacoes=capaRegObs({observacoes:''},'Observação ['+_obsMo+']: '+_obsTx);
   try{
     let salvo;
     try{ try{ salvo=await dbInsert('processo_capas',dados); }
