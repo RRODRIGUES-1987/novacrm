@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1414 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1417 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1414';
+const APP_VERSION='v1.0.1417';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -6039,7 +6039,12 @@ function armzAvisos(cli,m){
   var so=armzSemOp(cli,m), dv=armzDiverg(cli,m), h='';
   var lista=function(L){ return L.slice(0,10).map(function(c){ return ecomEsc(c.numero||''); }).join(', ')+(L.length>10?'…':''); };
   if(so.length) h+='<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+so.length+' capa(s) do mês <b>sem operação</b>: '+lista(so)+'. Elas não entram em nenhuma subfatura e o mês não fecha enquanto não forem corrigidas (abra a capa › Editar dados › Operação).</div>';
-  if(dv.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+dv.length+' capa(s) com o responsável digitado diferente da operação: '+lista(dv)+'. O extrato segue a <b>operação</b> da capa; confira se estão na subfatura certa.</div>';
+  // v1.0.1417: no mês corrente, o que é da quinzena ainda aberta vira aviso informativo (cinza); o da quinzena que está fechando segue em amarelo
+  var hj=new Date(), mAtual=hj.getFullYear()+'-'+String(hj.getMonth()+1).padStart(2,'0'), dHj=hj.getDate();
+  var aberta=function(c){ if(m!==mAtual) return false; if(dHj<=15) return true; return (Number(String(c.data_operacao||'').slice(8,10))||0)>15; };
+  var dvAb=dv.filter(aberta), dvFe=dv.filter(function(c){ return !aberta(c); });
+  if(dvFe.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+(m===mAtual?'1ª quinzena: ':'')+dvFe.length+' capa(s) com o responsável digitado diferente da operação: '+lista(dvFe)+'. O extrato segue a <b>operação</b> da capa; confira se estão na subfatura certa'+(m===mAtual?' antes de fechar a quinzena':'')+'.</div>';
+  if(dvAb.length) h+='<div style="border:1px solid var(--border);background:var(--bg2);color:var(--text2,#4b5563);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">ℹ Para a '+(dHj<=15?'1ª quinzena (ainda aberta)':'2ª quinzena (ainda aberta)')+': '+dvAb.length+' capa(s) com o responsável digitado diferente da operação: '+lista(dvAb)+'. O extrato segue a <b>operação</b> da capa.'+(dHj>15?' Não impede o fechamento da 1ª quinzena.':'')+'</div>';
   return h;
 }
 function rFatArmazenagem(){
@@ -37158,7 +37163,7 @@ function rWmsSeparacao_i(){
   const card=(valor,label,cor)=>`<div style="flex:1;min-width:90px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px 14px">
     <div style="font-size:24px;font-weight:800;color:${cor||'var(--text)'};line-height:1">${valor}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:3px">${label}</div></div>`;
-  const topo=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm" onclick="wmsOperadoresModal()">\u{1F477} Operadores</button></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+  const topo=`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm btn-p" style="margin-right:8px" onclick="wmsCxAbrir()" title="Checkout de bancada: bipa a folha da onda, bipa o EAN e imprime a etiqueta do volume">&#128421; Checkout (bancada)</button><button class="btn btn-sm" onclick="wmsOperadoresModal()">\u{1F477} Operadores</button></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${card(totListas,'Listas','var(--text)')}
       ${card(concluidas,'Concluídas','var(--green-text)')}
       ${card(emAndamento,'Em andamento','var(--amber-text)')}
@@ -38065,6 +38070,299 @@ async function wmsEtqChaoImprimirSel(){
   }
   showToast(alvo.length+' etiqueta(s) de chão enviadas para impressão','green');
   wmsEtqChaoRender();
+}
+
+// ═══ v1.0.1415 · CHECKOUT DE BANCADA DO WMS (mesmo fluxo do checkout da PE) — depositante com saldo no VERUS (Biobalance)
+//   Bipa a FOLHA da onda (consolidada: onda-produto-lote · por pedido: número do pedido) → bipa o EAN unidade a unidade
+//   (mais de 1 unidade do mesmo código: contagem às cegas) → pedido "morto": conclui a separação, marca CONFERIDO,
+//   imprime a etiqueta do volume e só chama o próximo depois do bipe da etiqueta. A baixa do estoque segue no embarque.
+var wmsCx=null, _wmsCxBusy=false, _wmsCxLast={code:'',ts:0}, _wmsCxUlt=null;
+var WMS_CX_ABERTO=['em_separacao','separado','importado'];
+function wmsCxAbrir(){
+  var old=ge('wms-cx-full'); if(old) old.remove();
+  wmsCx=null;
+  var ic=function(t,fn,lbl){ return '<button title="'+lbl+'" onclick="'+fn+'" style="height:40px;padding:0 14px;display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);color:var(--text2,#374151);border-radius:10px;cursor:pointer;font-size:13px">'+t+'</button>'; };
+  document.body.insertAdjacentHTML('beforeend','<div id="wms-cx-full" style="position:fixed;inset:0;z-index:4000;background:var(--bg);display:flex;flex-direction:column;box-sizing:border-box">'
+    +'<div style="background:#0a0a0a;color:#fff;padding:14px 22px;display:flex;align-items:center;gap:12px;flex:0 0 auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M4 4l6 16 4-10 6 4"/></svg>'
+      +'<span style="font-size:20px;font-weight:800;letter-spacing:2px">CHECKOUT VERUS</span><span style="font-size:12px;opacity:.7;letter-spacing:1px">WMS &middot; BANCADA</span></div>'
+    +'<div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 20px 0;overflow:auto"><div id="wms-cx-folha"></div><div style="margin-top:12px">'+coletorScanBox()+'</div><div id="wms-cx-body" style="flex:1;margin-top:14px;min-height:0"></div></div>'
+    +'<div style="flex:0 0 auto;padding:0 22px"><div style="border-top:1px solid var(--border);padding:10px 0;display:flex;align-items:center;gap:8px">'
+      +ic('&#8592; Sair','wmsCxFechar()','Sair do checkout')+'<div style="margin-left:auto;display:flex;gap:8px">'+ic('&#128424; Reimprimir &uacute;ltima','wmsCxReimprimir()','Reimprime a etiqueta do último pedido conferido')+ic('Nova folha','wmsCxNovaFolha()','Larga a folha atual')+'</div></div></div></div>');
+  _colScanHandler=function(code){ wmsCxScan(code); };
+  wmsCxRender();
+}
+function wmsCxFechar(){ var d=ge('wms-cx-full'); if(d) d.remove(); _colScanHandler=null; wmsCx=null; try{ if(typeof coletorCamStop==='function') coletorCamStop(); }catch(_e){} if(typeof render==='function') render(); }
+function wmsCxNovaFolha(){ if(wmsCx&&wmsCx.pendingLabel){ wmsCxFlash('Bipe a etiqueta impressa antes de trocar de folha','amber'); wmsCxRender(); return; } wmsCx=null; wmsCxRender(); }
+function wmsCxFlash(msg,cor){ if(!wmsCx) wmsCx={fila:[],peds:{}}; wmsCx.msg=msg; wmsCx.msgcolor=cor; }
+function wmsCxMsgHtml(){ if(!wmsCx||!wmsCx.msg) return ''; var c=wmsCx.msgcolor==='red'?'var(--red-bg);color:var(--red-text)':wmsCx.msgcolor==='green'?'var(--green-bg,#dcfce7);color:var(--green-text,#059669)':'var(--amber-bg,#fef3c7);color:var(--amber-text,#b45309)';
+  return '<div style="margin-bottom:12px;padding:9px 12px;border-radius:10px;font-weight:600;text-align:center;font-size:16px;background:'+c+'">'+ecomEsc(wmsCx.msg)+'</div>'; }
+function wmsCxFoco(){ setTimeout(function(){ var i=ge('col-scan'); if(i) i.focus(); },30); }
+function wmsCxFeito(p){ return WMS_CX_ABERTO.indexOf(String(p.status||''))<0; }
+function wmsCxAtual(){ if(!wmsCx||!wmsCx.fila) return null; for(var i=0;i<wmsCx.fila.length;i++){ var p=wmsCx.peds[wmsCx.fila[i]]; if(p&&!wmsCxFeito(p)&&!p._bloq) return p; } return null; }
+// v1.0.1416 — bancada WMS: nota obrigatória para embalar (parâmetro checkout_exige_nf) e etiqueta dos Correios (parâmetro correios.bancada)
+function wmsCxCfg(p){ var c=(clientes||[]).find(function(x){return x.id===p.cliente_id;})||{}, par=c.parametros||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } } return par||{}; }
+function wmsCxExigeNf(p){ return wmsCxCfg(p).checkout_exige_nf===true; }
+function wmsCxUsaCorreios(p){ var c=wmsCxCfg(p).correios; return !!(c&&c.bancada===true&&/CORREIO/i.test(String(p.transportadora||''))); }
+function wmsCxBloqueio(p){
+  if(!wmsCxExigeNf(p)) return '';
+  var n=p._nf||{};
+  if(n.st==='autorizada') return '';
+  if(n.st==='rejeitada'||n.st==='denegada') return 'nota '+(n.num||'')+' '+n.st+' pela SEFAZ'+(n.mot?': '+n.mot:'');
+  if(n.num) return 'nota '+n.num+' ainda não autorizada pela SEFAZ';
+  return 'pedido ainda sem nota fiscal';
+}
+function wmsCxBloqueados(){ if(!wmsCx||!wmsCx.fila) return []; return wmsCx.fila.map(function(id){return wmsCx.peds[id];}).filter(function(p){ return p&&!wmsCxFeito(p)&&p._bloq; }); }
+async function wmsCxFn(body){
+  var r=await fetch(SB_URL+'/functions/v1/correios',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok,apikey:SB_KEY},body:JSON.stringify(body)});
+  var d=null; try{ d=await r.json(); }catch(_e){}
+  return d||{ok:false,erro:'sem resposta da função dos Correios ('+r.status+')'};
+}
+// pré-postagem + rótulo. Repetir é seguro: se a pré-postagem já existe, a função devolve a mesma.
+async function wmsCxCorreios(p){
+  var a=await wmsCxFn({acao:'prepostar',cliente_id:p.cliente_id,pedido_id:p.id});
+  var pend=(a&&a.pendencias&&a.pendencias.length)?a.pendencias.join(' · '):'';
+  if(!a||a.ok!==true) throw new Error(pend||(a&&a.erro)||'os Correios não responderam');
+  if(a.simulacao) throw new Error(pend||'Correios em modo de simulação: falta habilitar na configuração do depositante');
+  var c=a.correios||{}; if(!c.objeto) throw new Error('os Correios não devolveram o código de rastreio');
+  var b=await wmsCxFn({acao:'rotulo',cliente_id:p.cliente_id,pedido_id:p.id});
+  if(!b||b.ok!==true||!b.pdf_base64) throw new Error('pré-postagem feita ('+c.objeto+'), mas o rótulo não veio: '+((b&&b.erro)||'sem resposta'));
+  try{ await dbInsert('wms_pedido_docs',{company_id:company?.id,cliente_id:p.cliente_id,pedido_id:p.id,tipo:'etiqueta',rastreio:c.objeto,numero:String(c.servico||''),origem:'correios'}); }catch(_e){}
+  return {objeto:String(c.objeto),servico:c.servico||'',pdf:b.pdf_base64};
+}
+function wmsCxPdfPrint(b64){
+  var old=ge('wms-cx-print'); if(old) old.remove();
+  var bin=atob(b64), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  var url=URL.createObjectURL(new Blob([u8],{type:'application/pdf'}));
+  var ifr=document.createElement('iframe'); ifr.id='wms-cx-print'; ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:150mm;border:none';
+  ifr.onload=function(){ setTimeout(function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(e){ try{ window.open(url,'_blank'); }catch(_e){} } wmsCxFoco(); },700); };
+  ifr.src=url; document.body.appendChild(ifr);
+  setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },180000);
+}
+async function wmsCxRetry(){
+  if(!wmsCx||!wmsCx.retry||_wmsCxBusy) return; var p=wmsCx.peds[wmsCx.retry]; if(!p) return;
+  _wmsCxBusy=true; wmsCxFlash('Pedindo a etiqueta aos Correios…','amber'); wmsCxRender();
+  try{ await wmsCxMatar(p); }catch(e){ ecomBeep(); wmsCxFlash('Erro: '+(e.message||e),'red'); }
+  finally{ _wmsCxBusy=false; wmsCxRender(); }
+}
+function wmsCxPular(){
+  if(!wmsCx||!wmsCx.retry) return; var p=wmsCx.peds[wmsCx.retry]; if(!p) return;
+  p._bloq='etiqueta dos Correios não saiu: '+(p._etqErro||''); p._linhas.forEach(function(l){ l.conf=0; }); wmsCx.retry=null;
+  wmsCxFlash('Pedido '+p.numero_pedido+' separado para o supervisor. Retire os itens da caixa.','amber'); wmsCxRender();
+}
+async function wmsCxRecheck(){
+  if(!wmsCx||wmsCx.modo!=='folha'||_wmsCxBusy) return; var c=wmsCx.onda+'-'+wmsCx.end;
+  _wmsCxBusy=true; try{ await wmsCxAbrirFolha(c); }catch(e){ wmsCxFlash('Erro: '+(e.message||e),'red'); } finally{ _wmsCxBusy=false; wmsCxRender(); }
+}
+function wmsCxNfHtml(p){
+  if(!wmsCxExigeNf(p)) return ''; var n=p._nf||{};
+  return '<div style="margin-top:10px;font-size:14px;color:var(--green-text,#059669);font-weight:600">NF '+ecomEsc(n.num||'')+' autorizada'+(wmsCxUsaCorreios(p)?' &middot; etiqueta dos Correios sai ao concluir':'')+'</div>';
+}
+function wmsCxProd(cliId,code){
+  var c=String(code||'').trim().toUpperCase(); if(!c) return null;
+  var ps=(wmsProdutos||[]).filter(function(p){return p.cliente_id===cliId;});
+  var pr=ps.find(function(p){ return String(p.ean||'').trim().toUpperCase()===c || String(p.sku||'').trim().toUpperCase()===c; });
+  if(pr) return {sku:String(pr.sku).trim(),lote:null};
+  var i=c.indexOf('-'); if(i>0){ var sk=c.slice(0,i); pr=ps.find(function(p){return String(p.sku||'').trim().toUpperCase()===sk;}); if(pr) return {sku:String(pr.sku).trim(),lote:c.slice(i+1)}; }   // QR da etiqueta de chão
+  return null;
+}
+// carrega do banco os pedidos (situação atual) e o que foi empenhado para cada um
+async function wmsCxCarregar(filtro){
+  var cid=company?.id;
+  var peds=await dbSelect('wms_pedidos','company_id=eq.'+cid+'&'+filtro+'&excluido_em=is.null&select=id,cliente_id,unit_id,numero_pedido,destinatario_nome,cep,endereco,cidade,uf,transportadora,status,parametros&order=numero_pedido');
+  if(!peds.length) return [];
+  var ids=peds.map(function(p){return p.id;});
+  var res=await wmsSelIn('wms_reservas','pedido_id',ids,'status=in.(reservada,consumida)&select=pedido_id,conteudo_id,sku,qtd&order=pedido_id');
+  var conts={}; (await wmsSelIn('wms_pallet_conteudo','id',res.map(function(r){return r.conteudo_id;}),'select=id,sku,descricao,lote&order=id')).forEach(function(c){conts[c.id]=c;});
+  var por={}; peds.forEach(function(p){ por[p.id]={}; });
+  res.forEach(function(r){ var c=conts[r.conteudo_id]||{}, sku=String(c.sku||r.sku||'').trim(), lote=String(c.lote||'').trim(), k=wmsEndChao(sku,lote), m=por[r.pedido_id]; if(!m) return;
+    if(!m[k]) m[k]={sku:sku,descricao:c.descricao||'',lote:lote,end:k,qtd:0,conf:0}; m[k].qtd+=Number(r.qtd||0); });
+  peds.forEach(function(p){ p._linhas=Object.values(por[p.id]).sort(function(a,b){return a.end.localeCompare(b.end);}); var par=p.parametros||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } } p._par=par; });
+  try{ var mnf={}; (await wmsSelIn('intg_pedidos','pedido_verus_id',ids,'select=pedido_verus_id,nf_st:payload->>nota_status,nf_num:payload->>nota_numero,nf_mot:payload->>nota_motivo&order=pedido_verus_id')).forEach(function(n){ mnf[n.pedido_verus_id]=n; });
+    peds.forEach(function(p){ var n=mnf[p.id]||{}; p._nf={st:n.nf_st||'',num:n.nf_num||'',mot:n.nf_mot||''}; });
+  }catch(_e){ peds.forEach(function(p){ p._nf={st:'',num:'',mot:''}; }); }
+  peds.forEach(function(p){ p._bloq=wmsCxBloqueio(p); });
+  return peds.filter(function(p){ return p._linhas.length; });
+}
+async function wmsCxAbrirFolha(code){
+  var c=String(code).trim(), i1=c.indexOf('-');
+  if(i1<0){ wmsCxFlash('Esta é a capa da onda: bipe a folha do produto (consolidada) ou a folha do pedido','amber'); return; }
+  var onda=c.slice(0,i1), end=c.slice(i1+1);
+  var peds=await wmsCxCarregar('parametros->>onda=eq.'+encodeURIComponent(onda));
+  var fila=peds.filter(function(p){ return p._linhas.length===1&&p._linhas[0].end.toUpperCase()===end.toUpperCase(); })
+    .sort(function(a,b){ return String(a.numero_pedido).localeCompare(String(b.numero_pedido),'pt-BR',{numeric:true}); });
+  if(!fila.length){ wmsCxFlash('Folha não encontrada: '+c,'red'); return; }
+  wmsCx={modo:'folha',onda:onda,end:end,desc:fila[0]._linhas[0].descricao,fila:fila.map(function(p){return p.id;}),peds:{},msg:'',msgcolor:''};
+  fila.forEach(function(p){ wmsCx.peds[p.id]=p; });
+  var ab=fila.filter(function(p){return !wmsCxFeito(p)&&!p._bloq;}).length, bq=fila.filter(function(p){return !wmsCxFeito(p)&&p._bloq;}).length;
+  wmsCxFlash(ab?('Folha aberta: '+ab+' pedido(s) para conferir'+(bq?' · '+bq+' bloqueado(s) sem nota':'')):(bq?(bq+' pedido(s) desta folha ainda sem nota autorizada: não podem ser embalados'):'Esta folha já foi toda conferida'),ab?'green':(bq?'red':'amber'));
+}
+async function wmsCxAbrirPedido(num){
+  var peds=await wmsCxCarregar('numero_pedido=eq.'+encodeURIComponent(num));
+  peds=peds.filter(function(p){ return wmsSaldoVerus(p.cliente_id); });
+  if(!peds.length){ wmsCxFlash('Pedido '+num+' não encontrado (ou sem estoque empenhado)','red'); return; }
+  var p=peds[0];
+  if(wmsCxFeito(p)){ wmsCxFlash('Pedido '+num+' já está '+p.status+': não há o que conferir','amber'); return; }
+  if(p._bloq){ if(typeof ecomBeep==='function') ecomBeep(); wmsCxFlash('Pedido '+num+' NÃO PODE SER EMBALADO: '+p._bloq,'red'); return; }
+  wmsCx={modo:'pedido',fila:[p.id],peds:{},msg:'',msgcolor:''}; wmsCx.peds[p.id]=p;
+  wmsCxFlash('Pedido '+num+' aberto','green');
+}
+function wmsCxEhFolha(code){ return /^OND\d{6,}/i.test(String(code).trim()); }
+async function wmsCxScan(code){
+  code=String(code||'').trim(); if(!code) return;
+  if(typeof antiRajada==='function'&&!antiRajada('wmscx',code)) return;
+  if(_wmsCxBusy) return;
+  var now=Date.now(); if(_wmsCxLast.code===code&&(now-_wmsCxLast.ts)<700) return; _wmsCxLast={code:code,ts:now};
+  _wmsCxBusy=true;
+  try{
+    // 1) esperando o bipe da etiqueta impressa
+    if(wmsCx&&wmsCx.pendingLabel){
+      var pl=wmsCx.peds[wmsCx.pendingLabel], cu2=code.toUpperCase(), n=String(pl.numero_pedido).toUpperCase();
+      var obj=(pl._cor&&pl._cor.objeto)?String(pl._cor.objeto).toUpperCase():'';
+      if(obj?(cu2.replace(/\s/g,'').indexOf(obj)>=0):(cu2==='VOL'+n||cu2===n)){ wmsCx.pendingLabel=null; wmsCxFlash('Pedido '+pl.numero_pedido+' liberado','green'); }
+      else { ecomBeep(); wmsCxFlash('Bipe a ETIQUETA do pedido '+pl.numero_pedido+' para liberar o próximo','red'); }
+      return;
+    }
+    if(wmsCx&&wmsCx.retry){ ecomBeep(); wmsCxFlash('Resolva a etiqueta do pedido '+wmsCx.peds[wmsCx.retry].numero_pedido+' antes de continuar','red'); return; }
+    // 2) folha ou pedido
+    if(wmsCxEhFolha(code)){ await wmsCxAbrirFolha(code); return; }
+    var atual=wmsCxAtual();
+    if(!atual){
+      if(/^\d{3,8}$/.test(code)){ await wmsCxAbrirPedido(code); return; }
+      ecomBeep(); wmsCxFlash('Bipe a folha para começar','amber'); return;
+    }
+    // 3) produto
+    var pr=wmsCxProd(atual.cliente_id,code);
+    if(!pr){ if(/^\d{3,8}$/.test(code)&&wmsCx.modo==='pedido'&&!atual._linhas.some(function(l){return l.conf>0;})){ await wmsCxAbrirPedido(code); return; }
+      ecomBeep(); wmsCxFlash('Produto não cadastrado: '+code,'red'); return; }
+    var ln=atual._linhas.find(function(l){ return l.conf<l.qtd && l.sku.toUpperCase()===pr.sku.toUpperCase() && (!pr.lote||l.lote.toUpperCase()===pr.lote); });
+    if(!ln){ ecomBeep();
+      var mesmo=atual._linhas.find(function(l){return l.sku.toUpperCase()===pr.sku.toUpperCase();});
+      wmsCxFlash(mesmo?(pr.lote&&mesmo.lote.toUpperCase()!==pr.lote?('LOTE ERRADO: este pedido leva o lote '+mesmo.lote):('Este produto já está completo neste pedido: '+pr.sku)):('Produto não esperado neste pedido: '+pr.sku),'red'); return; }
+    ln.conf++;
+    var completo=atual._linhas.every(function(l){return l.conf>=l.qtd;});
+    if(!completo){ wmsCxFlash('Item OK','green'); return; }
+    // contagem às cegas: mais de uma unidade do mesmo código
+    var porSku={}; atual._linhas.forEach(function(l){ porSku[l.sku]=(porSku[l.sku]||0)+l.qtd; });
+    if(Object.keys(porSku).some(function(k){return porSku[k]>1;})){
+      var esp=atual._linhas.reduce(function(a,l){return a+l.qtd;},0), cont=await wmsCxContagem(atual);
+      if(cont!==esp){ atual._linhas.forEach(function(l){l.conf=0;}); ecomBeep();
+        wmsCxFlash('CONTAGEM NÃO BATE ('+cont+' contada(s) × '+esp+' bipada(s)). RETIRE TUDO DA CAIXA E BIPE TODOS DE NOVO.','red'); return; }
+    }
+    await wmsCxMatar(atual);
+  }catch(e){ ecomBeep(); wmsCxFlash('Erro: '+(e.message||e),'red'); }
+  finally{ _wmsCxBusy=false; wmsCxRender(); }
+}
+function wmsCxContagem(p){
+  return new Promise(function(res){
+    var d=document.createElement('div'); d.id='wms-cx-cont'; d.className='modal-overlay'; d.style.zIndex='5300'; d.style.alignItems='center';
+    var sc=ge('col-scan'); if(sc){ sc.disabled=true; sc.blur(); }
+    d.innerHTML='<div class="modal" style="max-width:420px;text-align:center"><div style="font-size:12px;color:var(--text3);letter-spacing:.4px">PEDIDO '+ecomEsc(p.numero_pedido)+' · UNIDADES REPETIDAS</div>'
+      +'<div style="font-size:20px;font-weight:800;margin:8px 0 4px">Quantas UNIDADES há na embalagem?</div><div style="font-size:12.5px;color:var(--text2);margin-bottom:12px">Conte o que está dentro da caixa antes de fechar.</div>'
+      +'<input id="wms-cx-cont-in" type="number" inputmode="numeric" min="0" style="font-size:32px;font-weight:800;text-align:center;width:140px;padding:8px;border:2px solid var(--border);border-radius:10px">'
+      +'<div style="margin-top:14px"><button class="btn btn-p" id="wms-cx-cont-ok">Confirmar (Enter)</button></div></div>';
+    document.body.appendChild(d);
+    var inp=ge('wms-cx-cont-in'), fim=function(){ var v=parseInt(inp.value,10); if(isNaN(v)){ inp.focus(); return; } d.remove(); if(sc) sc.disabled=false; res(v); };
+    ge('wms-cx-cont-ok').onclick=fim;
+    inp.addEventListener('keydown',function(e){ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); fim(); } if(e.key==='Escape'){ e.preventDefault(); } });
+    inp.addEventListener('blur',function(){ setTimeout(function(){ if(ge('wms-cx-cont')) inp.focus(); },30); });
+    setTimeout(function(){ inp.focus(); },60);
+  });
+}
+// pedido "morto": trava no banco (outra bancada pode ter feito), conclui a separação, registra a conferência e imprime
+async function wmsCxMatar(p){
+  if(wmsCxUsaCorreios(p)&&!p._cor){
+    try{ p._cor=await wmsCxCorreios(p); wmsCx.retry=null; p._etqErro=''; }
+    catch(e){ p._etqErro=String(e.message||e); wmsCx.retry=p.id; ecomBeep(); wmsCxFlash('ETIQUETA DOS CORREIOS NÃO SAIU: '+p._etqErro,'red'); return; }
+  }
+  var agora=new Date().toISOString(), quem=(typeof coletorAutor==='function'&&coletorAutor())||profile?.full_name||cu?.email||'';
+  var r=await sbFetch('PATCH','/rest/v1/wms_pedidos?id=eq.'+p.id+'&status=in.('+WMS_CX_ABERTO.join(',')+')',{status:'conferido'},tok);
+  if(!r.ok) throw new Error((r.data&&r.data.message)||'não consegui gravar o pedido');
+  if(!Array.isArray(r.data)||!r.data.length){ p.status='conferido'; wmsCxFlash('Pedido '+p.numero_pedido+' já tinha sido conferido em outra bancada: separe o volume e chame o supervisor','red'); ecomBeep(); return; }
+  p.status='conferido';
+  var mp=(wmsPedidos||[]).find(function(x){return x.id===p.id;}); if(mp) mp.status='conferido';
+  try{
+    var ts=await dbSelect('wms_tarefas_separacao','pedido_id=eq.'+p.id+'&status=neq.concluida&select=id,lista_id,quantidade');
+    for(var i=0;i<ts.length;i++){ await dbUpdate('wms_tarefas_separacao',ts[i].id,{status:'concluida',qtd_separada:ts[i].quantidade,concluido_em:agora,separador_nome:quem,separador_informado_nome:'Checkout bancada'});
+      var mt=(wmsTarefasSeparacao||[]).find(function(x){return x.id===ts[i].id;}); if(mt){ mt.status='concluida'; mt.qtd_separada=ts[i].quantidade; } }
+    var ls=[...new Set(ts.map(function(t){return t.lista_id;}))];
+    for(var j=0;j<ls.length;j++){ var rest=await dbSelect('wms_tarefas_separacao','lista_id=eq.'+ls[j]+'&status=neq.concluida&select=id&limit=1');
+      if(!rest.length){ await dbUpdate('wms_listas_separacao',ls[j],{status:'concluida'}); var ml=(wmsListasSeparacao||[]).find(function(x){return x.id===ls[j];}); if(ml) ml.status='concluida'; } }
+    await dbInsert('wms_conferencias',{company_id:company?.id,unit_id:p.unit_id||null,tipo:1,pedido_id:p.id,cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:quem,resultado:'ok',auditoria_status:'ok',
+      observacao:'Checkout bancada · '+p._linhas.map(function(l){return l.qtd+'× '+l.end;}).join(' · ')+(wmsCx.onda?' · '+wmsCx.onda:'')});
+  }catch(e){ console.warn('[checkout WMS] pós-conferência',e); }
+  _wmsCxUlt=p;
+  try{ if(p._cor) wmsCxPdfPrint(p._cor.pdf); else wmsCxEtiquetaPrint(p); }catch(e){ console.warn('etiqueta',e); }
+  wmsCx.pendingLabel=p.id;
+  wmsCxFlash('Pedido '+p.numero_pedido+' OK · bipe a etiqueta '+(p._cor?'dos Correios colada na caixa':'impressa')+' para liberar','green');
+}
+function wmsCxReimprimir(){ if(!_wmsCxUlt){ showToast('Nenhum pedido conferido nesta bancada ainda','amber'); return; } if(_wmsCxUlt._cor) wmsCxPdfPrint(_wmsCxUlt._cor.pdf); else wmsCxEtiquetaPrint(_wmsCxUlt); wmsCxFoco(); }
+function wmsCxTranspCurto(t){ t=String(t||'').toUpperCase(); if(t.indexOf('CORREIO')>=0) return 'CORREIOS'; return (t.split(' ')[0]||'SEM TRANSP.').slice(0,14); }
+// etiqueta do volume (10×10) — modelo interno, enquanto a etiqueta de postagem não está integrada
+function wmsCxEtiquetaPrint(p){
+  var esc=ecomEsc, cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}, code='VOL'+p.numero_pedido, url=(typeof wmsCode128DataUrl==='function')?wmsCode128DataUrl(code):'';
+  var itens=p._linhas.map(function(l){ return '<div class="it"><b>'+l.qtd+' ×</b> '+esc(l.sku)+' <span>lote</span> <b>'+esc(l.lote||'—')+'</b></div>'; }).join('');
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Volume '+esc(p.numero_pedido)+'</title><style>@page{size:100mm 100mm;margin:0}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'html,body{margin:0;width:100mm;font-family:Arial,Helvetica,sans-serif;color:#000}.etq{width:100mm;height:100mm;padding:2.5mm;overflow:hidden}.in{border:0.4mm solid #000;height:100%;padding:2.5mm;display:flex;flex-direction:column;gap:1.5mm}'
+    +'.tit{background:#000;color:#fff;display:flex;justify-content:space-between;font-size:11pt;font-weight:bold;letter-spacing:1.5px;padding:1mm 2mm}.lb{font-size:6pt;color:#555;letter-spacing:.5px}'
+    +'.nome{font-size:15pt;font-weight:bold;line-height:1.08}.end{font-size:9.5pt;line-height:1.25;margin-top:.8mm}.its{border-top:0.3mm solid #000;border-bottom:0.3mm solid #000;padding:1mm 0;font-size:9pt;max-height:20mm;overflow:hidden}.it span{font-size:6.5pt;color:#555}'
+    +'.rod{flex:1;display:flex;justify-content:space-between;align-items:flex-end;gap:2mm;min-height:0}.ped{font-size:26pt;font-weight:bold;line-height:1;font-family:monospace}.sub{font-size:7pt;color:#333;margin-top:.6mm}.bc{text-align:right}.bc img{height:15mm;max-width:52mm}'
+    +'</style></head><body><div class="etq"><div class="in">'
+    +'<div class="tit"><span>'+esc(String(cli.nome||'').toUpperCase().split(' ')[0])+'</span><span>'+esc(wmsCxTranspCurto(p.transportadora))+'</span></div>'
+    +'<div><div class="lb">DESTINAT&Aacute;RIO</div><div class="nome">'+esc(String(p.destinatario_nome||'').slice(0,48))+'</div><div class="end">'+esc(p.endereco||'')+'<br>'+esc(p.cidade||'')+(p.uf?'/'+esc(p.uf):'')+(p.cep?' &middot; CEP '+esc(p.cep):'')+'</div></div>'
+    +'<div class="its">'+itens+'</div>'
+    +'<div class="rod"><div><div class="lb">PEDIDO</div><div class="ped">'+esc(p.numero_pedido)+'</div><div class="sub">vol 1/1'+(p._par&&p._par.onda?' &middot; '+esc(p._par.onda):'')+' &middot; '+new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})+'</div></div>'
+    +'<div class="bc">'+(url?'<img src="'+url+'">':'')+'<div style="font-family:monospace;font-size:8pt">'+esc(code)+'</div></div></div>'
+    +'</div></div></body></html>';
+  var old=ge('wms-cx-print'); if(old) old.remove();
+  var ifr=document.createElement('iframe'); ifr.id='wms-cx-print'; ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
+  document.body.appendChild(ifr); var d=ifr.contentDocument||ifr.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(e){} setTimeout(function(){ ifr.remove(); wmsCxFoco(); },3000); },500);
+}
+function wmsCxBoxHtml(p){ var t=wmsCxTranspCurto(p.transportadora), cor=t==='CORREIOS'?'#b45309':'#1e3a8a';
+  return '<div style="margin-top:18px;border-radius:16px;padding:16px 28px;border:3px solid '+cor+';text-align:center"><div style="font-size:13px;letter-spacing:2px;color:'+cor+'">COLOCAR NO</div><div style="font-size:34px;font-weight:800;color:'+cor+'">'+ecomEsc(t)+'</div></div>'; }
+function wmsCxRender(){
+  var body=ge('wms-cx-body'), fb=ge('wms-cx-folha'); if(!body) return;
+  var vazio=!wmsCx||!wmsCx.fila||!wmsCx.fila.length;
+  if(fb){
+    if(vazio) fb.innerHTML='<div style="display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:12px;padding:10px 14px;color:var(--text3)"><span style="font-size:12px;font-weight:600">Folha</span><span style="font-family:monospace">—</span><span style="font-size:13px">bipe a folha para come&ccedil;ar</span></div>';
+    else { var tu=0,cu3=0,fe=0; wmsCx.fila.forEach(function(id){ var p=wmsCx.peds[id], f=wmsCxFeito(p); if(f) fe++; p._linhas.forEach(function(l){ tu+=l.qtd; cu3+=f?l.qtd:Math.min(l.conf,l.qtd); }); });
+      fb.innerHTML='<div style="display:flex;align-items:center;gap:14px;border:1px solid var(--border);border-radius:12px;padding:10px 14px;flex-wrap:wrap"><span style="font-size:12px;color:var(--text3);font-weight:600">Folha</span>'
+        +(wmsCx.modo==='folha'?'<span style="font-family:monospace;font-weight:700;background:var(--bg2);padding:3px 10px;border-radius:7px">'+ecomEsc(wmsCx.end)+' &middot; '+ecomEsc(wmsCx.onda)+'</span>':'<span style="font-size:13px;color:var(--text3)">Pedido avulso</span>')
+        +'<span style="font-size:13px"><b style="font-family:monospace;font-size:15px">'+fe+'</b> <span style="color:var(--text3)">/ '+wmsCx.fila.length+' volumes</span></span><span style="color:var(--border)">|</span>'
+        +'<span style="font-size:13px"><b style="font-family:monospace;font-size:15px">'+cu3+'</b> <span style="color:var(--text3)">/ '+tu+' unidades</span></span>'
+        +(wmsCxBloqueados().length?'<span style="color:var(--border)">|</span><span style="font-size:13px;color:var(--red-text);font-weight:600">'+wmsCxBloqueados().length+' sem nota</span>':'')+'</div>'; }
+  }
+  var centro=function(h){ return '<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+wmsCxMsgHtml()+h+'</div>'; };
+  if(vazio){ body.innerHTML=centro('<div style="border:3px dashed var(--border);border-radius:20px;padding:56px 80px;text-align:center;color:var(--text3);font-size:22px">Bipe a <b>folha</b> da onda<br>para come&ccedil;ar</div>'); wmsCxFoco(); return; }
+  if(wmsCx.retry){ var pr2=wmsCx.peds[wmsCx.retry];
+    body.innerHTML=centro('<div style="border:3px solid var(--red-text);border-radius:20px;padding:36px 48px;text-align:center;max-width:720px"><div style="font-size:26px;font-weight:800;color:var(--red-text)">Etiqueta dos Correios n&atilde;o saiu</div>'
+      +'<div style="font-size:20px;font-weight:600;margin-top:8px">'+ecomEsc(pr2.destinatario_nome||'')+'</div><div style="font-size:15px;color:var(--text3);font-family:monospace">Pedido '+ecomEsc(pr2.numero_pedido)+'</div>'
+      +'<div style="font-size:15px;margin-top:14px;color:var(--red-text)">'+ecomEsc(pr2._etqErro||'')+'</div><div style="font-size:14px;color:var(--text3);margin-top:10px">O pedido <b>n&atilde;o</b> foi conclu&iacute;do. N&atilde;o feche a caixa.</div>'
+      +'<div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn btn-p" style="font-size:16px;padding:10px 22px" onclick="wmsCxRetry()">Tentar de novo</button><button class="btn" style="font-size:16px;padding:10px 22px" onclick="wmsCxPular()">Separar para o supervisor</button></div></div>'); return; }
+  if(wmsCx.pendingLabel){ var pl=wmsCx.peds[wmsCx.pendingLabel];
+    body.innerHTML=centro('<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:40px 56px;text-align:center;max-width:680px"><div style="font-size:28px;font-weight:800;color:var(--green-text,#059669)">Etiqueta impressa</div>'
+      +'<div style="font-size:22px;font-weight:600;margin-top:8px">'+ecomEsc(pl.destinatario_nome||'')+'</div><div style="font-size:15px;color:var(--text3);font-family:monospace">Pedido '+ecomEsc(pl.numero_pedido)+'</div>'+wmsCxBoxHtml(pl)
+      +(pl._cor?'<div style="font-size:15px;font-family:monospace;margin-top:14px">Rastreio '+ecomEsc(pl._cor.objeto)+(pl._cor.servico?' &middot; '+ecomEsc(pl._cor.servico):'')+'</div>':'')
+      +'<div style="font-size:18px;margin-top:18px">Bipe a <b>etiqueta '+(pl._cor?'dos Correios colada na caixa':'impressa')+'</b> para liberar o pr&oacute;ximo pedido</div><div style="font-size:13px;color:var(--text3);margin-top:10px">A etiqueta n&atilde;o saiu? Use &ldquo;Reimprimir &uacute;ltima&rdquo; no rodap&eacute;.</div></div>'); wmsCxFoco(); return; }
+  var p=wmsCxAtual();
+  if(!p&&wmsCxBloqueados().length){ var bqs=wmsCxBloqueados();
+    body.innerHTML=centro('<div style="border:3px solid var(--red-text);border-radius:20px;padding:36px 48px;text-align:center;max-width:760px"><div style="font-size:26px;font-weight:800;color:var(--red-text)">'+bqs.length+' pedido(s) n&atilde;o podem ser embalados</div>'
+      +'<div style="font-size:15px;color:var(--text3);margin-top:6px">Separe estas folhas e passe para a pr&oacute;xima.</div><div style="margin-top:14px;text-align:left;max-height:260px;overflow:auto">'
+      +bqs.map(function(b){ return '<div style="font-size:15px;padding:5px 0;border-bottom:1px solid var(--border)"><b style="font-family:monospace">'+ecomEsc(b.numero_pedido)+'</b> &middot; '+ecomEsc(b.destinatario_nome||'')+'<br><span style="font-size:13px;color:var(--red-text)">'+ecomEsc(b._bloq)+'</span></div>'; }).join('')
+      +'</div><div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+(wmsCx.modo==='folha'?'<button class="btn btn-p" style="font-size:16px;padding:10px 22px" onclick="wmsCxRecheck()">Verificar de novo</button>':'')+'<button class="btn" style="font-size:16px;padding:10px 22px" onclick="wmsCxNovaFolha()">Nova folha</button></div></div>'); wmsCxFoco(); return; }
+  if(!p){ body.innerHTML=centro('<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:60px;text-align:center"><div style="font-size:30px;font-weight:800;color:var(--green-text,#059669)">Folha conclu&iacute;da</div><div style="font-size:16px;color:var(--text3);margin-top:6px">'+wmsCx.fila.length+' pedido(s) conferido(s)</div><button class="btn btn-p" style="margin-top:18px;font-size:16px;padding:10px 22px" onclick="wmsCxNovaFolha()">Nova folha</button></div>'); wmsCxFoco(); return; }
+  var cur=p._linhas.find(function(l){return l.conf<l.qtd;})||p._linhas[0], pct=cur.qtd?Math.min(100,Math.round(cur.conf/cur.qtd*100)):0;
+  var lista=p._linhas.length>1?('<div style="margin-top:18px;border-top:1px solid var(--border);padding-top:12px;width:100%;max-width:520px">'+p._linhas.map(function(l){ var ok=l.conf>=l.qtd; return '<div style="display:flex;justify-content:space-between;font-size:16px;padding:5px 0"><span>'+ecomEsc(l.sku)+' &middot; '+ecomEsc(l.descricao||'')+' &middot; lote '+ecomEsc(l.lote||'—')+'</span><span style="font-family:monospace;color:'+(ok?'var(--green-text,#059669)':'var(--text)')+'">'+l.conf+'/'+l.qtd+(ok?' &#10003;':'')+'</span></div>'; }).join('')+'</div>'):'';
+  body.innerHTML='<div style="height:100%;display:flex;flex-direction:column">'+wmsCxMsgHtml()+'<div style="flex:1;display:flex;flex-wrap:wrap;gap:20px;align-items:stretch;min-height:0">'
+    +'<div style="flex:1;min-width:300px;border:2px solid var(--border);border-radius:20px;padding:28px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">'
+      +'<div style="font-size:14px;color:var(--text3);letter-spacing:1px">PEDIDO ATUAL &middot; 1 VOLUME</div><div style="font-size:40px;font-weight:800;line-height:1.1;margin-top:6px">'+ecomEsc(p.destinatario_nome||'—')+'</div>'
+      +'<div style="font-size:15px;color:var(--text3);font-family:monospace;margin-top:6px">Pedido '+ecomEsc(p.numero_pedido)+' &middot; '+ecomEsc(p.cidade||'')+(p.uf?'/'+ecomEsc(p.uf):'')+'</div>'+wmsCxNfHtml(p)
+      +'<div style="margin-top:18px;font-size:22px;font-weight:600">'+ecomEsc(cur.sku)+' &middot; lote '+ecomEsc(cur.lote||'—')+'</div><div style="font-size:16px;color:var(--text3)">'+ecomEsc(cur.descricao||'')+'</div>'+lista+wmsCxBoxHtml(p)+'</div>'
+    +'<div style="flex:1;min-width:300px;border:3px solid var(--accent);border-radius:20px;padding:28px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center">'
+      +'<div style="font-size:16px;color:var(--text3);letter-spacing:1px">UNIDADES CONFERIDAS</div><div style="font-size:130px;font-weight:800;line-height:1;color:var(--accent)">'+cur.conf+'<span style="font-size:48px;color:var(--text3)"> / '+cur.qtd+'</span></div>'
+      +'<div style="width:100%;max-width:420px;height:12px;background:var(--bg2);border-radius:99px;margin-top:20px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:var(--accent)"></div></div><div style="font-size:16px;color:var(--text3);margin-top:10px">bipe o produto</div></div>'
+    +'</div></div>';
+  wmsCxFoco();
 }
 
 function wmsListasPdfSelecionadas(){wmsListasPdfIds([..._wmsSel.sep]);}
@@ -58301,6 +58599,8 @@ function rCapasProcesso_i(){
         ${pode&&curPage==='fat-capas-digitar'?`<button class="bicon btn-sm" title="Digitar" onclick="event.stopPropagation();capaViewId='${c.id}';render()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>`:''}
+        ${capaPodeEditarDados(c)?`<button class="btn btn-sm" style="color:var(--blue-text)" title="Editar dados da capa (data, DOC, NF, motorista, placas, documentos vinculados…)" onclick="event.stopPropagation();capaEditarDados('${c.id}')">✏ Editar</button>`:''}
+        ${capaPodeObs(c)?`<button class="btn btn-sm" style="color:var(--blue-text)" title="Registrar uma observação com motivo (cancelamento, acerto fiscal, complemento…)" onclick="event.stopPropagation();capaObsNova('${c.id}')">＋ Observação</button>`:''}
         ${pode&&c.status!=='faturada'&&c.status!=='inutilizada'&&!capaPodeExcluir(c)?`<button class="btn btn-sm" style="color:var(--red-text)" onclick="event.stopPropagation();capaInutilizar('${c.id}')">⊘ Inutilizar</button>`:''}
         ${capaPodeExcluir(c)?`<button class="bicon btn-sm" title="Excluir (capa criada por engano)" onclick="event.stopPropagation();capaExcluir('${c.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
