@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1418 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1419 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1418';
+const APP_VERSION='v1.0.1419';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38108,7 +38108,7 @@ function wmsCxAbrir(){
       +'<span style="font-size:20px;font-weight:800;letter-spacing:2px">CHECKOUT VERUS</span><span style="font-size:12px;opacity:.7;letter-spacing:1px">WMS &middot; BANCADA</span></div>'
     +'<div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 20px 0;overflow:auto"><div id="wms-cx-folha"></div><div style="margin-top:12px">'+coletorScanBox()+'</div><div id="wms-cx-body" style="flex:1;margin-top:14px;min-height:0"></div></div>'
     +'<div style="flex:0 0 auto;padding:0 22px"><div style="border-top:1px solid var(--border);padding:10px 0;display:flex;align-items:center;gap:8px">'
-      +ic('&#8592; Sair','wmsCxFechar()','Sair do checkout')+'<div style="margin-left:auto;display:flex;gap:8px">'+ic('&#128424; Reimprimir &uacute;ltima','wmsCxReimprimir()','Reimprime a etiqueta do último pedido conferido')+ic('Nova folha','wmsCxNovaFolha()','Larga a folha atual')+'</div></div></div></div>');
+      +ic('&#8592; Sair','wmsCxFechar()','Sair do checkout')+'<div style="margin-left:auto;display:flex;gap:8px">'+ic('&#129534; DANFE 10&times;15','wmsCxDanfe(\'simples\')','DANFE simplificado (etiqueta) do pedido na tela ou do último conferido')+ic('&#129534; DANFE A4','wmsCxDanfe(\'completo\')','DANFE completo (A4) do pedido na tela ou do último conferido')+ic('&#128424; Reimprimir &uacute;ltima','wmsCxReimprimir()','Reimprime a etiqueta do último pedido conferido')+ic('Nova folha','wmsCxNovaFolha()','Larga a folha atual')+'</div></div></div></div>');
   _colScanHandler=function(code){ wmsCxScan(code); };
   wmsCxRender();
 }
@@ -38318,6 +38318,154 @@ async function wmsCxMatar(p){
 }
 function wmsCxReimprimir(){ if(!_wmsCxUlt){ showToast('Nenhum pedido conferido nesta bancada ainda','amber'); return; } if(_wmsCxUlt._cor) wmsCxPdfPrint(_wmsCxUlt._cor.pdf); else wmsCxEtiquetaPrint(_wmsCxUlt); wmsCxFoco(); }
 function wmsCxTranspCurto(t){ t=String(t||'').toUpperCase(); if(t.indexOf('CORREIO')>=0) return 'CORREIOS'; return (t.split(' ')[0]||'SEM TRANSP.').slice(0,14); }
+// ===== v1.0.1419 — DANFE gerado a partir do XML autorizado (wms_pedido_docs tipo nfe_xml) =====
+function danfeC128Svg(dig,hmm){
+  dig=String(dig||'').replace(/\D/g,''); if(!dig||dig.length%2||typeof CAPA_C128==='undefined') return '';
+  var vals=[105], sum=105; for(var i=0;i<dig.length;i+=2){ var v=parseInt(dig.substr(i,2),10); vals.push(v); sum+=v*(i/2+1); }
+  vals.push(sum%103);
+  var bits=vals.map(function(v){return CAPA_C128[v];}).join('')+'1100011101011', r='', x=0;
+  while(x<bits.length){ if(bits[x]==='1'){ var w=1; while(bits[x+w]==='1') w++; r+='<rect x="'+x+'" y="0" width="'+w+'" height="10"/>'; x+=w; } else x++; }
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+bits.length+' 10" preserveAspectRatio="none" style="width:100%;height:'+(hmm||12)+'mm;display:block" shape-rendering="crispEdges" fill="#000">'+r+'</svg>';
+}
+function danfeParse(xml){
+  var doc=new DOMParser().parseFromString(String(xml||''),'application/xml');
+  var kids=function(el,n){ var o=[]; if(!el) return o; for(var c=el.firstElementChild;c;c=c.nextElementSibling) if(c.localName===n) o.push(c); return o; };
+  var nd=function(el,path){ var ps=path.split('/'); for(var i=0;i<ps.length&&el;i++) el=kids(el,ps[i])[0]; return el||null; };
+  var tx=function(el,path){ var e=nd(el,path); return e?String(e.textContent||'').trim():''; };
+  var num=function(el,path){ var v=parseFloat(tx(el,path)); return isNaN(v)?0:v; };
+  var inf=doc.getElementsByTagName('infNFe')[0]; if(!inf) throw new Error('XML sem infNFe');
+  var prot=doc.getElementsByTagName('infProt')[0]||null;
+  var end=function(e){ return {lgr:tx(e,'xLgr'),nro:tx(e,'nro'),cpl:tx(e,'xCpl'),bairro:tx(e,'xBairro'),mun:tx(e,'xMun'),uf:tx(e,'UF'),cep:tx(e,'CEP'),fone:tx(e,'fone')}; };
+  var em=nd(inf,'emit'), de=nd(inf,'dest'), tr=nd(inf,'transp'), tot=nd(inf,'total/ICMSTot'), ibs=nd(inf,'total/IBSCBSTot');
+  var d={chave:String(inf.getAttribute('Id')||'').replace(/\D/g,'')||tx(prot,'chNFe'),
+    nNF:tx(inf,'ide/nNF'),serie:tx(inf,'ide/serie'),natOp:tx(inf,'ide/natOp'),tpNF:tx(inf,'ide/tpNF'),tpAmb:tx(inf,'ide/tpAmb'),tpEmis:tx(inf,'ide/tpEmis'),dhEmi:tx(inf,'ide/dhEmi'),dhSai:tx(inf,'ide/dhSaiEnt'),
+    prot:prot?{n:tx(prot,'nProt'),dh:tx(prot,'dhRecbto'),cStat:tx(prot,'cStat')}:null,
+    emit:Object.assign({nome:tx(em,'xNome'),doc:tx(em,'CNPJ')||tx(em,'CPF'),ie:tx(em,'IE'),iest:tx(em,'IEST')},end(nd(em,'enderEmit'))),
+    dest:Object.assign({nome:tx(de,'xNome'),doc:tx(de,'CNPJ')||tx(de,'CPF')||tx(de,'idEstrangeiro'),ie:tx(de,'IE')},end(nd(de,'enderDest'))),
+    tot:{}, ibs:ibs?{vIBS:num(ibs,'gIBS/vIBS'),vCBS:num(ibs,'gCBS/vCBS')}:null,
+    transp:{mod:tx(tr,'modFrete'),nome:tx(tr,'transporta/xNome'),doc:tx(tr,'transporta/CNPJ')||tx(tr,'transporta/CPF'),ie:tx(tr,'transporta/IE'),ender:tx(tr,'transporta/xEnder'),mun:tx(tr,'transporta/xMun'),uf:tx(tr,'transporta/UF'),placa:tx(tr,'veicTransp/placa'),ufPlaca:tx(tr,'veicTransp/UF'),
+      qVol:0,esp:'',marca:'',nVol:'',pesoB:0,pesoL:0},
+    dups:[], itens:[], infCpl:tx(inf,'infAdic/infCpl'), infFisco:tx(inf,'infAdic/infAdFisco')};
+  ['vBC','vICMS','vBCST','vST','vProd','vFrete','vSeg','vDesc','vOutro','vIPI','vNF','vTotTrib','vFCP','vPIS','vCOFINS'].forEach(function(k){ d.tot[k]=num(tot,k); });
+  kids(tr,'vol').forEach(function(v){ var t=d.transp; t.qVol+=num(v,'qVol'); t.esp=t.esp||tx(v,'esp'); t.marca=t.marca||tx(v,'marca'); t.nVol=t.nVol||tx(v,'nVol'); t.pesoB+=num(v,'pesoB'); t.pesoL+=num(v,'pesoL'); });
+  kids(nd(inf,'cobr'),'dup').forEach(function(x){ d.dups.push({n:tx(x,'nDup'),venc:tx(x,'dVenc'),v:num(x,'vDup')}); });
+  kids(inf,'det').forEach(function(dt){ var p=nd(dt,'prod'), ic=nd(dt,'imposto/ICMS'), g=ic?ic.firstElementChild:null, ipi=nd(dt,'imposto/IPI/IPITrib');
+    d.itens.push({cod:tx(p,'cProd'),desc:tx(p,'xProd'),ad:tx(dt,'infAdProd'),ncm:tx(p,'NCM'),cfop:tx(p,'CFOP'),un:tx(p,'uCom'),q:num(p,'qCom'),vUn:num(p,'vUnCom'),vProd:num(p,'vProd'),vDesc:num(p,'vDesc'),
+      cst:g?(tx(g,'orig')+(tx(g,'CST')||tx(g,'CSOSN'))):'',bc:g?num(g,'vBC'):0,vIcms:g?num(g,'vICMS'):0,pIcms:g?num(g,'pICMS'):0,vIpi:ipi?num(ipi,'vIPI'):0,pIpi:ipi?num(ipi,'pIPI'):0}); });
+  return d;
+}
+function danfeFmt(v,dec){ return (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:dec==null?2:dec,maximumFractionDigits:dec==null?2:dec}); }
+function danfeDoc(s){ s=String(s||'').replace(/\D/g,''); if(s.length===14) return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5'); if(s.length===11) return s.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4'); return s; }
+function danfeDocEtq(s){ s=String(s||'').replace(/\D/g,''); return s.length===11?('***.'+s.substr(3,3)+'.'+s.substr(6,3)+'-**'):danfeDoc(s); }   // CPF mascarado na etiqueta (fica exposta na caixa)
+function danfeCep(s){ s=String(s||'').replace(/\D/g,''); return s.length===8?s.substr(0,5)+'-'+s.substr(5):s; }
+function danfeFone(s){ s=String(s||'').replace(/\D/g,''); if(s.length===11) return '('+s.substr(0,2)+') '+s.substr(2,5)+'-'+s.substr(7); if(s.length===10) return '('+s.substr(0,2)+') '+s.substr(2,4)+'-'+s.substr(6); return s; }
+function danfeData(s,hora){ var m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}:\d{2}))?/); if(!m) return ''; return m[3]+'/'+m[2]+'/'+m[1]+(hora&&m[4]?' '+m[4]:''); }
+function danfeHora(s){ var m=String(s||'').match(/T(\d{2}:\d{2}:\d{2})/); return m?m[1]:''; }
+function danfeChaveFmt(c){ return String(c||'').replace(/(\d{4})(?=\d)/g,'$1 '); }
+function danfeFrete(m){ return ({'0':'0 - Por conta do remetente (CIF)','1':'1 - Por conta do destinatário (FOB)','2':'2 - Por conta de terceiros','3':'3 - Próprio, por conta do remetente','4':'4 - Próprio, por conta do destinatário','9':'9 - Sem frete'})[String(m)]||String(m||''); }
+function danfeEnd(e){ return [e.lgr,e.nro,e.cpl].filter(Boolean).join(', '); }
+
+// --- simplificado: etiqueta 10 × 15 ---
+function danfeHtmlSimples(d){
+  var e=ecomEsc, t=d.transp, qtd=d.itens.reduce(function(s,i){return s+i.q;},0);
+  return '<div class="pg etq">'
+    +'<div class="e-top"><b>DANFE SIMPLIFICADO</b><span>'+(d.tpNF==='0'?'0 - ENTRADA':'1 - SA&Iacute;DA')+'</span></div>'
+    +(d.tpAmb==='2'?'<div class="e-hom">SEM VALOR FISCAL &middot; HOMOLOGA&Ccedil;&Atilde;O</div>':'')
+    +'<div class="e-nf"><div><span class="lb">NF-e N&ordm;</span><b class="e-num">'+e(d.nNF)+'</b></div><div style="text-align:right"><span class="lb">S&Eacute;RIE</span> <b>'+e(d.serie)+'</b><br><span class="lb">EMISS&Atilde;O</span> <b>'+danfeData(d.dhEmi)+'</b></div></div>'
+    +'<div class="e-bc">'+danfeC128Svg(d.chave,17)+'</div>'
+    +'<div class="lb" style="text-align:center">CHAVE DE ACESSO</div><div class="e-ch">'+danfeChaveFmt(d.chave)+'</div>'
+    +'<div class="e-pr"><span class="lb">PROTOCOLO DE AUTORIZA&Ccedil;&Atilde;O</span><br><b>'+e(d.prot.n)+'</b> &middot; '+danfeData(d.prot.dh,true)+'</div>'
+    +'<div class="e-bl"><div class="lb">EMITENTE</div><div class="e-nm">'+e(d.emit.nome)+'</div><div>CNPJ '+danfeDoc(d.emit.doc)+' &middot; IE '+e(d.emit.ie)+'</div><div>'+e(d.emit.mun)+'/'+e(d.emit.uf)+'</div></div>'
+    +'<div class="e-bl"><div class="lb">DESTINAT&Aacute;RIO</div><div class="e-nm e-dest">'+e(d.dest.nome)+'</div><div>'+(String(d.dest.doc).length===11?'CPF ':'CNPJ ')+danfeDocEtq(d.dest.doc)+(d.dest.ie?' &middot; IE '+e(d.dest.ie):'')+'</div>'
+      +'<div>'+e(danfeEnd(d.dest))+(d.dest.bairro?' &middot; '+e(d.dest.bairro):'')+'</div><div><b>'+e(d.dest.mun)+'/'+e(d.dest.uf)+' &middot; CEP '+danfeCep(d.dest.cep)+'</b></div></div>'
+    +'<div class="e-tot"><div>'+d.itens.length+' item(ns) &middot; '+danfeFmt(qtd,0)+' un.<br>'+danfeFmt(t.qVol,0)+' volume(s) &middot; '+danfeFmt(t.pesoB,3)+' kg</div><div style="text-align:right"><span class="lb">VALOR TOTAL DA NOTA</span><br><b class="e-vl">R$ '+danfeFmt(d.tot.vNF)+'</b></div></div>'
+    +(t.nome?'<div class="e-bl"><span class="lb">TRANSPORTADOR</span> '+e(t.nome)+'</div>':'')
+    +(d.infCpl?'<div class="e-ad"><span class="lb">DADOS ADICIONAIS</span><br>'+e(d.infCpl)+'</div>':'')
+    +'</div>';
+}
+
+// --- completo: A4 retrato ---
+function danfeHtmlCompleto(d){
+  var e=ecomEsc, t=d.transp, T=d.tot;
+  var c=function(lb,v,st){ return '<div class="c"'+(st?' style="'+st+'"':'')+'><div class="lb">'+lb+'</div><div class="v">'+(v===''||v==null?'&nbsp;':v)+'</div></div>'; };
+  var r=function(cols,cells){ return '<div class="r" style="grid-template-columns:'+cols+'">'+cells.join('')+'</div>'; };
+  var linhas=d.itens.map(function(i){ return {h:Math.max(1,Math.ceil(i.desc.length/46))+(i.ad?Math.max(1,Math.ceil(i.ad.length/52)):0),
+    html:'<tr><td>'+e(i.cod)+'</td><td class="l">'+e(i.desc)+(i.ad?'<br><span class="ad">'+e(i.ad)+'</span>':'')+'</td><td>'+e(i.ncm)+'</td><td>'+e(i.cst)+'</td><td>'+e(i.cfop)+'</td><td>'+e(i.un)+'</td><td class="n">'+danfeFmt(i.q,4).replace(/,?0+$/,'')+'</td><td class="n">'+danfeFmt(i.vUn,4)+'</td><td class="n">'+danfeFmt(i.vProd)+'</td><td class="n">'+danfeFmt(i.vDesc)+'</td><td class="n">'+danfeFmt(i.bc)+'</td><td class="n">'+danfeFmt(i.vIcms)+'</td><td class="n">'+danfeFmt(i.vIpi)+'</td><td class="n">'+danfeFmt(i.pIcms)+'</td><td class="n">'+danfeFmt(i.pIpi)+'</td></tr>'}; });
+  var pags=[[]], cap=d.dups.length?42:48, uso=0;
+  linhas.forEach(function(L){ if(uso+L.h>cap&&pags[pags.length-1].length){ pags.push([]); uso=0; cap=68; } pags[pags.length-1].push(L.html); uso+=L.h; });
+  var topo=function(n){ return '<div class="r" style="grid-template-columns:40% 15% 45%">'
+      +'<div class="c emit"><div class="lb">IDENTIFICA&Ccedil;&Atilde;O DO EMITENTE</div><div class="en">'+e(d.emit.nome)+'</div><div>'+e(danfeEnd(d.emit))+(d.emit.bairro?' &middot; '+e(d.emit.bairro):'')+'<br>'+e(d.emit.mun)+'/'+e(d.emit.uf)+' &middot; CEP '+danfeCep(d.emit.cep)+(d.emit.fone?'<br>Fone '+danfeFone(d.emit.fone):'')+'</div></div>'
+      +'<div class="c dn"><div class="dt">DANFE</div><div class="ds">Documento Auxiliar da Nota Fiscal Eletr&ocirc;nica</div><div class="es"><span>0 - Entrada<br>1 - Sa&iacute;da</span><b>'+e(d.tpNF)+'</b></div><div class="nn">N&ordm; '+e(String(d.nNF).padStart(9,'0').replace(/(\d{3})(\d{3})(\d{3})/,'$1.$2.$3'))+'<br>S&Eacute;RIE '+e(d.serie)+'<br>FOLHA '+n+'/'+pags.length+'</div></div>'
+      +'<div class="c ch"><div class="bc">'+danfeC128Svg(d.chave,11)+'</div><div class="lb">CHAVE DE ACESSO</div><div class="cv">'+danfeChaveFmt(d.chave)+'</div><div class="cs">Consulta de autenticidade no portal nacional da NF-e<br>www.nfe.fazenda.gov.br/portal ou no site da Sefaz autorizadora</div></div></div>'
+    +r('55% 45%',[c('NATUREZA DA OPERA&Ccedil;&Atilde;O',e(d.natOp)),c('PROTOCOLO DE AUTORIZA&Ccedil;&Atilde;O DE USO',e(d.prot.n)+' &middot; '+danfeData(d.prot.dh,true))])
+    +r('34% 33% 33%',[c('INSCRI&Ccedil;&Atilde;O ESTADUAL',e(d.emit.ie)),c('INSCRI&Ccedil;&Atilde;O ESTADUAL DO SUBST. TRIBUT&Aacute;RIO',e(d.emit.iest)),c('CNPJ',danfeDoc(d.emit.doc))]); };
+  var thead='<thead><tr><th>C&Oacute;DIGO</th><th>DESCRI&Ccedil;&Atilde;O DO PRODUTO / SERVI&Ccedil;O</th><th>NCM/SH</th><th>CST</th><th>CFOP</th><th>UN</th><th>QTD</th><th>V. UNIT.</th><th>V. TOTAL</th><th>DESC.</th><th>BC ICMS</th><th>V. ICMS</th><th>V. IPI</th><th>% ICMS</th><th>% IPI</th></tr></thead>';
+  var hom=d.tpAmb==='2'?'<div class="hom">SEM VALOR FISCAL<br>AMBIENTE DE HOMOLOGA&Ccedil;&Atilde;O</div>':'';
+  return pags.map(function(pg,ix){
+    var h='<div class="pg a4">'+hom;
+    if(ix===0) h+='<div class="r canh" style="grid-template-columns:18% 64% 18%"><div class="c" style="grid-column:1/3;border-bottom:0.2mm solid #000"><div class="lb">RECEBEMOS DE '+e(d.emit.nome)+' OS PRODUTOS E/OU SERVI&Ccedil;OS CONSTANTES DA NOTA FISCAL ELETR&Ocirc;NICA INDICADA AO LADO &middot; DESTINAT&Aacute;RIO: '+e(d.dest.nome)+' &middot; VALOR TOTAL R$ '+danfeFmt(T.vNF)+'</div></div>'
+        +'<div class="c nfc" style="grid-row:1/3;grid-column:3"><b>NF-e</b><br>N&ordm; '+e(d.nNF)+'<br>S&eacute;rie '+e(d.serie)+'</div>'+c('DATA DE RECEBIMENTO','')+c('IDENTIFICA&Ccedil;&Atilde;O E ASSINATURA DO RECEBEDOR','')+'</div><div class="corte"></div>';
+    h+=topo(ix+1);
+    if(ix===0){
+      h+='<div class="tt">DESTINAT&Aacute;RIO / REMETENTE</div>'
+        +r('60% 22% 18%',[c('NOME / RAZ&Atilde;O SOCIAL',e(d.dest.nome)),c('CNPJ / CPF',danfeDoc(d.dest.doc)),c('DATA DA EMISS&Atilde;O',danfeData(d.dhEmi))])
+        +r('48% 22% 12% 18%',[c('ENDERE&Ccedil;O',e(danfeEnd(d.dest))),c('BAIRRO / DISTRITO',e(d.dest.bairro)),c('CEP',danfeCep(d.dest.cep)),c('DATA DA SA&Iacute;DA',danfeData(d.dhSai))])
+        +r('40% 8% 16% 18% 18%',[c('MUNIC&Iacute;PIO',e(d.dest.mun)),c('UF',e(d.dest.uf)),c('FONE',danfeFone(d.dest.fone)),c('INSCRI&Ccedil;&Atilde;O ESTADUAL',e(d.dest.ie)),c('HORA DA SA&Iacute;DA',danfeHora(d.dhSai))]);
+      if(d.dups.length) h+='<div class="tt">FATURA / DUPLICATAS</div><div class="r" style="grid-template-columns:1fr"><div class="c"><div class="v" style="font-weight:normal">'+d.dups.map(function(x){return e(x.n)+' &middot; '+danfeData(x.venc)+' &middot; R$ '+danfeFmt(x.v);}).join(' &nbsp;|&nbsp; ')+'</div></div></div>';
+      h+='<div class="tt">C&Aacute;LCULO DO IMPOSTO</div>'
+        +r('repeat(5,1fr)',[c('BASE DE C&Aacute;LCULO DO ICMS',danfeFmt(T.vBC),'text-align:right'),c('VALOR DO ICMS',danfeFmt(T.vICMS),'text-align:right'),c('BASE DE C&Aacute;LC. ICMS ST',danfeFmt(T.vBCST),'text-align:right'),c('VALOR DO ICMS ST',danfeFmt(T.vST),'text-align:right'),c('VALOR TOTAL DOS PRODUTOS',danfeFmt(T.vProd),'text-align:right')])
+        +r('repeat(6,1fr)',[c('VALOR DO FRETE',danfeFmt(T.vFrete),'text-align:right'),c('VALOR DO SEGURO',danfeFmt(T.vSeg),'text-align:right'),c('DESCONTO',danfeFmt(T.vDesc),'text-align:right'),c('OUTRAS DESPESAS',danfeFmt(T.vOutro),'text-align:right'),c('VALOR DO IPI',danfeFmt(T.vIPI),'text-align:right'),c('VALOR TOTAL DA NOTA',danfeFmt(T.vNF),'text-align:right')]);
+      if(d.ibs) h+=r('repeat(4,1fr)',[c('VALOR DO PIS',danfeFmt(T.vPIS),'text-align:right'),c('VALOR DA COFINS',danfeFmt(T.vCOFINS),'text-align:right'),c('VALOR DO IBS',danfeFmt(d.ibs.vIBS),'text-align:right'),c('VALOR DA CBS',danfeFmt(d.ibs.vCBS),'text-align:right')]);
+      h+='<div class="tt">TRANSPORTADOR / VOLUMES TRANSPORTADOS</div>'
+        +r('40% 26% 10% 6% 18%',[c('NOME / RAZ&Atilde;O SOCIAL',e(t.nome)),c('FRETE POR CONTA',e(danfeFrete(t.mod))),c('PLACA',e(t.placa)),c('UF',e(t.ufPlaca)),c('CNPJ / CPF',danfeDoc(t.doc))])
+        +r('50% 26% 6% 18%',[c('ENDERE&Ccedil;O',e(t.ender)),c('MUNIC&Iacute;PIO',e(t.mun)),c('UF',e(t.uf)),c('INSCRI&Ccedil;&Atilde;O ESTADUAL',e(t.ie))])
+        +r('12% 20% 20% 16% 16% 16%',[c('QUANTIDADE',danfeFmt(t.qVol,0)),c('ESP&Eacute;CIE',e(t.esp)),c('MARCA',e(t.marca)),c('NUMERA&Ccedil;&Atilde;O',e(t.nVol)),c('PESO BRUTO',danfeFmt(t.pesoB,3),'text-align:right'),c('PESO L&Iacute;QUIDO',danfeFmt(t.pesoL,3),'text-align:right')]);
+    }
+    h+='<div class="tt">DADOS DOS PRODUTOS / SERVI&Ccedil;OS</div><div class="its"><table>'+thead+'<tbody>'+pg.join('')+'</tbody></table></div>';
+    if(ix===pags.length-1) h+='<div class="tt">DADOS ADICIONAIS</div><div class="r adic" style="grid-template-columns:68% 32%"><div class="c"><div class="lb">INFORMA&Ccedil;&Otilde;ES COMPLEMENTARES</div><div class="tx">'+e(d.infCpl)+(d.infFisco?'<br>'+e(d.infFisco):'')+(T.vTotTrib?'<br>Valor aproximado dos tributos: R$ '+danfeFmt(T.vTotTrib):'')+'</div></div><div class="c"><div class="lb">RESERVADO AO FISCO</div></div></div>';
+    return h+'</div>';
+  }).join('');
+}
+function danfeCss(modelo){
+  var base='*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}html,body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}.lb{font-size:5.5pt;letter-spacing:.2px}.pg{page-break-after:always;overflow:hidden;position:relative}.pg:last-child{page-break-after:auto}';
+  if(modelo==='simples') return '@page{size:100mm 150mm;margin:0}'+base+'html,body{width:100mm}.etq{width:100mm;height:150mm;padding:3mm;font-size:8pt;line-height:1.25;display:flex;flex-direction:column;gap:1.3mm}'
+    +'.e-top{display:flex;justify-content:space-between;align-items:center;background:#000;color:#fff;padding:1mm 2mm;font-size:10pt;letter-spacing:.6px}.e-top span{font-size:8pt}.e-hom{border:0.4mm solid #000;text-align:center;font-weight:bold;font-size:9pt;padding:.6mm}'
+    +'.e-nf{display:flex;justify-content:space-between;align-items:flex-end}.e-num{font-size:20pt;line-height:1;margin-left:1.5mm;font-family:monospace}.e-bc{padding:0 4mm}.e-ch{font-family:monospace;font-size:7.8pt;white-space:nowrap;text-align:center;font-weight:bold;letter-spacing:.1px}'
+    +'.e-pr{text-align:center;border-top:0.3mm solid #000;border-bottom:0.3mm solid #000;padding:.8mm 0}.e-bl{border-bottom:0.2mm solid #000;padding-bottom:1mm}.e-nm{font-weight:bold;font-size:9.5pt}.e-dest{font-size:12pt;line-height:1.1}'
+    +'.e-tot{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:0.2mm solid #000;padding-bottom:1mm}.e-vl{font-size:13pt}.e-ad{font-size:7pt;line-height:1.2;flex:1;min-height:0;overflow:hidden}';
+  return '@page{size:A4 portrait;margin:0}'+base+'html,body{width:210mm}.a4{width:210mm;height:297mm;padding:7mm;font-size:7.5pt;line-height:1.2;display:flex;flex-direction:column}'
+    +'.r{display:grid;border:0.2mm solid #000;border-right:none;margin-top:-0.2mm}.c{border-right:0.2mm solid #000;padding:.5mm 1mm;min-height:6.6mm;overflow:hidden}.v{font-size:8.5pt;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    +'.tt{font-size:6pt;font-weight:bold;margin:1.2mm 0 .4mm}.canh .c{min-height:8mm}.nfc{text-align:center;font-size:9pt;display:flex;flex-direction:column;justify-content:center}.nfc b{font-size:11pt}.corte{border-top:0.2mm dashed #000;margin:1.5mm 0}'
+    +'.emit{font-size:8pt;line-height:1.3}.en{font-size:11pt;font-weight:bold;margin:1.5mm 0 1mm}.dn{text-align:center}.dt{font-size:13pt;font-weight:bold}.ds{font-size:6pt;line-height:1.1}.es{display:flex;justify-content:center;align-items:center;gap:2mm;font-size:6.5pt;text-align:left;margin:1mm 0}.es b{border:0.2mm solid #000;font-size:12pt;padding:0 1.6mm}.nn{font-size:8pt;font-weight:bold;line-height:1.25}'
+    +'.ch .bc{padding:1mm 3mm}.cv{font-family:monospace;font-size:7.2pt;white-space:nowrap;font-weight:bold;text-align:center;margin:.5mm 0 1mm}.cs{font-size:6.5pt;text-align:center;line-height:1.2}'
+    +'.its{flex:1;min-height:0;border:0.2mm solid #000;overflow:hidden}table{width:100%;border-collapse:collapse;font-size:6.6pt}th{font-size:5.3pt;font-weight:normal;border-bottom:0.2mm solid #000;border-right:0.2mm solid #000;padding:.6mm .5mm}td{border-right:0.2mm solid #000;padding:.5mm .6mm;text-align:center;vertical-align:top}th:last-child,td:last-child{border-right:none}td.l{text-align:left}td.n{text-align:right;white-space:nowrap}.ad{font-size:6pt}'
+    +'.adic .c{min-height:26mm}.tx{font-size:7pt;line-height:1.25}.hom{position:absolute;top:120mm;left:0;right:0;text-align:center;font-size:30pt;font-weight:bold;color:rgba(0,0,0,.15);transform:rotate(-25deg)}';
+}
+// busca os XMLs dos pedidos e imprime no modelo pedido ('simples' = etiqueta 10×15, 'completo' = A4)
+async function danfeImprimir(ids,modelo,depois){
+  ids=(ids||[]).filter(Boolean); if(!ids.length){ showToast('Nenhum pedido selecionado','amber'); return; }
+  try{
+    showToast('Montando DANFE…','blue');
+    var docs=await wmsSelIn('wms_pedido_docs','pedido_id',ids,'tipo=eq.nfe_xml&select=pedido_id,numero,conteudo&order=numero');
+    var ok=[], falhas=0;
+    docs.forEach(function(x){ try{ var d=danfeParse(x.conteudo); if(d.prot&&d.prot.n&&d.prot.cStat==='100'&&d.chave.length===44) ok.push(d); else falhas++; }catch(_e){ falhas++; } });
+    var sem=ids.length-docs.length+falhas;
+    if(!ok.length){ showToast(ids.length===1?'Este pedido ainda não tem nota autorizada com XML no VERUS':'Nenhum dos '+ids.length+' pedidos tem nota autorizada com XML no VERUS','amber'); if(depois) depois(); return; }
+    ok.sort(function(a,b){ return Number(a.nNF)-Number(b.nNF); });
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>DANFE '+ecomEsc(ok.length===1?ok[0].nNF:ok.length+' notas')+'</title><style>'+danfeCss(modelo)+'</style></head><body>'+ok.map(modelo==='simples'?danfeHtmlSimples:danfeHtmlCompleto).join('')+'</body></html>';
+    var old=ge('danfe-print'); if(old) old.remove();
+    var ifr=document.createElement('iframe'); ifr.id='danfe-print'; ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none';
+    document.body.appendChild(ifr); var dc=ifr.contentDocument||ifr.contentWindow.document; dc.open(); dc.write(html); dc.close();
+    setTimeout(function(){ try{ ifr.contentWindow.focus(); ifr.contentWindow.print(); }catch(_e){} if(depois) depois(); },500);
+    showToast(ok.length+' DANFE'+(sem>0?' · '+sem+' pedido(s) sem nota autorizada ficaram de fora':''),sem>0?'amber':'green');
+  }catch(e){ showToast('Erro ao montar o DANFE: '+(e.message||e),'red'); if(depois) depois(); }
+}
+function danfeBotoes(ids,cls){ var a="['"+ids.join("','")+"']";
+  return '<button class="'+(cls||'btn btn-sm')+'" onclick="danfeImprimir('+a+',\'simples\')" title="DANFE simplificado em etiqueta 10 × 15, para colar na caixa">&#129534; DANFE 10&times;15</button>'
+    +'<button class="'+(cls||'btn btn-sm')+'" onclick="danfeImprimir('+a+',\'completo\')" title="DANFE completo em A4">&#129534; DANFE A4</button>'; }
+function danfeSelecao(modelo){ danfeImprimir([...wmsPedSelecionados],modelo); }
+function wmsCxDanfe(modelo){ var p=(wmsCx&&wmsCx.pendingLabel&&wmsCx.peds[wmsCx.pendingLabel])||(wmsCx&&wmsCx.fila&&wmsCx.fila.length?wmsCxAtual():null)||_wmsCxUlt;
+  if(!p){ showToast('Nenhum pedido nesta bancada ainda','amber'); wmsCxFoco(); return; } danfeImprimir([p.id],modelo,wmsCxFoco); }
 // etiqueta do volume (10×10) — modelo interno, enquanto a etiqueta de postagem não está integrada
 function wmsCxEtiquetaPrint(p){
   var esc=ecomEsc, cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}, code='VOL'+p.numero_pedido, url=(typeof wmsCode128DataUrl==='function')?wmsCode128DataUrl(code):'';
@@ -45573,6 +45721,8 @@ function rWmsPedidos_i(){
     <span id="wms-ped-selcount" style="font-size:12px;font-weight:600;color:var(--accent-text)"></span>
     <div style="display:flex;gap:8px">
       <button class="btn btn-sm" onclick="wmsPedSelecionados.clear();filterWmsPedidos(ge('wms-ped-busca')?.value||'')">Limpar</button>
+      <button class="btn btn-sm" onclick="danfeSelecao('simples')" title="DANFE simplificado (etiqueta 10 × 15) das notas autorizadas dos pedidos marcados">🧾 DANFE 10×15</button>
+      <button class="btn btn-sm" onclick="danfeSelecao('completo')" title="DANFE completo (A4) das notas autorizadas dos pedidos marcados">🧾 DANFE A4</button>
       <button class="btn btn-sm" onclick="wmsMontarRomaneioDaSelecao()">🚚 Montar romaneio</button>
       <button class="btn btn-p btn-sm" onclick="wmsGerarListasModal()">⚙ Gerar listas de separação</button>
     </div>
@@ -45970,6 +46120,7 @@ function wmsPedidoDetalhe(id){
         ${wmsPedBtnExcluir(p)}
         ${(p.origem==='sap_b1'&&['cancelado','cancelada','excluido'].includes(p.status))?`<button class="btn btn-sm" onclick="wmsSapReimportar('${p.id}')" title="Traz o pedido de volta do SAP como pedido novo (a lista do SAP é fechada e os lotes desalocados antes)">↻ Reimportar do SAP</button>`:''}
         <button class="btn btn-sm" onclick="wmsCapaPedidosPrint(['${p.id}'])" title="Imprime só a capa (resumo + código de barras) para o checkout">🖨 Capa</button>
+        ${p.origem==='sap_b1'?danfeBotoes([p.id]):''}
         ${qPedTemLaudo(p.cliente_id)?`<button class="btn btn-sm" onclick="qLaudosPedido('${p.id}')" title="Laudos dos lotes separados, para imprimir e mandar com a carga">📄 Laudos</button>`:''}
         ${wmsPedBadge(p.status,p.id,p)}
       </div>
