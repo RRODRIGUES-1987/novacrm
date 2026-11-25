@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1421 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1422 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1421';
+const APP_VERSION='v1.0.1422';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38197,7 +38197,9 @@ function wmsCxUsaCorreios(p){ var c=wmsCxCfg(p).correios; return !!(c&&c.bancada
 function wmsCxBloqueio(p){
   if(!wmsCxExigeNf(p)) return '';
   var n=p._nf||{};
-  if(n.st==='autorizada') return '';
+  if(n.st==='autorizada'){   // v1.0.1422: a pré-postagem é criada antes do checkout; se os Correios recusaram, o pedido não é embalado
+    var _pp=p._par||{}; if(wmsCxUsaCorreios(p)&&_pp.correios_erro&&!(_pp.correios&&_pp.correios.id)) return 'etiqueta dos Correios não pôde ser criada: '+String(_pp.correios_erro.msg||_pp.correios_erro);
+    return ''; }
   if(n.st==='rejeitada'||n.st==='denegada') return 'nota '+(n.num||'')+' '+n.st+' pela SEFAZ'+(n.mot?': '+n.mot:'');
   if(n.num) return 'nota '+n.num+' ainda não autorizada pela SEFAZ';
   return 'pedido ainda sem nota fiscal';
@@ -38285,7 +38287,7 @@ async function wmsCxAbrirFolha(code){
   wmsCx={modo:'folha',onda:onda,end:end,desc:fila[0]._linhas[0].descricao,fila:fila.map(function(p){return p.id;}),peds:{},msg:'',msgcolor:''};
   fila.forEach(function(p){ wmsCx.peds[p.id]=p; });
   var ab=fila.filter(function(p){return !wmsCxFeito(p)&&!p._bloq;}).length, bq=fila.filter(function(p){return !wmsCxFeito(p)&&p._bloq;}).length;
-  wmsCxFlash(ab?('Folha aberta: '+ab+' pedido(s) para conferir'+(bq?' · '+bq+' bloqueado(s) sem nota':'')):(bq?(bq+' pedido(s) desta folha ainda sem nota autorizada: não podem ser embalados'):'Esta folha já foi toda conferida'),ab?'green':(bq?'red':'amber'));
+  wmsCxFlash(ab?('Folha aberta: '+ab+' pedido(s) para conferir'+(bq?' · '+bq+' bloqueado(s)':'')):(bq?(bq+' pedido(s) desta folha bloqueado(s) (sem nota autorizada ou sem etiqueta): não podem ser embalados'):'Esta folha já foi toda conferida'),ab?'green':(bq?'red':'amber'));
 }
 async function wmsCxAbrirPedido(num){
   var peds=await wmsCxCarregar('numero_pedido=eq.'+encodeURIComponent(num));
@@ -38309,7 +38311,17 @@ async function wmsCxScan(code){
     if(wmsCx&&wmsCx.pendingLabel){
       var pl=wmsCx.peds[wmsCx.pendingLabel], cu2=code.toUpperCase(), n=String(pl.numero_pedido).toUpperCase();
       var obj=(pl._cor&&pl._cor.objeto)?String(pl._cor.objeto).toUpperCase():'';
-      if(obj?(cu2.replace(/\s/g,'').indexOf(obj)>=0):(cu2==='VOL'+n||cu2===n)){ wmsCx.pendingLabel=null; wmsCxFlash('Pedido '+pl.numero_pedido+' liberado','green'); }
+      var nv=(!obj&&pl._vols>1)?pl._vols:1, okEt=false;
+      if(obj) okEt=cu2.replace(/\s/g,'').indexOf(obj)>=0;
+      else if(nv>1){ var pre='VOL'+n+'-', iv=(cu2.indexOf(pre)===0&&/^\d+$/.test(cu2.slice(pre.length)))?parseInt(cu2.slice(pre.length),10):0;
+        if(iv>=1&&iv<=nv){ pl._volsBip=pl._volsBip||{};
+          if(pl._volsBip[iv]){ ecomBeep(); wmsCxFlash('A etiqueta '+iv+'/'+nv+' já foi bipada: bipe as outras caixas','amber'); return; }
+          pl._volsBip[iv]=1; var falta=nv-Object.keys(pl._volsBip).length;
+          if(falta>0){ wmsCxFlash('Caixa '+iv+'/'+nv+' OK · falta(m) '+falta+' etiqueta(s) deste pedido','green'); return; }
+          okEt=true; } }
+      else okEt=(cu2==='VOL'+n||cu2===n);
+      if(okEt){ wmsCx.pendingLabel=null; var rmN=await wmsCxRomaneio(pl);
+        wmsCxFlash('Pedido '+pl.numero_pedido+' liberado'+(rmN?' · romaneio '+rmN+' · '+wmsCxTranspCurto(pl.transportadora):(pl._romErro?' · NÃO entrou no romaneio: '+pl._romErro:'')),pl._romErro?'amber':'green'); }
       else { ecomBeep(); wmsCxFlash('Bipe a ETIQUETA do pedido '+pl.numero_pedido+' para liberar o próximo','red'); }
       return;
     }
@@ -38359,6 +38371,29 @@ function wmsCxContagem(p){
     setTimeout(function(){ inp.focus(); },60);
   });
 }
+// v1.0.1422: nº de caixas da etiqueta interna = volumes da própria nota (mesma regra de caixas do faturamento)
+async function wmsCxVolsNf(p){
+  try{ var d=await dbSelect('wms_pedido_docs','pedido_id=eq.'+p.id+'&tipo=eq.nfe_xml&select=conteudo&limit=1'); var x=String((d&&d[0]&&d[0].conteudo)||''), n=0, m, re=/<qVol>(\d+)<\/qVol>/g;
+    while((m=re.exec(x))) n+=parseInt(m[1],10)||0; return Math.min(Math.max(n,1),60); }catch(_e){ return 1; }
+}
+// v1.0.1422: no bipe da etiqueta colada, o pedido entra no romaneio aberto da transportadora (um por transportadora, dia e unidade)
+async function wmsCxRomaneio(p){
+  if(wmsCxCfg(p).checkout_romaneio_auto!==true) return '';
+  try{
+    var cid=company?.id, tr=wmsCxTranspCurto(p.transportadora), hoje=hojeLocalISO(), un=p.unit_id||(typeof currentUnitId==='function'?currentUnitId():null);
+    var ja=await dbSelect('wms_pedidos','id=eq.'+p.id+'&select=romaneio_id'); if(ja&&ja[0]&&ja[0].romaneio_id){ var rj=await dbSelect('wms_romaneios','id=eq.'+ja[0].romaneio_id+'&select=numero'); return (rj&&rj[0]&&rj[0].numero)||''; }
+    var ab=await dbSelect('wms_romaneios','company_id=eq.'+cid+'&cliente_id=eq.'+p.cliente_id+'&status=eq.pendente&movimento=eq.saida&data=eq.'+hoje+'&transportadora=eq.'+encodeURIComponent(tr)+(un?'&unit_id=eq.'+un:'')+'&select=id,numero&order=created_at.desc&limit=1');
+    var rom=ab&&ab[0];
+    if(!rom){ var numero=await dbRpc('next_numero',{p_company:cid,p_prefixo:'ROM'});
+      rom=await dbInsert('wms_romaneios',Object.assign({company_id:cid,cliente_id:p.cliente_id,numero:numero,data:hoje,status:'pendente',movimento:'saida',transportadora:tr,owner_id:cu?.id||null},un?{unit_id:un}:{}));
+      rom=Array.isArray(rom)?rom[0]:rom; if(rom&&typeof wmsRomaneios!=='undefined'&&Array.isArray(wmsRomaneios)) wmsRomaneios=[rom].concat(wmsRomaneios); }
+    if(!rom||!rom.id) return '';
+    await dbUpdate('wms_pedidos',p.id,{romaneio_id:rom.id}); p.romaneio_id=rom.id;
+    var mp=(wmsPedidos||[]).find(function(x){return x.id===p.id;}); if(mp) mp.romaneio_id=rom.id;
+    try{ var q=await dbSelect('wms_pedidos','romaneio_id=eq.'+rom.id+'&excluido_em=is.null&select=id'); await dbUpdate('wms_romaneios',rom.id,{tot_pedidos:(q||[]).length}); }catch(_e){}
+    p._rom=rom.numero; return rom.numero||'';
+  }catch(e){ console.warn('[checkout WMS] romaneio automático',e); p._romErro=String(e.message||e); return ''; }
+}
 // pedido "morto": trava no banco (outra bancada pode ter feito), conclui a separação, registra a conferência e imprime
 async function wmsCxMatar(p){
   if(wmsCxUsaCorreios(p)&&!p._cor){
@@ -38382,9 +38417,10 @@ async function wmsCxMatar(p){
       observacao:'Checkout bancada · '+p._linhas.map(function(l){return l.qtd+'× '+l.end;}).join(' · ')+(wmsCx.onda?' · '+wmsCx.onda:'')});
   }catch(e){ console.warn('[checkout WMS] pós-conferência',e); }
   _wmsCxUlt=p;
+  if(!p._cor){ p._vols=await wmsCxVolsNf(p); p._volsBip={}; }
   try{ if(p._cor) wmsCxPdfPrint(p._cor.pdf); else wmsCxEtiquetaPrint(p); }catch(e){ console.warn('etiqueta',e); }
   wmsCx.pendingLabel=p.id;
-  wmsCxFlash('Pedido '+p.numero_pedido+' OK · bipe a etiqueta '+(p._cor?'dos Correios colada na caixa':'impressa')+' para liberar','green');
+  wmsCxFlash('Pedido '+p.numero_pedido+' OK · bipe '+(p._cor?'a etiqueta dos Correios colada na caixa':((p._vols>1)?('as '+p._vols+' etiquetas coladas nas caixas'):'a etiqueta impressa'))+' para liberar','green');
 }
 function wmsCxReimprimir(){ if(!_wmsCxUlt){ showToast('Nenhum pedido conferido nesta bancada ainda','amber'); return; } if(_wmsCxUlt._cor) wmsCxPdfPrint(_wmsCxUlt._cor.pdf); else wmsCxEtiquetaPrint(_wmsCxUlt); wmsCxFoco(); }
 function wmsCxTranspCurto(t){ t=String(t||'').toUpperCase(); if(t.indexOf('CORREIO')>=0) return 'CORREIOS'; return (t.split(' ')[0]||'SEM TRANSP.').slice(0,14); }
@@ -38538,20 +38574,21 @@ function wmsCxDanfe(modelo){ var p=(wmsCx&&wmsCx.pendingLabel&&wmsCx.peds[wmsCx.
   if(!p){ showToast('Nenhum pedido nesta bancada ainda','amber'); wmsCxFoco(); return; } danfeImprimir([p.id],modelo,wmsCxFoco); }
 // etiqueta do volume (10×10) — modelo interno, enquanto a etiqueta de postagem não está integrada
 function wmsCxEtiquetaPrint(p){
-  var esc=ecomEsc, cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}, code='VOL'+p.numero_pedido, url=(typeof wmsCode128DataUrl==='function')?wmsCode128DataUrl(code):'';
+  var esc=ecomEsc, cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;})||{}, nVol=(p._vols>1)?p._vols:1;
+  var codeDe=function(i){ return 'VOL'+p.numero_pedido+(nVol>1?'-'+i:''); }, urlDe=function(i){ return (typeof wmsCode128DataUrl==='function')?wmsCode128DataUrl(codeDe(i)):''; };
   var itens=p._linhas.map(function(l){ return '<div class="it"><b>'+l.qtd+' ×</b> '+esc(l.sku)+' <span>lote</span> <b>'+esc(l.lote||'—')+'</b></div>'; }).join('');
   var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Volume '+esc(p.numero_pedido)+'</title><style>@page{size:100mm 100mm;margin:0}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
-    +'html,body{margin:0;width:100mm;font-family:Arial,Helvetica,sans-serif;color:#000}.etq{width:100mm;height:100mm;padding:2.5mm;overflow:hidden}.in{border:0.4mm solid #000;height:100%;padding:2.5mm;display:flex;flex-direction:column;gap:1.5mm}'
+    +'html,body{margin:0;width:100mm;font-family:Arial,Helvetica,sans-serif;color:#000}.etq{width:100mm;height:100mm;padding:2.5mm;overflow:hidden;page-break-after:always}.etq:last-child{page-break-after:auto}.in{border:0.4mm solid #000;height:100%;padding:2.5mm;display:flex;flex-direction:column;gap:1.5mm}'
     +'.tit{background:#000;color:#fff;display:flex;justify-content:space-between;font-size:11pt;font-weight:bold;letter-spacing:1.5px;padding:1mm 2mm}.lb{font-size:6pt;color:#555;letter-spacing:.5px}'
     +'.nome{font-size:15pt;font-weight:bold;line-height:1.08}.end{font-size:9.5pt;line-height:1.25;margin-top:.8mm}.its{border-top:0.3mm solid #000;border-bottom:0.3mm solid #000;padding:1mm 0;font-size:9pt;max-height:20mm;overflow:hidden}.it span{font-size:6.5pt;color:#555}'
     +'.rod{flex:1;display:flex;justify-content:space-between;align-items:flex-end;gap:2mm;min-height:0}.ped{font-size:26pt;font-weight:bold;line-height:1;font-family:monospace}.sub{font-size:7pt;color:#333;margin-top:.6mm}.bc{text-align:right}.bc img{height:15mm;max-width:52mm}'
-    +'</style></head><body><div class="etq"><div class="in">'
+    +'</style></head><body>'+Array.from({length:nVol},function(_x,_i){ var vi=_i+1, code=codeDe(vi), url=urlDe(vi); return '<div class="etq"><div class="in">'
     +'<div class="tit"><span>'+esc(String(cli.nome||'').toUpperCase().split(' ')[0])+'</span><span>'+esc(wmsCxTranspCurto(p.transportadora))+'</span></div>'
     +'<div><div class="lb">DESTINAT&Aacute;RIO</div><div class="nome">'+esc(String(p.destinatario_nome||'').slice(0,48))+'</div><div class="end">'+esc(p.endereco||'')+'<br>'+esc(p.cidade||'')+(p.uf?'/'+esc(p.uf):'')+(p.cep?' &middot; CEP '+esc(p.cep):'')+'</div></div>'
     +'<div class="its">'+itens+'</div>'
-    +'<div class="rod"><div><div class="lb">PEDIDO</div><div class="ped">'+esc(p.numero_pedido)+'</div><div class="sub">vol 1/1'+(p._par&&p._par.onda?' &middot; '+esc(p._par.onda):'')+' &middot; '+new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})+'</div></div>'
+    +'<div class="rod"><div><div class="lb">PEDIDO</div><div class="ped">'+esc(p.numero_pedido)+'</div><div class="sub">vol '+vi+'/'+nVol+''+(p._par&&p._par.onda?' &middot; '+esc(p._par.onda):'')+' &middot; '+new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})+'</div></div>'
     +'<div class="bc">'+(url?'<img src="'+url+'">':'')+'<div style="font-family:monospace;font-size:8pt">'+esc(code)+'</div></div></div>'
-    +'</div></div></body></html>';
+    +'</div></div>'; }).join('')+'</body></html>';
   var old=ge('wms-cx-print'); if(old) old.remove();
   var ifr=document.createElement('iframe'); ifr.id='wms-cx-print'; ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
   document.body.appendChild(ifr); var d=ifr.contentDocument||ifr.contentWindow.document; d.open(); d.write(html); d.close();
@@ -38582,7 +38619,7 @@ function wmsCxRender(){
     body.innerHTML=centro('<div style="border:3px solid var(--green-text,#059669);border-radius:20px;padding:40px 56px;text-align:center;max-width:680px"><div style="font-size:28px;font-weight:800;color:var(--green-text,#059669)">Etiqueta impressa</div>'
       +'<div style="font-size:22px;font-weight:600;margin-top:8px">'+ecomEsc(pl.destinatario_nome||'')+'</div><div style="font-size:15px;color:var(--text3);font-family:monospace">Pedido '+ecomEsc(pl.numero_pedido)+'</div>'+wmsCxBoxHtml(pl)
       +(pl._cor?'<div style="font-size:15px;font-family:monospace;margin-top:14px">Rastreio '+ecomEsc(pl._cor.objeto)+(pl._cor.servico?' &middot; '+ecomEsc(pl._cor.servico):'')+'</div>':'')
-      +'<div style="font-size:18px;margin-top:18px">Bipe a <b>etiqueta '+(pl._cor?'dos Correios colada na caixa':'impressa')+'</b> para liberar o pr&oacute;ximo pedido</div><div style="font-size:13px;color:var(--text3);margin-top:10px">A etiqueta n&atilde;o saiu? Use &ldquo;Reimprimir &uacute;ltima&rdquo; no rodap&eacute;.</div></div>'); wmsCxFoco(); return; }
+      +'<div style="font-size:18px;margin-top:18px">'+((!pl._cor&&pl._vols>1)?('Bipe as <b>'+pl._vols+' etiquetas</b> coladas nas caixas ('+Object.keys(pl._volsBip||{}).length+' de '+pl._vols+' bipadas)'):('Bipe a <b>etiqueta '+(pl._cor?'dos Correios colada na caixa':'impressa')+'</b>'))+' para liberar o pr&oacute;ximo pedido</div><div style="font-size:13px;color:var(--text3);margin-top:10px">A etiqueta n&atilde;o saiu? Use &ldquo;Reimprimir &uacute;ltima&rdquo; no rodap&eacute;.</div></div>'); wmsCxFoco(); return; }
   var p=wmsCxAtual();
   if(!p&&wmsCxBloqueados().length){ var bqs=wmsCxBloqueados();
     body.innerHTML=centro('<div style="border:3px solid var(--red-text);border-radius:20px;padding:36px 48px;text-align:center;max-width:760px"><div style="font-size:26px;font-weight:800;color:var(--red-text)">'+bqs.length+' pedido(s) n&atilde;o podem ser embalados</div>'
