@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1420 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1421 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1420';
+const APP_VERSION='v1.0.1421';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -5986,10 +5986,38 @@ async function capaReenviarConfirmado(id){
 var ARMZ_INICIO='2026-10-01';
 // v1.0.1408: extrato POR OPERAÇÃO do cliente (cada operação é uma subfatura) + ajustes manuais com histórico
 var armzCli='', armzMes='', armzOp='', armzMeses={}, armzAjustes=[], armzOps={}, _armzLoaded=false, _armzSemAj=false;
+// v1.0.1421: cliente com programação de faturamento QUINZENAL → extrato, pico e fechamento por quinzena (1ª = 01–15, 2ª = 16–fim)
+var armzQz=0, armzProg=[];
+function armzQuinzenal(cli){ return (armzProg||[]).some(function(p){ return p.cliente_id===cli&&p.ativo!==false&&String(p.periodicidade||'').toLowerCase()==='quinzenal'; }); }
+function armzQzAtivo(){ return (armzCli&&armzQuinzenal(armzCli))?(armzQz===2?2:1):0; }
+function armzQzNome(q){ return q===2?'2ª quinzena':'1ª quinzena'; }
+function armzQzDe(dataISO){ return (Number(String(dataISO||'').slice(8,10))||0)<=15?1:2; }
+function armzFechObj(reg){ var f=reg&&reg.fechamento; if(typeof f==='string'){ try{ f=JSON.parse(f); }catch(_e){ f=null; } } return (f&&typeof f==='object')?f:{}; }
+function armzQzFechada(cli,op,m,q){ var reg=armzMeses[armzK(cli,op,m)], F=armzFechObj(reg); if(reg&&reg.fechado) return true; return q===1&&!!F.q1; }
+function armzQzSel(q){ armzQz=q; render(); }
+// extrato de UMA quinzena: quinzena fechada mostra os números congelados; a 2ª abre com o saldo final (congelado) da 1ª
+function armzR(cli,m,op,q){
+  var R=armzCalcular(cli,m,0,op); if(!q) return R;
+  var reg=armzMeses[armzK(cli,op,m)], F=armzFechObj(reg), f1=F.q1||null, f2=(reg&&reg.fechado&&F.q2)?F.q2:null;
+  var soma=function(dias,ab){ var o={abertura:ab,dias:dias,totE:0,totS:0,totAj:0,totAjV:0,pico:{pallets:-Infinity,dia:null},picoV:{valor:-Infinity,dia:null}};
+    dias.forEach(function(d){ o.totE+=d.entradas; o.totS+=d.saidas; o.totAj+=d.ajuste; o.totAjV=Math.round((o.totAjV+(d.ajuste_valor||0))*100)/100; if(d.saldo>o.pico.pallets) o.pico={pallets:d.saldo,dia:d.dia}; if(d.valor>o.picoV.valor) o.picoV={valor:d.valor,dia:d.dia}; });
+    var u=dias[dias.length-1]; o.fim=u?{pallets:u.saldo,valor:u.valor}:{pallets:ab.pallets,valor:ab.valor}; return o; };
+  var L1=soma(R.dias.slice(0,15),{pallets:R.abertura.pallets,valor:R.abertura.valor,fonte:R.abertura.fonte}), Q;
+  if(q===1){ Q=f1?Object.assign({},f1,{abertura:Object.assign({},f1.abertura,{fonte:'fechado'})}):L1;
+    Q.tardia=!!(f1&&(L1.fim.pallets!==f1.fim.pallets||Math.abs(L1.fim.valor-f1.fim.valor)>0.005||L1.totE!==f1.totE||L1.totS!==f1.totS)); }
+  else { var base=f1?f1.fim:L1.fim, dp=base.pallets-L1.fim.pallets, dv=Math.round((base.valor-L1.fim.valor)*100)/100;
+    var d2=R.dias.slice(15).map(function(d){ return Object.assign({},d,{abertura:d.abertura+dp,saldo:d.saldo+dp,valor:Math.round((d.valor+dv)*100)/100}); });
+    Q=f2?Object.assign({},f2,{abertura:Object.assign({},f2.abertura,{fonte:'q1fechada'})}):soma(d2,{pallets:base.pallets,valor:base.valor,fonte:f1?'q1fechada':'q1aberta'});
+    Q.tardia=!!(f1&&!f2&&(dp||dv)); }
+  Q.q=q; Q.pend=R.pend.filter(function(c){ return armzQzDe(c.data_operacao)===q; }); Q.temQ1=!!f1; Q.mesFechado=!!(reg&&reg.fechado);
+  Q.fechadoQ=Q.mesFechado||(q===1&&!!f1); Q.nCapas=R.nCapas; Q.nAj=R.nAj;
+  return Q;
+}
 function armzK(cli,op,m){ return cli+'|'+(op||'')+'|'+m; }
 async function armzCarregar(){
   try{ var r=await dbSelect('armazenagem_meses','company_id=eq.'+company.id)||[]; armzMeses={}; r.forEach(function(x){ armzMeses[armzK(x.cliente_id,x.operacao_id,x.competencia)]=x; }); }catch(e){ armzMeses={}; }
   try{ armzAjustes=await dbSelectAll('armazenagem_ajustes','company_id=eq.'+company.id+'&order=data.asc,created_at.asc')||[]; _armzSemAj=false; }catch(e2){ armzAjustes=[]; _armzSemAj=true; }
+  try{ armzProg=await dbSelect('fat_programacao','company_id=eq.'+company.id+'&select=cliente_id,periodicidade,ativo')||[]; }catch(e3){ armzProg=[]; }
   _armzLoaded=true;
 }
 // operações do cliente (clientes_contatos com tipo de operação ou tabela) — é por elas que a fatura se divide
@@ -6053,12 +6081,18 @@ function armzCalcular(cli,m,prof,op){
 function armzMesesOpcoes(){ var out=[], m=ARMZ_INICIO.slice(0,7), h=new Date(), atual=h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0'); if(atual<m) atual=m;
   while(m<=atual){ out.push(m); var a=Number(m.slice(0,4)), mm=Number(m.slice(5,7))+1; if(mm>12){ mm=1; a++; } m=a+'-'+String(mm).padStart(2,'0'); } return out; }
 function armzNomeMes(m){ return new Date(Number(m.slice(0,4)),Number(m.slice(5,7))-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'}); }
-function armzCliSel(v){ armzCli=v; armzOp=''; render(); }
+function armzCliSel(v){ armzCli=v; armzOp=''; armzQz=0; render(); }
 function armzOpSel(v){ armzOp=v||''; render(); }
 var ARMZ_TH='background:#1e3a8a;color:#fff;font-weight:600;font-size:11px;letter-spacing:.3px';
-function armzAvisos(cli,m){
+function armzAvisos(cli,m,qz){
   var so=armzSemOp(cli,m), dv=armzDiverg(cli,m), h='';
   var lista=function(L){ return L.slice(0,10).map(function(c){ return ecomEsc(c.numero||''); }).join(', ')+(L.length>10?'…':''); };
+  if(qz){   // v1.0.1421: só o que é da quinzena escolhida avisa; o da outra quinzena não trava nem polui
+    var daQ=function(c){ return armzQzDe(c.data_operacao)===qz; }, soQ=so.filter(daQ), dvQ=dv.filter(daQ), nq=armzQzNome(qz);
+    if(soQ.length) h+='<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+soQ.length+' capa(s) da '+nq+' <b>sem operação</b>: '+lista(soQ)+'. Elas não entram em nenhuma subfatura e a quinzena não fecha enquanto não forem corrigidas (abra a capa › Editar dados › Operação).</div>';
+    if(dvQ.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+dvQ.length+' capa(s) da '+nq+' com o responsável digitado diferente da operação: '+lista(dvQ)+'. O extrato segue a <b>operação</b> da capa; confira se estão na subfatura certa antes de fechar a quinzena.</div>';
+    return h;
+  }
   if(so.length) h+='<div style="border:1px solid var(--red-text);background:var(--red-bg,#fee2e2);color:var(--red-text);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+so.length+' capa(s) do mês <b>sem operação</b>: '+lista(so)+'. Elas não entram em nenhuma subfatura e o mês não fecha enquanto não forem corrigidas (abra a capa › Editar dados › Operação).</div>';
   // v1.0.1417: no mês corrente, o que é da quinzena ainda aberta vira aviso informativo (cinza); o da quinzena que está fechando segue em amarelo
   var hj=new Date(), mAtual=hj.getFullYear()+'-'+String(hj.getMonth()+1).padStart(2,'0'), dHj=hj.getDate();
@@ -6080,7 +6114,12 @@ function rFatArmazenagem(){
   var cab='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
     +'<select class="fi" style="width:auto;min-width:260px" onchange="armzCliSel(this.value)"><option value="">Selecione o cliente…</option>'+clis.map(function(c){return '<option value="'+c.id+'"'+(c.id===armzCli?' selected':'')+'>'+ecomEsc(c.nome)+'</option>';}).join('')+'</select>'
     +(ops&&ops.length?'<select class="fi" style="width:auto;min-width:200px" onchange="armzOpSel(this.value)">'+(ops.length>1?'<option value="">Todas as operações</option>':'')+ops.map(function(o){return '<option value="'+o.id+'"'+(o.id===armzOp?' selected':'')+'>'+ecomEsc(o.nome)+'</option>';}).join('')+'</select>':'')
-    +'<select class="fi" style="width:auto" onchange="armzMes=this.value;render()">'+meses.map(function(m){return '<option value="'+m+'"'+(m===armzMes?' selected':'')+'>'+armzNomeMes(m)+'</option>';}).join('')+'</select></div>';
+    +'<select class="fi" style="width:auto" onchange="armzMes=this.value;armzQz=0;render()">'+meses.map(function(m){return '<option value="'+m+'"'+(m===armzMes?' selected':'')+'>'+armzNomeMes(m)+'</option>';}).join('')+'</select>'
+    +(function(){ if(!armzCli||!armzQuinzenal(armzCli)) return '';
+        if(armzQz!==1&&armzQz!==2){ var hj=new Date(), mA=hj.getFullYear()+'-'+String(hj.getMonth()+1).padStart(2,'0'); armzQz=(armzMes===mA&&hj.getDate()<=15)?1:((armzOp&&!armzQzFechada(armzCli,armzOp,armzMes,1))?1:2); }
+        var ud=armzUltimoDia(armzMes), bt=function(q,t){ var on=armzQz===q; return '<button onclick="armzQzSel('+q+')" style="padding:7px 12px;border:none;cursor:pointer;font-size:12.5px;'+(on?'background:#1e3a8a;color:#fff;font-weight:600':'background:var(--bg);color:var(--text2)')+'">'+t+'</button>'; };
+        return '<span style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">'+bt(1,'1ª quinzena · 01 a 15')+bt(2,'2ª quinzena · 16 a '+ud)+'</span><span style="margin-left:auto;font-size:12px;color:var(--text3)">Apuração quinzenal (programação de faturamento)</span>'; })()
+    +'</div>';
   if(!armzCli) return tit+cab+'<div style="color:var(--text3);font-size:13px">Escolha o cliente e o mês. O extrato sai das capas conferidas, a partir de 01/10/2026, separado por operação do cliente.</div>';
   if(ops===undefined) return tit+cab+'<div style="padding:30px;text-align:center;color:var(--text3)">Carregando as operações do cliente…</div>';
   var semTab=_armzSemAj?'<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">Os ajustes ainda não estão disponíveis nesta base (falta o SQL da v1.0.1408).</div>':'';
@@ -6089,10 +6128,11 @@ function rFatArmazenagem(){
   // ── visão "Todas as operações": uma linha por subfatura
   if(ops.length>1&&!armzOp){
     var col0='grid-template-columns:1.3fr repeat(6,1fr) 1.5fr 1fr', T={ab:0,e:0,s:0,aj:0,f:0,v:0};
-    var h0=tit+cab+semTab+armzAvisos(armzCli,armzMes)
+    var qz0=armzQzAtivo();
+    var h0=tit+cab+semTab+armzAvisos(armzCli,armzMes,qz0)
       +'<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+col0+';gap:8px;padding:8px 12px;text-align:right;'+ARMZ_TH+'"><span style="text-align:left">OPERAÇÃO</span><span>ABERTURA</span><span>(+) ENTRADAS</span><span>(−) SAÍDAS</span><span>AJUSTES</span><span>SALDO FINAL</span><span>PICO</span><span>VALOR EM ESTOQUE</span><span style="text-align:center">SITUAÇÃO</span></div>';
     ops.forEach(function(o){
-      var R=armzCalcular(armzCli,armzMes,0,o.id), reg=armzMeses[armzK(armzCli,o.id,armzMes)], fech=!!(reg&&reg.fechado);
+      var R=armzR(armzCli,armzMes,o.id,qz0), reg=armzMeses[armzK(armzCli,o.id,armzMes)], fech=qz0?R.fechadoQ:!!(reg&&reg.fechado);
       var vazio=R.abertura.fonte==='vazia'&&!R.nCapas&&!R.nAj;
       var sit=fech?['fechado','var(--green-bg)','var(--green-text)']:(vazio?['sem movimento','var(--bg2)','var(--text3)']:(R.abertura.fonte==='vazia'?['sem abertura','var(--red-bg,#fee2e2)','var(--red-text)']:['aberto','var(--bg2)','var(--text2)']));
       T.ab+=R.abertura.pallets; T.e+=R.totE; T.s+=R.totS; T.aj+=R.totAj; T.f+=R.fim.pallets; T.v=Math.round((T.v+R.fim.valor)*100)/100;
@@ -6103,28 +6143,35 @@ function rFatArmazenagem(){
         +'<span style="text-align:center"><span style="padding:2px 9px;border-radius:99px;font-size:11.5px;background:'+sit[1]+';color:'+sit[2]+'">'+sit[0]+'</span></span></div>';
     });
     h0+='<div style="display:grid;'+col0+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">TOTAL DO CLIENTE</span><span>'+nf(T.ab)+'</span><span>'+nf(T.e)+'</span><span>'+nf(T.s)+'</span><span>'+sn(T.aj)+'</span><span>'+nf(T.f)+'</span><span>—</span><span>'+nv(T.v)+'</span><span></span></div></div>'
-      +'<div style="font-size:12px;color:var(--text3);margin-top:8px">Cada operação é uma subfatura, com abertura, pico e fechamento próprios. O pico não é somado entre operações. Clique na operação para ver o dia a dia, lançar a abertura e os ajustes.</div>';
+      +'<div style="font-size:12px;color:var(--text3);margin-top:8px">'+(qz0?'Números da <b>'+armzQzNome(qz0)+'</b>. ':'')+'Cada operação é uma subfatura, com abertura, pico e fechamento próprios. O pico não é somado entre operações. Clique na operação para ver o dia a dia, lançar a abertura e os ajustes.</div>';
     return h0;
   }
   // ── visão de uma operação (ou do cliente inteiro, quando ele não tem operações cadastradas)
   var op=ops.length?armzOp:'', opNome=op?armzOpNome(armzCli,op):'';
-  var R=armzCalcular(armzCli,armzMes,0,op), reg=armzMeses[armzK(armzCli,op,armzMes)], fechado=!!(reg&&reg.fechado);
-  var podeAbertura=!fechado&&(R.abertura.fonte==='digitada'||R.abertura.fonte==='vazia'||armzMes===ARMZ_INICIO.slice(0,7));
-  var h=tit+cab+semTab+armzAvisos(armzCli,armzMes);
-  h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:10px;font-size:13px">Saldo de abertura'+(opNome?' da <b>'+ecomEsc(opNome)+'</b>':'')+' em '+new Date(armzMes+'-01T00:00').toLocaleDateString('pt-BR')+': '
+  var qz=armzQzAtivo(), R=armzR(armzCli,armzMes,op,qz), reg=armzMeses[armzK(armzCli,op,armzMes)], fechado=qz?R.fechadoQ:!!(reg&&reg.fechado);
+  var nPer=qz?armzQzNome(qz):'mês', rotFech=qz?(qz===1?'1ª quinzena fechada':(R.mesFechado?'2ª quinzena fechada':'')):'Mês fechado';
+  var podeAbertura=!fechado&&qz!==2&&(R.abertura.fonte==='digitada'||R.abertura.fonte==='vazia'||armzMes===ARMZ_INICIO.slice(0,7));
+  var h=tit+cab+semTab+armzAvisos(armzCli,armzMes,qz);
+  if(qz&&R.tardia) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ Há capa ou ajuste da 1ª quinzena lançado <b>depois do fechamento</b> dela. Os números fechados não mudam'+(qz===2?', e a 2ª quinzena abre com o saldo fechado':'')+'. Acerte com um ajuste na 2ª quinzena ou reabra a 1ª.</div>';
+  h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:10px;font-size:13px">Saldo de abertura'+(opNome?' da <b>'+ecomEsc(opNome)+'</b>':'')+' em '+new Date(armzMes+(qz===2?'-16':'-01')+'T00:00').toLocaleDateString('pt-BR')+': '
     +(podeAbertura?'<input id="armz-ab-p" class="fi" style="width:110px;display:inline-block;text-align:right" value="'+(R.abertura.pallets||'')+'" placeholder="pallets"> pallets · valor <input id="armz-ab-v" class="fi" style="width:170px;display:inline-block;text-align:right" value="'+(R.abertura.valor?Number(R.abertura.valor).toLocaleString('pt-BR',{minimumFractionDigits:2}):'')+'" placeholder="R$ em estoque"> <button class="btn btn-sm" onclick="armzSalvarAbertura()">Salvar abertura</button>'+(reg&&reg.abertura_em?'<span style="color:var(--text3);font-size:11.5px">lançada por '+ecomEsc(reg.abertura_por_nome||'')+' em '+new Date(reg.abertura_em).toLocaleString('pt-BR')+'</span>':'')
-      :'<b>'+nf(R.abertura.pallets)+'</b> pallets · <b>'+nv(R.abertura.valor)+'</b> <span style="color:var(--text3);font-size:12px">('+(R.abertura.fonte==='anterior'?'saldo final do mês anterior':(R.abertura.fonte==='fechado'?'mês fechado':'digitada'))+')</span>')
-    +(fechado?'<span style="margin-left:auto;padding:4px 10px;border-radius:99px;background:var(--green-bg);color:var(--green-text);font-weight:600;font-size:12px">🔒 Mês fechado</span>':'')+'</div>';
-  if(R.pend.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+R.pend.length+' capa(s) do mês ainda não conferida(s) e fora do extrato: '+R.pend.slice(0,8).map(function(c){return c.numero+' ('+((CAPA_STATUS[c.status]||{}).l||c.status)+')';}).join(', ')+(R.pend.length>8?'…':'')+'</div>';
+      :'<b>'+nf(R.abertura.pallets)+'</b> pallets · <b>'+nv(R.abertura.valor)+'</b> <span style="color:var(--text3);font-size:12px">('+(R.abertura.fonte==='anterior'?'saldo final do mês anterior':(R.abertura.fonte==='fechado'?(qz?'quinzena fechada':'mês fechado'):(R.abertura.fonte==='q1fechada'?'saldo final da 1ª quinzena, fechada':(R.abertura.fonte==='q1aberta'?'saldo final da 1ª quinzena, ainda aberta':'digitada'))))+')</span>')
+    +(fechado?'<span style="margin-left:auto;padding:4px 10px;border-radius:99px;background:var(--green-bg);color:var(--green-text);font-weight:600;font-size:12px">🔒 '+rotFech+'</span>':'')+'</div>';
+  if(R.pend.length) h+='<div style="border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12.5px">⚠ '+R.pend.length+' capa(s) '+(qz?'da '+nPer:'do mês')+' ainda não conferida(s) e fora do extrato: '+R.pend.slice(0,8).map(function(c){return c.numero+' ('+((CAPA_STATUS[c.status]||{}).l||c.status)+')';}).join(', ')+(R.pend.length>8?'…':'')+'</div>';
+  if(qz){ var _cd=function(t,v,sub){ return '<div style="background:var(--bg2);border-radius:10px;padding:10px 12px"><div style="font-size:11.5px;color:var(--text3)">'+t+'</div><div style="font-size:18px;font-weight:700">'+v+'</div><div style="font-size:11.5px;color:var(--text3)">'+sub+'</div></div>'; }, _dd=function(x){ return x?new Date(x+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}):'—'; };
+    h+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">'
+      +_cd('Entradas · saídas · ajustes','+'+nf(R.totE)+' · −'+nf(R.totS)+' · '+sn(R.totAj),'só capas e ajustes da '+nPer)
+      +_cd('Pico da quinzena',nf(R.pico.pallets)+' pallets','em '+_dd(R.pico.dia)+' · valor '+nv(R.picoV.valor)+' em '+_dd(R.picoV.dia))
+      +_cd('Saldo final',nf(R.fim.pallets)+' pallets',nv(R.fim.valor)+(qz===1?' · abre a 2ª quinzena':''))+'</div>'; }
   var col='grid-template-columns:90px 1fr 1fr 1fr 1fr 1fr 1.4fr';
   h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+col+';gap:8px;padding:8px 12px;text-align:right;'+ARMZ_TH+'"><span style="text-align:left">DIA</span><span>SALDO ABERTURA</span><span>(+) ENTRADAS</span><span>(−) SAÍDAS</span><span>AJUSTES</span><span>SALDO FINAL</span><span>VALOR EM ESTOQUE</span></div>';
   R.dias.forEach(function(d){ var pk=d.dia===R.pico.dia, sem=['dom','sáb'].indexOf(new Date(d.dia+'T00:00').toLocaleDateString('pt-BR',{weekday:'short'}).replace('.',''))>=0;
     h+='<div style="display:grid;'+col+';gap:8px;padding:6px 12px;border-top:1px solid var(--border);text-align:right;font-size:12.5px'+(pk?';background:var(--blue-bg);color:var(--blue-text);font-weight:600':(sem&&!d.capas&&!d.ajuste?';color:var(--text3)':''))+'">'
       +'<span style="text-align:left">'+new Date(d.dia+'T00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',weekday:'short'})+'</span><span>'+nf(d.abertura)+'</span><span>'+(d.entradas?nf(d.entradas):'0')+'</span><span>'+(d.saidas?nf(d.saidas):'0')+'</span><span>'+sn(d.ajuste)+'</span><span>'+nf(d.saldo)+(pk?' ▲':'')+'</span><span>'+nv(d.valor)+(d.dia===R.picoV.dia?' ▲':'')+'</span></div>'; });
-  h+='<div style="display:grid;'+col+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">MÊS</span><span>'+nf(R.abertura.pallets)+'</span><span>'+nf(R.totE)+'</span><span>'+nf(R.totS)+'</span><span>'+sn(R.totAj)+'</span><span>'+nf(R.fim.pallets)+'</span><span>'+nv(R.fim.valor)+'</span></div></div>';
+  h+='<div style="display:grid;'+col+';gap:8px;padding:8px 12px;border-top:2px solid var(--border);text-align:right;background:var(--bg2);font-weight:700;font-size:12.5px"><span style="text-align:left">'+(qz?nPer.toUpperCase():'MÊS')+'</span><span>'+nf(R.abertura.pallets)+'</span><span>'+nf(R.totE)+'</span><span>'+nf(R.totS)+'</span><span>'+sn(R.totAj)+'</span><span>'+nf(R.fim.pallets)+'</span><span>'+nv(R.fim.valor)+'</span></div></div>';
   // ajustes do mês (histórico: nada é apagado; estorno fica registrado)
-  var AJ=armzAjustesDe(armzCli,op,armzMes,true);
-  h+='<div style="display:flex;align-items:center;gap:10px;margin:14px 0 6px"><b style="font-size:13px">Ajustes do mês</b><span style="font-size:12px;color:var(--text3)">créditos e débitos vêm das capas; aqui entram só correções, sempre com motivo</span>'
+  var AJ=armzAjustesDe(armzCli,op,armzMes,true); if(qz) AJ=AJ.filter(function(a){ return armzQzDe(a.data)===qz; });
+  h+='<div style="display:flex;align-items:center;gap:10px;margin:14px 0 6px"><b style="font-size:13px">Ajustes '+(qz?'da '+nPer:'do mês')+'</b><span style="font-size:12px;color:var(--text3)">créditos e débitos vêm das capas; aqui entram só correções, sempre com motivo</span>'
     +(!fechado&&!_armzSemAj?'<button class="btn btn-sm" style="margin-left:auto" onclick="armzAjusteNovo()">＋ Ajuste</button>':'')+'</div>';
   if(AJ.length){ var ca='grid-template-columns:90px 90px 150px 1fr 190px 90px';
     h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="display:grid;'+ca+';gap:8px;padding:7px 12px;'+ARMZ_TH+'"><span>DATA</span><span style="text-align:right">PALLETS</span><span style="text-align:right">VALOR</span><span>MOTIVO</span><span>LANÇADO POR</span><span></span></div>'
@@ -6134,11 +6181,11 @@ function rFatArmazenagem(){
           +'<span style="overflow-wrap:anywhere">'+ecomEsc(a.motivo||'')+(est?'<div style="font-size:11.5px">Estornado por '+ecomEsc(a.estornado_por_nome||'')+' em '+new Date(a.estornado_em).toLocaleString('pt-BR')+'</div>':'')+'</span>'
           +'<span>'+ecomEsc(a.criado_por_nome||'')+'<div style="font-size:11.5px;color:var(--text3)">'+(a.created_at?new Date(a.created_at).toLocaleString('pt-BR'):'')+'</div></span>'
           +'<span style="text-align:right">'+(!est&&!fechado?'<button class="btn btn-sm" style="font-size:11px" onclick="armzAjusteEstornar(\''+a.id+'\')">Estornar</button>':'')+'</span></div>'; }).join('')+'</div>';
-  } else h+='<div style="font-size:12.5px;color:var(--text3)">Nenhum ajuste lançado neste mês.</div>';
+  } else h+='<div style="font-size:12.5px;color:var(--text3)">Nenhum ajuste lançado '+(qz?'nesta quinzena':'neste mês')+'.</div>';
   h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">'
     +'<span style="padding:8px 12px;border-radius:10px;background:var(--blue-bg);color:var(--blue-text);font-size:13px">Pico: <b>'+nf(R.pico.pallets)+'</b> pallets em '+(R.pico.dia?new Date(R.pico.dia+'T00:00').toLocaleDateString('pt-BR'):'—')+' · Pico de valor: <b>'+nv(R.picoV.valor)+'</b> em '+(R.picoV.dia?new Date(R.picoV.dia+'T00:00').toLocaleDateString('pt-BR'):'—')+'</span>'
     +'<span style="margin-left:auto;display:flex;gap:6px"><button class="btn" onclick="armzPdf()">📄 Extrato (PDF)</button>'
-    +(fechado?((profile&&profile.role==='admin')?'<button class="btn" onclick="armzReabrir()">🔓 Reabrir o mês</button>':''):'<button class="btn btn-p" onclick="armzFechar()">🔒 Fechar o mês'+(opNome?' · '+ecomEsc(opNome):'')+'</button>')+'</span></div>';
+    +(fechado?((profile&&profile.role==='admin'&&!(qz===1&&R.mesFechado))?'<button class="btn" onclick="armzReabrir()">🔓 Reabrir '+(qz?'a '+nPer:'o mês')+'</button>':(qz===1&&R.mesFechado?'<span style="font-size:12px;color:var(--text3);align-self:center">para reabrir a 1ª, reabra antes a 2ª quinzena</span>':'')):'<button class="btn btn-p" onclick="armzFechar()">🔒 Fechar '+(qz?'a '+nPer:'o mês')+(opNome?' · '+ecomEsc(opNome):'')+'</button>')+'</span></div>';
   return h;
 }
 function armzNum(v){ var s=String(v==null?'':v).replace(/[R$\s]/g,'').replace(/−/g,'-'); if(s==='') return null; if(/,\d{1,2}$/.test(s)) s=s.replace(/\./g,'').replace(',','.'); else s=s.replace(/[.,](?=\d{3}\b)/g,''); var n=Number(s); return isNaN(n)?null:n; }
@@ -6158,7 +6205,7 @@ async function armzSalvarAbertura(){
   try{ await armzGravar({abertura_pallets:p,abertura_valor:v,abertura_por_nome:armzQuem(),abertura_em:new Date().toISOString(),abertura_hist:hist}); showToast('Saldo de abertura salvo.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
 function armzAjusteNovo(){
-  var hoje=hojeLocalISO(), ini=armzMes+'-01', fim=armzMes+'-'+String(armzUltimoDia(armzMes)).padStart(2,'0'), d=(hoje>=ini&&hoje<=fim)?hoje:fim, opNome=armzOpNome(armzCli,armzOpAtual());
+  var _q=armzQzAtivo(), hoje=hojeLocalISO(), ini=armzMes+(_q===2?'-16':'-01'), fim=armzMes+'-'+(_q===1?'15':String(armzUltimoDia(armzMes)).padStart(2,'0')), d=(hoje>=ini&&hoje<=fim)?hoje:fim, opNome=armzOpNome(armzCli,armzOpAtual());
   portModal('Novo ajuste'+(opNome?' · '+ecomEsc(opNome):''),
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'
     +'<div><label class="fl">Data *</label><input class="fi" type="date" id="armz-aj-data" min="'+ini+'" max="'+fim+'" value="'+d+'"></div>'
@@ -6171,6 +6218,7 @@ function armzAjusteNovo(){
 async function armzAjusteSalvar(){
   var d=String((ge('armz-aj-data')||{}).value||''), p=armzNum((ge('armz-aj-p')||{}).value), v=armzNum((ge('armz-aj-v')||{}).value), m=String((ge('armz-aj-m')||{}).value||'').replace(/\s+/g,' ').trim();
   if(!d||d.slice(0,7)!==armzMes){ portErr('A data precisa ser de '+armzNomeMes(armzMes)+'.'); return; }
+  if(armzQuinzenal(armzCli)&&armzQzFechada(armzCli,armzOpAtual(),armzMes,armzQzDe(d))){ portErr('A '+armzQzNome(armzQzDe(d))+' já está fechada: lance o ajuste na quinzena aberta ou reabra a fechada.'); return; }
   if(!(p||0)&&!(v||0)){ portErr('Informe os pallets e/ou o valor do ajuste.'); return; }
   if(m.length<5){ portErr('Descreva o motivo do ajuste.'); return; }
   portSaving();
@@ -6184,38 +6232,60 @@ async function armzAjusteEstornar(id){
   if(!(await vConfirmar('Estornar ajuste','O ajuste de '+new Date(String(a.data).slice(0,10)+'T00:00').toLocaleDateString('pt-BR')+' deixa de contar no extrato, mas continua no histórico como estornado.','Estornar','var(--red-text)'))) return;
   try{ var up={estornado_em:new Date().toISOString(),estornado_por:(cu&&cu.id)||null,estornado_por_nome:armzQuem()}; await dbUpdate('armazenagem_ajustes',id,up); Object.assign(a,up); showToast('Ajuste estornado.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
+async function armzFecharQz(q){
+  var op=armzOpAtual(), R=armzR(armzCli,armzMes,op,q), reg=armzMeses[armzK(armzCli,op,armzMes)], F=armzFechObj(reg), nq=armzQzNome(q);
+  var so=armzSemOp(armzCli,armzMes).filter(function(c){ return armzQzDe(c.data_operacao)===q; });
+  if(q===2&&!F.q1){ showToast('Feche antes a 1ª quinzena.','amber'); return; }
+  if(so.length){ showToast('Há '+so.length+' capa(s) da '+nq+' sem operação. Corrija antes de fechar.','amber'); return; }
+  if(R.pend.length){ showToast('Há '+R.pend.length+' capa(s) da '+nq+' ainda não conferida(s). Confira antes de fechar.','amber'); return; }
+  if(!(await vConfirmar('Fechar a '+nq,'Fechar a '+nq+' de '+armzNomeMes(armzMes)+(op?' da operação <b>'+ecomEsc(armzOpNome(armzCli,op))+'</b>':'')+'? Os números ficam congelados (pico de '+R.pico.pallets+' pallets).','Fechar a '+nq))) return;
+  var snap={abertura:{pallets:R.abertura.pallets,valor:R.abertura.valor},dias:R.dias,totE:R.totE,totS:R.totS,totAj:R.totAj,totAjV:R.totAjV,fim:R.fim,pico:R.pico,picoV:R.picoV,fechado_em:new Date().toISOString(),fechado_por_nome:armzQuem()};
+  try{
+    if(q===1) await armzGravar({fechado:false,fechamento:{q1:snap}});
+    else { var a=F.q1, pk=(a.pico.pallets>=R.pico.pallets)?a.pico:R.pico, pv=(a.picoV.valor>=R.picoV.valor)?a.picoV:R.picoV;
+      await armzGravar({fechado:true,fechado_em:new Date().toISOString(),fechado_por:cu&&cu.id,fechamento:{abertura:a.abertura,entradas:a.totE+R.totE,saidas:a.totS+R.totS,ajustes:a.totAj+R.totAj,ajustes_valor:Math.round(((a.totAjV||0)+(R.totAjV||0))*100)/100,fim:R.fim,pico:pk,pico_valor:pv,dias:a.dias.concat(R.dias),q1:a,q2:snap}}); }
+    showToast(nq.charAt(0).toUpperCase()+nq.slice(1)+' fechada.','green'); render();
+  }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
+async function armzReabrirQz(q){
+  var op=armzOpAtual(), reg=armzMeses[armzK(armzCli,op,armzMes)], F=armzFechObj(reg), nq=armzQzNome(q);
+  if(q===1&&reg&&reg.fechado){ showToast('Reabra antes a 2ª quinzena.','amber'); return; }
+  if(!(await vConfirmar('Reabrir a '+nq,'O extrato da '+nq+' volta a ser calculado das capas e dos ajustes.','Reabrir'))) return;
+  try{ await armzGravar(q===2?{fechado:false,fechamento:{q1:F.q1}}:{fechado:false,fechamento:{}}); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
+}
 async function armzFechar(){
+  var _qz=armzQzAtivo(); if(_qz) return armzFecharQz(_qz);
   var op=armzOpAtual(), R=armzCalcular(armzCli,armzMes,0,op), so=armzSemOp(armzCli,armzMes);
   if(so.length){ showToast('Há '+so.length+' capa(s) do mês sem operação. Corrija antes de fechar.','amber'); return; }
   if(R.pend.length){ showToast('Há '+R.pend.length+' capa(s) do mês ainda não conferida(s). Confira antes de fechar.','amber'); return; }
   if(!(await vConfirmar('Fechar o mês','Fechar '+armzNomeMes(armzMes)+(op?' da operação <b>'+ecomEsc(armzOpNome(armzCli,op))+'</b>':'')+'? Os números ficam congelados (pico de '+R.pico.pallets+' pallets).','Fechar o mês'))) return;
   try{ await armzGravar({fechado:true,fechado_em:new Date().toISOString(),fechado_por:cu&&cu.id,fechamento:{abertura:R.abertura,entradas:R.totE,saidas:R.totS,ajustes:R.totAj,ajustes_valor:R.totAjV,fim:R.fim,pico:R.pico,pico_valor:R.picoV,dias:R.dias}}); showToast('Mês fechado.','green'); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); }
 }
-async function armzReabrir(){ if(!(await vConfirmar('Reabrir o mês','O extrato volta a ser calculado das capas e dos ajustes.','Reabrir'))) return; try{ await armzGravar({fechado:false}); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); } }
+async function armzReabrir(){ var _qz=armzQzAtivo(); if(_qz) return armzReabrirQz(_qz); if(!(await vConfirmar('Reabrir o mês','O extrato volta a ser calculado das capas e dos ajustes.','Reabrir'))) return; try{ await armzGravar({fechado:false}); render(); }catch(e){ showToast('Erro: '+(e.message||e),'red'); } }
 async function armzPdf(){
   if(typeof pdfMake==='undefined'){ showToast('Biblioteca de PDF ainda carregando, tente de novo.','amber'); return; }
   var op=armzOpAtual(), opNome=op?armzOpNome(armzCli,op):'';
-  var R=armzCalcular(armzCli,armzMes,0,op), cli=(clientes||[]).find(function(c){return c.id===armzCli;})||{};
-  var reg=armzMeses[armzK(armzCli,op,armzMes)]; if(reg&&reg.fechado&&reg.fechamento){ var f=typeof reg.fechamento==='string'?JSON.parse(reg.fechamento):reg.fechamento; if(f&&f.dias){ R=Object.assign({},R,{abertura:f.abertura,totE:f.entradas,totS:f.saidas,totAj:f.ajustes||0,fim:f.fim,pico:f.pico,picoV:f.pico_valor,dias:f.dias}); } }
+  var qz=armzQzAtivo(), R=armzR(armzCli,armzMes,op,qz), cli=(clientes||[]).find(function(c){return c.id===armzCli;})||{};
+  var reg=armzMeses[armzK(armzCli,op,armzMes)]; if(!qz&&reg&&reg.fechado&&reg.fechamento){ var f=typeof reg.fechamento==='string'?JSON.parse(reg.fechamento):reg.fechamento; if(f&&f.dias){ R=Object.assign({},R,{abertura:f.abertura,totE:f.entradas,totS:f.saidas,totAj:f.ajustes||0,fim:f.fim,pico:f.pico,picoV:f.pico_valor,dias:f.dias}); } }
   var nf=function(v){ return Number(v||0).toLocaleString('pt-BR'); }, nv=function(v){ return 'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var sn=function(v){ v=Number(v||0); return v?((v>0?'+':'-')+nf(Math.abs(v))):'0'; };
   var dt=function(d){ return d?new Date(String(d).slice(0,10)+'T00:00').toLocaleDateString('pt-BR'):'—'; };
   var hc=function(t,al){ return {text:t,bold:true,color:'#ffffff',alignment:al||'left'}; };
   var body=[[hc('Dia'),hc('Saldo abertura','right'),hc('(+) Entradas','right'),hc('(−) Saídas','right'),hc('Ajustes','right'),hc('Saldo final','right'),hc('Valor em estoque','right')]];
   R.dias.forEach(function(d){ var pk=d.dia===R.pico.dia; body.push([dt(d.dia),{text:nf(d.abertura),alignment:'right'},{text:nf(d.entradas),alignment:'right'},{text:nf(d.saidas),alignment:'right'},{text:sn(d.ajuste),alignment:'right'},{text:nf(d.saldo)+(pk?' ▲':''),alignment:'right',bold:pk},{text:nv(d.valor),alignment:'right',bold:d.dia===R.picoV.dia}]); });
-  body.push([{text:'MÊS',bold:true},{text:nf(R.abertura.pallets),alignment:'right',bold:true},{text:nf(R.totE),alignment:'right',bold:true},{text:nf(R.totS),alignment:'right',bold:true},{text:sn(R.totAj),alignment:'right',bold:true},{text:nf(R.fim.pallets),alignment:'right',bold:true},{text:nv(R.fim.valor),alignment:'right',bold:true}]);
-  var AJ=armzAjustesDe(armzCli,op,armzMes,false), extra=[];
+  body.push([{text:qz?armzQzNome(qz).toUpperCase():'MÊS',bold:true},{text:nf(R.abertura.pallets),alignment:'right',bold:true},{text:nf(R.totE),alignment:'right',bold:true},{text:nf(R.totS),alignment:'right',bold:true},{text:sn(R.totAj),alignment:'right',bold:true},{text:nf(R.fim.pallets),alignment:'right',bold:true},{text:nv(R.fim.valor),alignment:'right',bold:true}]);
+  var AJ=armzAjustesDe(armzCli,op,armzMes,false), extra=[]; if(qz) AJ=AJ.filter(function(a){ return armzQzDe(a.data)===qz; });
   if(AJ.length){ var ba=[[hc('Data'),hc('Pallets','right'),hc('Valor','right'),hc('Motivo'),hc('Lançado por')]];
     AJ.forEach(function(a){ ba.push([dt(a.data),{text:sn(a.pallets),alignment:'right'},{text:Number(a.valor)?((Number(a.valor)>0?'+':'-')+nv(Math.abs(a.valor))):'—',alignment:'right'},a.motivo||'',a.criado_por_nome||'']); });
-    extra=[{text:'Ajustes do mês',bold:true,margin:[0,12,0,4]},{table:{headerRows:1,widths:[55,50,80,'*',110],body:ba},layout:{fillColor:function(i){ return i===0?'#1e3a8a':null; },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}}]; }
+    extra=[{text:qz?'Ajustes da quinzena':'Ajustes do mês',bold:true,margin:[0,12,0,4]},{table:{headerRows:1,widths:[55,50,80,'*',110],body:ba},layout:{fillColor:function(i){ return i===0?'#1e3a8a':null; },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}}]; }
   var def={pageSize:'A4',pageMargins:[28,30,28,30],defaultStyle:{fontSize:8.5},content:[
-    {text:'Extrato de armazenagem',fontSize:15,bold:true},{text:(cli.nome||'')+(opNome?' · operação '+opNome:'')+' · '+armzNomeMes(armzMes),fontSize:11,margin:[0,2,0,10]},
+    {text:'Extrato de armazenagem',fontSize:15,bold:true},{text:(cli.nome||'')+(opNome?' · operação '+opNome:'')+' · '+(qz?armzQzNome(qz)+' de ':'')+armzNomeMes(armzMes),fontSize:11,margin:[0,2,0,10]},
     {table:{headerRows:1,widths:[55,'*','*','*','*','*',105],body:body},layout:{fillColor:function(i){ return i===0?'#1e3a8a':(i===body.length-1?'#f3f4f6':null); },hLineColor:'#d1d5db',vLineColor:'#d1d5db'}},
     {text:'Pico de armazenagem: '+nf(R.pico.pallets)+' pallets em '+dt(R.pico.dia),bold:true,margin:[0,10,0,2]},
     {text:'Pico de valor em estoque: '+nv(R.picoV.valor)+' em '+dt(R.picoV.dia),bold:true}
   ].concat(extra)};
   var url=await capaPdfBlobUrl(def);
-  capaPdfViewer(url,'Extrato de armazenagem · '+(cli.nome||'')+(opNome?' · '+opNome:'')+' · '+armzNomeMes(armzMes),'Demonstração para autorização do faturamento','extrato-armazenagem-'+(opNome?opNome.replace(/[^A-Za-z0-9]+/g,'_')+'-':'')+armzMes+'.pdf');
+  capaPdfViewer(url,'Extrato de armazenagem · '+(cli.nome||'')+(opNome?' · '+opNome:'')+' · '+(qz?armzQzNome(qz)+' de ':'')+armzNomeMes(armzMes),'Demonstração para autorização do faturamento','extrato-armazenagem-'+(opNome?opNome.replace(/[^A-Za-z0-9]+/g,'_')+'-':'')+armzMes+(qz?'-q'+qz:'')+'.pdf');
 }
 // ══════════════ CP · LOMBADA DE MEDIÇÃO (v1.0.1072) ══════════════
 function cpMedPendente(cp){ return !!(cp&&cp.depende_medicao&&cp.medicao_status!=='aprovada'); }
