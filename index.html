@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1423 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1424 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1423';
+const APP_VERSION='v1.0.1424';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38180,6 +38180,10 @@ function wmsCxAbrir(){
     +'<div style="flex:0 0 auto;padding:0 22px"><div style="border-top:1px solid var(--border);padding:10px 0;display:flex;align-items:center;gap:8px">'
       +ic('&#8592; Sair','wmsCxFechar()','Sair do checkout')+'<div style="margin-left:auto;display:flex;gap:8px">'+ic('&#129534; DANFE 10&times;15','wmsCxDanfe(\'simples\')','DANFE simplificado (etiqueta) do pedido na tela ou do último conferido')+ic('&#129534; DANFE A4','wmsCxDanfe(\'completo\')','DANFE completo (A4) do pedido na tela ou do último conferido')+ic('&#128424; Reimprimir &uacute;ltima','wmsCxReimprimir()','Reimprime a etiqueta do último pedido conferido')+ic('Nova folha','wmsCxNovaFolha()','Larga a folha atual')+'</div></div></div></div>');
   _colScanHandler=function(code){ wmsCxScan(code); };
+  // v1.0.1424: campo de leitura VISÍVEL na bancada — folha sem código de barras: digita o número do pedido e tecla Enter (o leitor continua funcionando igual)
+  try{ var _sc=ge('col-scan'); if(_sc){ _sc.setAttribute('inputmode','numeric'); _sc.setAttribute('placeholder','Bipe ou digite o número do pedido e tecle Enter');
+    _sc.style.cssText='display:block;width:100%;box-sizing:border-box;margin:0 0 8px;padding:14px 16px;font-size:24px;font-weight:700;font-family:monospace;text-align:center;border:2px solid #1e3a8a;border-radius:14px;background:var(--bg);color:var(--text)';
+    var _bb=ge('col-bigbtn'); if(_bb) _bb.style.display='none'; setTimeout(function(){ try{ _sc.focus({preventScroll:true}); }catch(_e){} },80); } }catch(_e){}
   wmsCxRender();
 }
 function wmsCxFechar(){ var d=ge('wms-cx-full'); if(d) d.remove(); _colScanHandler=null; wmsCx=null; try{ if(typeof coletorCamStop==='function') coletorCamStop(); }catch(_e){} if(typeof render==='function') render(); }
@@ -38289,8 +38293,19 @@ async function wmsCxAbrirFolha(code){
   var ab=fila.filter(function(p){return !wmsCxFeito(p)&&!p._bloq;}).length, bq=fila.filter(function(p){return !wmsCxFeito(p)&&p._bloq;}).length;
   wmsCxFlash(ab?('Folha aberta: '+ab+' pedido(s) para conferir'+(bq?' · '+bq+' bloqueado(s)':'')):(bq?(bq+' pedido(s) desta folha bloqueado(s) (sem nota autorizada ou sem etiqueta): não podem ser embalados'):'Esta folha já foi toda conferida'),ab?'green':(bq?'red':'amber'));
 }
+// v1.0.1424: a folha do pedido pode trazer o número da lista de separação (LIST-1524/2026, LIST15242026 ou só 1524)
+async function wmsCxPedidosDaLista(code){
+  try{ var z=String(code||'').toUpperCase().replace(/[^A-Z0-9]/g,''), d=z.replace(/^LIST/,''), ano=String(new Date().getFullYear()), cands=[];
+    if(!/^\d{1,10}$/.test(d)) return [];
+    if(d.length>4&&d.slice(-4)===ano) cands.push('LIST-'+d.slice(0,-4)+'/'+ano);
+    cands.push('LIST-'+d+'/'+ano);
+    for(var i=0;i<cands.length;i++){ var L=await dbSelect('wms_listas_separacao','company_id=eq.'+company.id+'&numero_lista=eq.'+encodeURIComponent(cands[i])+'&status=neq.cancelada&select=id&limit=1');
+      if(L&&L[0]){ var lp=await dbSelect('wms_lista_pedidos','lista_id=eq.'+L[0].id+'&select=pedido_id'); return (lp||[]).map(function(x){return x.pedido_id;}); } }
+  }catch(_e){} return [];
+}
 async function wmsCxAbrirPedido(num){
-  var peds=await wmsCxCarregar('numero_pedido=eq.'+encodeURIComponent(num));
+  var peds=/^\d{3,8}$/.test(String(num))?await wmsCxCarregar('numero_pedido=eq.'+encodeURIComponent(num)):[];
+  if(!peds.length){ var idsL=await wmsCxPedidosDaLista(num); if(idsL.length){ peds=await wmsCxCarregar('id=in.('+idsL.join(',')+')'); if(peds.length) num=peds[0].numero_pedido; } }
   peds=peds.filter(function(p){ return wmsSaldoVerus(p.cliente_id); });
   if(!peds.length){ wmsCxFlash('Pedido '+num+' não encontrado (ou sem estoque empenhado)','red'); return; }
   var p=peds[0];
@@ -38321,7 +38336,8 @@ async function wmsCxScan(code){
           okEt=true; } }
       else okEt=(cu2==='VOL'+n||cu2===n);
       if(okEt){ wmsCx.pendingLabel=null; var rmN=await wmsCxRomaneio(pl);
-        wmsCxFlash('Pedido '+pl.numero_pedido+' liberado'+(rmN?' · romaneio '+rmN+' · '+wmsCxTranspCurto(pl.transportadora):(pl._romErro?' · NÃO entrou no romaneio: '+pl._romErro:'')),pl._romErro?'amber':'green'); }
+        wmsCxFlash('Pedido '+pl.numero_pedido+' liberado'+(rmN?' · romaneio '+rmN+' · '+wmsCxTranspCurto(pl.transportadora):(pl._romErro?' · NÃO entrou no romaneio: '+pl._romErro:'')),pl._romErro?'amber':'green');
+        if(wmsCxAtual()&&wmsCxCfg(pl).checkout_sem_bipe_produto===true) await wmsCxAuto(); }
       else { ecomBeep(); var cz=cu2.replace(/\s/g,''), oq='';
         if(obj){ oq=/^\d{8}$/.test(cz)?'Você bipou o código do CEP. ':(/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(cz)?'Esse rastreio ('+cz+') é de OUTRO pedido: confira se a etiqueta colada é a deste. ':(wmsCxProd(pl.cliente_id,code)?'Você bipou o produto. ':''));
           wmsCxFlash(oq+'Bipe o RASTREIO '+obj+' (código de barras grande, no alto da etiqueta dos Correios) do pedido '+pl.numero_pedido,'red'); }
@@ -38331,11 +38347,11 @@ async function wmsCxScan(code){
     }
     if(wmsCx&&wmsCx.retry){ ecomBeep(); wmsCxFlash('Resolva a etiqueta do pedido '+wmsCx.peds[wmsCx.retry].numero_pedido+' antes de continuar','red'); return; }
     // 2) folha ou pedido
-    if(wmsCxEhFolha(code)){ await wmsCxAbrirFolha(code); return; }
+    if(wmsCxEhFolha(code)){ await wmsCxAbrirFolha(code); await wmsCxAuto(); return; }
     var atual=wmsCxAtual();
     if(!atual){
-      if(/^\d{3,8}$/.test(code)){ await wmsCxAbrirPedido(code); return; }
-      ecomBeep(); wmsCxFlash('Bipe a folha para começar','amber'); return;
+      if(/^\d{3,8}$/.test(code)||/^LIST[\s\-]?\d/i.test(code)){ await wmsCxAbrirPedido(code); await wmsCxAuto(); return; }
+      ecomBeep(); wmsCxFlash('Bipe a folha da onda ou a folha do pedido para começar','amber'); return;
     }
     // 3) produto
     var pr=wmsCxProd(atual.cliente_id,code);
@@ -38398,6 +38414,13 @@ async function wmsCxRomaneio(p){
     p._rom=rom.numero; return rom.numero||'';
   }catch(e){ console.warn('[checkout WMS] romaneio automático',e); p._romErro=String(e.message||e); return ''; }
 }
+// v1.0.1424: depositante com checkout_sem_bipe_produto → a folha do pedido já conclui (produtos conferidos fora do sistema) e imprime a etiqueta
+async function wmsCxAuto(){
+  if(!wmsCx||wmsCx.pendingLabel||wmsCx.retry) return; var p=wmsCxAtual(); if(!p) return;
+  if(wmsCxCfg(p).checkout_sem_bipe_produto!==true) return;
+  p._linhas.forEach(function(l){ l.conf=l.qtd; }); p._semBipe=true;
+  await wmsCxMatar(p);
+}
 // pedido "morto": trava no banco (outra bancada pode ter feito), conclui a separação, registra a conferência e imprime
 async function wmsCxMatar(p){
   if(wmsCxUsaCorreios(p)&&!p._cor){
@@ -38418,7 +38441,7 @@ async function wmsCxMatar(p){
     for(var j=0;j<ls.length;j++){ var rest=await dbSelect('wms_tarefas_separacao','lista_id=eq.'+ls[j]+'&status=neq.concluida&select=id&limit=1');
       if(!rest.length){ await dbUpdate('wms_listas_separacao',ls[j],{status:'concluida'}); var ml=(wmsListasSeparacao||[]).find(function(x){return x.id===ls[j];}); if(ml) ml.status='concluida'; } }
     await dbInsert('wms_conferencias',{company_id:company?.id,unit_id:p.unit_id||null,tipo:1,pedido_id:p.id,cliente_id:p.cliente_id,conferente_id:cu?.id||null,conferente_nome:quem,resultado:'ok',auditoria_status:'ok',
-      observacao:'Checkout bancada · '+p._linhas.map(function(l){return l.qtd+'× '+l.end;}).join(' · ')+(wmsCx.onda?' · '+wmsCx.onda:'')});
+      observacao:'Checkout bancada'+(p._semBipe?' SEM BIPE DE PRODUTO (parâmetro do depositante)':'')+' · '+p._linhas.map(function(l){return l.qtd+'× '+l.end;}).join(' · ')+(wmsCx.onda?' · '+wmsCx.onda:'')});
   }catch(e){ console.warn('[checkout WMS] pós-conferência',e); }
   _wmsCxUlt=p;
   if(!p._cor){ p._vols=await wmsCxVolsNf(p); p._volsBip={}; }
@@ -38613,7 +38636,7 @@ function wmsCxRender(){
         +(wmsCxBloqueados().length?'<span style="color:var(--border)">|</span><span style="font-size:13px;color:var(--red-text);font-weight:600">'+wmsCxBloqueados().length+' sem nota</span>':'')+'</div>'; }
   }
   var centro=function(h){ return '<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+wmsCxMsgHtml()+h+'</div>'; };
-  if(vazio){ body.innerHTML=centro('<div style="border:3px dashed var(--border);border-radius:20px;padding:56px 80px;text-align:center;color:var(--text3);font-size:22px">Bipe a <b>folha</b> da onda<br>para come&ccedil;ar</div>'); wmsCxFoco(); return; }
+  if(vazio){ body.innerHTML=centro('<div style="border:3px dashed var(--border);border-radius:20px;padding:56px 80px;text-align:center;color:var(--text3);font-size:22px">Bipe a <b>folha</b> da onda ou do pedido<br>para come&ccedil;ar</div>'); wmsCxFoco(); return; }
   if(wmsCx.retry){ var pr2=wmsCx.peds[wmsCx.retry];
     body.innerHTML=centro('<div style="border:3px solid var(--red-text);border-radius:20px;padding:36px 48px;text-align:center;max-width:720px"><div style="font-size:26px;font-weight:800;color:var(--red-text)">Etiqueta dos Correios n&atilde;o saiu</div>'
       +'<div style="font-size:20px;font-weight:600;margin-top:8px">'+ecomEsc(pr2.destinatario_nome||'')+'</div><div style="font-size:15px;color:var(--text3);font-family:monospace">Pedido '+ecomEsc(pr2.numero_pedido)+'</div>'
