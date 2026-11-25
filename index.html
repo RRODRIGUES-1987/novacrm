@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1417 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1418 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1417';
+const APP_VERSION='v1.0.1418';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3870,12 +3870,21 @@ function ecomFullProdPainel(p){
     return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;'+(ok?'color:var(--green-text)':'')+'"><span>'+ecomEsc(k)+' <small style="color:var(--text3)">'+ecomEsc(ecomFullDesc(p,k)||'')+'</small></span><span>'+cf+'/'+ct+' cx · '+c+'/'+t+' un</span></div>'; }).join('');
   return topo+'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12.5px;margin-bottom:10px"><div style="font-size:11px;color:var(--text3);letter-spacing:.4px;margin-bottom:4px">PRODUTOS · CAIXAS / UNIDADES</div>'+lin+'</div>';
 }
+// v1.0.1418: as quantidades conferidas dos itens vêm do banco a cada bipe. Antes só o full_meta era relido: uma bancada com a tela
+// aberta há mais tempo contava a partir do zero um produto já conferido em outra bancada e gastava etiquetas de caixa a mais.
+async function ecomFullItensSync(p){
+  try{ var rs=await dbSelect('ecom_pedido_itens','pedido_id=eq.'+p.id+'&select=id,qtd_conferida,qtd_separada'), m={};
+    (rs||[]).forEach(function(r){ m[r.id]=r; });
+    ecomItensDo(p.id).forEach(function(i){ var r=m[i.id]; if(r){ i.qtd_conferida=r.qtd_conferida; i.qtd_separada=r.qtd_separada; } });
+  }catch(_e){}
+}
 async function ecomFullBip(p,its,code){
   var _m0=ecomFullMeta(p); if(!(_m0.ml&&_m0.cx_pend)&&!antiRajada('full:'+p.id,code)) return;   // v1.0.1179 · v1.0.1221: Full ML com caixa aberta aceita o mesmo código seguido
   // v1.0.1129: lê o full_meta ATUAL do banco a cada bipe. A tela do checkout podia ter o pedido carregado ANTES das
   // etiquetas serem ligadas (sem os códigos ML nem os PDFs): o bipe dava "Etiqueta não é deste Full"/"não localizada",
   // e, pior, ao gravar o progresso, regravava o full_meta antigo por cima do que estava no banco.
   try{ var _fm=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=full_meta,status'); if(_fm&&_fm[0]&&_fm[0].full_meta){ p.full_meta=_fm[0].full_meta; if(_fm[0].status) p.status=_fm[0].status; } }catch(_e){}
+  await ecomFullItensSync(p);   // v1.0.1418
   await ecomFullCellsGarantir(p);   // v1.0.1304
   var meta=ecomFullMeta(p), qr=ecomFullNormQr(code), sk='';
   if(meta.modo_produto!==false&&!meta.ml){ await ecomFullProdBip(p,its,meta,code); return; }   // v1.0.1185: checkout por produto (caixas de 48) — Full Shopee
@@ -3892,8 +3901,12 @@ async function ecomFullBip(p,its,code){
   else { var it1=its.find(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===sk&&ecomN(i.qtd_conferida)<ecomN(i.qtd); }); if(it1){ alvo=[it1]; porKit[sk]=1; } }
   if(!alvo.length){ ecomBeep(); ecomCxFlash('SKU '+sk+' sem item a conferir neste Full','red'); ecomCxRender(); return; }
   for(var a=0;a<alvo.length;a++){
-    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, nova=ecomN(it.qtd_conferida)+inc;
-    await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, ant=ecomN(it.qtd_conferida), nova=ant+inc;
+    var _rc=await sbFetch('PATCH','/rest/v1/ecom_pedido_itens?id=eq.'+it.id+'&'+(ant?('qtd_conferida=eq.'+ant):'or=(qtd_conferida.is.null,qtd_conferida.eq.0)'),{qtd_conferida:nova},tok);
+    if(!_rc.ok) throw new Error((_rc.data&&_rc.data.message)||'não consegui gravar a conferência');
+    if(!Array.isArray(_rc.data)||!_rc.data.length){   // v1.0.1418: outra bancada mexeu neste item
+      await ecomFullItensSync(p); ecomBeep(); ecomCxFlash('OUTRA BANCADA está conferindo o '+sk+' neste Full. A contagem foi atualizada: confira a tela antes de continuar.','red'); ecomCxRender(); return 'conflito'; }
+    it.qtd_conferida=nova;
     await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
   }
   if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
@@ -3951,8 +3964,12 @@ async function ecomFullMlConfereUm(p,its,sk,code){
   else { var it1=its.find(function(i){ return !i.kit_sku&&String(i.sku||'').toUpperCase()===sk&&ecomN(i.qtd_conferida)<ecomN(i.qtd); }); if(it1){ alvo=[it1]; porKit[sk]=1; } }
   if(!alvo.length) return false;
   for(var a=0;a<alvo.length;a++){
-    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, nova=ecomN(it.qtd_conferida)+inc;
-    await dbUpdate('ecom_pedido_itens',it.id,{qtd_conferida:nova}); it.qtd_conferida=nova;
+    var it=alvo[a], inc=porKit[String(it.sku||'').toUpperCase()]||1, ant=ecomN(it.qtd_conferida), nova=ant+inc;
+    var _rc=await sbFetch('PATCH','/rest/v1/ecom_pedido_itens?id=eq.'+it.id+'&'+(ant?('qtd_conferida=eq.'+ant):'or=(qtd_conferida.is.null,qtd_conferida.eq.0)'),{qtd_conferida:nova},tok);
+    if(!_rc.ok) throw new Error((_rc.data&&_rc.data.message)||'não consegui gravar a conferência');
+    if(!Array.isArray(_rc.data)||!_rc.data.length){   // v1.0.1418: outra bancada mexeu neste item
+      await ecomFullItensSync(p); ecomBeep(); ecomCxFlash('OUTRA BANCADA está conferindo o '+sk+' neste Full. A contagem foi atualizada: confira a tela antes de continuar.','red'); ecomCxRender(); return 'conflito'; }
+    it.qtd_conferida=nova;
     await dbInsert('ecom_bips',{company_id:ecomCid(),pedido_id:p.id,pedido_item_id:it.id,etapa:'conferencia',codigo_lido:code,operador:ecomOper()});
   }
   return true;
@@ -4015,6 +4032,7 @@ async function ecomFullProdBipML(p,its,meta,code){
     if(meta.mlcodes&&Object.keys(meta.mlcodes).length&&!ecomFullMlEhEtiqueta(meta,code)){ ecomBeep(); ecomCxFlash('Bipe a ETIQUETA do Mercado Livre colada no produto (não o EAN)','red'); ecomCxRender(); return; }
     if((pend.bip||0)>=pend.qtd){ ecomBeep(); ecomCxFlash('A caixa '+pend.n+' já tem as '+pend.qtd+' unidades','red'); ecomCxRender(); return; }
     var ok=await ecomFullMlConfereUm(p,its,sk,code);
+    if(ok==='conflito') return;
     if(!ok){ ecomBeep(); ecomCxFlash('SKU '+sk+' sem item a conferir neste Full','red'); ecomCxRender(); return; }
     pend.bip=(pend.bip||0)+1;
     if(p.status==='separado'||p.status==='separando'){ await dbUpdate('ecom_pedidos',p.id,{status:'conferindo'}); p.status='conferindo'; }
@@ -4090,7 +4108,10 @@ async function ecomFullMlAbrirCaixa(p,meta,sk,prefixo){
 }
 // v1.0.1312: escolher o produto clicando na lista do checkout
 async function ecomFullMlEscolher(pid,sk){
-  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return; await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p);
+  var p=(ecomPedidos||[]).find(function(x){return x.id===pid;}); if(!p) return;
+  try{ var _fmE=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=full_meta,status'); if(_fmE&&_fmE[0]&&_fmE[0].full_meta){ p.full_meta=_fmE[0].full_meta; if(_fmE[0].status) p.status=_fmE[0].status; } }catch(_e){}   // v1.0.1418
+  await ecomFullItensSync(p);
+  await ecomFullCellsGarantir(p); var meta=ecomFullMeta(p);
   if(meta.cx_pend){ ecomBeep(); ecomCxFlash('Termine a caixa '+meta.cx_pend.n+' ('+meta.cx_pend.sku+') antes de trocar de produto','red'); ecomCxRender(); return; }
   await ecomFullMlAbrirCaixa(p,meta,String(sk).toUpperCase(),'');
 }
