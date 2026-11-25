@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1419 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1420 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1419';
+const APP_VERSION='v1.0.1420';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51595,15 +51595,16 @@ async function wmsCkvAcharCaixa(raw){
 function wmsCkvQtdPacoteObrigatoria(){ var p=_ckv&&_ckv.plano&&_ckv.plano.p, cl=p&&(clientes||[]).find(function(c){return c.id===p.cliente_id;}); var pr=(cl&&cl.parametros)||{}; return pr.pacote_fechado===true||pr.pacote_fechado==='true'; }
 async function wmsCkvBipe(raw){
   if(!_ckv) return; raw=String(raw||'').trim(); if(!raw) return;
-  var pl=_ckv.plano, k=null, g=null;
+  var pl=_ckv.plano, k=null, g=null, _qInf=0;
+  // v1.0.1420: pacote com quebra (pedido fora do múltiplo com reserva manual aprovada) — a sobra do item (restante % pacote) também é quantidade válida de pacote
   // v1.0.1302: pacote = código do produto + QUANTIDADE do pacote (os dois códigos da etiqueta do pacote). A quantidade garante que é
   //            pacote e não a caixa (a caixa traz a quantidade da caixa, que não bate com o pacote).
   if(_ckv.aguardaQtd){
     var aq=_ckv.aguardaQtd, gq=pl.itens[aq.sku], saco=gq?(gq.saco||1):1;
     if(!/^\d{1,5}$/.test(raw)){ _ckv.msg={t:'erro',x:'Agora bipe a QUANTIDADE que está na etiqueta do pacote de '+ecomEsc(aq.sku)+' (esperado '+saco.toLocaleString('pt-BR')+').'}; wmsBeep(true); return wmsCkvRender(); }
-    var nq=+raw; _ckv.aguardaQtd=null;
-    if(nq!==saco){ _ckv.msg={t:'erro',x:'Quantidade '+nq.toLocaleString('pt-BR')+' não é de pacote de '+ecomEsc(aq.sku)+' (pacote = '+saco.toLocaleString('pt-BR')+'). Você bipou a etiqueta da CAIXA? Caixa inteira é pelo RG.'}; wmsBeep(true); return wmsCkvRender(); }
-    k=aq.sku;
+    var nq=+raw, _qb=gq?(wmsCkvRestante(gq)%saco):0; _ckv.aguardaQtd=null;
+    if(nq!==saco&&!(_qb>0&&nq===_qb)){ _ckv.msg={t:'erro',x:'Quantidade '+nq.toLocaleString('pt-BR')+' não é de pacote de '+ecomEsc(aq.sku)+' (pacote = '+saco.toLocaleString('pt-BR')+(_qb>0?', ou '+_qb.toLocaleString('pt-BR')+' no pacote com quebra':'')+'). Você bipou a etiqueta da CAIXA? Caixa inteira é pelo RG.'}; wmsBeep(true); return wmsCkvRender(); }
+    k=aq.sku; _qInf=nq;
   }
   // 1) pacote: código do produto (SKU ou EAN)
   var cod=wmsNorm(raw);
@@ -51618,7 +51619,7 @@ async function wmsCkvBipe(raw){
   if(k){ g=pl.itens[k];
     if(_ckv.aberto&&_ckv.aberto.sku!==k){ _ckv.msg={t:'erro',x:'O volume aberto é de '+ecomEsc(_ckv.aberto.sku)+' (sem caixa mista). Feche o volume antes de começar '+ecomEsc(k)+'.'}; wmsBeep(true); return wmsCkvRender(); }
     var rest=wmsCkvRestante(g); if(rest<=0){ _ckv.msg={t:'erro',x:ecomEsc(k)+' já está completo neste pedido.'}; wmsBeep(true); return wmsCkvRender(); }
-    if(!/^\d{1,5}$/.test(raw)&&wmsCkvQtdPacoteObrigatoria()&&(g.saco||0)>1){ _ckv.aguardaQtd={sku:k}; _ckv.msg={t:'aviso',x:'Código de '+ecomEsc(k)+' lido. Agora bipe a QUANTIDADE da etiqueta do pacote ('+g.saco.toLocaleString('pt-BR')+').'}; if(navigator.vibrate) navigator.vibrate(30); return wmsCkvRender(); }   // v1.0.1302
+    if(!/^\d{1,5}$/.test(raw)&&wmsCkvQtdPacoteObrigatoria()&&(g.saco||0)>1){ _ckv.aguardaQtd={sku:k}; _ckv.msg={t:'aviso',x:'Código de '+ecomEsc(k)+' lido. Agora bipe a QUANTIDADE da etiqueta do pacote ('+g.saco.toLocaleString('pt-BR')+((rest%g.saco)>0?', ou '+(rest%g.saco).toLocaleString('pt-BR')+' no pacote com quebra':'')+').'}; if(navigator.vibrate) navigator.vibrate(30); return wmsCkvRender(); }   // v1.0.1302
     if(!((g.saco||0)>1)){   // v1.0.1343: produto SEM pacote (ex.: 4070200165-00) → parte de caixa aberta: digita a quantidade desta caixa
       if(_ckv.aberto){ _ckv.msg={t:'erro',x:'Feche o volume aberto antes.'}; wmsBeep(true); return wmsCkvRender(); }
       var _sug=g.m>0?Math.min(rest,g.m):rest, _r=prompt(k+' não tem pacote cadastrado.\nQuantas peças vão NESTE volume (caixa aberta)?\nFaltam '+rest.toLocaleString('pt-BR')+' pç.',String(_sug));
@@ -51627,7 +51628,7 @@ async function wmsCkvBipe(raw){
       _ckv.msg={t:'ok',x:'✓ Volume de '+_q.toLocaleString('pt-BR')+' pç de '+ecomEsc(k)+' (caixa aberta)'};
       await wmsCkvCriarVolume(k,_q,'fracao',[{q:_q}],null); return;
     }
-    var q=Math.min(g.saco||1,rest);
+    var q=Math.min((_qInf>0&&_qInf<(g.saco||1))?_qInf:(g.saco||1),rest);
     _ckv.aberto=_ckv.aberto||{sku:k,qtd:0,bipes:[]}; _ckv.aberto.qtd+=q; _ckv.aberto.bipes.push({q:q,em:new Date().toISOString()}); wmsCkvSalvarAberto();
     _ckv.msg={t:'ok',x:'✓ Pacote '+_ckv.aberto.bipes.length+' · '+q.toLocaleString('pt-BR')+' pç de '+ecomEsc(k)};
     if(wmsCkvRestante(g)<=0) return wmsCkvFecharVolume();   // completou o produto: fecha e imprime
