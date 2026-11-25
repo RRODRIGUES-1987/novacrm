@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1426 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1427 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1426';
+const APP_VERSION='v1.0.1427';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38373,9 +38373,9 @@ async function wmsCxScan(code){
           okEt=true; } }
       else okEt=(cu2==='VOL'+n||cu2===n);
       if(!okEt&&/^\d{4,6}$/.test(code)&&code!==String(pl.numero_pedido)&&wmsCxCfg(pl).checkout_sem_bipe_produto===true){
-        wmsCx.pendingLabel=null; pl._semBipeEtq=true; await wmsCxRomaneio(pl);
+        wmsCx.pendingLabel=null; pl._semBipeEtq=true; await wmsCxParSet(pl,{etiqueta_ok:new Date().toISOString(),etiqueta_ok_modo:'proximo_pedido'}); await wmsCxRomaneio(pl);
         await wmsCxAbrirPedido(code); await wmsCxAuto(); return; }
-      if(okEt){ wmsCx.pendingLabel=null; var rmN=await wmsCxRomaneio(pl);
+      if(okEt){ wmsCx.pendingLabel=null; await wmsCxParSet(pl,{etiqueta_ok:new Date().toISOString(),etiqueta_ok_modo:'bipe'}); var rmN=await wmsCxRomaneio(pl);
         wmsCxFlash('Pedido '+pl.numero_pedido+' liberado'+(rmN?' · romaneio '+rmN+' · '+wmsCxTranspCurto(pl.transportadora):(pl._romErro?' · NÃO entrou no romaneio: '+pl._romErro:'')),pl._romErro?'amber':'green');
         if(wmsCxAtual()&&wmsCxCfg(pl).checkout_sem_bipe_produto===true) await wmsCxAuto(); }
       else { ecomBeep(); var cz=cu2.replace(/\s/g,''), oq='';
@@ -38454,6 +38454,20 @@ async function wmsCxRomaneio(p){
     p._rom=rom.numero; return rom.numero||'';
   }catch(e){ console.warn('[checkout WMS] romaneio automático',e); p._romErro=String(e.message||e); return ''; }
 }
+// v1.0.1427: o pedido entra no romaneio quando é CONCLUÍDO (etiqueta enviada à impressora), não mais na confirmação da etiqueta.
+// A confirmação (bipe do rastreio ou próximo pedido) fica gravada à parte, e a tela inicial lista o que foi impresso e não confirmado.
+async function wmsCxParSet(p,obj){
+  try{ var cur=await dbSelect('wms_pedidos','id=eq.'+p.id+'&select=parametros'), par=(cur&&cur[0]&&cur[0].parametros)||{}; if(typeof par==='string'){ try{ par=JSON.parse(par); }catch(_e){ par={}; } }
+    par=Object.assign({},par,obj); await dbUpdate('wms_pedidos',p.id,{parametros:par}); p._par=par; }catch(e){ console.warn('[checkout WMS] parâmetros do pedido',e); }
+}
+var _wmsCxSemConfT=0;
+async function wmsCxSemConf(){
+  var el=ge('wms-cx-semconf'); if(!el) return; if(Date.now()-_wmsCxSemConfT<20000&&el.getAttribute('data-ok')==='1') return; _wmsCxSemConfT=Date.now();
+  try{ var L=await dbSelect('wms_pedidos','company_id=eq.'+company.id+'&status=eq.conferido&excluido_em=is.null&parametros->>etiqueta_impressa_em=gte.'+hojeLocalISO()+'&parametros->>etiqueta_ok=is.null&select=numero_pedido&order=numero_pedido&limit=80')||[];
+    el=ge('wms-cx-semconf'); if(!el) return; el.setAttribute('data-ok','1');
+    el.innerHTML=L.length?'<div style="margin-top:14px;border:1px solid #f59e0b;background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e);border-radius:12px;padding:10px 14px;font-size:14px;max-width:760px">⚠ <b>'+L.length+' pedido(s)</b> com etiqueta impressa hoje e <b>sem confirma&ccedil;&atilde;o</b> de que foi colada: '+L.map(function(x){return ecomEsc(x.numero_pedido);}).join(', ')+'.<br><span style="font-size:12.5px">J&aacute; est&atilde;o no romaneio. Para conferir, digite o n&uacute;mero: a etiqueta reimprime e a tela pede a confirma&ccedil;&atilde;o.</span></div>':'';
+  }catch(_e){}
+}
 // v1.0.1424: depositante com checkout_sem_bipe_produto → a folha do pedido já conclui (produtos conferidos fora do sistema) e imprime a etiqueta
 async function wmsCxAuto(){
   if(!wmsCx||wmsCx.pendingLabel||wmsCx.retry) return; var p=wmsCxAtual(); if(!p) return;
@@ -38488,7 +38502,8 @@ async function wmsCxMatar(p){
   if(!p._cor){ p._vols=await wmsCxVolsNf(p); p._volsBip={}; }
   try{ if(p._cor) wmsCxPdfPrint(p._cor.pdf); else wmsCxEtiquetaPrint(p); }catch(e){ console.warn('etiqueta',e); }
   wmsCx.pendingLabel=p.id;
-  wmsCxFlash('Pedido '+p.numero_pedido+' OK · bipe '+(p._cor?'a etiqueta dos Correios colada na caixa':((p._vols>1)?('as '+p._vols+' etiquetas coladas nas caixas'):'a etiqueta impressa'))+' para liberar','green');
+  await wmsCxParSet(p,{etiqueta_impressa_em:agora}); var _rmI=await wmsCxRomaneio(p);
+  wmsCxFlash('Pedido '+p.numero_pedido+' OK'+(_rmI?' · romaneio '+_rmI:(p._romErro?' · NÃO entrou no romaneio: '+p._romErro:''))+' · bipe '+(p._cor?'a etiqueta dos Correios colada na caixa':((p._vols>1)?('as '+p._vols+' etiquetas coladas nas caixas'):'a etiqueta impressa'))+' para liberar',p._romErro?'amber':'green');
 }
 function wmsCxReimprimir(){ if(!_wmsCxUlt){ showToast('Nenhum pedido conferido nesta bancada ainda','amber'); return; } if(_wmsCxUlt._cor) wmsCxPdfPrint(_wmsCxUlt._cor.pdf); else wmsCxEtiquetaPrint(_wmsCxUlt); wmsCxFoco(); }
 function wmsCxTranspCurto(t){ t=String(t||'').toUpperCase(); if(t.indexOf('CORREIO')>=0) return 'CORREIOS'; return (t.split(' ')[0]||'SEM TRANSP.').slice(0,14); }
@@ -38682,7 +38697,7 @@ function wmsCxRender(){
         +(wmsCxBloqueados().length?'<span style="color:var(--border)">|</span><span style="font-size:13px;color:var(--red-text);font-weight:600">'+wmsCxBloqueados().length+' sem nota</span>':'')+'</div>'; }
   }
   var centro=function(h){ return '<div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column">'+wmsCxMsgHtml()+h+'</div>'; };
-  if(vazio){ body.innerHTML=centro('<div style="border:3px dashed var(--border);border-radius:20px;padding:56px 80px;text-align:center;color:var(--text3);font-size:22px">Bipe a <b>folha</b> da onda ou do pedido<br>para come&ccedil;ar</div>'); wmsCxFoco(); return; }
+  if(vazio){ body.innerHTML=centro('<div style="border:3px dashed var(--border);border-radius:20px;padding:56px 80px;text-align:center;color:var(--text3);font-size:22px">Bipe a <b>folha</b> da onda ou do pedido<br>para come&ccedil;ar</div><div id="wms-cx-semconf"></div>'); wmsCxSemConf(); wmsCxFoco(); return; }
   if(wmsCx.retry){ var pr2=wmsCx.peds[wmsCx.retry];
     body.innerHTML=centro('<div style="border:3px solid var(--red-text);border-radius:20px;padding:36px 48px;text-align:center;max-width:720px"><div style="font-size:26px;font-weight:800;color:var(--red-text)">Etiqueta dos Correios n&atilde;o saiu</div>'
       +'<div style="font-size:20px;font-weight:600;margin-top:8px">'+ecomEsc(pr2.destinatario_nome||'')+'</div><div style="font-size:15px;color:var(--text3);font-family:monospace">Pedido '+ecomEsc(pr2.numero_pedido)+'</div>'
