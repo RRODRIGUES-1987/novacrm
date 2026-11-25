@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1424 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1425 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1424';
+const APP_VERSION='v1.0.1425';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38226,7 +38226,21 @@ async function wmsCxCorreios(p){
   try{ await dbInsert('wms_pedido_docs',{company_id:company?.id,cliente_id:p.cliente_id,pedido_id:p.id,tipo:'etiqueta',rastreio:c.objeto,numero:String(c.servico||''),origem:'correios'}); }catch(_e){}
   return {objeto:String(c.objeto),servico:c.servico||'',pdf:b.pdf_base64};
 }
+// v1.0.1425: impressão direta pelo QZ Tray (mesma impressora de envio 100×150 da bancada do e-commerce), sem caixa de diálogo.
+// Sem QZ Tray neste computador, ou se o envio falhar, cai na impressão do navegador como antes.
+async function wmsCxQz(dados,larg,alt){
+  try{ if(typeof ecomQzConnect!=='function') return false;
+    await ecomQzConnect(true); var pr=await ecomQzResolvePrinter(); if(!pr) return false;
+    var mk=function(){ return qz.configs.create(pr,{units:'mm',size:{width:larg,height:alt},margins:0,colorType:'grayscale',rasterize:true,scaleContent:true,rotation:0}); };
+    try{ await qz.print(mk(),dados); }
+    catch(_e1){ await new Promise(function(r){setTimeout(r,900);}); await ecomQzConnect(true); pr=await ecomQzResolvePrinter(); await qz.print(mk(),dados); }
+    return true;
+  }catch(e){ console.warn('[checkout WMS] QZ Tray',e); return false; }
+}
 function wmsCxPdfPrint(b64){
+  wmsCxQz([{type:'pixel',format:'pdf',flavor:'base64',data:b64,options:{pageWidth:100,pageHeight:150,units:'mm',scaleContent:true}}],100,150).then(function(ok){ if(!ok) wmsCxPdfPrintDialogo(b64); else wmsCxFoco(); });
+}
+function wmsCxPdfPrintDialogo(b64){
   var old=ge('wms-cx-print'); if(old) old.remove();
   var bin=atob(b64), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
   var url=URL.createObjectURL(new Blob([u8],{type:'application/pdf'}));
@@ -38616,6 +38630,10 @@ function wmsCxEtiquetaPrint(p){
     +'<div class="rod"><div><div class="lb">PEDIDO</div><div class="ped">'+esc(p.numero_pedido)+'</div><div class="sub">vol '+vi+'/'+nVol+''+(p._par&&p._par.onda?' &middot; '+esc(p._par.onda):'')+' &middot; '+new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})+'</div></div>'
     +'<div class="bc">'+(url?'<img src="'+url+'">':'')+'<div style="font-family:monospace;font-size:8pt">'+esc(code)+'</div></div></div>'
     +'</div></div>'; }).join('')+'</body></html>';
+  var _pt=html.split('<div class="etq">'), _docs=_pt.slice(1).map(function(x){ return _pt[0]+'<div class="etq">'+x.replace('</body></html>','')+'</body></html>'; });
+  wmsCxQz(_docs.map(function(d){ return {type:'pixel',format:'html',flavor:'plain',data:d,options:{pageWidth:100,pageHeight:100,units:'mm'}}; }),100,100).then(function(ok){ if(ok){ wmsCxFoco(); return; } wmsCxEtiquetaDialogo(html); });
+}
+function wmsCxEtiquetaDialogo(html){
   var old=ge('wms-cx-print'); if(old) old.remove();
   var ifr=document.createElement('iframe'); ifr.id='wms-cx-print'; ifr.style.cssText='position:fixed;top:-9999px;left:-9999px;width:100mm;height:100mm;border:none';
   document.body.appendChild(ifr); var d=ifr.contentDocument||ifr.contentWindow.document; d.open(); d.write(html); d.close();
