@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1427 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1428 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1427';
+const APP_VERSION='v1.0.1428';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -40223,7 +40223,9 @@ async function colRgTrocar(listaId,raw){
   if(pal[0]) _colRg.pal[pal[0].id]=pal[0]; achou.forEach(function(c){_colRg.cont[c.id]=c;});
   var antigo=null;
   colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;}).forEach(function(t){ antigo=antigo||t.pallet_id; t.pallet_id=cont.pallet_id; if(pal[0]) t.endereco_origem=pal[0].endereco_codigo||t.endereco_origem; });
-  for(const t of colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;})) await dbUpdate('wms_tarefas_separacao',t.id,{pallet_id:t.pallet_id,endereco_origem:t.endereco_origem});
+  // v1.0.1428: caixa nova com MAIS peças que a tarefa → a retirada deixa de ser caixa inteira (o checkout pedia o RG da caixa toda; CH-0082)
+  colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;}).forEach(function(t){ if((t.tipo_volume==='pallet'||t.tipo_volume==='caixa')&&(+cont.qtd_fiscal||0)>(+t.quantidade||0)) t.tipo_volume='fracao'; });
+  for(const t of colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;})) await dbUpdate('wms_tarefas_separacao',t.id,{pallet_id:t.pallet_id,endereco_origem:t.endereco_origem,tipo_volume:t.tipo_volume});
   return {ok:true,pallet_id:cont.pallet_id,de:antigo?colRgNome(antigo):'—'};
 }
 async function coletorSepRgBipe(listaId,code){
@@ -60419,18 +60421,21 @@ function meuChamadoDetalhe(id){
   var html='<div class="modal-overlay" id="hd-meu-det"><div class="modal" style="max-width:560px;width:96%;max-height:90vh;overflow:auto">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div><span style="font-family:monospace;font-size:13px;color:#666">'+helpdeskEsc(c.numero||'')+'</span> '+helpdeskStatusBadge(c.status)+'</div><button onclick="helpdeskMeuDetFechar()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;padding:0">×</button></div>'+
     '<div style="font-size:16px;font-weight:700;margin-bottom:8px">'+helpdeskEsc(c.titulo||'')+'</div>'+
-    '<div style="background:#f7f8fa;border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;margin-bottom:12px">'+helpdeskEsc(c.descricao||'')+'</div>'+
+    ((c.respostas||[]).some(function(r){return r.tipo==='suporte';})?'<div style="background:#e8f5ee;border:1px solid #86c9a4;border-radius:8px;padding:8px 12px;font-size:12px;color:#14532d;margin-bottom:10px">💬 O suporte respondeu. A resposta está em <b>Conversa</b>, abaixo.</div>':'')+
+    '<details style="margin-bottom:12px"><summary style="font-size:12px;color:#666;cursor:pointer">Descrição do chamado</summary><div style="background:#f7f8fa;border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;margin-top:6px;max-height:220px;overflow:auto">'+helpdeskEsc(c.descricao||'')+'</div></details>'+
     (anexos?('<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+anexos+'</div>'):'')+
     valida+
-    '<div style="font-size:12px;color:#666;margin-bottom:6px">Conversa</div><div style="max-height:200px;overflow:auto;margin-bottom:10px">'+respostas+'</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:6px">Conversa</div><div id="hd-meu-conversa" style="max-height:50vh;overflow:auto;margin-bottom:10px">'+respostas+'</div>'+
     '<div style="display:flex;gap:8px"><input class="fi" id="hd-meu-resp" placeholder="Escreva uma mensagem…" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();helpdeskMeuAddResposta(\''+id+'\');}"><button onclick="helpdeskMeuAddResposta(\''+id+'\')" style="padding:9px 14px;border:none;background:#1e5f82;color:#fff;border-radius:8px;font-size:13px;cursor:pointer">Enviar</button></div>'+
   '</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
+  var _cv=document.getElementById('hd-meu-conversa'); if(_cv) _cv.scrollTop=_cv.scrollHeight;   // v1.0.1428: abre na resposta mais recente
 }
 function helpdeskMeuDetFechar(){var m=document.getElementById('hd-meu-det');if(m)m.remove();}
 async function helpdeskMeuAddResposta(id){
   var inp=document.getElementById('hd-meu-resp'); var txt=inp?inp.value.trim():''; if(!txt)return;
   var c=helpdeskMeuById(id); if(!c)return;
+  try{ var _f=((await dbSelect('helpdesk_chamados','id=eq.'+id+'&select=respostas'))||[])[0]; if(_f) c.respostas=_f.respostas||[]; }catch(_e){}   // v1.0.1428: relê antes de gravar (não apaga resposta do suporte que chegou com a tela aberta)
   var resp=(c.respostas||[]).slice();
   resp.push({autor_id:((typeof cu!=='undefined'&&cu)?cu.id:null),autor_nome:((typeof profile!=='undefined'&&profile&&profile.full_name)||'Solicitante'),tipo:'solicitante',texto:txt,em:new Date().toISOString()});
   try{ await dbUpdate('helpdesk_chamados',id,{respostas:resp,updated_at:new Date().toISOString()}); c.respostas=resp; if(inp)inp.value=''; meuChamadoDetalhe(id); }
