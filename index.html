@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1434 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1435 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1434';
+const APP_VERSION='v1.0.1435';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -36801,8 +36801,9 @@ function rWmsRomaneios_i(){
       </div>
     </div>`;
   }).join('');
-  return `${cards}${wmsSelHint('rom')}<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-    <div id="wms-rom-count" style="font-size:12px;color:var(--text3)">${_romsView.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div>${btnMontar}</div><div id="wms-rom-list">${rows||'<div class="empty"><p>Nenhum romaneio com este filtro.</p></div>'}</div>`;
+  setTimeout(function(){ wmsSelBarUpd('rom'); },0);   // v1.0.1435: barra de ações dos romaneios marcados
+  return `${cards}${wmsSelBarHtml('rom')}${wmsSelHint('rom')}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px">
+    <div id="wms-rom-count" style="font-size:12px;color:var(--text3)">${_romsView.length} romaneio(s) · ${semRom.length} pedido(s) sem romaneio</div><div style="display:flex;gap:8px"><button class="btn btn-sm" onclick="wmsRomMarcarTodos()" title="Marca todos os romaneios visíveis (filtro + busca)">☑ Marcar todos</button>${btnMontar}</div></div><div id="wms-rom-list">${rows||'<div class="empty"><p>Nenhum romaneio com este filtro.</p></div>'}</div>`;
 }
 
 // Modal: seleção de pedidos para montar romaneio
@@ -36834,8 +36835,11 @@ function wmsRomaneioDetalhe(id){
   const data=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
   // botões de avanço de status
   let btnStatus='';
-  if(r.status==='pendente')btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomStatus('${id}','em_carregamento')">▶ Iniciar operação</button>`;
+  const _semPrisma=r.movimento!=='entrada'&&wmsCliSemPrisma(r.cliente_id);   // v1.0.1435: depositante que carrega sem prisma (como a PE)
+  if(_semPrisma&&(r.status==='pendente'||r.status==='em_carregamento'))btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomEncerrarSemPrisma(['${id}'])">✓ Encerrar carregamento</button>`;
+  else if(r.status==='pendente')btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomStatus('${id}','em_carregamento')">▶ Iniciar operação</button>`;
   else if(r.status==='em_carregamento')btnStatus=`<button class="btn btn-p btn-sm" onclick="wmsRomStatus('${id}','carregado')">✓ Concluir</button>`;
+  btnStatus+=`<button class="btn btn-sm" style="margin-left:6px" onclick="wmsRomImprimir(['${id}'])">🖨 Imprimir romaneio</button>`;
   // documentos de embarque (conforme flags do cliente) — a partir do carregamento
   if(r.status==='em_carregamento'||r.status==='carregado'){
     if(cli&&cli.wms_usa_termo_resp===true)btnStatus+=`<button class="btn btn-sm" onclick="wmsGerarDocEmbarque('${id}','termo')">📄 Termo de responsabilidade</button>`;
@@ -36869,7 +36873,7 @@ function wmsRomaneioDetalhe(id){
   const docaTxt=r.doca?(' · 🏭 Doca '+r.doca):'';
   const prismaBox=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:9px;background:${prismaR?'var(--green-bg)':'var(--amber-bg)'};margin-bottom:12px">
       <div style="font-size:12px;font-weight:600;color:${prismaR?'var(--green-text)':'var(--amber-text)'}">
-        ${prismaR?('🚚 Prisma '+prismaR.codigo+(prismaR.placa?' · '+prismaR.placa:'')+docaTxt):'⚠ Nenhum prisma atribuído'}
+        ${prismaR?('🚚 Prisma '+prismaR.codigo+(prismaR.placa?' · '+prismaR.placa:'')+docaTxt):(_semPrisma?'Este depositante carrega sem prisma: encerre o carregamento direto':'⚠ Nenhum prisma atribuído')}
       </div>
       ${r.status!=='carregado'?(prismaR
         ?`<button class="btn btn-sm" onclick="wmsZerarPrisma('${prismaR.id}')" style="color:var(--red-text)">Liberar</button>`
@@ -36898,6 +36902,111 @@ function wmsRomaneioDetalhe(id){
       <button class="btn btn-sm" onclick="wmsCancelarRomaneio('${id}')" style="color:var(--red-text)">🗑 Cancelar romaneio</button>
     </div>`,
     'portClose()',{saveLabel:'Fechar',width:'560px'});
+}
+
+// ═══ v1.0.1435 · romaneio sem prisma (como a PE) + impressão em lote ═══
+// carregamento_sem_prisma no parâmetro do depositante; sem o parâmetro, vale o checkout_sem_bipe_produto (Biobalance)
+function wmsCliSemPrisma(cid){
+  var c=(clientes||[]).find(function(x){return x.id===cid;}); var pr=(c&&c.parametros)||{};
+  if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } }
+  if(pr.carregamento_sem_prisma===true||pr.carregamento_sem_prisma===false) return pr.carregamento_sem_prisma;
+  return pr.checkout_sem_bipe_produto===true;
+}
+function wmsRomMarcarTodos(){
+  const vis=[...document.querySelectorAll('#wms-rom-list .li[data-rom-id]')].filter(el=>el.style.display!=='none').map(el=>el.getAttribute('data-rom-id'));
+  if(!vis.length){showToast('Nenhum romaneio visível','amber');return;}
+  const todas=vis.every(id=>_wmsSel.rom.has(id));
+  if(todas)vis.forEach(id=>_wmsSel.rom.delete(id));else vis.forEach(id=>_wmsSel.rom.add(id));
+  wmsSelRerender();
+  if(!todas)showToast(vis.length+' romaneio(s) marcado(s)','green');
+}
+async function wmsRomEncerrarSemPrisma(ids){
+  const roms=(ids||[]).map(id=>wmsRomaneios.find(r=>r.id===id)).filter(Boolean);
+  if(!roms.length){showToast('Marque ao menos um romaneio.','amber');return;}
+  const jaFeito=roms.filter(r=>r.status==='carregado');
+  const comPrisma=roms.filter(r=>r.status!=='carregado'&&(r.movimento==='entrada'||!wmsCliSemPrisma(r.cliente_id)));
+  let alvo=roms.filter(r=>r.status!=='carregado'&&r.movimento!=='entrada'&&wmsCliSemPrisma(r.cliente_id));
+  // pedidos vêm do banco (a tela pode não ter todos)
+  let peds=[];
+  try{ peds=alvo.length?await wmsSelIn('wms_pedidos','romaneio_id',alvo.map(r=>r.id),'select=id,romaneio_id,status,numero_pedido,numero_curto'):[]; }catch(e){ showToast('Erro ao ler os pedidos: '+(e.message||e),'red'); return; }
+  const vazios=alvo.filter(r=>!peds.some(p=>p.romaneio_id===r.id));
+  alvo=alvo.filter(r=>peds.some(p=>p.romaneio_id===r.id));
+  const fim={}; String(typeof WMS_FIM_STATUS!=='undefined'?WMS_FIM_STATUS:'').split(',').forEach(k=>{if(k)fim[k]=1;}); fim.excluido=1;
+  const pAlvo=peds.filter(p=>alvo.some(r=>r.id===p.romaneio_id)&&!fim[p.status]);
+  const naoConf=pAlvo.filter(p=>!['conferido','faturado','unitizado','expedido'].includes(p.status));
+  const fora=[];
+  if(jaFeito.length)fora.push(jaFeito.length+' já carregado(s)');
+  if(comPrisma.length)fora.push(comPrisma.length+' de depositante que exige prisma ('+comPrisma.map(r=>r.numero).slice(0,4).join(', ')+')');
+  if(vazios.length)fora.push(vazios.length+' sem pedido ('+vazios.map(r=>r.numero).slice(0,4).join(', ')+')');
+  if(!alvo.length){showToast('Nada para encerrar'+(fora.length?': '+fora.join(' · '):'.'),'amber');return;}
+  const msg='Encerrar o carregamento de '+alvo.length+' romaneio(s) sem prisma?\n\n'+alvo.map(r=>'• '+r.numero+' · '+peds.filter(p=>p.romaneio_id===r.id).length+' pedido(s)').join('\n')
+    +'\n\n'+pAlvo.length+' pedido(s) passam para "embarcado".'
+    +(naoConf.length?'\n\n⚠ '+naoConf.length+' pedido(s) ainda não conferidos: '+naoConf.slice(0,8).map(p=>(p.numero_curto||p.numero_pedido)+' ('+p.status+')').join(', ')+(naoConf.length>8?'…':''):'')
+    +(fora.length?'\n\nFicam de fora: '+fora.join(' · '):'');
+  if(!confirm(msg))return;
+  let n=0,np=0;
+  try{
+    for(const r of alvo){
+      await dbUpdate('wms_romaneios',r.id,{status:'carregado'}); r.status='carregado';
+      const pr=wmsPrismas.find(x=>x.romaneio_id===r.id&&x.status==='ocupado');
+      if(pr){ await dbUpdate('wms_prismas_caminhao',pr.id,{status:'livre',romaneio_id:null,placa:null,motorista:null,atribuido_em:null,atribuido_por:null}); Object.assign(pr,{status:'livre',romaneio_id:null,placa:null,motorista:null}); }
+      np+=await wmsEncerrarPedidosRomaneio(r.id,'romaneio encerrado sem prisma'+(profile&&profile.full_name?' · '+profile.full_name:''));
+      _wmsSel.rom.delete(r.id); n++;
+    }
+    showToast(n+' romaneio(s) encerrado(s) · '+np+' pedido(s) embarcado(s).'+(fora.length?' Fora: '+fora.join(' · '):''),'green');
+  }catch(e){ showToast('Erro ('+n+' já encerrado(s)): '+(e.message||e),'red'); }
+  if(typeof portClose==='function')portClose();
+  render();
+}
+// Romaneio de carregamento (modelo da PE): 2 vias por romaneio, com NF, volumes e peso da nota quando houver
+async function wmsRomImprimir(ids){
+  const roms=(ids||[]).map(id=>wmsRomaneios.find(r=>r.id===id)).filter(Boolean)
+    .sort((a,b)=>String(a.numero||'').localeCompare(String(b.numero||''),'pt-BR',{numeric:true}));
+  if(!roms.length){showToast('Marque ao menos um romaneio.','amber');return;}
+  showToast('Montando o(s) romaneio(s)…','blue');
+  const e=ecomEsc, fmtKg=n=>(+n||0).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3});
+  let peds=[],docs=[],nfs=[];
+  try{
+    peds=await wmsSelIn('wms_pedidos','romaneio_id',roms.map(r=>r.id),'select=id,romaneio_id,status,numero_pedido,numero_curto,destinatario_nome,cidade,uf,tot_peso,transportadora,cliente_id');
+    const pids=peds.map(p=>p.id);
+    if(pids.length){
+      docs=await wmsSelIn('wms_pedido_docs','pedido_id',pids,'tipo=eq.nfe_xml&select=pedido_id,numero,conteudo');
+      nfs=await wmsSelIn('wms_pedido_nfs','pedido_id',pids,'select=pedido_id,numero');
+    }
+  }catch(err){ showToast('Erro ao ler os pedidos: '+(err.message||err),'red'); return; }
+  const sheets=[];
+  roms.forEach(r=>{
+    const ps=peds.filter(p=>p.romaneio_id===r.id).sort((a,b)=>String(a.numero_pedido||'').localeCompare(String(b.numero_pedido||''),'pt-BR',{numeric:true}));
+    const cli=clientes.find(c=>c.id===(r.cliente_id||(ps[0]&&ps[0].cliente_id)))||{};
+    let totVol=0,totKg=0,semVol=0;
+    const rows=ps.map(p=>{
+      const d=docs.find(x=>x.pedido_id===p.id)||{}, xml=String(d.conteudo||'');
+      const nfNum=d.numero||nfs.filter(x=>x.pedido_id===p.id).map(x=>x.numero).filter(Boolean).join(', ')||'';
+      let vol=0; (xml.match(/<qVol>\s*(\d+)\s*<\/qVol>/g)||[]).forEach(m=>{vol+=+(m.replace(/\D/g,''))||0;});
+      let kg=0; (xml.match(/<pesoB>\s*([\d.]+)\s*<\/pesoB>/g)||[]).forEach(m=>{kg+=parseFloat(m.replace(/[^\d.]/g,''))||0;});
+      if(!kg)kg=+p.tot_peso||0;
+      if(vol)totVol+=vol;else semVol++;
+      totKg+=kg;
+      return '<tr><td>'+e(p.numero_curto||p.numero_pedido||'')+'</td><td>'+e(nfNum||'—')+'</td><td>'+e(p.destinatario_nome||'')+'</td><td>'+e((p.cidade||'')+(p.uf?('/'+p.uf):''))+'</td><td style="text-align:center">'+(vol||'—')+'</td><td style="text-align:right">'+(kg?fmtKg(kg):'—')+'</td></tr>';
+    }).join('')||'<tr><td colspan="6" style="text-align:center;color:#888">Sem pedidos</td></tr>';
+    const num=String(r.numero||'').split('/')[0];
+    const transp=r.transportadora||(ps.find(p=>p.transportadora)||{}).transportadora||'';
+    const dataTxt=r.data?new Date(r.data+'T00:00:00').toLocaleDateString('pt-BR'):'';
+    const via=label=>'<div class="sheet">'
+      +'<div style="text-align:center;font-size:9px;color:#888;letter-spacing:2px;margin-bottom:4px">'+label+'</div>'
+      +'<div class="sheet-hd" style="border-bottom:3px solid #111"><div class="sheet-hd-info"><div style="font-size:22px;font-weight:800">ROMANEIO DE CARREGAMENTO</div>'
+      +'<div style="font-size:14px;font-weight:700;margin-top:2px">N&ordm; '+e(r.numero||'')+' &middot; '+e(dataTxt)+'</div>'
+      +'<div style="margin-top:2px">Depositante: <b>'+e(cli.razao_social||cli.nome||'—')+'</b>'+(transp?' &middot; Transportadora: <b>'+e(transp)+'</b>':'')+'</div></div>'+ecomFolhaBarcode(num)+'</div>'
+      +'<table><thead><tr><th>Pedido</th><th>NF</th><th>Destinat&aacute;rio</th><th>Cidade/UF</th><th>Vol.</th><th>Peso (kg)</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      +'<div class="tot-vol"><span class="tot-vol-lbl">Total de volumes:</span><span class="tot-vol-num">'+(totVol||ps.length)+'</span>'
+      +'<span style="margin-left:20px;font-size:14px;color:#555">'+ps.length+' pedido(s) &middot; '+fmtKg(totKg)+' kg'+(semVol&&totVol?' &middot; '+semVol+' sem volume na NF':'')+(!totVol?' &middot; 1 volume por pedido (sem NF)':'')+'</span></div>'
+      +'<div class="assinaturas">'
+      +'<div class="assin"><div class="lbl">MK LOG&Iacute;STICA</div><div class="campo">Nome: ______________________________</div><div class="campo">Documento: __________________________</div><div class="sig">Assinatura</div></div>'
+      +'<div class="assin"><div class="lbl">COLETADO POR</div><div class="campo">Nome: ______________________________</div><div class="campo">Placa: ______________________________</div><div class="sig">Assinatura</div></div>'
+      +'</div></div>';
+    sheets.push(via('&mdash; 1&ordf; VIA (MK LOG&Iacute;STICA) &mdash;'),via('&mdash; 2&ordf; VIA (MOTORISTA) &mdash;'));
+  });
+  ecomPrintDoc(roms.length===1?('Romaneio '+roms[0].numero):(roms.length+' romaneios'),sheets,false);
 }
 
 // Cancela um romaneio: libera os pedidos (volta romaneio_id=null), libera prisma, apaga o romaneio
@@ -37099,7 +37208,7 @@ function wmsSelRerender(){
   if(curPage==='wms-pedidos'){c.innerHTML=rWmsPedidos();filterWmsPedidos('');}
   else if(curPage==='wms-separacao'){c.innerHTML=rWmsSeparacao();wmsSelBarUpd('sep');}   // v1.0.1432: a barra de ações da seleção (imprimir em lote) voltou a aparecer
   else if(curPage==='wms-conferencia')c.innerHTML=rWmsConferencia();
-  else if(curPage==='wms-romaneio')c.innerHTML=rWmsRomaneios();
+  else if(curPage==='wms-romaneio'){c.innerHTML=rWmsRomaneios();wmsSelBarUpd('rom');}
   c.scrollTop=sy;
 }
 function wmsSelHint(sc){
@@ -37195,6 +37304,7 @@ function wmsSelBarHtml(sc){
     +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: capa + consolidada por produto e lote + por pedido (depositante sem bipe de produto: uma folha por pedido, com código de barras)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
       +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
       +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
+    +(sc==='rom'?'<button class="btn btn-p btn-sm" onclick="wmsRomImprimir([..._wmsSel.rom])" title="Romaneio de carregamento em 2 vias (MK e motorista), um por romaneio marcado">&#128424; Imprimir romaneios</button><button class="btn btn-sm" onclick="wmsPlacasImprimir([..._wmsSel.rom])">&#129707; Placas de totem</button><button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsRomEncerrarSemPrisma([..._wmsSel.rom])" title="Depositante que carrega sem prisma (como a PE): encerra o carregamento e marca os pedidos como embarcados">&#10003; Encerrar carregamento</button>':'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
 }
 function wmsSelTotais(sc,ids){
