@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1430 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1431 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1430';
+const APP_VERSION='v1.0.1431';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38864,6 +38864,21 @@ async function wmsCapaPedidosPrint(pedidoIds){
     tar.forEach(t=>{ const k=String(t.sku||'').trim(); const o=porSku[k]||(porSku[k]={sku:k,desc:'',qtd:0,cx:0,fr:false}); if(t.tipo_volume==='pallet'||t.tipo_volume==='caixa') o.cx++; else o.fr=true; });
     const L=Object.values(porSku).sort((a,b)=>a.sku.localeCompare(b.sku));
     const cheias=L.reduce((a,o)=>a+o.cx,0), abertas=L.filter(o=>o.fr).length, vols=cheias+abertas;
+    // v1.0.1431: depositante sem bipe de produto (Biobalance) → a capa É a lista de separação: endereço (etiqueta de chão) e lote por linha
+    let LL=null;
+    const _cpar=(function(){ let pr=cli.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr||{}; })();
+    if(_cpar.checkout_sem_bipe_produto===true){
+      const res=(await dbSelect('wms_reservas','pedido_id=eq.'+pid+'&status=in.(reservada,consumida)&select=conteudo_id,sku,qtd').catch(()=>[]))||[];
+      const cids=[...new Set(res.map(r=>r.conteudo_id).filter(Boolean))];
+      const cm={}; if(cids.length) ((await dbSelect('wms_pallet_conteudo','id=in.('+cids.join(',')+')&select=id,sku,descricao,lote').catch(()=>[]))||[]).forEach(c=>{cm[c.id]=c;});
+      const por={}, resSku={};
+      res.forEach(r=>{ const c=cm[r.conteudo_id]||{}, sku=String(c.sku||r.sku||'').trim(), lote=String(c.lote||'').trim(), k=sku+'|'+lote;
+        (por[k]=por[k]||{sku:sku,lote:lote,desc:c.descricao||(porSku[sku]||{}).desc||'',end:wmsEndChao(sku,lote),qtd:0}).qtd+=Number(r.qtd||0);
+        resSku[sku]=(resSku[sku]||0)+Number(r.qtd||0); });
+      L.forEach(o=>{ const f=+(o.qtd-(resSku[o.sku]||0)).toFixed(3); if(f>0) por[o.sku+'|#falta']={sku:o.sku,lote:'',desc:o.desc,end:'SEM SALDO',qtd:f}; });
+      LL=Object.values(por).sort((a,b)=>String(a.end).localeCompare(String(b.end),'pt-BR',{numeric:true}));
+      if(!LL.length) LL=null;
+    }
     const cod=String(p.numero_curto||p.numero_pedido||p.id).replace(/\s+/g,'');
     const bc=ecomBcSvg(cod);
     const nfs=(_wmsNfPed[pid]||[]).map(x=>x.numero).join(', '), part=wmsPartDoPedido(p);
@@ -38877,8 +38892,10 @@ async function wmsCapaPedidosPrint(pedidoIds){
       <div class="vol"><div><div class="l">TOTAL DE VOLUMES</div><div class="vn">${vols||'—'}</div></div>
         <div class="info">${e(String(p.numero_pedido||'').split(' · ')[0])} · OS <b>${e(p.numero_curto||'—')}</b>${lst?' · '+e(lst.numero_lista||''):''}<br>${nfs?'NF <b>'+e(nfs)+'</b>':'sem NF ligada'}${pesoTxt?' · '+pesoTxt:''}${p.transportadora?' · '+e(p.transportadora):''}<br>${cheias} caixa(s) fechada(s)${abertas?' + '+abertas+' com pacotes':''} · ${L.length} SKU(s)</div></div>
       ${part?`<div class="part"><div class="pk">PARTICULARIDADE DE EMBARQUE · ${e(part.destinatario_nome||'')}</div><div class="pt">${e(part.exigencia||'')}</div></div>`:''}
-      <table><tr><th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">Volumes</th></tr>
-        ${L.map(o=>`<tr><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,corte))}</td><td class="r">${n(o.qtd)}</td><td class="r">${o.cx?o.cx+' cx':''}${o.cx&&o.fr?' + ':''}${o.fr?'pct':''}${!o.cx&&!o.fr?'—':''}</td></tr>`).join('')}</table>
+      ${LL?`<table><tr><th>Endereço</th><th>Código</th><th>Descrição</th><th>Lote</th><th class="r">Qtd</th><th class="r">✓</th></tr>
+        ${LL.map(o=>`<tr><td style="font-family:monospace;font-weight:700">${e(o.end||'—')}</td><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,Math.max(18,corte-16)))}</td><td><b>${e(o.lote||'—')}</b></td><td class="r">${n(o.qtd)}</td><td class="r" style="width:28px">☐</td></tr>`).join('')}</table>`
+      :`<table><tr><th>Código</th><th>Descrição</th><th class="r">Qtd</th><th class="r">Volumes</th></tr>
+        ${L.map(o=>`<tr><td>${e(o.sku)}</td><td>${e(String(o.desc||'').slice(0,corte))}</td><td class="r">${n(o.qtd)}</td><td class="r">${o.cx?o.cx+' cx':''}${o.cx&&o.fr?' + ':''}${o.fr?'pct':''}${!o.cx&&!o.fr?'—':''}</td></tr>`).join('')}</table>`}
       <div class="bcbox">${bc||''}<div class="code">${e(cod)}</div></div>
     </section>`;
   }
