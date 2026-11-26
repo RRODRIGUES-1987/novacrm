@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1429 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1430 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1429';
+const APP_VERSION='v1.0.1430';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37427,6 +37427,8 @@ async function wmsCancelarLista(id){
 
 // ── WMS · GERAÇÃO DE LISTAS DE SEPARAÇÃO ──
 let wmsPedSelecionados=new Set();  // ids de pedidos marcados
+// v1.0.1430: ao filtrar por depositante, desmarca os pedidos de outros depositantes (ficavam marcados e escondidos e entravam na onda)
+function wmsPedPodarSelecao(){ if(!wmsPedFiltroCliente) return; [...wmsPedSelecionados].forEach(function(id){ var p=(wmsPedidos||[]).find(function(x){return x.id===id;}); if(!p||p.cliente_id!==wmsPedFiltroCliente) wmsPedSelecionados.delete(id); }); }
 
 // Registra leituras no banco (1 linha por unidade de fração, 1 por pallet cheio).
 // Usado por bipe E manual — mesmo rastro. etapa: 'separacao'|'conf1'|'conf2'|'unitizacao'
@@ -37616,8 +37618,8 @@ function wmsPendenciasMultiplo(itens,clienteId){
 }
 function wmsPendenciasMultiploHtml(pend,titulo){
   if(!pend||!pend.length) return '';
-  var li=pend.slice(0,8).map(function(p){ return '<b>'+esc(String(p.sku))+'</b> · '+p.qtd.toLocaleString('pt-BR')+' un. → '+p.bipes.toLocaleString('pt-BR')+' bipes'+(p.semMultiplo?' (sem un. por caixa)':''); }).join('<br>');
-  return '<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6">⚠ <b>'+(titulo||'Cadastro incompleto')+'</b> — '+pend.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes:<br>'+li+(pend.length>8?'<br>+'+(pend.length-8)+' item(ns)':'')+'<br><span style="color:var(--text2)">Cadastre <b>un. por caixa</b> no produto (Cadastros › Produtos do depositante) antes de gerar a lista de separação.</span></div>';
+  var li=pend.slice(0,8).map(function(p){ return '<b>'+esc(String(p.sku))+'</b> · '+p.qtd.toLocaleString('pt-BR')+' un. → '+p.bipes.toLocaleString('pt-BR')+' bipes'+(p.semMultiplo?' (sem total por pallet)':''); }).join('<br>');
+  return '<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6">⚠ <b>'+(titulo||'Cadastro incompleto')+'</b> — '+pend.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes:<br>'+li+(pend.length>8?'<br>+'+(pend.length-8)+' item(ns)':'')+'<br><span style="color:var(--text2)">Cadastre o <b>total por pallet</b> no produto (Cadastros › Produtos do depositante) antes de gerar a lista de separação.</span></div>';
 }
 // Fim do ciclo: romaneio carregado (ou veículo liberado na portaria) → pedidos do romaneio viram 'embarcado'.
 async function wmsEncerrarPedidosRomaneio(romId,origem){
@@ -40678,7 +40680,7 @@ function wmsGerarListasModal(){
   peds.forEach(p=>{wmsPedidoItens.filter(it=>it.pedido_id===p.id).forEach(it=>{nItens++;const e=wmsEndDoItem(it);if(e){nComEnd++;if(wmsFrenteDe(e)==='alta')nAlta++;else nBaixa++;}});});
   const temEnd=nComEnd>0;
   portModal(`Gerar listas de separação — ${ids.length} pedido(s)`,
-    `<div style="font-size:12px;color:var(--text3);margin-bottom:14px">${ids.length} pedido(s) selecionado(s) · ~${totTarefas} tarefa(s) estimada(s). Escolha o tipo de separação:</div>
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:14px">${ids.length} pedido(s) selecionado(s) · ~${totTarefas} tarefa(s) estimada(s). Escolha o tipo de separação:</div>${clientesSel.length>1?`<div style="font-size:12px;color:var(--amber-text);background:var(--amber-bg);padding:8px 12px;border-radius:8px;margin-bottom:12px">⚠ A seleção tem pedidos de ${clientesSel.length} depositantes: ${clientesSel.map(function(cid2){ var n=peds.filter(function(p){return p.cliente_id===cid2;}).length, c=(clientes||[]).find(function(x){return x.id===cid2;}); return esc((c&&c.nome)||'?')+' ('+n+')'; }).join(', ')}. Confira antes de gerar.</div>`:''}
      <div style="display:flex;flex-direction:column;gap:10px">
        <button class="wms-tipo-opt" onclick="wmsGerarListas('pedido_a_pedido')" style="text-align:left;background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:14px;cursor:pointer">
          <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">📋 Pedido a pedido</div>
@@ -40803,7 +40805,7 @@ async function wmsGerarListas(tipo,opts){
   if(tipo!=='consolidada'){
     var _bloq=[];
     peds.forEach(function(p){ var pend=wmsPendenciasMultiplo(wmsPedidoItens.filter(function(it){return it.pedido_id===p.id;}),p.cliente_id); pend.forEach(function(x){ _bloq.push((p.numero_curto||p.numero_pedido||'')+' · '+x.sku+' · '+x.qtd.toLocaleString('pt-BR')+' un. → '+x.bipes.toLocaleString('pt-BR')+' bipes'); }); });
-    if(_bloq.length){ portErr('Lista não gerada: '+_bloq.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes. Cadastre un. por caixa no produto. '+_bloq.slice(0,4).join(' | ')+(_bloq.length>4?' | +'+(_bloq.length-4):'')); return; }
+    if(_bloq.length){ portErr('Lista não gerada: '+_bloq.length+' item(ns) passaria(m) de '+WMS_MAX_BIPES_ITEM+' bipes. Cadastre o total por pallet no produto (Cadastros › Produtos do depositante: camada × camadas ou "Total por pallet"). '+_bloq.slice(0,4).join(' | ')+(_bloq.length>4?' | +'+(_bloq.length-4):'')); return; }
   }
   portSaving();
   if(!_auto) document.querySelectorAll('.wms-tipo-opt').forEach(b=>{b.disabled=true;b.style.opacity='.35';b.style.pointerEvents='none';});
@@ -45911,7 +45913,7 @@ function rWmsPedidos_i(){
 
   return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-sm" onclick="wmsNovoPedidoModal()">＋ Novo pedido</button><button class="btn btn-sm" onclick="wmsImportarPedidosModal()">\u{1F4E5} Importar pedidos</button></div>${cards}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
   <div class="sechdr" style="gap:10px">
-    <select class="fi" id="wms-ped-cli" onchange="wmsPedFiltroCliente=this.value;render()" style="height:36px;width:auto;min-width:200px">
+    <select class="fi" id="wms-ped-cli" onchange="wmsPedFiltroCliente=this.value;wmsPedPodarSelecao();render()" style="height:36px;width:auto;min-width:200px">
       <option value="">Todos os depositantes</option>${optCli}
     </select>
     <div class="swrap" style="flex:1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
