@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1433 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1434 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1433';
+const APP_VERSION='v1.0.1434';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46333,13 +46333,24 @@ function wmsContraOrdensHtml(){
   const podeDev=wmsSepPodeConcluir();
   const blocos=Object.keys(porPed).map(pid=>{ const l=porPed[pid], c0=l[0];
     return `<div style="margin-top:8px"><div style="font-size:12px;color:var(--text2)"><b>${ecomEsc(c0.pedido_ref||'')}</b> · excluído por ${ecomEsc(c0.criada_por_nome||'?')} em ${new Date(c0.created_at).toLocaleString('pt-BR')} · "${ecomEsc(c0.motivo||'')}"</div>`
-      +l.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 12px;font-size:13px;border-bottom:1px dashed var(--border)"><span style="font-family:monospace;font-weight:700;min-width:90px">${ecomEsc(c.sku||'')}</span><span>${Number(c.quantidade||0).toLocaleString('pt-BR')} ${ecomEsc(c.tipo_volume||'')}</span><span>→ <b>${ecomEsc(c.endereco_destino||'(sem endereço)')}</b>${c.rg?' · RG '+ecomEsc(c.rg):''}</span>`
+      +l.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 12px;font-size:13px;border-bottom:1px dashed var(--border)"><span style="font-family:monospace;font-weight:700;min-width:90px">${ecomEsc(c.sku||'')}</span><span>${Number(c.quantidade||0).toLocaleString('pt-BR')} ${ecomEsc(c.tipo_volume||'')}</span><span>→ <b>${ecomEsc(c.endereco_destino||'(sem endereço)')}</b>${c.rg?' · RG '+ecomEsc(c.rg):''}</span>${c.pallet_id?`<button class="btn btn-sm" title="Reimprime a etiqueta do RG de origem (caixa nova para as peças que voltam)" onclick="wmsContraOrdemEtiqueta('${c.id}')">🏷 Etiqueta do RG</button>`:''}`
         +(podeDev?(String(c.tipo_volume||'')==='pallet'&&c.pallet_id
             ? `<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="wmsContraOrdemDevolvido('${c.id}','no_endereco')">✓ Está no endereço</button><button class="btn btn-sm" onclick="wmsContraOrdemReenderecar('${c.id}')">↪ Estava no stage · re-endereçar</button></span>`
             : `<button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdemDevolvido('${c.id}','pallet_origem')">✓ Devolvido ao pallet de origem</button>`):'')+`</div>`).join('')+`</div>`; }).join('');   // v1.0.1172
   return `<div style="border:2px solid var(--amber-text);background:var(--amber-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px">
     <div style="display:flex;align-items:center;gap:8px"><div style="font-weight:700;font-size:14px;color:var(--amber-text)">CONTRA-ORDENS · devolver ao endereço (${cos.length} pendente${cos.length>1?'s':''})</div>
     <button class="btn btn-sm" style="margin-left:auto" onclick="wmsContraOrdensImprimir()">🖨 Imprimir</button></div>${blocos}</div>`;
+}
+// v1.0.1434: etiqueta do RG de origem direto da contra-ordem (as peças voltam numa caixa nova com a nossa etiqueta reimpressa)
+async function wmsContraOrdemEtiqueta(id){
+  const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c||!c.pallet_id){ showToast('Contra-ordem sem RG de origem','amber'); return; }
+  try{
+    const pl=((await dbSelect('wms_pallets','id=eq.'+c.pallet_id))||[])[0]; if(!pl){ showToast('RG não encontrado','red'); return; }
+    const ct=(await dbSelect('wms_pallet_conteudo','pallet_id=eq.'+c.pallet_id+'&status=eq.ativo'))||[];
+    wmsPallets=(wmsPallets||[]).filter(x=>x.id!==pl.id).concat([pl]);
+    wmsPalletConteudo=(wmsPalletConteudo||[]).filter(x=>x.pallet_id!==pl.id).concat(ct);
+    await wmsEtiquetaPalletImprimir([pl.id]);
+  }catch(e){ showToast('Não consegui imprimir: '+(e.message||e),'red'); }
 }
 async function wmsContraOrdemDevolvido(id,acao){
   const c=(wmsContraOrdens||[]).find(x=>x.id===id); if(!c) return;
@@ -48190,6 +48201,85 @@ async function wmsSaiExcel(){ var d=wmsSaiData; if(!d) return;
     var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),'Saída por item');
     XLSX.writeFile(wb,'saida_por_item_'+(d.dep||'wms').replace(/[^A-Za-z0-9]+/g,'_').slice(0,20)+'_'+d.ini+'_'+d.fim+'.xlsx');
   }catch(e){ showToast('Não consegui gerar o Excel: '+(e.message||e),'red'); } }
+// ═══ v1.0.1434 · OBJETOS POSTADOS NOS CORREIOS — lista por romaneio no formato da lista de pré-postagem dos Correios ═══
+//  Fonte: pedidos do romaneio + etiqueta (código do objeto e serviço) + XML da NF (número e peso "1CX-0,254" das informações complementares).
+//  Sem logotipo dos Correios e com a MK LOG como emissora: é um comprovante do operador, não um documento emitido pelos Correios.
+var _cor={ini:'',fim:'',dep:'',roms:[],sel:{}};
+var WMS_COR_SERVICO={SEDEX:'03220: SEDEX CONTRATO AG',PAC:'03298: PAC CONTRATO AG'};
+function wmsCorView(){
+  var cid=company?company.id:null, d=new Date(), hoje=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  var on=new Date(d.getTime()-86400000), ontem=on.getFullYear()+'-'+String(on.getMonth()+1).padStart(2,'0')+'-'+String(on.getDate()).padStart(2,'0');
+  if(!_cor.ini) _cor.ini=ontem; if(!_cor.fim) _cor.fim=hoje;
+  var cls=(clientes||[]).filter(function(c){return c.company_id===cid;}).slice().sort(function(a,b){return String(a.nome||'').localeCompare(String(b.nome||''));});
+  var cliOpts='<option value="">Todos</option>'+cls.map(function(c){ return '<option value="'+c.id+'"'+(_cor.dep===c.id?' selected':'')+'>'+ecomEsc(c.nome||'')+'</option>'; }).join('');
+  var lin=(_cor.roms||[]).map(function(r){ return '<tr><td style="padding:6px 8px"><input type="checkbox" '+(_cor.sel[r.id]?'checked':'')+' onchange="_cor.sel[\''+r.id+'\']=this.checked"></td><td style="padding:6px 8px;font-family:monospace;font-weight:700">'+ecomEsc(r.numero||'')+'</td><td style="padding:6px 8px">'+ecomEsc(wmsDataBr?wmsDataBr(r.data):r.data)+'</td><td style="padding:6px 8px">'+ecomEsc(r._cli||'')+'</td><td style="padding:6px 8px">'+ecomEsc(r.status||'')+'</td><td style="padding:6px 8px;text-align:right">'+(r._n||0)+'</td></tr>'; }).join('');
+  return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><button class="btn btn-sm" onclick="wmsRelVoltar()">&larr; Voltar aos relat&oacute;rios</button><b style="font-size:17px">Objetos postados nos Correios</b></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:14px">'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Depositante</div><select class="fi" id="cor-dep" style="min-width:220px">'+cliOpts+'</select></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Romaneios de</div><input class="fi" type="date" id="cor-ini" value="'+_cor.ini+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">At&eacute;</div><input class="fi" type="date" id="cor-fim" value="'+_cor.fim+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Contrato Correios</div><input class="fi" id="cor-contrato" style="width:130px" value="'+ecomEsc(_cor.contrato||'')+'"></div>'
+      +'<div><div style="font-size:11px;color:var(--text3);margin-bottom:3px">Cart&atilde;o de postagem</div><input class="fi" id="cor-cartao" style="width:130px" value="'+ecomEsc(_cor.cartao||'')+'"></div>'
+      +'<button class="btn btn-sm" onclick="wmsCorBuscar()">Buscar romaneios</button>'
+      +'<button class="btn btn-p btn-sm" onclick="wmsCorPdf()">&#128424; Gerar lista (PDF)</button>'
+    +'</div>'
+    +(lin?'<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:var(--text3);font-size:11px;border-bottom:1px solid var(--border)"><th></th><th style="padding:6px 8px">Romaneio</th><th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Depositante</th><th style="padding:6px 8px">Situa&ccedil;&atilde;o</th><th style="padding:6px 8px;text-align:right">Objetos</th></tr>'+lin+'</table>'
+        :'<div id="cor-msg" style="padding:20px;text-align:center;color:var(--text3);font-size:13px">'+(_cor.buscou?'Nenhum romaneio dos Correios no per&iacute;odo.':'Carregando…')+'</div>')
+    +'<div style="font-size:11px;color:var(--text3);margin-top:10px">Uma folha por romaneio, cada objeto em duas linhas como na lista dos Correios. Peso em gramas, da nota fiscal. Dimens&otilde;es, adicionais e valor declarado ficam em branco: o VERUS n&atilde;o guarda esses dados.</div>'
+  +'</div>';
+}
+function wmsCorLer(){ ['ini','fim','dep','contrato','cartao'].forEach(function(k){ var el=ge('cor-'+k); if(el) _cor[k]=el.value; }); }
+async function wmsCorBuscar(){
+  wmsCorLer(); var cid=company&&company.id; if(!cid) return;
+  try{
+    var rs=(await dbSelect('wms_romaneios','company_id=eq.'+cid+'&transportadora=ilike.*correios*&data=gte.'+_cor.ini+'&data=lte.'+_cor.fim+'&order=numero.asc&select=id,numero,data,status,cliente_id,depositante_id'))||[];
+    var peds=rs.length?await wmsSelIn('wms_pedidos','romaneio_id',rs.map(function(r){return r.id;}),'select=id,romaneio_id,cliente_id'):[];
+    rs.forEach(function(r){ var ps=peds.filter(function(p){return p.romaneio_id===r.id;}); r._n=ps.length; var cl=ps.length?ps[0].cliente_id:(r.cliente_id||r.depositante_id); r._dep=cl; var c=(clientes||[]).find(function(x){return x.id===cl;}); r._cli=c?c.nome:''; });
+    if(_cor.dep) rs=rs.filter(function(r){return r._dep===_cor.dep;});
+    _cor.roms=rs; _cor.sel={}; rs.forEach(function(r){ if(r._n) _cor.sel[r.id]=true; }); _cor.buscou=true;
+    var dc=(clientes||[]).find(function(x){return x.id===(_cor.dep||(rs[0]&&rs[0]._dep));}), pr=(dc&&dc.parametros)||{}; if(typeof pr==='string'){ try{pr=JSON.parse(pr);}catch(_e){pr={};} }
+    if(!_cor.contrato&&pr.correios_contrato) _cor.contrato=String(pr.correios_contrato); if(!_cor.cartao&&pr.correios_cartao) _cor.cartao=String(pr.correios_cartao);
+  }catch(e){ showToast('Erro ao buscar: '+(e.message||e),'red'); }
+  var c=ge('content'); if(c&&wmsRelView==='correios') c.innerHTML=wmsCorView();
+}
+async function wmsCorPdf(){
+  wmsCorLer(); var ids=Object.keys(_cor.sel).filter(function(k){return _cor.sel[k];}); if(!ids.length){ showToast('Marque ao menos um romaneio','amber'); return; }
+  showToast('Montando a lista…','blue');
+  var e=ecomEsc, pags=[];
+  try{
+    for(const rid of ids){
+      var r=_cor.roms.find(function(x){return x.id===rid;}); if(!r) continue;
+      var ps=(await dbSelect('wms_pedidos','romaneio_id=eq.'+rid+'&select=id,numero_pedido,destinatario_nome,cep,cliente_id&order=numero_pedido.asc'))||[];
+      if(!ps.length) continue;
+      var docs=await wmsSelIn('wms_pedido_docs','pedido_id',ps.map(function(p){return p.id;}),'tipo=in.(nfe_xml,etiqueta)&select=pedido_id,tipo,numero,rastreio,conteudo');
+      var c=(clientes||[]).find(function(x){return x.id===ps[0].cliente_id;})||{}, rem=String(c.razao_social||c.nome||'').toUpperCase();
+      ps.sort(function(a,b){ return String(a.numero_pedido).localeCompare(String(b.numero_pedido),'pt-BR',{numeric:true}); });
+      var linhas=ps.map(function(p,i){
+        var nf=docs.find(function(d){return d.pedido_id===p.id&&d.tipo==='nfe_xml';})||{}, et=docs.find(function(d){return d.pedido_id===p.id&&d.tipo==='etiqueta'&&d.rastreio;})||{};
+        var mp=String(nf.conteudo||'').match(/<infCpl>[^<]*?\d+CX-(\d+,\d+)/), peso=mp?String(Math.round(parseFloat(mp[1].replace(',','.'))*1000)):'';
+        var sv=String(et.numero||'').toUpperCase(), svc=WMS_COR_SERVICO[sv]||sv;
+        return '<tbody class="'+(i%2===0?'z ':'')+'pg"><tr class="a"><td class="cod">'+e(et.rastreio||'—')+'</td><td></td><td>'+e(String(p.cep||'').replace(/\D/g,''))+'</td><td>'+peso+'</td><td></td><td></td><td></td><td>'+e(svc)+'</td></tr>'
+          +'<tr class="b"><td colspan="2">Remetente: '+e(rem)+'</td><td colspan="2">Destinat&aacute;rio: '+e(String(p.destinatario_nome||'').toUpperCase().slice(0,30))+'</td><td colspan="3">Observa&ccedil;&atilde;o: NOTA FISCAL '+e(nf.numero||'—')+' PEDIDO '+e(p.numero_pedido||'')+'</td><td>Emissor: '+e(rem)+'</td></tr></tbody>';
+      }).join('');
+      pags.push('<section class="sh"><div class="hd"><div class="tit">Lista de objetos<br>postados – Correios<small>'+e(r.numero)+' · coleta de '+e(wmsDataBr?wmsDataBr(r.data):r.data)+'</small></div>'
+        +'<div class="blk"><b>Contratante:</b><br>'+e(rem)+(_cor.contrato?'<br>Contrato: '+e(_cor.contrato):'')+(_cor.cartao?'<br>Cart&atilde;o de postagem: '+e(_cor.cartao):'')+'</div>'
+        +'<div class="blk"><b>Emissor da lista:</b><br>MK LOG LTDA (operador log&iacute;stico)<br>'+ps.length+' objeto(s)</div></div>'
+        +'<table><thead><tr><th>C&oacute;digo do objeto</th><th>NF-e / DC-e</th><th>CEP de destino</th><th>Peso</th><th>Dimens&otilde;es A x L x C x D</th><th>Adicionais</th><th>Valor<br>Declarado</th><th>Servi&ccedil;o</th></tr></thead>'+linhas+'</table>'
+        +'<div class="foot">Gerado pelo VERUS em '+new Date().toLocaleString('pt-BR')+' a partir dos pedidos do '+e(r.numero)+'. Peso em gramas, conforme a nota fiscal.</div></section>');
+    }
+  }catch(err){ showToast('Erro ao montar: '+(err.message||err),'red'); return; }
+  if(!pags.length){ showToast('Os romaneios marcados não têm pedidos','amber'); return; }
+  var css='@page{size:A4 landscape;margin:8mm 7mm}body{font-family:Arial,Helvetica,sans-serif;color:#222;margin:0;font-size:9.6px}.sh{page-break-after:always}.sh:last-child{page-break-after:auto}'
+    +'.hd{display:flex;align-items:flex-start;gap:28px;padding:4px 6px 10px}.tit{width:190px;font-size:15px;font-weight:700;color:#00416b;line-height:1.15}.tit small{display:block;font-size:9px;font-weight:400;color:#555;margin-top:3px}'
+    +'.blk{font-family:Consolas,"DejaVu Sans Mono",monospace;font-size:10.5px;line-height:1.3;color:#333}.blk b{font-family:Arial;font-weight:400;color:#555;font-size:9.5px}'
+    +'table{width:100%;border-collapse:collapse}th{font-size:9.5px;text-align:left;font-weight:700;color:#333;border-bottom:2px solid #222;padding:4px}'
+    +'td{font-family:Consolas,"DejaVu Sans Mono",monospace;font-size:9.2px;padding:2px 4px;vertical-align:top;white-space:nowrap}tr.a td{padding-top:5px}tr.b td{padding-bottom:5px;border-bottom:1px solid #d5d5d5}'
+    +'tbody.z tr td{background:#ececec;-webkit-print-color-adjust:exact;print-color-adjust:exact}.cod{font-weight:700}.pg{page-break-inside:avoid}.foot{margin-top:8px;font-size:9px;color:#555}';
+  var w=window.open('','_blank'); if(!w){ showToast('Libere pop-ups para gerar o PDF','amber'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Objetos postados Correios</title><style>'+css+'</style></head><body>'+pags.join('')+'<script>setTimeout(function(){window.print();},400)<\/script></body></html>');
+  w.document.close();
+}
 function wmsRelVoltar(){ wmsRelView='hub'; var c=ge('content'); if(c) c.innerHTML=rWmsRelatorios(); }
 
 function rWmsRelatorios(){
@@ -48202,10 +48292,16 @@ function rWmsRelatorios(){
   if(wmsRelView==='saidas') return wmsSaiView();   // v1.0.1327
   if(wmsRelView==='fat-prev') return wmsFatPrevView();   // v1.0.1321
   if(wmsRelView==='track-rg') return wmsTrkView();   // v1.0.1395
+  if(wmsRelView==='correios') return wmsCorView();   // v1.0.1434
   return '<div style="max-width:1100px;margin:0 auto;padding:4px">'
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><b style="font-size:19px">Central de Relat&oacute;rios</b></div>'
     +'<div style="font-size:13px;color:var(--text3);margin-bottom:16px">Escolha um relat&oacute;rio para abrir.</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'
+      +'<div onclick="wmsRelAbrir(\'correios\');setTimeout(wmsCorBuscar,30)" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+        +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px;font-size:18px">📮</div>'
+        +'<div style="font-weight:700;font-size:15px">Objetos postados nos Correios</div>'
+        +'<div style="font-size:12px;color:var(--text3);margin-top:3px;line-height:1.4">Lista por romaneio no formato da lista dos Correios (código do objeto, CEP, peso, serviço, NF e pedido), em PDF, para o cliente comprovar a coleta aos compradores.</div>'
+        +'<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--accent)">Abrir &rarr;</div></div>'
       +'<div onclick="wmsRelAbrir(\'track-rg\');setTimeout(wmsTrkGerar,30)" style="border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;background:var(--bg)" onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
         +'<div style="width:38px;height:38px;border-radius:10px;background:var(--bg2);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg></div>'
         +'<div style="font-weight:700;font-size:15px">Tracking de recebimento RG</div>'
