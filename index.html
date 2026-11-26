@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1428 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1428 | Gerado: 2026-11-24 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -37192,7 +37192,7 @@ function wmsSelBarHtml(sc){
   return '<div id="wms-'+sc+'-selbar" style="display:none;align-items:center;justify-content:space-between;gap:10px;background:var(--blue-bg);border:1px solid var(--blue-text);border-radius:8px;padding:9px 14px;margin-bottom:10px;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
     +'<span id="wms-'+sc+'-seltxt" style="font-size:12px;font-weight:700;color:var(--blue-text)"></span>'
     +'<div style="display:flex;gap:8px">'
-    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: consolidada por produto + lote e por pedido (depositante com saldo no VERUS)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
+    +(sc==='sep'?'<button class="btn btn-p btn-sm" onclick="wmsListasPdfSelecionadas()">&#128424; Folhas de separação</button><button class="btn btn-sm" onclick="wmsOndaImprimir([..._wmsSel.sep])" title="Folhas no modelo da PE: capa + consolidada por produto e lote + por pedido (depositante sem bipe de produto: uma folha por pedido, com código de barras)">&#128424; Onda (consolidada)</button><button class="btn btn-sm" onclick="wmsEtiqSepZebraSelecionadas()">&#127991; Etiquetas Zebra</button><button class="btn btn-sm" onclick="wmsEtiqColunaListas([..._wmsSel.sep])" title="Etiquetas de coluna (A4 sulfite) dos endereços das listas marcadas">&#127991; Etiquetas de endereço</button><button class="btn btn-sm" onclick="wmsCapaPedidosPrint((wmsListaPedidos||[]).filter(v=>_wmsSel.sep.has(v.lista_id)).map(v=>v.pedido_id))">&#128424; Capas</button>'
       +(wmsSepPodeConcluir()?'<button class="btn btn-sm" style="color:var(--green-text)" onclick="wmsListasConcluirLote()">&#10003; Concluir selecionadas</button>':'')
       +(wmsSepPodeExcluir()?'<button class="btn btn-sm" style="color:var(--red-text)" onclick="wmsListasExcluirLote()">&#128465; Excluir selecionadas</button>':''):'')
     +'<button class="btn btn-sm" onclick="wmsSelClear(&apos;'+sc+'&apos;)">Limpar seleção</button></div></div>';
@@ -38004,7 +38004,11 @@ async function wmsOndaImprimir(listaIds){
   }
   var cli=(clientes||[]).find(function(c){return c.id===cls[0];})||{};
   var single=[], multi=[];
-  peds.forEach(function(p){ (linhasDe[p.id].length===1?single:multi).push(p); });
+  // v1.0.1428: depositante sem bipe de produto (checkout_sem_bipe_produto) → TODOS os pedidos saem na folha por pedido,
+  //   com o código de barras do número do pedido (é o que a bancada bipa). Sem folhas consolidadas enquanto o modo valer.
+  var _cliPar=(function(){ var pr=cli.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr||{}; })();
+  var _porPedido=_cliPar.checkout_sem_bipe_produto===true;
+  peds.forEach(function(p){ ((!_porPedido&&linhasDe[p.id].length===1)?single:multi).push(p); });
   // consolidadas: produto + lote
   var agg={};
   single.forEach(function(p){ var l=linhasDe[p.id][0], k=l.end;
@@ -38019,6 +38023,7 @@ async function wmsOndaImprimir(listaIds){
   var capa='<div class="sheet"><div class="sheet-title">Onda de Separação &mdash; Capa</div>'
     +'<div class="sheet-hd"><div class="sheet-hd-info"><div><b style="font-size:16px">'+esc(cli.nome||'')+'</b></div><div>'+listaIds.length+' lista(s) · '+new Date().toLocaleString('pt-BR')+'</div></div>'+ecomFolhaBarcode(onda)+'</div>'
     +'<div class="capa-totais"><div class="capa-tot"><div class="capa-tot-lbl">Pedidos</div><div class="capa-tot-num">'+peds.length+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Unidades</div><div class="capa-tot-num">'+totUn+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Folhas consolidadas</div><div class="capa-tot-num">'+chaves.length+'</div></div><div class="capa-tot"><div class="capa-tot-lbl">Folhas por pedido</div><div class="capa-tot-num">'+multi.length+'</div></div></div>'
+    +(_porPedido?'<div style="font-size:12px;margin:6px 0 10px;padding:6px 10px;border:1px solid #f59e0b;background:#fef3c7;border-radius:6px"><b>Uma folha por pedido</b>, com o c&oacute;digo de barras do pedido: coloque a folha na caixa e, na bancada, bipe o c&oacute;digo da folha para imprimir a etiqueta.</div>':'')
     +'<table><thead><tr><th>Transportadora</th><th style="text-align:center">Pedidos</th><th style="text-align:center">Unidades</th></tr></thead><tbody>'
     +Object.keys(porT).sort().map(function(t){ return '<tr><td>'+esc(t)+'</td><td style="text-align:center">'+porT[t].p+'</td><td style="text-align:center">'+porT[t].u+'</td></tr>'; }).join('')+'</tbody></table>'
     +'<div style="font-size:11px;color:#555;margin:12px 0 2px">Retirar do chão (total da onda por produto e lote):</div>'
@@ -38049,7 +38054,7 @@ async function wmsOndaImprimir(listaIds){
       +ls.map(function(l){ return '<tr><td style="font-family:monospace;font-weight:700">'+esc(l.end)+'</td><td>'+esc(l.sku)+'</td><td>'+esc(l.descricao||'')+'</td><td><b>'+esc(l.lote||'—')+'</b></td><td style="text-align:center;width:44px">'+l.qtd+'</td><td style="width:36px"></td></tr>'; }).join('')
       +'</tbody></table><div class="tot-vol"><span class="tot-vol-lbl">Total de volumes:</span><span class="tot-vol-num">'+tv+'</span></div></div>'); });
   ecomPrintDoc('Onda '+onda+' · '+(cli.nome||''), sheets, false, false);
-  showToast('Onda '+onda+' · '+peds.length+' pedidos · '+chaves.length+' folha(s) consolidada(s) e '+multi.length+' por pedido','green');
+  showToast('Onda '+onda+' · '+peds.length+' pedidos · '+(_porPedido?(multi.length+' folha(s) por pedido, com código de barras'):(chaves.length+' folha(s) consolidada(s) e '+multi.length+' por pedido')),'green');
 }
 // ─── ETIQUETA DE CHÃO (10×10): código do produto + lote, sem descrição e sem validade (para não haver interpretação).
 //   Os dígitos que realmente diferenciam os produtos do depositante saem grandes; o começo comum (ex.: 903) sai pequeno.
@@ -40223,9 +40228,7 @@ async function colRgTrocar(listaId,raw){
   if(pal[0]) _colRg.pal[pal[0].id]=pal[0]; achou.forEach(function(c){_colRg.cont[c.id]=c;});
   var antigo=null;
   colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;}).forEach(function(t){ antigo=antigo||t.pallet_id; t.pallet_id=cont.pallet_id; if(pal[0]) t.endereco_origem=pal[0].endereco_codigo||t.endereco_origem; });
-  // v1.0.1428: caixa nova com MAIS peças que a tarefa → a retirada deixa de ser caixa inteira (o checkout pedia o RG da caixa toda; CH-0082)
-  colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;}).forEach(function(t){ if((t.tipo_volume==='pallet'||t.tipo_volume==='caixa')&&(+cont.qtd_fiscal||0)>(+t.quantidade||0)) t.tipo_volume='fracao'; });
-  for(const t of colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;})) await dbUpdate('wms_tarefas_separacao',t.id,{pallet_id:t.pallet_id,endereco_origem:t.endereco_origem,tipo_volume:t.tipo_volume});
+  for(const t of colRgTarefas(listaId).filter(function(t){return t.reserva_id===res;})) await dbUpdate('wms_tarefas_separacao',t.id,{pallet_id:t.pallet_id,endereco_origem:t.endereco_origem});
   return {ok:true,pallet_id:cont.pallet_id,de:antigo?colRgNome(antigo):'—'};
 }
 async function coletorSepRgBipe(listaId,code){
@@ -60421,21 +60424,18 @@ function meuChamadoDetalhe(id){
   var html='<div class="modal-overlay" id="hd-meu-det"><div class="modal" style="max-width:560px;width:96%;max-height:90vh;overflow:auto">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div><span style="font-family:monospace;font-size:13px;color:#666">'+helpdeskEsc(c.numero||'')+'</span> '+helpdeskStatusBadge(c.status)+'</div><button onclick="helpdeskMeuDetFechar()" style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;padding:0">×</button></div>'+
     '<div style="font-size:16px;font-weight:700;margin-bottom:8px">'+helpdeskEsc(c.titulo||'')+'</div>'+
-    ((c.respostas||[]).some(function(r){return r.tipo==='suporte';})?'<div style="background:#e8f5ee;border:1px solid #86c9a4;border-radius:8px;padding:8px 12px;font-size:12px;color:#14532d;margin-bottom:10px">💬 O suporte respondeu. A resposta está em <b>Conversa</b>, abaixo.</div>':'')+
-    '<details style="margin-bottom:12px"><summary style="font-size:12px;color:#666;cursor:pointer">Descrição do chamado</summary><div style="background:#f7f8fa;border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;margin-top:6px;max-height:220px;overflow:auto">'+helpdeskEsc(c.descricao||'')+'</div></details>'+
+    '<div style="background:#f7f8fa;border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;margin-bottom:12px">'+helpdeskEsc(c.descricao||'')+'</div>'+
     (anexos?('<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+anexos+'</div>'):'')+
     valida+
-    '<div style="font-size:12px;color:#666;margin-bottom:6px">Conversa</div><div id="hd-meu-conversa" style="max-height:50vh;overflow:auto;margin-bottom:10px">'+respostas+'</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:6px">Conversa</div><div style="max-height:200px;overflow:auto;margin-bottom:10px">'+respostas+'</div>'+
     '<div style="display:flex;gap:8px"><input class="fi" id="hd-meu-resp" placeholder="Escreva uma mensagem…" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();helpdeskMeuAddResposta(\''+id+'\');}"><button onclick="helpdeskMeuAddResposta(\''+id+'\')" style="padding:9px 14px;border:none;background:#1e5f82;color:#fff;border-radius:8px;font-size:13px;cursor:pointer">Enviar</button></div>'+
   '</div></div>';
   document.body.insertAdjacentHTML('beforeend',html);
-  var _cv=document.getElementById('hd-meu-conversa'); if(_cv) _cv.scrollTop=_cv.scrollHeight;   // v1.0.1428: abre na resposta mais recente
 }
 function helpdeskMeuDetFechar(){var m=document.getElementById('hd-meu-det');if(m)m.remove();}
 async function helpdeskMeuAddResposta(id){
   var inp=document.getElementById('hd-meu-resp'); var txt=inp?inp.value.trim():''; if(!txt)return;
   var c=helpdeskMeuById(id); if(!c)return;
-  try{ var _f=((await dbSelect('helpdesk_chamados','id=eq.'+id+'&select=respostas'))||[])[0]; if(_f) c.respostas=_f.respostas||[]; }catch(_e){}   // v1.0.1428: relê antes de gravar (não apaga resposta do suporte que chegou com a tela aberta)
   var resp=(c.respostas||[]).slice();
   resp.push({autor_id:((typeof cu!=='undefined'&&cu)?cu.id:null),autor_nome:((typeof profile!=='undefined'&&profile&&profile.full_name)||'Solicitante'),tipo:'solicitante',texto:txt,em:new Date().toISOString()});
   try{ await dbUpdate('helpdesk_chamados',id,{respostas:resp,updated_at:new Date().toISOString()}); c.respostas=resp; if(inp)inp.value=''; meuChamadoDetalhe(id); }
