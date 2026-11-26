@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1432 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1433 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1432';
+const APP_VERSION='v1.0.1433';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46214,6 +46214,61 @@ function wmsPedItensSeparados(pedidoId){
   return (wmsTarefasSeparacao||[]).filter(t=>t.pedido_id===pedidoId&&t.status==='concluida'&&Number(t.qtd_separada||t.quantidade||0)>0)
     .map(t=>{ const pl=(wmsPallets||[]).find(x=>x.id===t.pallet_id); return {t, qtd:Number(t.qtd_separada||t.quantidade||0), rg:pl?String(pl.rg||''):'', end:t.endereco_origem||(pl&&pl.endereco_codigo)||''}; });
 }
+// ═══ v1.0.1433 · CORTE DE QUANTIDADE em pedido já separado (sem NF): reduz o item, solta o empenho da diferença,
+//     ajusta as tarefas e gera CONTRA-ORDEM da sobra — sem refazer separação nem conferência (RPC wms_pedido_cortar_item)
+function wmsPedPodeCortarPerfil(){ return podeFazer('wms-pedidos','pode_editar',['admin','gestor','supervisor_operacoes']); }
+function wmsPedBloqueioCorte(p){
+  if(!p) return 'pedido não encontrado';
+  if(!['em_separacao','separado'].includes(String(p.status||''))) return 'só em pedido separado';
+  if(p.origem==='sap_b1') return 'pedido do SAP: o corte é feito no SAP';
+  if(((typeof _wmsNfPed!=='undefined'&&_wmsNfPed[p.id])||[]).length) return 'já tem NF ligada';
+  if((wmsTarefasSeparacao||[]).some(t=>t.pedido_id===p.id&&!['concluida','cancelada'].includes(String(t.status||'')))) return 'separação ainda em aberto';
+  return '';
+}
+function wmsPedBtnCortar(p){
+  if(!p||!wmsPedPodeCortarPerfil()||!['em_separacao','separado'].includes(String(p.status||''))) return '';
+  const b=wmsPedBloqueioCorte(p);
+  return b?`<button class="btn btn-sm" disabled title="${ecomEsc('Não pode cortar: '+b)}">✂ Cortar quantidade</button>`
+          :`<button class="btn btn-sm" onclick="wmsPedCortarModal('${p.id}')" title="O cliente cortou ou reduziu um item: ajusta o pedido sem refazer separação nem conferência">✂ Cortar quantidade</button>`;
+}
+function wmsPedCortarModal(id){
+  const p=wmsPedidos.find(x=>x.id===id); if(!p) return;
+  const b=wmsPedBloqueioCorte(p); if(b){ showToast('Não pode cortar: '+b,'amber'); return; }
+  const its=(wmsPedidoItens||[]).filter(i=>i.pedido_id===id&&String(i.status||'')!=='cancelado');
+  const linhas=its.map(i=>`<tr><td style="font-family:monospace;font-weight:700">${ecomEsc(i.sku||'')}</td><td style="font-size:12px">${ecomEsc(String(i.descricao||'').slice(0,40))}</td><td style="text-align:right">${Number(i.quantidade||0).toLocaleString('pt-BR')}</td>`
+    +`<td style="width:110px"><input class="fi" type="number" min="0" max="${Number(i.quantidade||0)}" step="any" data-corte-item="${i.id}" data-corte-atual="${Number(i.quantidade||0)}" value="${Number(i.quantidade||0)}" style="text-align:right"></td></tr>`).join('');
+  portModal('✂ Cortar quantidade · '+ecomEsc(p.numero_pedido||'')+(p.numero_curto?' · OS '+ecomEsc(p.numero_curto):''),
+    `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Informe a <b>nova quantidade</b> do item cortado (0 tira o item). A diferença sai do empenho e vira <b>CONTRA-ORDEM</b> para devolver ao endereço (WMS → Separação). O resto do pedido segue como está, sem nova separação nem conferência.</div>`
+    +`<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th>SKU</th><th>Descrição</th><th style="text-align:right">Atual</th><th style="text-align:right">Nova</th></tr>${linhas}</table>`
+    +`<label class="fl" style="margin-top:12px">Motivo *</label><input class="fi" id="wms-corte-motivo" placeholder="ex.: cliente cortou 200 pç da OC 13827 por e-mail">`,
+    `wmsPedCortarSalvar('${p.id}')`,{width:'640px',saveLabel:'Cortar e gerar contra-ordem'});
+}
+async function wmsPedCortarSalvar(id){
+  const p=wmsPedidos.find(x=>x.id===id); if(!p) return;
+  const motivo=String((ge('wms-corte-motivo')||{}).value||'').trim();
+  if(!motivo){ portErr('Informe o motivo.'); return; }
+  const mud=[...document.querySelectorAll('[data-corte-item]')].map(el=>({id:el.getAttribute('data-corte-item'),atual:+el.getAttribute('data-corte-atual'),nova:el.value===''?NaN:+el.value}))
+    .filter(x=>!isNaN(x.nova)&&x.nova!==x.atual);
+  if(!mud.length){ portErr('Nenhuma quantidade mudou.'); return; }
+  const inval=mud.find(x=>x.nova<0||x.nova>x.atual); if(inval){ portErr('A nova quantidade precisa ficar entre 0 e a atual ('+inval.atual.toLocaleString('pt-BR')+'). Para aumentar, gere outro pedido.'); return; }
+  const quem=(profile&&profile.full_name)||(cu&&cu.email)||'';
+  portSaving();
+  const feitos=[], erros=[];
+  for(const m of mud){
+    try{ feitos.push(await wmsRpc('wms_pedido_cortar_item',{p_item_id:m.id,p_nova_qtd:m.nova,p_motivo:motivo,p_operador:quem})); }
+    catch(e){ const it=(wmsPedidoItens||[]).find(i=>i.id===m.id); erros.push((it?it.sku+': ':'')+String(e.message||e)); }
+  }
+  try{
+    const its=await dbSelect('wms_pedido_itens','pedido_id=eq.'+id)||[]; wmsPedidoItens=(wmsPedidoItens||[]).filter(i=>i.pedido_id!==id).concat(its);
+    const ts=await dbSelect('wms_tarefas_separacao','pedido_id=eq.'+id)||[]; wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(t=>t.pedido_id!==id).concat(ts.filter(t=>t.status!=='cancelada'));
+    wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${company?.id}&status=eq.pendente&order=created_at.asc`);
+  }catch(_r){}
+  if(erros.length&&!feitos.length){ portErr(erros.join(' · ')); return; }
+  portClose();
+  const co=feitos.reduce((a,f)=>a+(+f.contra_ordens||0),0);
+  showToast(feitos.map(f=>f.sku+' '+Number(f.de).toLocaleString('pt-BR')+'→'+Number(f.para).toLocaleString('pt-BR')).join(' · ')+(co?' · contra-ordem em WMS → Separação':'')+(erros.length?' · não cortou: '+erros.join(' · '):''),erros.length?'amber':'green');
+  render();
+}
 function wmsPedBtnExcluir(p){
   if(!p||p.status==='excluido'||!wmsPedPodeExcluirPerfil()) return '';
   const b=wmsPedBloqueioExclusao(p);
@@ -46354,6 +46409,7 @@ function wmsPedidoDetalhe(id){
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn btn-sm" onclick="wmsTrackModal('${p.id}')">🔍 Rastreabilidade</button>
         ${wmsPedBtnExcluir(p)}
+        ${wmsPedBtnCortar(p)}
         ${(p.origem==='sap_b1'&&['cancelado','cancelada','excluido'].includes(p.status))?`<button class="btn btn-sm" onclick="wmsSapReimportar('${p.id}')" title="Traz o pedido de volta do SAP como pedido novo (a lista do SAP é fechada e os lotes desalocados antes)">↻ Reimportar do SAP</button>`:''}
         <button class="btn btn-sm" onclick="wmsCapaPedidosPrint(['${p.id}'])" title="Imprime só a capa (resumo + código de barras) para o checkout">🖨 Capa</button>
         ${p.origem==='sap_b1'?danfeBotoes([p.id]):''}
