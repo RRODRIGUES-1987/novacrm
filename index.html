@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1431 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1432 | Gerado: 2026-11-26 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1431';
+const APP_VERSION='v1.0.1432';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -37942,8 +37942,20 @@ function wmsVolumesDaLista(listaId){
 }
 
 // ── Folha de separação impressa (A4). Nas listas por frente: uma folha por frente. ──
+// v1.0.1432: depositante sem bipe de produto (Biobalance) → a folha de separação É a capa do pedido (endereço e lote). Toda impressão de lista desse depositante sai como capa.
+function wmsCliSemBipe(cid){ var c=(clientes||[]).find(function(x){return x.id===cid;}); var pr=(c&&c.parametros)||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr.checkout_sem_bipe_produto===true; }
+async function wmsListasCapaSemBipe(ids){
+  var ls=(ids||[]).map(function(id){return (wmsListasSeparacao||[]).find(function(l){return l.id===id;});}).filter(Boolean);
+  var cap=ls.filter(function(l){return wmsCliSemBipe(l.cliente_id);}).sort(function(a,b){return String(a.numero_lista||'').localeCompare(String(b.numero_lista||''),'pt-BR',{numeric:true});});
+  if(!cap.length) return ids||[];
+  var capIds=cap.map(function(l){return l.id;}), peds=[];
+  capIds.forEach(function(lid){ (wmsListaPedidos||[]).filter(function(v){return v.lista_id===lid;}).forEach(function(v){ if(peds.indexOf(v.pedido_id)<0) peds.push(v.pedido_id); }); });
+  if(peds.length) await wmsCapaPedidosPrint(peds); else showToast('Lista sem pedido vinculado','amber');
+  return (ids||[]).filter(function(id){return capIds.indexOf(id)<0;});
+}
 async function wmsListaPdf(listaId){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
+  if(!(await wmsListasCapaSemBipe([listaId])).length) return;   // v1.0.1432
   await wmsRgPreload([listaId]);   // v1.0.1252: RG de cada caixa na folha
   const content=wmsListaPdfContent(listaId,false);
   if(!content){alert('Lista sem tarefas.');return;}
@@ -38011,6 +38023,7 @@ async function wmsOndaImprimir(listaIds){
   var _cliPar=(function(){ var pr=cli.parametros||{}; if(typeof pr==='string'){ try{ pr=JSON.parse(pr); }catch(_e){ pr={}; } } return pr||{}; })();
   var _porPedido=_cliPar.checkout_sem_bipe_produto===true;
   peds.forEach(function(p){ ((!_porPedido&&linhasDe[p.id].length===1)?single:multi).push(p); });
+  if(_porPedido){ multi.sort(wmsOndaTranspOrd); await wmsCapaPedidosPrint(multi.map(function(p){return p.id;})); showToast('Onda '+onda+' · '+multi.length+' capa(s) com a lista de separação','green'); return; }   // v1.0.1432: uma folha só por pedido
   // consolidadas: produto + lote
   var agg={};
   single.forEach(function(p){ var l=linhasDe[p.id][0], k=l.end;
@@ -38988,6 +39001,7 @@ function wmsEtiqColunaFiltro(){
 async function wmsListasPdfIds(ids){
   if(typeof pdfMake==='undefined'){alert('Biblioteca de PDF ainda carregando, tente novamente.');return;}
   ids=ids||[];
+  ids=await wmsListasCapaSemBipe(ids); if(!ids.length) return;   // v1.0.1432: Biobalance sai como capa
   await wmsRgPreload(ids);   // v1.0.1252
   const ls=ids.map(id=>wmsListasSeparacao.find(l=>l.id===id)).filter(Boolean).sort((a,b)=>String(a.numero_lista||'').localeCompare(String(b.numero_lista||'')));
   if(!ls.length){showToast('Nenhuma lista marcada','amber');return;}
