@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1439 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1440 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1439';
+const APP_VERSION='v1.0.1440';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -46479,26 +46479,37 @@ function wmsPedBloqueioCorte(p){
   if(!p) return 'pedido não encontrado';
   if(!['em_separacao','separado'].includes(String(p.status||''))) return 'só em pedido separado';
   if(p.origem==='sap_b1') return 'pedido do SAP: o corte é feito no SAP';
-  if(((typeof _wmsNfPed!=='undefined'&&_wmsNfPed[p.id])||[]).length) return 'já tem NF ligada';
+  // v1.0.1440: NF ligada não bloqueia mais — faturado a menor corta até a quantidade da nota (o banco confere)
   if((wmsTarefasSeparacao||[]).some(t=>t.pedido_id===p.id&&!['concluida','cancelada'].includes(String(t.status||'')))) return 'separação ainda em aberto';
   return '';
 }
 function wmsPedBtnCortar(p){
-  if(!p||!wmsPedPodeCortarPerfil()||!['em_separacao','separado'].includes(String(p.status||''))) return '';
-  const b=wmsPedBloqueioCorte(p);
+  // v1.0.1440: o botão aparece sempre; quando não pode, fica cinza com o motivo
+  if(!p||p.status==='excluido') return '';
+  const b=!wmsPedPodeCortarPerfil()?'seu perfil não tem edição em WMS · Pedidos':wmsPedBloqueioCorte(p);
   return b?`<button class="btn btn-sm" disabled title="${ecomEsc('Não pode cortar: '+b)}">✂ Cortar quantidade</button>`
           :`<button class="btn btn-sm" onclick="wmsPedCortarModal('${p.id}')" title="O cliente cortou ou reduziu um item: ajusta o pedido sem refazer separação nem conferência">✂ Cortar quantidade</button>`;
 }
-function wmsPedCortarModal(id){
+async function wmsPedCortarModal(id){
   const p=wmsPedidos.find(x=>x.id===id); if(!p) return;
+  if(!wmsPedPodeCortarPerfil()){ showToast('Não pode cortar: seu perfil não tem edição em WMS · Pedidos','amber'); return; }
   const b=wmsPedBloqueioCorte(p); if(b){ showToast('Não pode cortar: '+b,'amber'); return; }
   const its=(wmsPedidoItens||[]).filter(i=>i.pedido_id===id&&String(i.status||'')!=='cancelado');
-  const linhas=its.map(i=>`<tr><td style="font-family:monospace;font-weight:700">${ecomEsc(i.sku||'')}</td><td style="font-size:12px">${ecomEsc(String(i.descricao||'').slice(0,40))}</td><td style="text-align:right">${Number(i.quantidade||0).toLocaleString('pt-BR')}</td>`
-    +`<td style="width:110px"><input class="fi" type="number" min="0" max="${Number(i.quantidade||0)}" step="any" data-corte-item="${i.id}" data-corte-atual="${Number(i.quantidade||0)}" value="${Number(i.quantidade||0)}" style="text-align:right"></td></tr>`).join('');
+  // v1.0.1440: pedido já faturado — mostra a quantidade da nota e já sugere o corte até ela (faturado a menor)
+  let nfs=[]; try{ nfs=await dbSelect('wms_pedido_nfs','pedido_id=eq.'+id+'&select=numero,status,itens,divergencias')||[]; }catch(_e){ nfs=[]; }
+  const nfQ={}; nfs.forEach(n=>(Array.isArray(n.itens)?n.itens:[]).forEach(e=>{ const k=String(e.sku||'').trim().toUpperCase(); nfQ[k]=(nfQ[k]||0)+(+e.qtd||0); }));
+  const pedQ={}; its.forEach(i=>{ const k=String(i.sku||'').trim().toUpperCase(); pedQ[k]=(pedQ[k]||0)+(+i.quantidade||0); });
+  const temNf=nfs.length>0, n=v=>Number(v||0).toLocaleString('pt-BR');
+  const linhas=its.map(i=>{ const k=String(i.sku||'').trim().toUpperCase(), q=Number(i.quantidade||0), nq=temNf?(nfQ[k]||0):null;
+      const sug=(temNf&&nq<pedQ[k]&&pedQ[k]===q)?nq:q, aMenor=temNf&&nq<pedQ[k];
+      return `<tr${aMenor?' style="background:var(--amber-bg)"':''}><td style="font-family:monospace;font-weight:700">${ecomEsc(i.sku||'')}</td><td style="font-size:12px">${ecomEsc(String(i.descricao||'').slice(0,40))}</td><td style="text-align:right">${n(q)}</td>`
+        +(temNf?`<td style="text-align:right;${aMenor?'font-weight:700;color:var(--amber-text)':'color:var(--text3)'}">${n(nq)}</td>`:'')
+        +`<td style="width:110px"><input class="fi" type="number" min="${temNf?Math.max(0,q-(pedQ[k]-nq)):0}" max="${q}" step="any" data-corte-item="${i.id}" data-corte-atual="${q}" value="${sug}" style="text-align:right"></td></tr>`; }).join('');
+  const avisoNf=temNf?`<div style="font-size:12px;padding:8px 10px;border-radius:8px;background:var(--amber-bg);color:var(--amber-text);margin-bottom:10px">Pedido já faturado (NF ${ecomEsc(nfs.map(x=>x.numero).join(', '))}). O corte só vai <b>até a quantidade da nota</b>, nunca abaixo. As linhas em destaque foram faturadas a menor e já vêm com a quantidade da nota; quando o pedido bater com a nota, a NF deixa de ficar divergente.</div>`:'';
   portModal('✂ Cortar quantidade · '+ecomEsc(p.numero_pedido||'')+(p.numero_curto?' · OS '+ecomEsc(p.numero_curto):''),
-    `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Informe a <b>nova quantidade</b> do item cortado (0 tira o item). A diferença sai do empenho e vira <b>CONTRA-ORDEM</b> para devolver ao endereço (WMS → Separação). O resto do pedido segue como está, sem nova separação nem conferência.</div>`
-    +`<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th>SKU</th><th>Descrição</th><th style="text-align:right">Atual</th><th style="text-align:right">Nova</th></tr>${linhas}</table>`
-    +`<label class="fl" style="margin-top:12px">Motivo *</label><input class="fi" id="wms-corte-motivo" placeholder="ex.: cliente cortou 200 pç da OC 13827 por e-mail">`,
+    avisoNf+`<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Informe a <b>nova quantidade</b> do item cortado (0 tira o item). A diferença sai do empenho e vira <b>CONTRA-ORDEM</b> para devolver ao endereço (WMS → Separação). O resto do pedido segue como está, sem nova separação nem conferência.</div>`
+    +`<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:var(--text3);font-size:11px"><th>SKU</th><th>Descrição</th><th style="text-align:right">Atual</th>${temNf?'<th style="text-align:right">Na nota</th>':''}<th style="text-align:right">Nova</th></tr>${linhas}</table>`
+    +`<label class="fl" style="margin-top:12px">Motivo *</label><input class="fi" id="wms-corte-motivo" placeholder="${temNf?'ex.: cliente faturou 395 na NF '+ecomEsc(nfs[0].numero||'')+' (pedido tinha 400)':'ex.: cliente cortou 200 pç da OC 13827 por e-mail'}">`,
     `wmsPedCortarSalvar('${p.id}')`,{width:'640px',saveLabel:'Cortar e gerar contra-ordem'});
 }
 async function wmsPedCortarSalvar(id){
@@ -46520,11 +46531,13 @@ async function wmsPedCortarSalvar(id){
     const its=await dbSelect('wms_pedido_itens','pedido_id=eq.'+id)||[]; wmsPedidoItens=(wmsPedidoItens||[]).filter(i=>i.pedido_id!==id).concat(its);
     const ts=await dbSelect('wms_tarefas_separacao','pedido_id=eq.'+id)||[]; wmsTarefasSeparacao=(wmsTarefasSeparacao||[]).filter(t=>t.pedido_id!==id).concat(ts.filter(t=>t.status!=='cancelada'));
     wmsContraOrdens=await dbSelectAll('wms_contra_ordens',`company_id=eq.${company?.id}&status=eq.pendente&order=created_at.asc`);
+    // v1.0.1440: corte pode ter acertado a NF (divergente → ligada)
+    if(typeof _wmsNfPed!=='undefined'){ const nf=await dbSelect('wms_pedido_nfs','pedido_id=eq.'+id+'&select=id,pedido_id,numero,dest_nome,status,divergencias')||[]; if(nf.length) _wmsNfPed[id]=nf; }
   }catch(_r){}
   if(erros.length&&!feitos.length){ portErr(erros.join(' · ')); return; }
   portClose();
   const co=feitos.reduce((a,f)=>a+(+f.contra_ordens||0),0);
-  showToast(feitos.map(f=>f.sku+' '+Number(f.de).toLocaleString('pt-BR')+'→'+Number(f.para).toLocaleString('pt-BR')).join(' · ')+(co?' · contra-ordem em WMS → Separação':'')+(erros.length?' · não cortou: '+erros.join(' · '):''),erros.length?'amber':'green');
+  showToast(feitos.map(f=>f.sku+' '+Number(f.de).toLocaleString('pt-BR')+'→'+Number(f.para).toLocaleString('pt-BR')).join(' · ')+(co?' · contra-ordem em WMS → Separação':'')+(feitos.some(f=>+f.nf_ligada>0)?' · pedido bate com a nota: NF deixou de ser divergente':'')+(erros.length?' · não cortou: '+erros.join(' · '):''),erros.length?'amber':'green');
   render();
 }
 function wmsPedBtnExcluir(p){
