@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1438 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1439 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1438';
+const APP_VERSION='v1.0.1439';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -38600,11 +38600,20 @@ async function wmsCxPedidosDaLista(code){
       if(L&&L[0]){ var lp=await dbSelect('wms_lista_pedidos','lista_id=eq.'+L[0].id+'&select=pedido_id'); return (lp||[]).map(function(x){return x.pedido_id;}); } }
   }catch(_e){} return [];
 }
+// v1.0.1439: pedido cancelado no SAP (excluído pela integração) — a bancada não embala e diz o que fazer
+async function wmsCxCancelado(filtro){
+  try{ var r=await dbSelect('wms_pedidos','company_id=eq.'+company.id+'&'+filtro+'&excluido_em=not.is.null&select=id,numero_pedido,motivo_exclusao,excluido_por_nome,excluido_em&order=excluido_em.desc&limit=1'); return (r&&r[0])||null; }catch(_e){ return null; }
+}
+function wmsCxFlashCancelado(x){
+  if(typeof ecomBeep==='function') ecomBeep();
+  wmsCxFlash('PEDIDO '+x.numero_pedido+' CANCELADO: NÃO EMBALE · '+(x.motivo_exclusao||'excluído')+' · devolva os itens ao endereço (WMS › Separação › contra-ordem)','red');
+}
 async function wmsCxAbrirPedido(num){
   var peds=/^\d{3,8}$/.test(String(num))?await wmsCxCarregar('numero_pedido=eq.'+encodeURIComponent(num)):[];
   if(!peds.length){ var idsL=await wmsCxPedidosDaLista(num); if(idsL.length){ peds=await wmsCxCarregar('id=in.('+idsL.join(',')+')'); if(peds.length) num=peds[0].numero_pedido; } }
   peds=peds.filter(function(p){ return wmsSaldoVerus(p.cliente_id); });
-  if(!peds.length){ wmsCxFlash('Pedido '+num+' não encontrado (ou sem estoque empenhado)','red'); return; }
+  if(!peds.length){ var _cx=/^\d{3,8}$/.test(String(num))?await wmsCxCancelado('numero_pedido=eq.'+encodeURIComponent(num)):null; if(_cx){ wmsCxFlashCancelado(_cx); return; }
+    wmsCxFlash('Pedido '+num+' não encontrado (ou sem estoque empenhado)','red'); return; }
   var p=peds[0];
   if(wmsCxFeito(p)&&p.status==='conferido'){   // v1.0.1426: reimpressão — imprime de novo e volta a esperar o bipe da etiqueta
     wmsCx={modo:'pedido',fila:[p.id],peds:{},msg:'',msgcolor:''}; wmsCx.peds[p.id]=p;
@@ -38744,6 +38753,8 @@ async function wmsCxAuto(){
 }
 // pedido "morto": trava no banco (outra bancada pode ter feito), conclui a separação, registra a conferência e imprime
 async function wmsCxMatar(p){
+  var _cxc=await wmsCxCancelado('id=eq.'+p.id);   // v1.0.1439: cancelado no SAP enquanto estava na bancada
+  if(_cxc){ wmsCxProg(null); if(wmsCx&&Array.isArray(wmsCx.fila)) wmsCx.fila=wmsCx.fila.filter(function(id){return id!==p.id;}); wmsCxFlashCancelado(_cxc); try{ wmsCxRender(); }catch(_e){} return; }
   wmsCxProg('Pedido '+p.numero_pedido+': buscando a etiqueta…');
   if(wmsCxUsaCorreios(p)&&!p._cor){
     try{ p._cor=await wmsCxCorreios(p); wmsCx.retry=null; p._etqErro=''; }
