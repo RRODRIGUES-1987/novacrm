@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1436 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1437 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1473,7 +1473,7 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1436';
+const APP_VERSION='v1.0.1437';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -3054,8 +3054,10 @@ async function fcdCapasParaFaturas(novas){
 function fcdAplicarNasLinhas(linhas,info){
   if(!info) return linhas;
   var num=function(v){ var n=Number(String(v==null?'':v).replace(/[^0-9,.-]/g,'').replace(/\./g,'').replace(',','.')); return isNaN(n)?0:n; };
+  var _rep={}; (linhas||[]).forEach(function(l){ var k=fcdNorm(l.servico); _rep[k]=(_rep[k]||0)+1; });
   (linhas||[]).forEach(function(l){
     var k=fcdNorm(l.servico); if(!(k in info.soma)) return;
+    if(_rep[k]>1){ l.capas_ambiguo={qtd:Math.round(info.soma[k]*1000)/1000,capas:Array.from(new Set(info.usadas[k]))}; return; }   // v1.0.1437: a capa não diz qual das linhas (ex.: veículo)
     var q=Math.round(info.soma[k]*1000)/1000;
     l.quantidade=String(q).replace('.',',');
     l.capas_origem={n:new Set(info.usadas[k]).size,capas:Array.from(new Set(info.usadas[k]))};
@@ -6018,6 +6020,62 @@ function armzR(cli,m,op,q){
   return Q;
 }
 function armzK(cli,op,m){ return cli+'|'+(op||'')+'|'+m; }
+// ═══ v1.0.1437 · ABERTURAS PENDENTES — todo cliente da programação de faturamento, por operação (subdivisão), sem saldo de abertura
+var armzAbVisao=false, _armzAb={mes:null,linhas:null,carregando:false};
+function armzAbAbrir(){ armzAbVisao=true; _armzAb.linhas=null; render(); }
+function armzAbFechar(){ armzAbVisao=false; render(); }
+async function armzAbCarregar(){
+  if(_armzAb.carregando) return; _armzAb.carregando=true;
+  try{
+    if(!_armzLoaded) await armzCarregar(); if(!_fcdLoaded) await fcdCarregar();
+    var progs=(await dbSelect('fat_programacao','company_id=eq.'+company.id+'&select=cliente_id,ativo'))||[], vis={}, L=[];
+    for(var i=0;i<progs.length;i++){ var p=progs[i]; if(p.ativo===false||vis[p.cliente_id]) continue; vis[p.cliente_id]=1;
+      var cli=(clientes||[]).find(function(c){return c.id===p.cliente_id;}); if(!cli||cli.ativo===false) continue;
+      if(armzOpsDe(p.cliente_id)===undefined) await armzOpsCarregar(p.cliente_id);
+      var ops=armzOpsDe(p.cliente_id)||[], nomes={}; ops.forEach(function(o){ var k=String(o.nome||'').trim().toUpperCase(); nomes[k]=(nomes[k]||0)+1; });
+      (ops.length?ops:[{id:'',nome:'(cliente sem operação)'}]).forEach(function(o){
+        var temAb=Object.keys(armzMeses).some(function(k){ var r=armzMeses[k]; return r.cliente_id===p.cliente_id&&String(r.operacao_id||'')===String(o.id||'')&&r.abertura_pallets!=null; });
+        L.push({cli:cli,op:o,temAb:temAb,dup:o.id&&nomes[String(o.nome||'').trim().toUpperCase()]>1});
+      }); }
+    L.sort(function(a,b){ return String(a.cli.nome).localeCompare(String(b.cli.nome))||String(a.op.nome).localeCompare(String(b.op.nome)); });
+    _armzAb.linhas=L;
+  }catch(e){ showToast('Erro ao carregar as aberturas: '+(e.message||e),'red'); _armzAb.linhas=[]; }
+  _armzAb.carregando=false; if(curPage==='fat-armazenagem') render();
+}
+function armzAbView(){
+  var meses=armzMesesOpcoes(); if(!_armzAb.mes||meses.indexOf(_armzAb.mes)<0) _armzAb.mes=meses[meses.length-1];
+  var tit='<div class="page-header"><div class="page-title">Armazenagem · aberturas pendentes</div><button class="btn btn-sm" onclick="armzAbFechar()">← Voltar ao extrato</button></div>';
+  if(!_armzAb.linhas){ setTimeout(armzAbCarregar,0); return tit+'<div style="padding:30px;text-align:center;color:var(--text3)">Carregando clientes e operações…</div>'; }
+  var pend=_armzAb.linhas.filter(function(x){return !x.temAb;}), ok=_armzAb.linhas.length-pend.length, m=_armzAb.mes;
+  var ini=m+'-01', fim=m+'-'+String(armzUltimoDia(m)).padStart(2,'0');
+  var nCapas=function(x){ return (capasProcesso||[]).filter(function(c){ return c.cliente_id===x.cli.id&&c.data_operacao>=ini&&c.data_operacao<=fim&&c.status!=='inutilizada'&&(!x.op.id||c.responsavel_id===x.op.id); }).length; };
+  var h=tit+'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+    +'<span style="font-size:13px">Saldo em 01 de</span><select class="fi" style="width:auto" onchange="_armzAb.mes=this.value;render()">'+meses.map(function(x){return '<option value="'+x+'"'+(x===m?' selected':'')+'>'+armzNomeMes(x)+'</option>';}).join('')+'</select>'
+    +'<span style="margin-left:auto;font-size:12.5px;padding:4px 10px;border-radius:6px;background:'+(pend.length?'var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e)':'var(--green-bg,#dcfce7);color:var(--green-text,#166534)')+'">'+pend.length+' operação(ões) sem abertura · '+ok+' aberta(s)</span></div>';
+  if(!pend.length) return h+'<div style="padding:24px;text-align:center;color:var(--text3)">Todas as operações dos clientes da programação já têm saldo de abertura.</div>';
+  h+='<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1e3a8a;color:#fff;font-size:11px;text-align:left"><th style="padding:8px 10px">CLIENTE</th><th style="padding:8px 10px">OPERAÇÃO (SUBDIVISÃO)</th><th style="padding:8px 10px;text-align:right">CAPAS NO MÊS</th><th style="padding:8px 10px;width:130px">PALLETS</th><th style="padding:8px 10px;width:190px">VALOR EM ESTOQUE (R$)</th></tr></thead><tbody>'
+    +pend.map(function(x,i){ var idx=_armzAb.linhas.indexOf(x);
+      if(x.dup) return '<tr style="border-top:1px solid var(--border);background:var(--amber-bg,#fef3c7);color:var(--amber-text,#92400e)"><td style="padding:7px 10px">'+ecomEsc(x.cli.nome)+'</td><td style="padding:7px 10px">'+ecomEsc(x.op.nome)+' (nome repetido)</td><td style="padding:7px 10px;text-align:right">'+nCapas(x)+'</td><td colspan="2" style="padding:7px 10px;font-size:12px">acerte o nome da operação no cadastro do cliente antes de abrir</td></tr>';
+      return '<tr style="border-top:1px solid var(--border)"><td style="padding:7px 10px">'+ecomEsc(x.cli.nome)+'</td><td style="padding:7px 10px">'+ecomEsc(x.op.nome)+'</td><td style="padding:7px 10px;text-align:right">'+nCapas(x)+'</td>'
+        +'<td style="padding:5px 10px"><input class="fi armz-ab-p" data-i="'+idx+'" placeholder="pallets" style="width:100%"></td><td style="padding:5px 10px"><input class="fi armz-ab-v" data-i="'+idx+'" placeholder="0,00" style="width:100%"></td></tr>'; }).join('')
+    +'</tbody></table></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap"><span style="font-size:12px;color:var(--text3)">Só as linhas com pallets e valor preenchidos são gravadas. Depois da abertura, o saldo segue sozinho pelas capas conferidas.</span><button class="btn btn-p" onclick="armzAbSalvar()">Salvar aberturas</button></div>';
+  return h;
+}
+async function armzAbSalvar(){
+  var ps=document.querySelectorAll('.armz-ab-p'), lote=[], parc=0;
+  ps.forEach(function(e){ var i=+e.getAttribute('data-i'), v=document.querySelector('.armz-ab-v[data-i="'+i+'"]'), pp=armzNum(e.value), vv=armzNum(v?v.value:'');
+    if(pp==null&&vv==null) return; if(pp==null||vv==null){ parc++; return; } lote.push({x:_armzAb.linhas[i],p:pp,v:vv}); });
+  if(parc){ showToast(parc+' linha(s) com só pallets ou só valor: preencha os dois.','amber'); return; }
+  if(!lote.length){ showToast('Preencha pallets e valor de ao menos uma operação.','amber'); return; }
+  var ok=0, erros=[];
+  for(var j=0;j<lote.length;j++){ var it=lote[j];
+    try{ var r=await sbFetch('POST','/rest/v1/armazenagem_meses?on_conflict=company_id,cliente_id,operacao_id,competencia',{company_id:company.id,cliente_id:it.x.cli.id,operacao_id:it.x.op.id||'',competencia:_armzAb.mes,abertura_pallets:it.p,abertura_valor:it.v,abertura_por_nome:armzQuem(),abertura_em:new Date().toISOString(),abertura_hist:[]},tok,{'Prefer':'resolution=merge-duplicates,return=representation'});
+      if(!r.ok) throw new Error((r.data&&r.data.message)||('HTTP '+r.status)); var row=Array.isArray(r.data)?r.data[0]:r.data; if(row) armzMeses[armzK(row.cliente_id,row.operacao_id,row.competencia)]=row; it.x.temAb=true; ok++;
+    }catch(e){ erros.push(it.x.cli.nome+' · '+it.x.op.nome+': '+(e.message||e)); } }
+  showToast(ok+' abertura(s) salva(s)'+(erros.length?' · '+erros.length+' com erro':''),erros.length?'amber':'green');
+  if(erros.length){ console.warn('aberturas',erros); showToast('Não gravadas: '+erros.slice(0,3).join(' · '),'red'); }
+  render();
+}
 async function armzCarregar(){
   try{ var r=await dbSelect('armazenagem_meses','company_id=eq.'+company.id)||[]; armzMeses={}; r.forEach(function(x){ armzMeses[armzK(x.cliente_id,x.operacao_id,x.competencia)]=x; }); }catch(e){ armzMeses={}; }
   try{ armzAjustes=await dbSelectAll('armazenagem_ajustes','company_id=eq.'+company.id+'&order=data.asc,created_at.asc')||[]; _armzSemAj=false; }catch(e2){ armzAjustes=[]; _armzSemAj=true; }
@@ -6110,7 +6168,8 @@ function rFatArmazenagem(){
   if(!_fcdLoaded||!_armzLoaded){ setTimeout(async function(){ if(!_fcdLoaded) await fcdCarregar(); if(!_armzLoaded) await armzCarregar(); if(curPage==='fat-armazenagem') render(); },0); return '<div style="padding:30px;text-align:center;color:var(--text3)">Carregando…</div>'; }
   var meses=armzMesesOpcoes(); if(!armzMes||meses.indexOf(armzMes)<0) armzMes=meses[meses.length-1];
   var clis=(clientes||[]).filter(function(c){ return c.ativo!==false; }).sort(function(a,b){return String(a.nome||'').localeCompare(String(b.nome||''));});
-  var tit='<div class="page-header"><div class="page-title">Armazenagem · extrato</div></div>';
+  if(armzAbVisao) return armzAbView();
+  var tit='<div class="page-header"><div class="page-title">Armazenagem · extrato</div><button class="btn btn-sm" onclick="armzAbAbrir()" title="Clientes e operações que ainda não têm o saldo de abertura (lançado uma única vez; depois o saldo segue pelas capas)">Aberturas pendentes</button></div>';
   var ops=armzCli?armzOpsDe(armzCli):[];
   if(armzCli&&ops===undefined){ var _c=armzCli; setTimeout(async function(){ await armzOpsCarregar(_c); if(curPage==='fat-armazenagem') render(); },0); }
   if(ops&&ops.length===1&&!armzOp) armzOp=ops[0].id;
@@ -11967,8 +12026,20 @@ function ttSmMapa(json){
   return sm;
 }
 // quadros da tela -> JSON no formato das propostas
+// v1.0.1437: de onde vem a quantidade da linha no rascunho (extrato de armazenagem fechado). Chave serviço|unidade (há serviços repetidos com unidades diferentes).
+var TT_EXTRATO_OPCOES=[['','nada (digitar)'],['pico_pallets','pico de pallets'],['pico_valor','pico de valor em estoque'],['entradas','entradas (pallets)'],['saidas','saídas (pallets)'],['pallet_dia','pallet-dia (soma dos saldos diários)']];
+function ttExtK(it){ return String((it&&it.servico)||'').trim().toUpperCase()+'|'+String((it&&(it.unidade_cobranca||it.unidade))||'').trim().toUpperCase(); }
+function ttExtMapa(json){ var m={}; (json||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){ if(it&&it.extrato) m[ttExtK(it)]={extrato:it.extrato,extrato_op:it.extrato_op||''}; }); }); return m; }
+function ttExtNome(v){ var o=TT_EXTRATO_OPCOES.find(function(x){return x[0]===v;}); return o?o[1]:''; }
+var ttOpsTabela=[];   // operações do cliente da tabela (para a marcação "só na operação X")
+async function ttOpsCarregar(cliId){ ttOpsTabela=[]; if(!cliId) return; try{ var L=await dbSelect('clientes_contatos','cliente_id=eq.'+cliId+'&order=created_at.asc')||[]; var vis={}; L.forEach(function(c){ var t=String(c.tipo_operacao||'').replace(/\s+/g,' ').trim(); if(t&&!vis[t]){ vis[t]=1; ttOpsTabela.push(t); } }); }catch(_e){} }
+function ttExtratoValidar(){
+  var vis={}, dup=[];
+  (ttQuadros||[]).forEach(function(q){ (q.itens||[]).forEach(function(it){ if(!it||!it.servico||!it.extrato) return; var k=it.extrato+'|'+String(it.extrato_op||'').toUpperCase(); if(vis[k]) dup.push('"'+ttExtNome(it.extrato)+'"'+(it.extrato_op?' na operação '+it.extrato_op:'')+': '+vis[k]+' e '+it.servico); else vis[k]=it.servico; }); });
+  return dup;
+}
 function ttJsonDeQuadros(quadros,jsonAntigo){
-  var nd=ttNdMapa(jsonAntigo), sm=ttSmMapa(jsonAntigo), em=ttEmMapa(jsonAntigo);
+  var nd=ttNdMapa(jsonAntigo), sm=ttSmMapa(jsonAntigo), em=ttEmMapa(jsonAntigo), ex=ttExtMapa(jsonAntigo);
   return (quadros||[]).filter(function(q){return q&&q.nome&&(q.itens||[]).some(function(i){return i&&i.servico;});}).map(function(q){
     return {quadro:q.nome, itens:(q.itens||[]).filter(function(i){return i&&i.servico;}).map(function(it){
       var un=it.unidade_cobranca||it.unidade||'';
@@ -11978,7 +12049,9 @@ function ttJsonDeQuadros(quadros,jsonAntigo){
               qtde_minima:it.qtde_minima?Number(it.qtde_minima):null,
               nota_debito:(it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true),
               so_minimo:(it.so_minimo===true)||(it.so_minimo===undefined&&sm[k]===true),
-              entra_minimo:((it.entra_minimo===true)||(it.entra_minimo===undefined&&em[k]===true))&&((it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true))};
+              entra_minimo:((it.entra_minimo===true)||(it.entra_minimo===undefined&&em[k]===true))&&((it.nota_debito===true)||(it.nota_debito===undefined&&nd[k]===true)),
+              extrato:(it.extrato!==undefined?(it.extrato||''):((ex[ttExtK(it)]||{}).extrato||'')),
+              extrato_op:(it.extrato!==undefined?(it.extrato?(it.extrato_op||''):''):((ex[ttExtK(it)]||{}).extrato_op||''))};
     })};
   });
 }
@@ -11993,7 +12066,7 @@ function ttQuadrosDeJson(json){
         var v=parseValorTarifa(it.valor,perc);
         return {servico:it.servico||it.descricao, unidade_cobranca:un, valor:v||'',
                 qtde_minima:it.qtde_minima||null, nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true)?true:undefined, entra_minimo:it.entra_minimo===true,
-                cap_recebimento:false, cap_expedicao:false};
+                cap_recebimento:false, cap_expedicao:false, extrato:it.extrato||'', extrato_op:it.extrato_op||''};
       })};
   });
 }
@@ -12011,12 +12084,14 @@ async function loadTTQuadros(tabelaId){
     if(_js.length) ttQuadros=ttQuadrosDeJson(_js);
   } else {
     // o flag de Nota de Debito so existe na coluna tarifas: traz de la
-    const nd=ttNdMapa(_js), sm=ttSmMapa(_js), em=ttEmMapa(_js);
+    const nd=ttNdMapa(_js), sm=ttSmMapa(_js), em=ttEmMapa(_js), ex=ttExtMapa(_js);
     ttQuadros.forEach(function(q){ (q.itens||[]).forEach(function(it){
+      if(it.extrato===undefined){ var _x=ex[ttExtK(it)]; it.extrato=_x?_x.extrato:''; it.extrato_op=_x?_x.extrato_op:''; }
       if(it.entra_minimo===undefined) it.entra_minimo=em[String(it.servico||'').trim().toUpperCase()]===true;
       if(it.nota_debito===undefined) it.nota_debito=nd[String(it.servico||'').trim().toUpperCase()]===true;
       if(it.so_minimo===undefined) it.so_minimo=sm[String(it.servico||'').trim().toUpperCase()]===true; }); });
   }
+  try{ await ttOpsCarregar(_t&&_t.cliente_id); }catch(_oe){}
   renderTTQuadros();
 }
 // Sincronizacao unica: tabelas editadas na tela antes da v1.0.993 ficaram com a
@@ -12082,6 +12157,7 @@ function renderTTQuadros(){
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Esta linha vai para a Nota de Débito (valor fixo, sem imposto)">ND</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:6%" title="Esta ND é o faturamento mínimo: a NF cobra só o que os serviços passarem dela (ex.: locação Viscofan)">É o mín.</th>
             <th style="padding:7px 4px;text-align:center;font-size:10px;font-weight:600;width:7%" title="Conta só para o cálculo do faturamento mínimo e não é cobrada (ex.: litros expedidos de outro cliente)">Só mín.</th>
+            <th style="padding:7px 6px;text-align:left;font-size:10px;font-weight:600;width:16%" title="O rascunho da fatura preenche a quantidade desta linha com o número do extrato de armazenagem fechado do período (mês ou quinzena)">Vem do extrato</th>
             <th style="width:5%"></th>
           </tr>
         </thead>
@@ -12093,6 +12169,14 @@ function renderTTQuadros(){
     </div>`).join('');
 }
 
+function ttExtratoCelula(qi,ii,item){
+  var v=item.extrato||'', sel='<select onchange="ttQuadros['+qi+'].itens['+ii+'].extrato=this.value;if(!this.value)ttQuadros['+qi+'].itens['+ii+'].extrato_op=\'\';renderTTQuadros()" style="width:100%;font-size:11.5px;padding:3px 4px;border:1px solid '+(v?'#1e3a8a':'var(--border)')+';border-radius:6px;background:var(--bg)">'
+    +TT_EXTRATO_OPCOES.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>';
+  if(v&&(ttOpsTabela||[]).length>1){ var op=item.extrato_op||'';
+    sel+='<select onchange="ttQuadros['+qi+'].itens['+ii+'].extrato_op=this.value" title="Use quando a tabela serve várias operações e esta linha é de uma só (ex.: matéria-prima x acabado)" style="width:100%;font-size:11px;padding:2px 4px;margin-top:3px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"><option value="">todas as operações</option>'
+      +ttOpsTabela.map(function(t){ return '<option value="'+ecomEsc(t)+'"'+(t===op?' selected':'')+'>só '+ecomEsc(t)+'</option>'; }).join('')+'</select>'; }
+  return sel;
+}
 function renderTTRow(qi, ii, item){
   return`<tr style="border-bottom:1px solid var(--border)" id="tt-row-${qi}-${ii}">
     <td style="padding:5px 8px">
@@ -12126,6 +12210,7 @@ function renderTTRow(qi, ii, item){
     <td style="padding:5px 4px;text-align:center">
       <input type="checkbox" ${item.so_minimo?'checked':''} onchange="ttQuadros[${qi}].itens[${ii}].so_minimo=this.checked" style="width:15px;height:15px;cursor:pointer" title="Conta só para o faturamento mínimo (não é cobrada)">
     </td>
+    <td style="padding:4px 6px">${ttExtratoCelula(qi,ii,item)}</td>
     <td style="padding:5px 4px;text-align:center">
       <button onclick="removeItemQuadro(${qi},${ii})" style="border:none;background:none;cursor:pointer;color:var(--text3);padding:2px">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -12177,6 +12262,7 @@ function removeQuadro(qi){
 }
 
 async function onTTClienteChange(clienteId, tipoAtual=null){
+  try{ await ttOpsCarregar(clienteId); if(typeof renderTTQuadros==='function'&&ge('tt-quadros')) renderTTQuadros(); }catch(_oe){}
   const tipoSel=ge('tt-tipo');if(!tipoSel)return;
   if(!clienteId){tipoSel.innerHTML='<option value="">Selecione o cliente primeiro</option>';return;}
   const contatos=await dbSelect('clientes_contatos',`cliente_id=eq.${clienteId}`);
@@ -12188,6 +12274,8 @@ async function onTTClienteChange(clienteId, tipoAtual=null){
 async function saveTabelaTarifaria(){
   const nome=ge('tt-nome')?.value.trim();
   if(!nome)throw new Error('Nome da tabela é obrigatório.');
+  const _dupEx=ttExtratoValidar();   // v1.0.1437: o mesmo número do extrato não pode ir para duas linhas (cobraria em dobro)
+  if(_dupEx.length) throw new Error('O mesmo número do extrato está em mais de uma linha: '+_dupEx.join(' · ')+'. Deixe em uma só, ou diga a operação de cada linha.');
   const cid=company?.id||profile?.company_id||null;
   const getV=id=>{const e=ge(id);return e?e.value||null:null;};
 
@@ -12581,6 +12669,14 @@ function fatEntraNoMinimo(l){
 function fatNdMinimo(linhas){ return (linhas||[]).filter(function(l){ return l&&l.nota_debito&&l.entra_minimo===true&&!l.is_complemento&&!l.so_minimo; }).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
 function fatFaturavelNF(l){ return !!l&&!l.nota_debito&&!l.so_minimo&&!l.is_complemento; }
 function fatBaseMinimo(linhas){ return (linhas||[]).filter(fatEntraNoMinimo).reduce(function(s,l){return s+Number(l.subtotal||0);},0); }
+function fatLinhaOrigemTag(l){   // v1.0.1437
+  var ch=function(t,bg,cor){ return '<span style="display:inline-block;margin-top:3px;margin-right:4px;font-size:10.5px;padding:1px 7px;border-radius:6px;background:'+bg+';color:'+cor+'">'+t+'</span>'; };
+  var h='';
+  if(l&&l.extrato_origem) h+=ch('extrato · '+ecomEsc(l.extrato_origem.rotulo||'')+(l.extrato_origem.alterada?' · alterada à mão':''),l.extrato_origem.alterada?'var(--amber-bg,#fef3c7)':'var(--blue-bg,#dbeafe)',l.extrato_origem.alterada?'var(--amber-text,#92400e)':'var(--blue-text,#1e3a8a)');
+  if(l&&l.capas_origem&&l.capas_origem.n) h+=ch(l.capas_origem.n+' capa'+(l.capas_origem.n>1?'s':''),'var(--green-bg,#dcfce7)','var(--green-text,#166534)');
+  if(l&&l.capas_ambiguo) h+=ch(ecomEsc(String(l.capas_ambiguo.qtd).replace('.',','))+' nas capas '+ecomEsc((l.capas_ambiguo.capas||[]).slice(0,4).join(', '))+': escolha a linha (veículo)','var(--amber-bg,#fef3c7)','var(--amber-text,#92400e)');
+  return h?'<div>'+h+'</div>':'';
+}
 function fatLinhaMinTag(l,gi){
   if(l.so_minimo) return '<div style="font-size:10.5px;color:var(--text3);margin-top:2px">n\u00e3o faturado \u00b7 conta s\u00f3 para o faturamento m\u00ednimo</div>';
   if(l.nota_debito) return '<label style="display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--text3);margin-top:3px;cursor:pointer"><input type="checkbox" '+(l.entra_minimo===true?'checked':'')+' onchange="fatLinhas['+gi+'].entra_minimo=this.checked;fatInvalidaSubtotal();recalcFatura()" style="width:13px;height:13px"> ND \u00b7 \u00e9 o faturamento m\u00ednimo (a NF cobra s\u00f3 o excedente)</label>';   // v1.0.1055
@@ -13538,11 +13634,11 @@ function renderLinhasFatura(){
                 onchange="fatLinhas[${gi}].${campo}=this.value;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
                 style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:${ali};background:var(--amber-bg,#fef3c7)">`;
             return`<tr style="border-bottom:1px solid var(--border)${l.so_minimo?';background:var(--bg2);color:var(--text3)':''}">
-              <td style="padding:4px 8px;font-size:12px">${_man?_inp('servico',l.servico,'left','Descreva o servico'):l.servico}${fatLinhaMinTag(l,gi)}</td>
+              <td style="padding:4px 8px;font-size:12px">${_man?_inp('servico',l.servico,'left','Descreva o servico'):l.servico}${fatLinhaMinTag(l,gi)}${fatLinhaOrigemTag(l)}</td>
               <td style="padding:4px 8px;font-size:12px;text-align:center">${_man?_inp('unidade',l.unidade,'center','Un.'):(l.unidade||'')}</td>
               <td style="padding:4px 8px;font-size:12px;text-align:right">${_man?_inp('preco_unitario',l.preco_unitario,'right','0,00'):fatPrecoExib(l)}</td>
               <td style="padding:4px 6px">
-                <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
+                <input value="${l.quantidade||''}" onchange="fatLinhas[${gi}].quantidade=this.value;if(fatLinhas[${gi}].extrato_origem)fatLinhas[${gi}].extrato_origem.alterada=true;if(fatLinhas[${gi}].capas_ambiguo&&this.value)delete fatLinhas[${gi}].capas_ambiguo;calcLinhaFatura(${gi});fatInvalidaSubtotal();recalcFatura()"
                   style="width:100%;border:1px solid var(--border);border-radius:6px;padding:3px 6px;font-size:12px;text-align:center"
                   placeholder="${isPerc?'Valor R$':'Qtd'}">
               </td>
@@ -15952,6 +16048,8 @@ async function fatGerarAbrir(){
   _fgContatos=null;          // sempre fresco: cliente recem-cadastrado precisa aparecer
   await fgCarregaContatos();
   await fgCarregaExistentes();
+  try{ await armzCarregar(); var _cx={}; (fatProgramacao||[]).forEach(function(p){ var t=(tabelasTarifarias||[]).find(function(x){return x.id===p.tabela_id;}); if(t&&fgTabTemExtrato(t)) _cx[p.cliente_id]=1; });
+    for(var _ck in _cx){ if(armzOpsDe(_ck)===undefined) await armzOpsCarregar(_ck); } }catch(_ae){ console.warn('extrato p/ rascunho',_ae); }
   await fatCarregaMaxNumero();
   fatGerarRender();
 }
@@ -16017,7 +16115,8 @@ function fgLinhasDaTabela(tab){
         quantidade:'',                                   // em branco — é o que vamos digitar
         subtotal:0,
         tipo:(it.valor&&String(it.valor).includes('%'))?'percentual':'unitario',
-        nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true)?true:undefined
+        nota_debito:it.nota_debito===true, so_minimo:it.so_minimo===true, entra_minimo:(it.nota_debito===true&&it.entra_minimo===true)?true:undefined,
+        extrato:it.extrato||undefined, extrato_op:it.extrato_op||undefined
       });
     });
   });
@@ -16037,6 +16136,33 @@ function fgAchaExistente(clienteId,ini,fim,tipoOp){
   });
 }
 
+// v1.0.1437: números do extrato de armazenagem FECHADO (mês ou quinzena) da operação — null = período não fechado
+function armzNumerosFechados(cli,op,comp,q){
+  var reg=armzMeses[armzK(cli,op||'',comp)], F=armzFechObj(reg), sn=null;
+  if(q===1) sn=F.q1||null; else if(q===2) sn=(reg&&reg.fechado)?(F.q2||null):null;
+  else if(reg&&reg.fechado) sn={pico:F.pico,picoV:F.pico_valor,totE:F.entradas,totS:F.saidas,dias:F.dias,fechado_em:reg.fechado_em};
+  if(!sn||!sn.pico) return null;
+  var pd=(sn.dias||[]).reduce(function(a,d){ return a+(Number(d.saldo)||0); },0);
+  return {pico:Number(sn.pico.pallets)||0, picoV:Math.round((Number((sn.picoV||{}).valor)||0)*100)/100, ent:Number(sn.totE)||0, sai:Number(sn.totS)||0, palletDia:pd, fechado_em:sn.fechado_em||(reg&&reg.fechado_em)||null};
+}
+function fgPerQz(per){ var a=String(per.ini||'').slice(8,10), b=String(per.fim||'').slice(8,10); if(a==='01'&&b==='15') return 1; if(a==='16') return 2; return 0; }
+function fgTabTemExtrato(tab){ var t=[]; try{ t=Array.isArray(tab.tarifas)?tab.tarifas:JSON.parse(tab.tarifas||'[]'); }catch(_e){ t=[]; } return (t||[]).some(function(q){ return (q.itens||[]).some(function(i){ return i&&i.extrato; }); }); }
+function fgOpExtrato(cliId,tipo,contato){ if(contato&&contato.id) return contato.id; var ops=(typeof armzOpsDe==='function'?armzOpsDe(cliId):null)||[]; return ops.length===1?ops[0].id:''; }
+function armzAplicarNasLinhas(linhas,x){
+  if(!x||!x.extrato) return linhas;
+  var N=x.extrato, nrm=function(s){ return String(s||'').replace(/\s+/g,' ').trim().toUpperCase(); };
+  var rot={pico_pallets:'pico de pallets',pico_valor:'pico de valor em estoque',entradas:'entradas',saidas:'saídas',pallet_dia:'pallet-dia'};
+  (linhas||[]).forEach(function(l){
+    if(!l.extrato||l.capas_origem) return;   // capa e extrato na mesma linha: vale a capa
+    if(l.extrato_op&&nrm(l.extrato_op)!==nrm(x.tipoOp)) return;   // linha de outra operação
+    var q=l.extrato==='pico_pallets'?N.pico:l.extrato==='pico_valor'?N.picoV:l.extrato==='entradas'?N.ent:l.extrato==='saidas'?N.sai:l.extrato==='pallet_dia'?N.palletDia:null;
+    if(q==null) return;
+    l.quantidade=(l.extrato==='pico_valor')?q.toFixed(2).replace('.',','):String(q);
+    l.subtotal=Math.round(fatSubtotalPuro(l)*100)/100;
+    l.extrato_origem={tipo:l.extrato,rotulo:rot[l.extrato]||l.extrato,periodo:x.per.ini+'|'+x.per.fim,fechado_em:N.fechado_em};
+  });
+  return linhas;
+}
 function fgPrevia(){
   var cid=company?company.id:null, out=[];
   (fatProgramacao||[]).filter(function(p){ return p.ativo!==false && (!cid||p.company_id===cid); }).forEach(function(p){
@@ -16059,6 +16185,12 @@ function fgPrevia(){
         else if(!linhas.length){ item.situacao='pendente'; item.motivo='tabela sem itens'; }
         else if((item.existente=fgAchaExistente(p.cliente_id,pr.ini,pr.fim,al.tipo))){ item.situacao='pulada'; }
         else { item.situacao='nova'; }
+        // v1.0.1437: tabela com linha que vem do extrato → só gera com o período FECHADO no extrato de armazenagem
+        if(item.situacao==='nova'&&fgTabTemExtrato(tab)){
+          var _q=fgPerQz(pr), _N=armzNumerosFechados(p.cliente_id,fgOpExtrato(p.cliente_id,al.tipo,al.contato),String(pr.ini).slice(0,7),_q);
+          if(!_N){ item.situacao='pendente'; item.motivo='extrato '+(_q?(_q+'ª quinzena'):'do mês')+' não fechado'+(al.tipo?' · '+al.tipo:'')+' (Financeiro › Armazenagem)'; }
+          else item.extrato=_N;
+        }
         out.push(item);
       });
     });
@@ -16116,7 +16248,8 @@ function fatGerarRender(){
   } else {
     var dBR=function(iso){ if(!iso)return '\u2014'; var p=iso.split('-'); return p[2]+'/'+p[1]; };
     var badge=function(x){
-      if(x.situacao==='nova')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#e7f3ec;color:#166534">nova</span>';
+      if(x.situacao==='nova')return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:#e7f3ec;color:#166534">nova</span>'
+        +(x.extrato?'<div style="font-size:10.5px;color:var(--text3);margin-top:2px" title="Números do extrato de armazenagem fechado que vão para as linhas marcadas na tabela">&#128274; extrato: pico '+x.extrato.pico+' plt · R$ '+Number(x.extrato.picoV).toLocaleString('pt-BR',{minimumFractionDigits:2})+' · +'+x.extrato.ent+' −'+x.extrato.sai+'</div>':'');
       if(x.situacao==='pulada'){
         var _ex=x.existente||{}, _st=String(_ex.status||'').replace(/_/g,' ');
         return '<span title="Procure por este n\u00famero na lista de faturamento" style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;background:var(--bg3);color:var(--text3)">j\u00e1 existe'
@@ -16197,7 +16330,7 @@ async function fatGerarExecutar(){
         periodo_inicio:x.per.ini, periodo_fim:x.per.fim,
         data_emissao:x.emissao,
         vencimento_dias:x.venc?x.venc.dias:null,
-        linhas:JSON.stringify(fcdAplicarNasLinhas(x.linhas,_capInfo.porFat[i])),
+        linhas:JSON.stringify(armzAplicarNasLinhas(fcdAplicarNasLinhas(x.linhas,_capInfo.porFat[i]),x)),
         subtotal:0, total:0,
         status:'rascunho'
       };
