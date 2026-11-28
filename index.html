@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1449 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1450 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1854,7 +1854,7 @@ async function usrEquipeCarregar(){
       :'<div class="empty"><p>Ninguém com telas do seu módulo ainda.</p></div>';
   }catch(e){ box.innerHTML='<div style="color:var(--red-text);padding:12px">Erro ao carregar: '+usrEsc(e.message||e)+'</div>'; }
 }
-const APP_VERSION='v1.0.1449';
+const APP_VERSION='v1.0.1450';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -65672,7 +65672,7 @@ async function ecomRomAuto(p){
     var cur=await dbSelect('ecom_pedidos','id=eq.'+p.id+'&select=status,romaneio_id'); cur=cur&&cur[0];
     if(!cur||cur.romaneio_id||cur.status!=='conferido') return '';
     var cid=ecomCid(), tr=String(p.transportadora||'').trim()||'SEM TRANSPORTADORA', hoje=hojeLocalISO();
-    var ab=await dbSelect('ecom_romaneios','company_id=eq.'+cid+'&lojista_id=eq.'+p.lojista_id+'&status=eq.aberto&data_coleta=eq.'+hoje+'&transportadora=eq.'+encodeURIComponent(tr)+'&select=id,numero&order=created_at.asc&limit=1');
+    var ab=await dbSelect('ecom_romaneios','company_id=eq.'+cid+'&lojista_id=eq.'+p.lojista_id+'&status=eq.aberto&transportadora=eq.'+encodeURIComponent(tr)+'&select=id,numero&order=created_at.asc&limit=1');   // v1.0.1450: acumula até a coleta (não vira o dia)
     var rom=ab&&ab[0];
     if(!rom){ rom=await dbInsert('ecom_romaneios',{company_id:cid,lojista_id:p.lojista_id,status:'aberto',transportadora:tr,qtd_pedidos:0,qtd_volumes:0,data_coleta:hoje,obs:'automático (checkout)'});
       rom=Array.isArray(rom)?rom[0]:rom; if(rom) ecomRomaneios=[rom].concat(ecomRomaneios||[]); }
@@ -66475,7 +66475,10 @@ function ecomRomConteudo(romId){
     +(corpo||'<div style="padding:10px;color:var(--text3);font-size:12px">Nenhum pedido neste romaneio.</div>')+'</div>'
     +'<div style="font-size:11px;color:var(--text3);margin-top:6px">Verde = completo · laranja = falta bipar na saída · vermelho = volume sem checkout</div>';
 }
+var _romAbrindo=null;
 function ecomRomAbrir(romId){
+  var _ra=(ecomRomaneios||[]).find(function(x){return x.id===romId;});
+  if(_romAbrindo!==romId && _ra && _ra.status==='aberto'){ _romAbrindo=romId; ecomRomJuntarAuto(romId).then(function(n){ if(n) showToast(n+' pedido(s) de outro romaneio aberto da '+(_ra.transportadora||'transportadora')+' entraram nesta coleta','green'); ecomRomAbrir(romId); }).finally(function(){ _romAbrindo=null; }); return; }   // v1.0.1450: junta antes de bipar
   var r=ecomRomaneios.find(function(x){return x.id===romId;}); if(!r)return;
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===romId;});
   var carregado=(r.status==='coletado');
@@ -66794,6 +66797,12 @@ async function ecomEmbParcialExec(){
     await dbUpdate('ecom_romaneios',ctx.romId,Object.assign({status:'coletado',data_coleta_efetiva:iso},_ret)); if(r) Object.assign(r,{status:'coletado',data_coleta_efetiva:iso},_ret);
     // 4) opcional: já cria o próximo romaneio com os que ficaram
     var novoNum=null;
+    // v1.0.1450: romaneio automático — o que ficou volta sozinho para o romaneio aberto da transportadora (ou abre o próximo), marcado como não coletado
+    if(r && ecomRomFolhaNova(r,ctx.vao.concat(ctx.ficam)) && ctx.ficam.some(function(x){ return ecomRomAutoLigado(x); })){
+      var _novos={};
+      for(var q=0;q<ctx.ficam.length;q++){ var _n=await ecomRomAuto(ctx.ficam[q]); if(_n) _novos[_n]=1; }
+      novoNum=Object.keys(_novos).join(', ')||null; criarNovo=false;
+    }
     if(criarNovo){
       var maxN=(ecomRomaneios||[]).reduce(function(m,x){return (x.numero||0)>m?(x.numero||0):m;},0);
       var nr=await dbInsert('ecom_romaneios',{company_id:ecomCid(),lojista_id:ctx.ficam[0].lojista_id||null,
@@ -66819,6 +66828,7 @@ async function ecomEmbParcialExec(){
 }
 async function ecomRomConfirmar(romId){
   var r=ecomRomaneios.find(function(x){return x.id===romId;}); if(!r)return;
+  try{ var _nj=await ecomRomJuntarAuto(romId); if(_nj){ showToast(_nj+' pedido(s) de outro romaneio aberto entraram nesta coleta: bipe as caixas deles','amber'); var _c=ge('ecom-rom-cont'); if(_c) _c.innerHTML=ecomRomConteudo(romId); } }catch(_j){}   // v1.0.1450
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===romId;});
   if(ecomEmb && ecomEmb.romId===romId){
     var falta=peds.filter(function(p){ return !ecomEmb.ok[p.id]; });
@@ -66901,8 +66911,27 @@ function ecomRomFolhaColeta(r,peds){
     +'<div style="border:1px solid #111;border-radius:6px;padding:4px 10px;text-align:right"><div style="font-size:10px;color:#555">ROMANEIO</div><div style="font-family:monospace;font-size:16px;font-weight:700">'+num+'</div></div></div>'
     +resumo+blocos+ret+'</div>';
 }
+// v1.0.1450: na coleta, os outros romaneios ABERTOS da mesma transportadora (e lojista) entram neste — uma folha, uma assinatura
+async function ecomRomJuntarAuto(romId){
+  var r=(ecomRomaneios||[]).find(function(x){return x.id===romId;}); if(!r||r.status!=='aberto') return 0;
+  var peds=(ecomPedidos||[]).filter(function(p){return p.romaneio_id===romId;}); if(!ecomRomFolhaNova(r,peds)) return 0;
+  var lid=r.lojista_id||((peds[0]||{}).lojista_id); var t=String(r.transportadora||'').trim().toUpperCase(); if(!t) return 0;
+  var outros=(ecomRomaneios||[]).filter(function(x){ if(x.id===romId||x.status!=='aberto'||String(x.transportadora||'').trim().toUpperCase()!==t) return false;
+    var xl=x.lojista_id||((ecomPedidos||[]).find(function(p){return p.romaneio_id===x.id;})||{}).lojista_id; return !lid||!xl||xl===lid; });
+  var n=0;
+  for(var i=0;i<outros.length;i++){ var o=outros[i];
+    try{ var mv=await sbFetch('PATCH','/rest/v1/ecom_pedidos?romaneio_id=eq.'+o.id+'&status=in.(romaneado,conferido)',{romaneio_id:romId},tok); n+=((mv&&mv.data)||[]).length;
+      try{ await sbFetch('PATCH','/rest/v1/ecom_embarque_conf?romaneio_id=eq.'+o.id,{romaneio_id:romId},tok); }catch(_b){}
+      var rest=await dbSelect('ecom_pedidos','romaneio_id=eq.'+o.id+'&select=id&limit=1')||[];
+      if(!rest.length){ await dbDelete('ecom_romaneios',o.id); ecomRomaneios=ecomRomaneios.filter(function(x){return x.id!==o.id;}); } else await ecomRomRecontar(o.id);
+    }catch(e){ console.warn('[e-commerce] juntar romaneio',o.numero,e); } }
+  if(n){ (ecomPedidos||[]).forEach(function(p){ if(outros.some(function(o){return o.id===p.romaneio_id;})&&['romaneado','conferido'].indexOf(p.status)>=0) p.romaneio_id=romId; }); await ecomRomRecontar(romId); }
+  return n;
+}
+var _romJuntando=null;
 function ecomRomPDF(id){
   var r=ecomRomaneios.find(function(x){return x.id===id;}); if(!r)return;
+  if(_romJuntando!==id && r.status==='aberto'){ _romJuntando=id; ecomRomJuntarAuto(id).then(function(n){ if(n) showToast(n+' pedido(s) de outro romaneio aberto da '+(r.transportadora||'transportadora')+' entraram nesta coleta','green'); ecomRomPDF(id); }).finally(function(){ _romJuntando=null; }); return; }   // v1.0.1450
   var _pf=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===id;});
   if(ecomRomFolhaNova(r,_pf)){ ecomPrintDoc('Folha de coleta ROM-'+String(r.numero||0).padStart(4,'0'), [ecomRomFolhaColeta(r,_pf)], false); return; }   // v1.0.1449
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===id;});
