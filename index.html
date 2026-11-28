@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1440 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1441 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -503,6 +503,16 @@ body:has(#col-acao-btn) #col-bigbtn{display:none!important}   /* v1.0.1279: um b
         <div style="display:flex;align-items:center;gap:9px">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 18v-5a9 9 0 0 1 18 0v5"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H3z"/></svg>
           <span>Help Desk</span>
+        </div>
+      </button>
+    </div>
+
+    <!-- v1.0.1441: master de módulo -->
+    <div class="nav-module" id="nav-usr-equipe-mod" style="display:none">
+      <button class="nav-module-header" id="nav-usr-equipe" onclick="pg('usr-equipe')" style="font-weight:500;color:var(--text2)">
+        <div style="display:flex;align-items:center;gap:9px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+          <span>Equipe do módulo</span>
         </div>
       </button>
     </div>
@@ -1473,7 +1483,214 @@ async function aplicarPreset(userId, role, companyId){
   });
   await Promise.all(ops);
 }
-const APP_VERSION='v1.0.1440';
+
+// ═══════════ v1.0.1441 · ACESSOS: criar usuário numa tela só · master de módulo · telas novas se distribuem sozinhas ═══════════
+// Banco: verus_telas (tela → módulo), verus_role_telas (padrão de cada função), usr_modulo_master, e as funções
+// usr_criar_acesso / usr_master_definir / usr_preset_proprio / verus_telas_sincronizar. A gravação de permissões
+// pelos não-admins passa só por essas funções (a tabela permissoes fica fechada para gravação direta).
+var usrModsMaster=[];
+var USR_ROLE_LBL_EXTRA={supervisor_operacoes:'Supervisor de operações',lider_operacoes:'Liderança de operações (coletor)',coletor:'Coletor (separação + conferência)',manutencao:'Manutenção (técnico)'};
+var USR_ROLES_RESTRITAS=['admin','gestor','adm','controladoria','supervisor_operacoes','rh'];
+function usrRoleLbl(r){ return (typeof ROLES!=='undefined'&&ROLES[r])||USR_ROLE_LBL_EXTRA[r]||r; }
+function usrRolesLista(){
+  var ks={}; Object.keys(typeof ROLES!=='undefined'?ROLES:{}).forEach(function(k){ks[k]=1;}); Object.keys(ROLE_PRESETS).forEach(function(k){ks[k]=1;}); Object.keys(USR_ROLE_LBL_EXTRA).forEach(function(k){ks[k]=1;});
+  return Object.keys(ks).sort(function(a,b){ return usrRoleLbl(a).localeCompare(usrRoleLbl(b)); });
+}
+function usrModulosLista(){ var v={}; TELAS.forEach(function(t){ if(t.modulo!=='Admin'&&t.modulo!=='Help Desk') v[t.modulo]=1; }); return Object.keys(v).sort(); }
+function usrTelaModulo(id){ var t=TELAS.find(function(x){return x.id===id;}); return t?t.modulo:(String(id).indexOf('wms-')===0?'WMS':''); }
+function usrEsc(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function usrSenhaSugerida(){ var a='ABCDEFGHJKLMNPQRSTUVWXYZ', b='abcdefghijkmnpqrstuvwxyz', d='23456789', s='#@!$%';
+  var pick=function(x){ return x[Math.floor(Math.random()*x.length)]; };
+  return pick(a)+pick(b)+pick(b)+pick(s)+pick(d)+pick(d)+pick(d)+pick(d)+'-'+pick(b)+pick(b); }
+
+// módulos em que o usuário logado é master (carregado no login)
+async function usrCarregarMaster(){
+  try{ var r=await dbRpc('usr_meus_modulos_master',{}); usrModsMaster=Array.isArray(r)?r:[]; }catch(_e){ usrModsMaster=[]; }
+  var m=ge('nav-usr-equipe-mod'); if(m) m.style.display=(usrModsMaster.length&&profile&&profile.role!=='admin')?'':'none';
+}
+// a cada versão publicada, o navegador do admin registra as telas e os padrões das funções no banco;
+// tela nova vai sozinha para os masters do módulo e para quem tem a função que já a prevê
+async function verusTelasSync(){
+  if(!(profile&&profile.role==='admin')) return;
+  var k='verus_telas_sync_'+APP_VERSION; try{ if(localStorage.getItem(k)) return; }catch(_e){}
+  try{
+    var r=await dbRpc('verus_telas_sincronizar',{p_telas:TELAS.map(function(t){return {tela:t.id,modulo:t.modulo,nome:t.label};}),p_presets:ROLE_PRESETS});
+    try{ localStorage.setItem(k,'1'); }catch(_e){}
+    if(r&&(+r.telas_novas||+r.acessos_concedidos)) showToast('Acessos: '+(+r.telas_novas||0)+' tela(s) nova(s) registrada(s) · '+(+r.acessos_concedidos||0)+' acesso(s) concedido(s) automaticamente','green');
+  }catch(e){ console.warn('[acessos] sincronização das telas',e); }
+}
+// admin: liga/desliga master de módulo (direto da tela de Permissões)
+async function usrMasterToggle(el,userId,modulo){
+  el.disabled=true;
+  try{ await dbRpc('usr_master_definir',{p_user:userId,p_modulo:modulo,p_on:!!el.checked});
+    showToast((el.checked?'Agora é master do módulo ':'Deixou de ser master do módulo ')+modulo+(el.checked?' (recebeu todas as telas do módulo)':''),'green');
+    if(el.checked&&mmode==='permissoes'&&mid===userId){ setTimeout(function(){ openModal('permissoes',userId); },300); }
+  }catch(e){ el.checked=!el.checked; showToast('Não consegui alterar: '+(e.message||e),'red'); }
+  finally{ el.disabled=false; }
+}
+async function usrMasterSecHtml(userId){
+  if(!(profile&&profile.role==='admin')) return '';
+  var atuais=[]; try{ atuais=(await dbSelect('usr_modulo_master','user_id=eq.'+userId+'&select=modulo&order=modulo.asc')||[]).map(function(x){return x.modulo;}); }catch(_e){}
+  return '<div style="margin-bottom:16px"><div style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">Master de módulo</div>'
+    +'<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Quem é master recebe todas as telas do módulo (e as que nascerem depois) e pode criar usuários dentro dele.</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+usrModulosLista().map(function(m){ var on=atuais.indexOf(m)>=0;
+      return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:'+(on?'var(--accent-bg,#e0ecff)':'var(--bg2)')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="usrMasterToggle(this,\''+userId+'\',\''+m.replace(/'/g,"\\'")+'\')"> '+usrEsc(m)+'</label>'; }).join('')
+    +'</div></div>';
+}
+
+// ── ⚡ Criar usuário (uma tela só) ──
+var _usrWiz=null;
+function usrWizPodeAbrir(){ return (profile&&profile.role==='admin')||(usrModsMaster||[]).length>0; }
+async function usrWizAbrir(){
+  if(!usrWizPodeAbrir()){ showToast('Só o administrador ou um master de módulo cria usuários.','amber'); return; }
+  var admin=profile.role==='admin', mods=admin?null:usrModsMaster.slice();
+  var cid=admin?(typeof usrEmpresaAlvo==='function'&&usrEmpresaAlvo()||company?.id):(profile.company_id||company?.id);
+  _usrWiz={admin:admin,mods:mods,cid:cid,modo:'perfil',role:'',de:'',perms:[],units:[],unidades:[],senha:usrSenhaSugerida()};
+  var listaEmp=(typeof allCompanies!=='undefined'&&allCompanies&&allCompanies.length)?allCompanies:companies;
+  portModal('⚡ Criar usuário'+(admin?'':' · '+mods.join(', ')),
+    '<div style="font-size:12.5px;color:var(--text3);margin-top:-6px">'+(admin?'Tudo numa tela só: a pessoa nasce com o acesso igual a um perfil ou a alguém que já trabalha na função.':'Você é master de '+usrEsc(mods.join(', '))+': o novo usuário recebe só telas desse(s) módulo(s), na sua empresa e nas suas unidades.')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      +'<div><label class="fl">Nome completo *</label><input class="fi" id="uw-nome" placeholder="Nome do usuário"></div>'
+      +'<div><label class="fl">E-mail *</label><input class="fi" id="uw-email" type="email" placeholder="email@mklogistica.com"></div>'
+      +'<div><label class="fl">Senha inicial</label><div style="display:flex;gap:6px"><input class="fi" id="uw-senha" value="'+usrEsc(_usrWiz.senha)+'"><button class="btn btn-sm" type="button" onclick="ge(\'uw-senha\').value=usrSenhaSugerida()" title="Gerar outra">↻</button></div></div>'
+      +'<div><label class="fl">Empresa</label>'+(admin?'<select class="fi" id="uw-emp" onchange="_usrWiz.cid=this.value;usrWizUnidades()">'+listaEmp.map(function(c){return '<option value="'+c.id+'" '+(c.id===cid?'selected':'')+'>'+usrEsc(c.name)+'</option>';}).join('')+'</select>'
+        :'<div class="fi" style="background:var(--bg2)">'+usrEsc(((companies||[]).find(function(c){return c.id===cid;})||{}).name||'—')+'</div>')+'</div>'
+    +'</div>'
+    +'<div><label class="fl">Acesso igual a</label><div style="display:flex;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:3px;margin-bottom:8px">'
+      +'<button type="button" id="uw-m-perfil" class="btn btn-sm" style="flex:1;border:none" onclick="usrWizModo(\'perfil\')">Perfil padrão</button>'
+      +'<button type="button" id="uw-m-pessoa" class="btn btn-sm" style="flex:1;border:none" onclick="usrWizModo(\'pessoa\')">'+(admin?'Pessoa que já trabalha na função':'Pessoa da minha equipe')+'</button></div>'
+      +'<div id="uw-escolha"></div></div>'
+    +'<div><label class="fl">Unidades</label><div id="uw-units" style="display:flex;flex-wrap:wrap;gap:6px"><span style="font-size:12px;color:var(--text3)">carregando…</span></div></div>'
+    +'<div id="uw-resumo" style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.7;color:var(--text2)">Escolha o perfil ou a pessoa.</div>'
+    +'<label style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" id="uw-mail" checked> Enviar e-mail de acesso com a senha</label>'
+    +'<div style="font-size:11.5px;color:var(--text3)">Depois dá para ajustar tela a tela em Permissões, como hoje.</div>',
+    'usrWizSalvar()',{width:'640px',saveLabel:'Criar usuário'});
+  usrWizModo('perfil'); usrWizUnidades();
+  setTimeout(function(){ var n=ge('uw-nome'); if(n) n.focus(); },60);
+}
+function usrWizModo(m){
+  if(!_usrWiz) return; _usrWiz.modo=m; _usrWiz.role=''; _usrWiz.de=''; _usrWiz.perms=[];
+  ['perfil','pessoa'].forEach(function(k){ var b=ge('uw-m-'+k); if(b){ b.style.background=k===m?'#fff':'transparent'; b.style.fontWeight=k===m?'700':'500'; b.style.boxShadow=k===m?'0 1px 3px rgba(0,0,0,.08)':'none'; } });
+  var box=ge('uw-escolha'); if(!box) return;
+  if(m==='perfil'){
+    var roles=usrRolesLista().filter(function(r){ return _usrWiz.admin||USR_ROLES_RESTRITAS.indexOf(r)<0; })
+      .filter(function(r){ if(_usrWiz.admin) return true; var p=ROLE_PRESETS[r]; return !p||!p.length||p.some(function(t){ return _usrWiz.mods.indexOf(usrTelaModulo(t))>=0; }); });
+    box.innerHTML='<select class="fi" id="uw-role" onchange="usrWizEscolheRole(this.value)"><option value="">— escolha o perfil —</option>'+roles.map(function(r){return '<option value="'+r+'">'+usrEsc(usrRoleLbl(r))+'</option>';}).join('')+'</select>';
+  }else{
+    var lista=(profiles||[]).filter(function(p){ return p.role!=='admin'&&(_usrWiz.admin||(p.company_id===_usrWiz.cid&&USR_ROLES_RESTRITAS.indexOf(p.role)<0)); })
+      .sort(function(a,b){ return String(a.full_name||a.email||'').localeCompare(String(b.full_name||b.email||'')); });
+    box.innerHTML='<select class="fi" id="uw-de" onchange="usrWizEscolhePessoa(this.value)"><option value="">— escolha a pessoa —</option>'+lista.map(function(p){return '<option value="'+p.id+'">'+usrEsc((p.full_name||p.email)+' · '+usrRoleLbl(p.role))+'</option>';}).join('')+'</select>';
+  }
+  usrWizResumo();
+}
+function usrWizFiltra(perms){ if(_usrWiz.admin) return perms; return perms.filter(function(p){ return _usrWiz.mods.indexOf(usrTelaModulo(p.tela))>=0; }); }
+function usrWizEscolheRole(r){
+  _usrWiz.role=r; _usrWiz.de='';
+  _usrWiz.perms=usrWizFiltra((ROLE_PRESETS[r]||[]).map(function(t){ return {tela:t,pode_ver:true,pode_criar:true,pode_editar:true,pode_excluir:false,pode_exportar:false}; }));
+  usrWizResumo();
+}
+async function usrWizEscolhePessoa(id){
+  _usrWiz.de=id; var p=(profiles||[]).find(function(x){return x.id===id;}); _usrWiz.role=p?p.role:'';
+  _usrWiz.perms=[]; usrWizResumo('Lendo o acesso de '+usrEsc(p&&(p.full_name||p.email)||'')+'…');
+  try{
+    var rows=await dbSelect('permissoes','user_id=eq.'+id+'&select=tela,pode_ver,pode_criar,pode_editar,pode_excluir,pode_exportar&order=tela.asc')||[];
+    _usrWiz.perms=usrWizFiltra(rows.filter(function(x){ return x.pode_ver||x.pode_criar||x.pode_editar||x.pode_excluir||x.pode_exportar; }));
+    var uu=await dbSelect('user_units','user_id=eq.'+id+'&select=unit_id&order=unit_id.asc')||[];
+    var permitidas=_usrWiz.unidades.map(function(u){return u.id;});
+    _usrWiz.units=uu.map(function(x){return x.unit_id;}).filter(function(u){ return permitidas.indexOf(u)>=0; });
+    usrWizUnidadesRender();
+  }catch(e){ usrWizResumo('Não consegui ler o acesso: '+usrEsc(e.message||e)); return; }
+  usrWizResumo();
+}
+async function usrWizUnidades(){
+  var box=ge('uw-units'); if(!box) return;
+  var L=[];
+  try{
+    if(_usrWiz.admin||(profile&&profile.role==='gestor')) L=await dbSelect('units','company_id=eq.'+_usrWiz.cid+'&active=eq.true&order=is_main.desc,name.asc')||[];
+    else { var minhas=(await dbSelect('user_units','user_id=eq.'+cu.id+'&select=unit_id&order=unit_id.asc')||[]).map(function(x){return x.unit_id;});
+      L=minhas.length?(await dbSelect('units','id=in.('+minhas.join(',')+')&order=is_main.desc,name.asc')||[]):[]; }
+  }catch(_e){ L=[]; }
+  _usrWiz.unidades=L;
+  if(!_usrWiz.units.length){ var atual=(typeof activeUnit!=="undefined"&&activeUnit)||null; _usrWiz.units=L.filter(function(u){ return atual?u.id===atual:u.is_main; }).map(function(u){return u.id;}); if(!_usrWiz.units.length&&L.length) _usrWiz.units=[L[0].id]; }
+  usrWizUnidadesRender();
+}
+function usrWizUnidadesRender(){
+  var box=ge('uw-units'); if(!box||!_usrWiz) return;
+  if(!_usrWiz.unidades.length){ box.innerHTML='<span style="font-size:12px;color:var(--text3)">Nenhuma unidade disponível.</span>'; return; }
+  box.innerHTML=_usrWiz.unidades.map(function(u){ var on=_usrWiz.units.indexOf(u.id)>=0;
+    return '<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:'+(on?'var(--accent)':'var(--bg2)')+';color:'+(on?'#fff':'inherit')+'"><input type="checkbox" style="display:none" '+(on?'checked':'')+' onchange="usrWizUnit(\''+u.id+'\',this.checked)">'+usrEsc(u.name)+(u.is_main?' (matriz)':'')+'</label>'; }).join('');
+  usrWizResumo();
+}
+function usrWizUnit(id,on){ _usrWiz.units=_usrWiz.units.filter(function(x){return x!==id;}); if(on) _usrWiz.units.push(id); usrWizUnidadesRender(); }
+function usrWizResumo(msg){
+  var box=ge('uw-resumo'); if(!box||!_usrWiz) return;
+  if(msg){ box.innerHTML=msg; return; }
+  if(!_usrWiz.role){ box.innerHTML='Escolha o perfil ou a pessoa.'; return; }
+  var porMod={}; _usrWiz.perms.filter(function(p){return p.pode_ver;}).forEach(function(p){ var m=usrTelaModulo(p.tela)||'outros'; porMod[m]=(porMod[m]||0)+1; });
+  var nT=Object.keys(porMod).reduce(function(a,k){return a+porMod[k];},0);
+  var nome=(ge('uw-nome')&&ge('uw-nome').value.trim())||'A pessoa', de=_usrWiz.de&&(profiles||[]).find(function(x){return x.id===_usrWiz.de;});
+  var un=_usrWiz.unidades.filter(function(u){return _usrWiz.units.indexOf(u.id)>=0;}).map(function(u){return usrEsc(u.name);});
+  var ok='<span style="color:var(--green-text);font-weight:700">✓</span> ';
+  box.innerHTML='<b style="color:var(--text)">'+usrEsc(nome.split(' ')[0])+' vai nascer com:</b><br>'
+    +ok+'Função: '+usrEsc(usrRoleLbl(_usrWiz.role))+'<br>'
+    +ok+nT+' tela(s)'+(de?' iguais às de '+usrEsc((de.full_name||de.email||'').split(' ')[0]):' do perfil')+(nT?' ('+Object.keys(porMod).sort().map(function(k){return usrEsc(k)+' '+porMod[k];}).join(' · ')+')':'')+'<br>'
+    +ok+'Unidades: '+(un.length?un.join(', '):'<span style="color:var(--amber-text)">nenhuma marcada</span>')+'<br>'
+    +'<span style="color:var(--text3)">✗ Não copia: funcionário vinculado, assinatura, direito de aprovação, master de módulo</span>'
+    +(!_usrWiz.admin&&!nT?'<div style="color:var(--amber-text);margin-top:4px">Esse perfil não tem telas do seu módulo.</div>':'');
+}
+async function usrWizSalvar(){
+  var W=_usrWiz; if(!W) return;
+  var nome=(ge('uw-nome').value||'').trim(), email=(ge('uw-email').value||'').trim().toLowerCase(), senha=ge('uw-senha').value||'';
+  if(!nome||!/^\S+@\S+\.\S+$/.test(email)){ portErr('Informe nome e e-mail válido.'); return; }
+  if(senha.length<6){ portErr('Senha mínima de 6 caracteres.'); return; }
+  if(!W.role){ portErr('Escolha o perfil ou a pessoa para copiar o acesso.'); return; }
+  if(!W.admin&&!W.perms.length){ portErr('Esse acesso não tem nenhuma tela do seu módulo.'); return; }
+  if((profiles||[]).some(function(p){ return String(p.email||'').toLowerCase()===email; })){ portErr('Já existe um usuário com este e-mail.'); return; }
+  portSaving();
+  try{
+    var a=await sbAuth('signup',{email:email,password:senha,data:{full_name:nome}});
+    if(!a.ok) throw new Error((a.data&&(a.data.msg||a.data.error_description||a.data.message))||'Erro ao criar o login.');
+    var uid=(a.data&&a.data.user&&a.data.user.id)||(a.data&&a.data.id)||null;
+    if(!uid) throw new Error('O login não devolveu o ID. Verifique se o e-mail já está cadastrado.');
+    var empresas=[];
+    if(W.admin&&W.de){ try{ empresas=(await dbSelect('user_companies','user_id=eq.'+W.de+'&select=company_id&order=company_id.asc')||[]).map(function(x){return x.company_id;}); }catch(_e){} }
+    var r=await dbRpc('usr_criar_acesso',{p_user:uid,p_nome:nome,p_email:email,p_role:W.role,p_company:W.cid,
+      p_perms:W.perms.map(function(p){ return {tela:p.tela,pode_ver:!!p.pode_ver,pode_criar:!!p.pode_criar,pode_editar:!!p.pode_editar,pode_excluir:!!p.pode_excluir,pode_exportar:!!p.pode_exportar}; }),
+      p_units:W.units, p_empresas:empresas});
+    if(Array.isArray(profiles)) profiles.unshift({id:uid,full_name:nome,email:email,role:W.role,company_id:(r&&r.empresa)||W.cid});
+    var mail='';
+    if(ge('uw-mail')&&ge('uw-mail').checked){
+      try{ var comp2=(companies||[]).find(function(c){return c.id===((r&&r.empresa)||W.cid);});
+        var e=await fetch(SB_URL+'/functions/v1/send-email',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':SB_KEY},
+          body:JSON.stringify({from:'VERUS ERP <noreply@mklogistica.com>',to:[email],subject:'Bem-vindo ao VERUS ERP — '+((comp2&&comp2.name)||''),
+            html:htmlEmailAcesso({nome:nome,email:email,empresa:(comp2&&comp2.name)||'—',role:W.role,senha:senha,reenvio:false})})});
+        mail=e.ok?' · e-mail enviado':' · e-mail NÃO saiu (reenvie pela lista)'; }catch(_m){ mail=' · e-mail NÃO saiu (reenvie pela lista)'; }
+    }
+    portClose(); _usrWiz=null;
+    showToast('Usuário '+nome+' criado · '+((r&&r.telas)||0)+' tela(s) · '+((r&&r.unidades)||0)+' unidade(s)'+mail,'green');
+    render();
+  }catch(e){ portErr(String(e.message||e).replace(/^\[rpc [^\]]+\]\s*/,'')); }
+}
+
+// ── página do master: equipe do módulo ──
+function rUsrEquipe(){ setTimeout(usrEquipeCarregar,0);
+  return '<div class="sechdr"><span class="sectitle">Equipe do módulo · '+usrEsc((usrModsMaster||[]).join(', '))+'</span><button class="btn btn-p btn-sm" onclick="usrWizAbrir()">⚡ Criar usuário</button></div>'
+    +'<div style="font-size:12.5px;color:var(--text3);margin:-4px 0 12px">Você é master: cria usuários com as telas do seu módulo. Para mudar função, outros módulos ou tirar acesso, fale com o administrador.</div>'
+    +'<div id="usr-equipe-lista"><div style="padding:20px;text-align:center;color:var(--text3)"><span class="spin spinner-dark"></span> Carregando…</div></div>'; }
+async function usrEquipeCarregar(){
+  var box=ge('usr-equipe-lista'); if(!box) return;
+  try{
+    var telas=TELAS.filter(function(t){ return usrModsMaster.indexOf(t.modulo)>=0; }).map(function(t){return t.id;});
+    var rows=telas.length?(await dbSelectAll('permissoes','tela=in.('+telas.join(',')+')&pode_ver=eq.true&select=user_id,tela')||[]):[];
+    var porUser={}; rows.forEach(function(r){ porUser[r.user_id]=(porUser[r.user_id]||0)+1; });
+    var cid=profile.company_id||company?.id;
+    var L=(profiles||[]).filter(function(p){ return porUser[p.id]&&p.role!=='admin'&&(!cid||p.company_id===cid); })
+      .sort(function(a,b){ return String(a.full_name||'').localeCompare(String(b.full_name||'')); });
+    box.innerHTML=L.length?L.map(function(p){ return '<div class="li"><div class="linfo"><div class="lname">'+usrEsc(p.full_name||'—')+'</div><div class="lsub">'+usrEsc(p.email||'')+' · '+usrEsc(usrRoleLbl(p.role))+' · '+porUser[p.id]+' tela(s) do módulo</div></div></div>'; }).join('')
+      :'<div class="empty"><p>Ninguém com telas do seu módulo ainda.</p></div>';
+  }catch(e){ box.innerHTML='<div style="color:var(--red-text);padding:12px">Erro ao carregar: '+usrEsc(e.message||e)+'</div>'; }
+}
+const APP_VERSION='v1.0.1441';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -2103,6 +2320,7 @@ async function loadPermissoes(){
   // voltam visiveis. Helpdesk e liberado explicitamente.
   if(role==='admin'){
     minhasPermissoes={};
+    setTimeout(verusTelasSync,2500);   // v1.0.1441: telas novas e padrões das funções vão para o banco e se distribuem sozinhos
     var _hdA=ge('nav-helpdesk');
     if(_hdA){var _hdMA=_hdA.closest('.nav-module'); if(_hdMA)_hdMA.style.display='';}
     return;
@@ -2131,8 +2349,8 @@ async function loadPermissoes(){
   try{
     let perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
     if(!perms||perms.length===0){
-      // Primeira vez: aplica preset do perfil automaticamente
-      await aplicarPreset(cu.id,role,company?.id);
+      // Primeira vez: aplica preset do perfil automaticamente (v1.0.1441: pelo banco — a tabela permissoes é fechada para gravação direta)
+      try{ await dbRpc('usr_preset_proprio',{}); }catch(_pp){ console.warn('preset próprio:',_pp); }
       perms=await dbSelect('permissoes',`user_id=eq.${cu.id}`);
     }
     (perms||[]).forEach(function(p){ minhasPermissoes[p.tela]=p; });
@@ -2164,6 +2382,7 @@ async function loadPermissoes(){
   _navShow('nav-qual-aprovacoes',['qual-documentos']);   // Aprovações herda a permissão de Documentos
   var _hdNav=ge('nav-helpdesk');
   if(_hdNav){var _hdM=_hdNav.closest('.nav-module'); if(_hdM)_hdM.style.display=(minhasPermissoes['helpdesk']&&minhasPermissoes['helpdesk'].pode_ver)?'':'none';}
+  usrCarregarMaster();   // v1.0.1441: master de módulo ganha "Equipe do módulo"
 
 }
 
@@ -7117,7 +7336,7 @@ function pg(p){
   if(_pgRole!=='admin'&&_pgRole!=='portaria'){
     // v1.0.1200: "Parâmetros" do WMS abre para quem pode ver qualquer aba dele (Depositantes, Prismas, Operadores)
     var _pgParamOk=(p==='wms-armazem')&&['wms-armazem','wms-clientes','wms-prismas','wms-operadores'].some(function(t){ return canDo(t,'pode_ver'); });
-    if(p!=='dashboard'&&p!=='cp-medicoes'&&!_pgParamOk&&!canDo(p,'pode_ver')){   // v1.0.1089: medições do próprio usuário não dependem do acesso ao financeiro
+    if(p!=='dashboard'&&p!=='cp-medicoes'&&!_pgParamOk&&!(p==='usr-equipe'&&(usrModsMaster||[]).length)&&!canDo(p,'pode_ver')){   // v1.0.1089: medições do próprio usuário não dependem do acesso ao financeiro
       return; // silencioso — sidebar já esconde o link
     }
   }
@@ -7340,6 +7559,7 @@ function render_i(){
   else if(curPage==='contatos')c.innerHTML=rContatos();
   else if(curPage==='pipeline')c.innerHTML=rPipeline();
   else if(curPage==='tarefas')c.innerHTML=rTarefas();
+  else if(curPage==='usr-equipe')c.innerHTML=rUsrEquipe();   // v1.0.1441
   else if(curPage==='admin')c.innerHTML=rAdmin();
   else if(curPage==='compras-solicitacoes')c.innerHTML=rComprasSolicitacoes();
   else if(curPage==='compras-cotacoes')c.innerHTML=rComprasCotacoes();
@@ -29094,7 +29314,7 @@ function rUsuarios(){
       </div>
     </div>`;
   }).join('');
-  return`<div class="sechdr"><span class="sectitle">Usuários (${lista.length})</span><button class="btn btn-p btn-sm" onclick="openModal('new_user')">+ Novo usuário</button></div>
+  return`<div class="sechdr"><span class="sectitle">Usuários (${lista.length})</span><span style="display:flex;gap:8px"><button class="btn btn-sm" style="border-color:var(--accent);color:var(--accent);font-weight:600" onclick="usrWizAbrir()" title="Cria o usuário já com o acesso igual a um perfil ou a outra pessoa">⚡ Criar usuário</button><button class="btn btn-p btn-sm" onclick="openModal('new_user')">+ Novo usuário</button></span></div>
   ${filtroHtml}
   ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>Nenhum usuário</p></div>'}`;
 }
@@ -29424,8 +29644,10 @@ function openModal(mode,id=null){
                  </div>`
               : '<div style="font-size:12px;color:var(--text3)">Nenhuma unidade ativa cadastrada para esta empresa.</div>')}
         </div>`;
+      const masterSec=await usrMasterSecHtml(id);   // v1.0.1441
       body.innerHTML=`
         <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">Configure o que este usuário pode fazer em cada tela.</div>
+        ${masterSec}
         ${unidadesSec}
         ${modulos.map(mod=>`
           <div style="margin-bottom:16px">
