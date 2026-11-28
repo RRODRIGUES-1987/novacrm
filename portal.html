@@ -3195,7 +3195,8 @@ var qrcode = function() {
    Tema claro do VERUS. Home estilo internet banking.
    Sem SUPABASE_URL configurada, roda em MODO DEMONSTRAÇÃO (memória).
    ===================================================================== */
-const PORTAL_VERSION = 'v1.8.35';   // v1.8.35: Biobalance — nota do SAP vale como faturado ("aguardando coleta · faturado"), agendamento pelo romaneio (em lote), DANFE/XML, rastreio e etiqueta dos Correios no quadro de pedidos   // v1.8.34: planilha de pedidos não diz mais "concluído" quando algum pedido falhou   // v1.8.33: aging do estoque em barras, com percentual do total e quantidade   // v1.8.32: NFs de cobertura viram submenu do Estoque; produto com cobertura pendente fica com a linha destacada
+const PORTAL_VERSION = 'v1.8.36';   // v1.8.36: CASCO — cliente nos agendamentos e coletas, filtro de datas, data de carregamento, espelho do pedido, observações no envio
+// (v1.8.35)   // v1.8.35: Biobalance — nota do SAP vale como faturado ("aguardando coleta · faturado"), agendamento pelo romaneio (em lote), DANFE/XML, rastreio e etiqueta dos Correios no quadro de pedidos   // v1.8.34: planilha de pedidos não diz mais "concluído" quando algum pedido falhou   // v1.8.33: aging do estoque em barras, com percentual do total e quantidade   // v1.8.32: NFs de cobertura viram submenu do Estoque; produto com cobertura pendente fica com a linha destacada
 // const PORTAL_VERSION_ANT = 'v1.8.31';   // v1.8.31: indicadores fecham no dia anterior; veículos retidos agora ficam em Agendamentos
 //   // v1.8.22: NF com diferença só de volumes fica laranja e aceita carta de correção (CC-e)
 //   // v1.8.20: desligar a NF (XML + DANFE) do pedido antes do romaneio
@@ -3730,7 +3731,7 @@ function mkItem(kind, o, estagio){
   const b=document.createElement('button'); b.className='item'; b.onclick=()=>openDetalhe(kind,o.id);
   const l2 = kind==='ped'
     ? `${ent?'Entrada':'Saída'} · ${(o.itens||[]).slice(0,2).map(i=>i.descricao.split(' ').slice(0,3).join(' ')+' × '+(+i.quantidade).toLocaleString('pt-BR')).join(' · ')}${(o.itens||[]).length>2?' · +'+((o.itens||[]).length-2):''}${o.nf_numero?' · NF '+o.nf_numero:''} · ${new Date(o.criado_em).toLocaleDateString('pt-BR')}`
-    : `${ent?'Entrada':'Saída'} · ${cdNome(o.cd)} · ${fmtDataLonga(o.data)} · ${fmtHora(o.hora_inicio)}–${fmtHora(o.hora_fim)}${o.placa?' · '+o.placa:''}`;
+    : `${ent?'Entrada':'Saída'} · ${cdNome(o.cd)} · ${fmtDataLonga(o.data)} · ${fmtHora(o.hora_inicio)}–${fmtHora(o.hora_fim)}${o.placa?' · '+o.placa:''}${(o.clientes||[]).length?' · <b style="font-weight:600;color:var(--ink,#1a1a1a)">'+esc(cliResumo(o.clientes))+'</b>':''}`;   // v1.8.36: cliente
   const badge = estagio
     ? `<span class="badge b-${estagio}">${estNome(estagio)}</span>`
     : `<span class="badge b-${o.status}">${stNome(o.status)}</span>`;
@@ -4211,9 +4212,22 @@ function pedIndHtml(p){
 let pedFiltro = {classe:'', tipo:'', fora:false};
 // v1.8.21: filtros do agendamento (como na tela de pedidos) · nasce sem os realizados (carregados) e os cancelados
 const AGD_OCULTOS_PADRAO = ['realizado','cancelado'];
-let agdFiltro = {tipo:'', fora:new Set(AGD_OCULTOS_PADRAO), q:''};
+let agdFiltro = {tipo:'', fora:new Set(AGD_OCULTOS_PADRAO), q:'', de:'', ate:'', per:''};
+// v1.8.36: período (data do agendamento)
+function agdIsoMais(d){ const x=new Date(); x.setDate(x.getDate()+d); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); }
+window.agdPeriodo = function(p){
+  agdFiltro.per = p;
+  if(p==='hoje'){ agdFiltro.de = agdIsoMais(0); agdFiltro.ate = agdIsoMais(0); }
+  else if(p==='7'){ agdFiltro.de = agdIsoMais(-7); agdFiltro.ate = ''; }
+  else if(p==='30'){ agdFiltro.de = agdIsoMais(-30); agdFiltro.ate = ''; }
+  else { agdFiltro.de = ''; agdFiltro.ate = ''; agdFiltro.per = ''; }
+  renderLista('agd');
+};
+window.agdData = function(k,v){ agdFiltro[k] = v||''; agdFiltro.per = 'manual'; renderLista('agd'); };
 function agdPassa(a){
   if(agdFiltro.tipo && a.tipo!==agdFiltro.tipo) return false;
+  if(agdFiltro.de && String(a.data||'') < agdFiltro.de) return false;   // v1.8.36
+  if(agdFiltro.ate && String(a.data||'') > agdFiltro.ate) return false;
   if(agdFiltro.fora.has(a.status)) return false;
   if(agdFiltro.q){ const q=agdFiltro.q.toLowerCase(); if(JSON.stringify(a).toLowerCase().indexOf(q)<0) return false; }
   return true;
@@ -4230,7 +4244,11 @@ function agdChips(){
     + '<span class="psep"></span>'
     + sts.map(st=>ch((agdFiltro.fora.has(st)?'':'✓ ')+((st==='realizado')?'Carregado / realizado':stNome(st))+' '+n(a=>a.status===st), !agdFiltro.fora.has(st), "agdTogSit('"+st+"')")).join('')
     + '<span class="psep"></span>'
-    + `<input id="agdQ" placeholder="🔍 placa, protocolo, transportadora, pedido" value="${String(agdFiltro.q).replace(/"/g,'&quot;')}" oninput="agdBusca(this.value)" style="min-width:240px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:13px">`;
+    + `<input id="agdQ" placeholder="🔍 placa, protocolo, transportadora, pedido, cliente" value="${String(agdFiltro.q).replace(/"/g,'&quot;')}" oninput="agdBusca(this.value)" style="min-width:240px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:13px">`
+    + `<div style="flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px"><span style="font-size:12.5px;color:var(--muted)">Período</span>`   // v1.8.36
+    + ch('Hoje', agdFiltro.per==='hoje', "agdPeriodo('hoje')") + ch('7 dias', agdFiltro.per==='7', "agdPeriodo('7')") + ch('30 dias', agdFiltro.per==='30', "agdPeriodo('30')") + ch('Tudo', !agdFiltro.de&&!agdFiltro.ate, "agdPeriodo('')")
+    + `<span style="font-size:12.5px;color:var(--muted)">de</span><input type="date" value="${agdFiltro.de}" onchange="agdData('de',this.value)" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px">`
+    + `<span style="font-size:12.5px;color:var(--muted)">até</span><input type="date" value="${agdFiltro.ate}" onchange="agdData('ate',this.value)" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div>`;
 }
 function pedChips(){
   const el=$('pedChips'); if(!el) return;
@@ -4560,18 +4578,25 @@ async function plLerCasco(f){
   if(h<0) return null;
   const hd=r0[h].map(plNorm), ci=n=>hd.findIndex(x=>x===n||x.startsWith(n));
   const cSku=ci('numero do item'), cQtd=ci('qtde separar'), cCli=ci('nome cliente'), cOv=ci('ov casco'), cOc=ci('oc cliente'), cItCli=ci('item cliente');
+  // v1.8.36: todas as colunas da planilha (para o espelho do pedido)
+  const cSep=hd.findIndex(x=>/separacao$/.test(x)&&/^n/.test(x)), cItF=ci('item fornecedor'), cCod=ci('codigo cliente'), cObs=ci('observacao'), cCas=hd.indexOf('cas'),
+        cOs=hd.findIndex(x=>x.replace(/\W/g,'')==='os'), cVol=ci('volume'), cEmb=hd.findIndex(x=>/embarque$/.test(x));
+  const _v=(r,c)=>c>=0?String((r||[])[c]==null?'':(r||[])[c]).trim():'';
   const ovs=[]; for(let i=h+1;i<r0.length;i++){ const ov=String((r0[i]||[])[cOv]||'').trim().split('-')[0]; if(ov && /^\d+$/.test(ov) && ovs.indexOf(ov)<0) ovs.push(ov); }
   const mOs=String(f.name||'').match(/(\d{4,})/);
   const base=String(f.name||'').replace(/\.[^.]+$/,'').replace(/^separa[cç][aã]o de carga\s*-\s*/i,'').slice(0,40);
   // v1.8.10: UM pedido por número de separação (a planilha) — as OVs da separação vão juntas no mesmo pedido;
   //          cada linha guarda a sua OV, para a rastreabilidade e a nota
   const doc='OV '+(ovs.join('/')||'?')+(mOs?(' · OS ant. '+mOs[1]):(' · '+base));
-  const ped={doc, arquivo:f.name, itens:[]};
+  const ped={doc, arquivo:f.name, itens:[], _file:f, planilha:{separacao:'', linhas:[]}};
   for(let i=h+1;i<r0.length;i++){ const r=r0[i]; const sku=String(r[cSku]||'').trim(); if(!/^\d{10}-\d{2}$/.test(sku)) continue;
     const oc=cOc>=0?String(r[cOc]||'').trim():''; const m=oc.match(/^(.*?)[-\/\s]+(\d+)$/);
     const ovL=String(r[cOv]||'').trim().split('-')[0];
     ped.itens.push({sku, qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0, destinatario:cCli>=0?String(r[cCli]||'').trim():'',
-      oc:m?m[1].trim():oc, ocLinha:m?m[2]:'', itemCliente:cItCli>=0?String(r[cItCli]||'').trim():'', ov:/^\d+$/.test(ovL)?ovL:''}); }
+      oc:m?m[1].trim():oc, ocLinha:m?m[2]:'', itemCliente:cItCli>=0?String(r[cItCli]||'').trim():'', ov:/^\d+$/.test(ovL)?ovL:''});
+    ped.planilha.linhas.push({sep:_v(r,cSep), ov:_v(r,cOv), oc:oc, item:sku, item_fornecedor:_v(r,cItF), codigo_cliente:_v(r,cCod), nome_cliente:_v(r,cCli),
+      qtd:parseFloat(String(r[cQtd]||'0').replace(',','.'))||0, item_cliente:_v(r,cItCli), obs:_v(r,cObs), cas:_v(r,cCas), os:_v(r,cOs), volume:_v(r,cVol), embarque:_v(r,cEmb)});
+    if(!ped.planilha.separacao && _v(r,cSep)) ped.planilha.separacao=_v(r,cSep); }   // v1.8.36
   return ped.itens.length?[ped]:[];
 }
 window.plImportar = async function(files){
@@ -4590,8 +4615,10 @@ window.plImportar = async function(files){
   document.body.insertAdjacentHTML('beforeend', `<div id="mPl" class="overlay" role="dialog" aria-modal="true"><div class="modal" style="max-width:640px">
     <div class="modal-h"><h3>Subir planilha de pedidos</h3></div>
     <div class="modal-b">${lidos.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Pedido</th><th>Destinatário</th><th class="num">Itens</th><th class="num">Peças</th></tr></thead><tbody>
-      ${lidos.map(r=>`<tr><td>${esc(r.doc)}</td><td>${esc(r.itens[0].destinatario||'—')}</td><td class="num">${r.itens.length}</td><td class="num">${n(r.itens.reduce((a,x)=>a+x.qtd,0))}</td></tr>`).join('')}
-      </tbody></table></div>`:'<p class="hint">Nenhuma planilha no formato de pedidos (colunas "Número do item" e "Qtde Separar").</p>'}
+      ${lidos.map(r=>`<tr><td>${esc(r.doc)}${r.planilha&&r.planilha.separacao?'<div class="hint" style="font-size:11.5px">'+esc(r.planilha.separacao)+'</div>':''}</td><td>${esc(r.itens[0].destinatario||'—')}</td><td class="num">${r.itens.length}</td><td class="num">${n(r.itens.reduce((a,x)=>a+x.qtd,0))}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${lidos.map((r,i)=>`<label style="display:block;margin-top:10px;font-size:12.5px;color:var(--muted)">Observações${lidos.length>1?' · '+esc(r.doc):''}
+        <textarea id="plObs${i}" rows="2" maxlength="500" placeholder="Ex.: entregar só após as 14h; cliente pede a nota junto com o pedido" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:13.5px;color:var(--ink,#1a1a1a)"></textarea></label>`).join('')}`:'<p class="hint">Nenhuma planilha no formato de pedidos (colunas "Número do item" e "Qtde Separar").</p>'}
       ${fora.length?`<p class="hint" style="margin-top:8px">Fora do formato: ${fora.map(esc).join(', ')}</p>`:''}
       <div id="plRes" style="margin-top:10px"></div></div>
     <div class="modal-f"><button class="btn btn-ghost" onclick="$('mPl').remove()">Fechar</button>${lidos.length?`<button class="btn btn-primary" id="plGo" onclick="plEnviar()">Enviar ${lidos.length} pedido(s)</button>`:''}</div></div></div>`);
@@ -4602,9 +4629,16 @@ window.plEnviar = async function(){
   const L=window._plLidos||[], res=$('plRes'), bt=$('plGo'); if(bt){ bt.disabled=true; bt.textContent='Enviando…'; }
   const out=[]; let nErr=0;
   if(res) res.innerHTML='<div class="hint">Enviando 1 de '+L.length+'…</div>';
-  for(const r of L){
+  for(const [ix,r] of L.entries()){
     try{ const { data, error } = await sb.rpc('portal_importar_pedido', { p_documento:r.doc, p_itens:r.itens, p_arquivo:r.arquivo });
       if(error) throw error;
+      if(!data.ignorado){   // v1.8.36: observações, colunas da planilha e o arquivo original (não trava o envio se falhar)
+        try{ let path=null; const obs=(($('plObs'+ix)||{}).value||'').trim();
+          if(r._file && state.depositanteId){ path=`${state.depositanteId}/pedidos/${Date.now()}_${String(r._file.name||'pedido.xlsx').replace(/[^\w.\-]+/g,'_')}`;
+            const up=await sb.storage.from('portal-anexos').upload(path, r._file, { upsert:true, contentType:r._file.type||'application/octet-stream' }); if(up.error) path=null; }
+          await sb.rpc('portal_pedido_complemento', { p_documento:r.doc, p_observacoes:obs||null, p_planilha:r.planilha||{}, p_arquivo_path:path });
+        }catch(_c){ console.warn('complemento do pedido', _c); }
+      }
       out.push(data.ignorado?`${esc(r.doc)}: <span class="hint">${esc(data.motivo)}</span>`:`<b>${esc(r.doc)}</b> → OS ${esc(data.os)} · ${data.itens} item(ns)${data.volumes!=null?' · <b>'+data.volumes+' volume(s) para faturar</b>':''}${data.nao_cadastrados?' · <span style="color:#b45309">'+data.nao_cadastrados+' produto(s) não cadastrado(s): '+esc(data.skus_nao_cadastrados)+'</span>':''}${data.fora_do_multiplo?'<div style="color:#b91c1c;margin-top:2px">⚠ Quantidade fora do múltiplo do pacote — a separação fica parada até ajustar: '+esc(data.fora_do_multiplo)+'</div>':''}`);
     }catch(e){ nErr++; const m=String(e.message||e), lento=/statement timeout|canceling statement/i.test(m);
       out.push(`${esc(r.doc)}: <span style="color:#b91c1c"><b>não foi gravado</b> — ${lento?'o sistema demorou mais que o limite para gravar':esc(m)}</span>`); }
@@ -4615,7 +4649,48 @@ window.plEnviar = async function(){
   if(res) res.insertAdjacentHTML('beforeend', nErr
     ? `<div style="margin-top:8px;font-weight:600;color:#b91c1c">${nErr} de ${L.length} pedido(s) não foram gravados.</div><div class="hint" style="margin-top:4px">Nada desses pedidos ficou pela metade: pode clicar em "Enviar de novo" sem risco de duplicar${nOk?' (os que já entraram são ignorados)':''}. Se o erro continuar, avise a MKLOG.</div>`
     : '<div style="margin-top:8px;font-weight:600">✓ Envio concluído. Os pedidos já aparecem no quadro "Volumes para faturamento".</div>');
-  try{ const vf=await portalVolFat(); state.volFat=vf.data||[]; renderVolFat(); }catch(_e){}
+  try{ const vf=await portalVolFat(); state.volFat=vf.data||[]; await pedDatasCarregar(); renderVolFat(); }catch(_e){}
+};
+// v1.8.36: espelho do pedido (como a DANFE) — cabeçalho, itens com as colunas da planilha e a situação; imprime ou salva em PDF
+window.pedEspelho = async function(id){
+  const w = window.open('', '_blank'); if(!w){ toast('Libere as janelas (pop-up) do portal para ver o pedido.'); return; }
+  w.document.write('<p style="font-family:Arial;padding:20px">Carregando o pedido…</p>');
+  let d=null; try{ const r=await sb.rpc('portal_pedido_espelho', { p_pedido:id }); if(r.error) throw r.error; d=r.data; }catch(e){ w.document.body.innerHTML='<p style="font-family:Arial;padding:20px;color:#b91c1c">Não consegui abrir o pedido: '+esc(e.message||e)+'</p>'; return; }
+  if(!d){ w.document.body.innerHTML='<p style="font-family:Arial;padding:20px">Pedido não encontrado.</p>'; return; }
+  const pl=d.planilha||{}, lin=Array.isArray(pl.linhas)&&pl.linhas.length ? pl.linhas
+    : (d.itens||[]).map(i=>({ ov:'', item:i.sku, item_fornecedor:'', qtd:i.quantidade, item_cliente:i.item_cliente||'', oc:(i.oc||'')+(i.oc_linha?'-'+i.oc_linha:''), obs:'', descricao:i.descricao }));
+  const nf=v=>Number(v||0).toLocaleString('pt-BR'), dt=v=>v?new Date(v).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+  const COLS=[['ov','OV'],['item','Nº do item'],['descricao','Descrição'],['item_fornecedor','Item fornecedor'],['qtd','Qtde'],['item_cliente','Item cliente'],['oc','OC cliente'],['obs','Observação'],['cas','CAS'],['os','O.S.'],['volume','Volume'],['embarque','Nº embarque']]
+    .filter(([k])=>k==='item'||k==='qtd'||lin.some(x=>String(x[k]==null?'':x[k]).trim()!==''));
+  const uniq=k=>[...new Set(lin.map(x=>String(x[k]||'').split('-')[0].trim()).filter(Boolean))];
+  const ovs=uniq('ov').join(' / ')||String(d.pedido||'').replace(/^OV\s*/,'').split(' · ')[0], ocs=uniq('oc').join(' / ')||'—';
+  const codCli=(lin.find(x=>x.codigo_cliente)||{}).codigo_cliente||'';
+  const sit = d.carregado_em ? 'Carregado em '+dt(d.carregado_em) : ({importado:'Recebido pela MKLOG',em_separacao:'Em separação',separado:'Separado',conferido:'Conferido',em_romaneio:'Em carregamento',aguardando_saldo:'Aguardando saldo'}[d.status]||String(d.status||'—'));
+  const box=(k,v)=>`<div class="bx"><div class="k">${k}</div><div class="v">${esc(v||'—')}</div></div>`;
+  let urlArq=null; if(pl.arquivo_path){ try{ const u=await sb.storage.from('portal-anexos').createSignedUrl(pl.arquivo_path, 3600); urlArq=u&&u.data&&u.data.signedUrl; }catch(_e){} }
+  w.document.open(); w.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Pedido ${esc(d.pedido||'')}</title><style>
+    *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:18px;font-size:12px}
+    .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px}
+    h1{font-size:18px;margin:0} .sub{color:#555;margin-top:2px} .sep{border:1px solid #111;border-radius:4px;padding:4px 12px;text-align:right}
+    .sep .k,.bx .k{font-size:9.5px;color:#555;text-transform:uppercase;letter-spacing:.3px} .sep .v{font-size:16px;font-family:monospace}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #111;border-radius:4px;margin:10px 0}
+    .bx{padding:6px 8px;border-right:1px solid #111} .bx:last-child{border-right:0} .bx .v{font-size:12.5px;margin-top:2px}
+    table{width:100%;border-collapse:collapse} th{background:#1e3a8a;color:#fff;text-align:left;padding:6px;font-size:10.5px;font-weight:600} td{padding:5px 6px;border-bottom:1px solid #ddd}
+    td.n,th.n{text-align:right} .obs{border:1px solid #111;border-radius:4px;padding:6px 8px;margin-top:10px} .rod{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#333}
+    .bt{font:inherit;padding:7px 14px;border:1px solid #111;border-radius:6px;background:#fff;cursor:pointer;margin-left:6px;text-decoration:none;color:#111}
+    @media print{.noprint{display:none} body{padding:8mm}}
+  </style></head><body>
+    <div class="top"><div><h1>Espelho do pedido</h1><div class="sub">${esc(d.depositante||'')} · operação MK Logística</div></div>
+      <div class="sep"><div class="k">Nº separação</div><div class="v">${esc(pl.separacao||d.os||'—')}</div></div></div>
+    <div class="grid">${box('OV',ovs)}${box('OC cliente',ocs)}${box('Cliente',(d.destinatario||'')+(codCli?' ('+codCli+')':''))}${box('Subiu em',dt(d.criado_em))}</div>
+    <table><thead><tr>${COLS.map(([k,t])=>`<th${k==='qtd'?' class="n"':''}>${t}</th>`).join('')}</tr></thead><tbody>
+      ${lin.map(x=>`<tr>${COLS.map(([k])=>k==='qtd'?`<td class="n">${nf(x.qtd)}</td>`:`<td>${esc(x[k]==null||x[k]===''?'—':x[k])}</td>`).join('')}</tr>`).join('')}
+      <tr><td colspan="${COLS.findIndex(c=>c[0]==='qtd')}" style="font-weight:600">${lin.length} item(ns)</td><td class="n" style="font-weight:600">${nf(lin.reduce((a,x)=>a+Number(x.qtd||0),0))}</td><td colspan="${Math.max(COLS.length-COLS.findIndex(c=>c[0]==='qtd')-1,0)}"></td></tr>
+    </tbody></table>
+    ${d.observacoes?`<div class="obs"><div class="k" style="font-size:9.5px;color:#555;text-transform:uppercase">Observações do cliente</div>${esc(d.observacoes)}</div>`:''}
+    <div class="rod"><div><b>Situação:</b> ${esc(sit)}${d.nf?' · NF '+esc(d.nf):''}${d.placa?' · placa '+esc(d.placa):''}${d.romaneio?' · romaneio '+esc(d.romaneio):''} · OS MKLOG ${esc(d.os||'—')}</div>
+      <div class="noprint"><button class="bt" onclick="window.print()">Imprimir / PDF</button>${urlArq?`<a class="bt" href="${urlArq}" target="_blank" rel="noopener">Planilha original</a>`:''}</div></div>
+  </body></html>`); w.document.close();
 };
 window.renderRastreio = function(){
   const box = $('rastBox'); if(!box) return;
@@ -4790,6 +4865,13 @@ window.nfEscolher = function(pedidoId){
   const i=document.createElement('input'); i.type='file'; i.accept='.xml,text/xml,.pdf,application/pdf'; i.multiple=true;
   i.onchange=()=>nfEnviar(i.files, pedidoId); i.click();
 };
+// v1.8.36: cliente (destinatário) resumido — o primeiro e quantos faltam
+function cliResumo(L){ L=(L||[]).filter(Boolean); return L.length ? L[0]+(L.length>1?' (+'+(L.length-1)+')':'') : ''; }
+// v1.8.36: data de carregamento (último bipe de embarque) e observações de cada pedido
+async function pedDatasCarregar(){
+  state.pedDatas = {};
+  try{ if(!podeVer('ped')) return; const r = await sb.rpc('portal_pedidos_datas'); ((r && !r.error && r.data) || []).forEach(x=>{ state.pedDatas[x.id] = x; }); }catch(_e){}
+}
 window.renderColetas = function(){
   const box = $('coletasBox'); if(!box) return;
   const L = state.coletas || []; if(!L.length){ box.classList.add('hide'); return; }
@@ -4800,8 +4882,8 @@ window.renderColetas = function(){
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
     <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Coletas e recebimentos · últimos 30 dias <span class="hint" style="font-weight:400">horários registrados na portaria e na doca da MKLOG</span>
       <button class="btn btn-ghost" style="width:auto;margin-left:auto;padding:4px 10px" onclick="coletasCsv()">Exportar CSV</button></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Dia</th><th>Placa</th><th>Tipo</th><th>Agendado</th><th>Chegou</th><th>Doca</th><th>Carregado</th><th>Saiu</th><th class="num">Espera</th><th class="num">Total</th><th></th></tr></thead><tbody>
-    ${L.map(r=>`<tr><td>${dia(r.chegada_em||r.agendado_em)}</td><td>${esc(r.placa||'—')}</td><td>${r.movimento==='descarga'?'Recebimento':'Coleta'}</td>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Dia</th><th>Placa</th><th>Cliente</th><th>Tipo</th><th>Agendado</th><th>Chegou</th><th>Doca</th><th>Carregado</th><th>Saiu</th><th class="num">Espera</th><th class="num">Total</th><th></th></tr></thead><tbody>
+    ${L.map(r=>`<tr><td>${dia(r.chegada_em||r.agendado_em)}</td><td>${esc(r.placa||'—')}</td><td title="${esc((r.clientes||[]).join(' · '))}">${esc(cliResumo(r.clientes)||'—')}</td><td>${r.movimento==='descarga'?'Recebimento':'Coleta'}</td>
       <td>${h(r.agendado_em)}</td><td>${h(r.chegada_em)}</td><td>${h(r.doca_em)}</td><td>${h(r.fim_carreg_em)}</td><td><b>${h(r.saida_em)}</b></td>
       <td class="num">${dur(r.espera_min)}</td><td class="num">${dur(r.total_min)}</td>
       <td style="white-space:nowrap">${r.foto_bau_url?`<a href="${r.foto_bau_url}" target="_blank" rel="noopener">foto do baú</a>`:''}${r.foto_bau_url&&r.termo_assinado_url?' · ':''}${r.termo_assinado_url?`<a href="${r.termo_assinado_url}" target="_blank" rel="noopener">termo</a>`:''}</td></tr>`).join('')}
@@ -4810,8 +4892,8 @@ window.renderColetas = function(){
 window.coletasCsv = function(){
   const L = state.coletas || [], f = d => d ? new Date(d).toLocaleString('pt-BR') : '';
   const q = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"';
-  const lin = [['Placa','Tipo','Romaneio','Agendado','Chegou','Doca','Fim do carregamento','Saiu','Espera (min)','Total (min)','Foto do baú','Termo assinado'].map(q).join(';')]
-    .concat(L.map(r=>[r.placa,r.movimento==='descarga'?'Recebimento':'Coleta',r.romaneio,f(r.agendado_em),f(r.chegada_em),f(r.doca_em),f(r.fim_carreg_em),f(r.saida_em),r.espera_min,r.total_min,r.foto_bau_url,r.termo_assinado_url].map(q).join(';')));
+  const lin = [['Placa','Cliente','Tipo','Romaneio','Agendado','Chegou','Doca','Fim do carregamento','Saiu','Espera (min)','Total (min)','Foto do baú','Termo assinado'].map(q).join(';')]
+    .concat(L.map(r=>[r.placa,(r.clientes||[]).join(' / '),r.movimento==='descarga'?'Recebimento':'Coleta',r.romaneio,f(r.agendado_em),f(r.chegada_em),f(r.doca_em),f(r.fim_carreg_em),f(r.saida_em),r.espera_min,r.total_min,r.foto_bau_url,r.termo_assinado_url].map(q).join(';')));
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['\ufeff'+lin.join('\n')],{type:'text/csv;charset=utf-8'})); a.download='coletas_'+(state.depositante||'').replace(/\W+/g,'_')+'.csv'; a.click();
 };
 if(typeof window.esc!=='function') window.esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));   // v1.7.6
@@ -5091,7 +5173,7 @@ window.renderVolFat = function(){
   const n = v => Number(v||0).toLocaleString('pt-BR');
   box.innerHTML = `<div style="border:1px solid var(--border,#e5e5e5);border-radius:12px;overflow:hidden">
     <div style="padding:10px 14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Pedidos em andamento <span class="hint" style="font-weight:400">volumes pelas reservas atuais da MKLOG · caixas fechadas + 1 caixa por produto com sobra</span><span style="margin-left:auto;font-size:12.5px;font-weight:500;color:#64748b">${L.filter(volPasa).length} pedido(s)${Object.keys(state.volF||{}).length?` · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a>`:''}</span></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido${volFiltBtn('ped')}</th><th>Destinatário${volFiltBtn('dest')}</th><th>Situação${volFiltBtn('sit')}</th><th class="num">Volumes${volFiltBtn('vol')}</th><th class="num">Peso${volFiltBtn('peso')}</th><th>Nota fiscal${volFiltBtn('nf')}</th><th></th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr>${podeVer('agd')?'<th style="width:28px"></th>':''}<th>Pedido${volFiltBtn('ped')}</th><th>Destinatário${volFiltBtn('dest')}</th><th>Carregado em</th><th>Situação${volFiltBtn('sit')}</th><th class="num">Volumes${volFiltBtn('vol')}</th><th class="num">Peso${volFiltBtn('peso')}</th><th>Nota fiscal${volFiltBtn('nf')}</th><th></th></tr></thead><tbody>
     ${L.map((r,i)=>{ if(!volPasa(r)) return ''; const sit=r.situacao||'aguardando_separacao', SIT={carregado:['carregado','#e5e7eb','#374151'],em_separacao:['em separação','#dbeafe','#1e40af'],separado:['separado','#dcfce7','#166534'],conferido:['conferido','#d1fae5','#065f46'],aguardando_coleta:['aguardando coleta · faturado','#fef3c7','#92400e'],em_romaneio:['em carregamento','#ede9fe','#5b21b6'],aguardando_saldo:['aguardando saldo','#fee2e2','#991b1b'],aguardando_separacao:['aguardando separação','#f1f5f9','#475569']}[sit]||[sit,'#f1f5f9','#475569'];
       const semSaldo = sit==='aguardando_saldo', semLista = sit==='aguardando_separacao';
       const foraMult = semSaldo && /não fecha pacote/.test(r.faltas||'');   // v1.8.13
@@ -5125,11 +5207,12 @@ window.renderVolFat = function(){
       const apto=r.nf&&(r.nf_status!=='divergente'||r._nfOk)&&['conferido','aguardando_coleta','separado','em_separacao'].includes(sit);
       r._apto=!!apto;   // v1.8.23
       return `<tr>${podeVer('agd')?`<td>${apto?`<input type="checkbox" ${_qSel.has(r.id)?'checked':''} onchange="qSelToggle('${r.id}',this.checked)" title="Marcar para agendar">`:''}</td>`:''}<td>${esc(ped1)}<div class="hint" style="font-size:11.5px">${esc(ped2?ped2+' · ':'')}${dt}</div></td><td>${esc(r.destinatario||'—')}</td>
+      <td style="white-space:nowrap">${(()=>{ const d=(state.pedDatas||{})[r.id]; return d&&d.carregado_em ? new Date(d.carregado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '<span class="hint">—</span>'; })()}</td>
       <td><span style="font-size:12px;padding:2px 9px;border-radius:99px;background:${foraMult?'#ffedd5':SIT[1]};color:${foraMult?'#9a3412':SIT[2]};white-space:nowrap">${foraMult?'itens fora do múltiplo':SIT[0]}</span>${semSaldo&&r.faltas?`<div class="hint" style="font-size:11.5px;margin-top:3px">${esc(r.faltas)}</div>`:''}${(()=>{ const rs=(state.rsvSol||{})[r.id]; if(!foraMult||!rs) return ''; if(rs.situacao==='pendente') return `<div style="font-size:11.5px;margin-top:4px;color:#1e40af"><b>⏳ Reserva manual aguardando aceite da MK Logística</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; if(rs.situacao==='recusada') return `<div style="font-size:11.5px;margin-top:4px;color:#b91c1c"><b>Reserva manual recusada</b><div class="hint" style="font-size:11px">${esc(rs.motivo||'')}</div></div>`; return ''; })()}</td>
       <td class="num">${r.volumes!=null?'<b>'+n(r.volumes)+'</b>':'<span class="hint">'+(semSaldo?'—':'a calcular')+'</span>'}</td><td class="num">${r.peso_kg?n(r.peso_kg)+' kg':'—'}</td>
       <td>${nf}</td>
-      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button>${(foraMult&&!(state.rsvSol||{})[r.id]?.situacao||foraMult&&(state.rsvSol||{})[r.id]?.situacao==='recusada')?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Pedir à MK Logística que reserve o RG fora do padrão (ex.: saco aberto)" onclick="pedSolicitarReserva(${i})">🔑 Reserva manual</button>`:''}${(!r.nf&&(semLista||semSaldo))?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px;color:#b91c1c" title="Excluir pedido (ainda não separado e sem nota)" onclick="pedExcluir(${i})">🗑</button>`:''}</td></tr>`; }).join('')}
-    ${L.some(volPasa)?'':'<tr><td colspan="9" style="text-align:center;padding:18px;color:#64748b">Nenhum pedido com esses filtros · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a></td></tr>'}
+      <td style="white-space:nowrap;text-align:right">${(r.volumes!=null&&!r.pendentes)?`<button class="btn btn-ghost" style="width:auto;padding:4px 10px" onclick="volFatDet(${i})">detalhe</button>`:''} <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Ver pedido (espelho para imprimir)" onclick="pedEspelho('${r.id}')">📄 Ver pedido</button> <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Rastreabilidade do pedido" onclick="rastAbrir(${i})">🔍</button>${(foraMult&&!(state.rsvSol||{})[r.id]?.situacao||foraMult&&(state.rsvSol||{})[r.id]?.situacao==='recusada')?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px" title="Pedir à MK Logística que reserve o RG fora do padrão (ex.: saco aberto)" onclick="pedSolicitarReserva(${i})">🔑 Reserva manual</button>`:''}${(!r.nf&&(semLista||semSaldo))?` <button class="btn btn-ghost" style="width:auto;padding:4px 10px;color:#b91c1c" title="Excluir pedido (ainda não separado e sem nota)" onclick="pedExcluir(${i})">🗑</button>`:''}</td></tr>`; }).join('')}
+    ${L.some(volPasa)?'':'<tr><td colspan="10" style="text-align:center;padding:18px;color:#64748b">Nenhum pedido com esses filtros · <a href="#" onclick="event.preventDefault();volFiltLimpar()">limpar filtros</a></td></tr>'}
     </tbody></table></div><div id="nfSelBar">${nfSelBarHtml()}</div><div id="qSelBar">${qSelBarHtml()}</div></div>`;   // v1.8.9 · v1.8.23
 };
 // v1.8.16: excluir pedido ainda não separado e sem nota fiscal (o empenho volta ao estoque; a MKLOG vê como excluído pelo portal)
@@ -5802,6 +5885,8 @@ function showDone(kind, protocolo, msg){
     try{ const ra = podeVer('ped') ? await sb.rpc('portal_rastreio', { p_dias:30 }) : {data:[]}; state.rastreio = (ra && !ra.error && ra.data) || []; }catch(_e){ state.rastreio = []; }   // v1.7.3
     setTimeout(renderRastreio, 0);
     try{ const co = podeVer('agd') ? await sb.rpc('portal_coletas', { p_dias:30 }) : {data:[]}; state.coletas = (co && !co.error && co.data) || []; }catch(_e){ state.coletas = []; }   // v1.7.1
+    try{ if(podeVer('agd') && state.coletas.length){ const cc = await sb.rpc('portal_coletas_clientes', { p_dias:30 }); const mp = {}; ((cc && !cc.error && cc.data) || []).forEach(x=>{ mp[String(x.romaneio)] = x.clientes || []; });
+      state.coletas.forEach(r=>{ r.clientes = mp[String(r.romaneio||'')] || []; }); } }catch(_e){}   // v1.8.36
     setTimeout(renderColetas, 0);
     setTimeout(renderVolFat, 0);
     if(est.error) throw new Error('Estoque: '+est.error.message);
@@ -5820,6 +5905,9 @@ function showDone(kind, protocolo, msg){
     });
     // v1.6.5: agendamentos e janelas reais
     state.agendamentos = (ags && !ags.error ? (ags.data||[]) : []).map(a=>({ ...a, criado_em:a.created_at, anexos:[], cartao:a.protocolo }));
+    try{ if(podeVer('agd')){ const ac = await sb.rpc('portal_agd_clientes'); const mp = {}; ((ac && !ac.error && ac.data) || []).forEach(x=>{ mp[x.agendamento_id] = x.clientes || []; });
+      state.agendamentos.forEach(a=>{ a.clientes = mp[a.id] || []; }); } }catch(_e){}   // v1.8.36
+    await pedDatasCarregar();   // v1.8.36
     state.janelasView = (jan && !jan.error ? (jan.data||[]) : []);
     if(ags && ags.error) console.warn('agendamentos:', ags.error.message);
     state.ncs = []; state.faturas = []; state.laudos = [];
