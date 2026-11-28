@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1442 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1443 | Gerado: 2026-11-27 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1523,7 +1523,7 @@ async function verusTelasSync(){
 // admin: liga/desliga master de módulo (direto da tela de Permissões)
 async function usrMasterToggle(el,userId,modulo){
   el.disabled=true;
-  try{ await dbRpc('usr_master_definir',{p_user:userId,p_modulo:modulo,p_on:!!el.checked});
+  try{ await dbRpc('usr_master_definir',{p_user:userId,p_modulo:modulo,p_on:!!el.checked}); if(typeof usrExtras!=='undefined') usrExtras.cid=null;
     showToast((el.checked?'Agora é master do módulo ':'Deixou de ser master do módulo ')+modulo+(el.checked?' (recebeu todas as telas do módulo)':''),'green');
     if(el.checked&&mmode==='permissoes'&&mid===userId){ setTimeout(function(){ openModal('permissoes',userId); },300); }
   }catch(e){ el.checked=!el.checked; showToast('Não consegui alterar: '+(e.message||e),'red'); }
@@ -1667,7 +1667,7 @@ async function usrWizSalvar(){
             html:htmlEmailAcesso({nome:nome,email:email,empresa:(comp2&&comp2.name)||'—',role:W.role,senha:senha,reenvio:false})})});
         mail=e.ok?' · e-mail enviado':' · e-mail NÃO saiu (reenvie pela lista)'; }catch(_m){ mail=' · e-mail NÃO saiu (reenvie pela lista)'; }
     }
-    portClose(); _usrWiz=null;
+    portClose(); _usrWiz=null; if(typeof usrExtras!=='undefined') usrExtras.cid=null;
     showToast('Usuário '+nome+' criado · '+((r&&r.telas)||0)+' tela(s) · '+((r&&r.unidades)||0)+' unidade(s)'+mail,'green');
     render();
   }catch(e){ portErr(String(e.message||e).replace(/^\[rpc [^\]]+\]\s*/,'')); }
@@ -1691,7 +1691,7 @@ async function usrEquipeCarregar(){
       :'<div class="empty"><p>Ninguém com telas do seu módulo ainda.</p></div>';
   }catch(e){ box.innerHTML='<div style="color:var(--red-text);padding:12px">Erro ao carregar: '+usrEsc(e.message||e)+'</div>'; }
 }
-const APP_VERSION='v1.0.1442';
+const APP_VERSION='v1.0.1443';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -29258,68 +29258,146 @@ async function setUsrFiltroEmp(cid){
   repaintUsuarios();
 }
 
+// v1.0.1443 · tela de Usuários: busca, agrupamento (área/função/unidade), filtros rápidos e ações extras no menu "⋯"
+var usrBusca='', usrChip='todos', usrExtras={cid:null,units:{},unidades:{},masters:{},carregando:false};
+var USR_AREAS=[['Operação',['operacao','supervisor_operacoes','lider_operacoes','conferente','separador','coletor','inventariante','ecommerce']],
+  ['Torre / Customer Service',['customer_service']],['Administrativo e financeiro',['adm','controladoria','gestor','compras']],
+  ['RH e Qualidade',['rh','qualidade']],['Comercial',['vendedor']],['Manutenção',['manutencao']],['Portaria',['portaria']],['Administração',['admin']]];
+function usrLS(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(_e){ return null; } }
+function usrGrupoModo(){ return usrLS('usr_grupo')||'area'; }
+function usrFechados(){ try{ return JSON.parse(usrLS('usr_fechados')||'[]'); }catch(_e){ return []; } }
+function usrNorm(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function usrJs(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,''); }
+function usrHl(txt){ var t=usrEsc(txt); var q=usrBusca.trim(); if(!q) return t;
+  var rx=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'); return t.replace(rx,'<mark style="background:#fde68a;padding:0 1px;border-radius:3px">$1</mark>'); }
+function usrArea(role){ for(var i=0;i<USR_AREAS.length;i++){ if(USR_AREAS[i][1].indexOf(role)>=0) return USR_AREAS[i][0]; } return 'Outros'; }
+async function usrExtrasCarregar(cid){
+  if(!cid||usrExtras.carregando||usrExtras.cid===cid) return;
+  usrExtras.carregando=true;
+  try{
+    var uu=await dbSelectAll('user_units','company_id=eq.'+cid+'&select=user_id,unit_id')||[];
+    var un=await dbSelect('units','company_id=eq.'+cid+'&select=id,name,is_main&order=is_main.desc,name.asc')||[];
+    var mm=await dbSelectAll('usr_modulo_master','select=user_id,modulo&order=modulo.asc')||[];
+    var U={}, N={}, M={};
+    un.forEach(function(u){ N[u.id]=u.name; });
+    uu.forEach(function(x){ (U[x.user_id]=U[x.user_id]||[]).push(x.unit_id); });
+    mm.forEach(function(x){ (M[x.user_id]=M[x.user_id]||[]).push(x.modulo); });
+    usrExtras={cid:cid,units:U,unidades:N,masters:M,carregando:false};
+  }catch(e){ console.warn('[usuarios] extras',e); usrExtras.carregando=false; usrExtras.cid=cid; }
+  usrListaRender();
+}
+function usrPessoa(p){ return (typeof pessoas!=='undefined'&&pessoas||[]).find(function(x){return x.id===p.pessoa_id;}); }
+function usrPassaBusca(p){
+  var q=usrNorm(usrBusca.trim()); if(!q) return true; var pe=usrPessoa(p);
+  return [p.full_name,p.email,pe&&pe.nome,usrRoleLbl(p.role),p.role].some(function(v){ return usrNorm(v).indexOf(q)>=0; });
+}
+function usrPassaChip(p){
+  if(usrChip==='masters') return !!(usrExtras.masters[p.id]||[]).length;
+  if(usrChip==='semfunc') return !usrPessoa(p);
+  if(usrChip==='critico') return !usrPessoa(p)&&['gestor','rh'].indexOf(p.role)>=0;
+  return true;
+}
+function usrChaveGrupo(p){
+  var m=usrGrupoModo();
+  if(m==='funcao') return [usrRoleLbl(p.role)];
+  if(m==='unidade'){ var u=(usrExtras.units[p.id]||[]).map(function(id){ return usrExtras.unidades[id]; }).filter(Boolean); return u.length?u:['Sem unidade']; }
+  if(m==='nenhum') return ['Todos'];
+  return [usrArea(p.role)];
+}
+function usrSetBusca(v){ usrBusca=v||''; usrListaRender(); }
+function usrSetChip(c){ usrChip=c; usrListaRender(); }
+function usrSetGrupo(m){ usrLS('usr_grupo',m); repaintUsuarios(); }
+function usrToggleGrupo(g){ var f=usrFechados(), i=f.indexOf(g); if(i>=0) f.splice(i,1); else f.push(g); usrLS('usr_fechados',JSON.stringify(f)); usrListaRender(); }
+function usrMenu(ev,id){
+  ev.stopPropagation();
+  var ja=ge('usr-menu-'+id), aberto=ja&&ja.style.display==='block';
+  document.querySelectorAll('.usr-menu').forEach(function(m){ m.style.display='none'; });
+  if(ja&&!aberto) ja.style.display='block';
+}
+document.addEventListener('click',function(){ document.querySelectorAll('.usr-menu').forEach(function(m){ m.style.display='none'; }); });
+function usrLinhaHtml(p,i){
+  var pe=usrPessoa(p), nm=p.full_name||p.email||'?', comp=(companies||[]).find(function(c){return c.id===p.company_id;});
+  var mods=usrExtras.masters[p.id]||[], uns=(usrExtras.units[p.id]||[]).map(function(id){ return usrExtras.unidades[id]; }).filter(Boolean);
+  var cid=usrEmpresaAlvo(), outraCia=comp&&cid&&p.company_id!==cid;
+  var ib='width:30px;height:30px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:var(--bg);color:var(--text2);cursor:pointer;padding:0';
+  var it='display:flex;gap:8px;align-items:center;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--text);cursor:pointer';
+  var critico=!pe&&['gestor','rh'].indexOf(p.role)>=0;
+  return '<tr style="border-top:1px solid var(--border)">'
+    +'<td style="padding:9px 14px;width:34%"><div style="display:flex;align-items:center;gap:10px"><div class="av '+AVC[i%5]+'" style="flex-shrink:0">'+ini(nm)+'</div><div style="min-width:0">'
+      +'<div style="font-weight:600;font-size:13.5px">'+usrHl(p.full_name||'—')+(mods.map(function(m){ return ' <span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--accent);color:#fff;vertical-align:middle">MASTER '+usrEsc(m.toUpperCase())+'</span>'; }).join(''))+'</div>'
+      +'<div style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+usrHl(p.email||'')+(outraCia?' · '+usrEsc(comp.name):'')+'</div></div></div></td>'
+    +'<td style="padding:9px 14px"><span class="role-badge '+(ROLE_CLASS[p.role]||'')+'">'+usrHl(usrRoleLbl(p.role))+'</span></td>'
+    +'<td style="padding:9px 14px">'+(p.role==='admin'||p.role==='gestor'?'<span style="font-size:11.5px;color:var(--text3)">todas</span>':(uns.length?uns.map(function(u){ return '<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg2);border:1px solid var(--border);margin-right:4px;white-space:nowrap">'+usrEsc(u)+'</span>'; }).join(''):'<span style="font-size:11.5px;color:var(--amber-text)">nenhuma</span>'))+'</td>'
+    +'<td style="padding:9px 14px;font-size:12px">'+(pe?'<span style="color:var(--green-text)">🔗 '+usrHl(pe.nome)+'</span>':'<span style="color:var(--'+(critico?'red':'amber')+'-text)">⚠ sem funcionário</span>')+'</td>'
+    +'<td style="padding:9px 14px;text-align:right;white-space:nowrap;position:relative">'
+      +'<button style="'+ib+'" title="Permissões" onclick="openModal(\'permissoes\',\''+p.id+'\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button> '
+      +'<button style="'+ib+'" title="Editar" onclick="openModal(\'user\',\''+p.id+'\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button> '
+      +'<button style="'+ib+'" title="Mais ações" onclick="usrMenu(event,\''+p.id+'\')">⋯</button>'
+      +'<div class="usr-menu" id="usr-menu-'+p.id+'" onclick="event.stopPropagation()" style="display:none;position:absolute;right:14px;top:44px;z-index:30;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.14);padding:6px;width:260px">'
+        +'<button style="'+it+'" onclick="openEmpresasUsuario(\''+p.id+'\',\''+usrJs(nm)+'\')">🏢 Empresas com acesso</button>'
+        +'<button style="'+it+'" onclick="openUnidadesUsuario(\''+p.id+'\',\''+usrJs(nm)+'\')">🏬 Unidades com acesso</button>'
+        +'<button style="'+it+'" onclick="copiarPermissoes(\''+p.id+'\')">📋 Copiar permissões de outro usuário</button>'
+        +((profile&&profile.role==='admin')?'<button style="'+it+'" onclick="duplicarUsuario(\''+p.id+'\')">👥 Duplicar usuário</button>':'')
+        +'<div style="height:1px;background:var(--border);margin:4px 0"></div>'
+        +'<button style="'+it+'" onclick="reenviarEmailAcesso(\''+p.id+'\',\''+usrJs(p.email||'')+'\',\''+usrJs(nm)+'\')">✉️ Reenviar e-mail de acesso</button>'
+        +'<button style="'+it+'" onclick="resetarSenha(\''+p.id+'\',\''+usrJs(p.email||'')+'\',\''+usrJs(nm)+'\')">🔑 Resetar senha</button>'
+      +'</div></td></tr>';
+}
+function usrListaHtml(){
+  var todos=usrListaAtual()||[];
+  var L=todos.filter(usrPassaChip).filter(usrPassaBusca);
+  var info=ge('usr-busca-info'); if(info) info.textContent=usrBusca.trim()?(L.length+' encontrado(s)'):'';
+  // contadores dos filtros
+  var cnt={todos:todos.length,masters:todos.filter(function(p){return (usrExtras.masters[p.id]||[]).length;}).length,
+    semfunc:todos.filter(function(p){return !usrPessoa(p);}).length, critico:todos.filter(function(p){return !usrPessoa(p)&&['gestor','rh'].indexOf(p.role)>=0;}).length};
+  var chip=function(k,t){ var on=usrChip===k; return '<button onclick="usrSetChip(\''+k+'\')" style="font-size:12px;padding:5px 11px;border-radius:99px;cursor:pointer;border:1px solid '+(on?'var(--text)':'var(--border)')+';background:'+(on?'var(--text)':'var(--bg)')+';color:'+(on?'var(--bg)':'var(--text2)')+'">'+t+' '+cnt[k]+'</button>'; };
+  var h='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">'+chip('todos','Todos')+chip('masters','Masters de módulo')+chip('semfunc','Sem funcionário vinculado')+chip('critico','Gestor/RH sem funcionário')+'</div>';
+  if(!L.length) return h+'<div class="empty"><p>'+(todos.length?'Ninguém com esse filtro'+(usrBusca.trim()?' ou busca':''):'Nenhum usuário')+'</p></div>';
+  // agrupa (na Unidade a pessoa aparece em cada unidade que tem)
+  var grupos={}, ordem=[];
+  L.forEach(function(p){ usrChaveGrupo(p).forEach(function(g){ if(!grupos[g]){ grupos[g]=[]; ordem.push(g); } grupos[g].push(p); }); });
+  var m=usrGrupoModo();
+  if(m==='area'){ var ref=USR_AREAS.map(function(a){return a[0];}).concat(['Outros']); ordem.sort(function(a,b){ return ref.indexOf(a)-ref.indexOf(b); }); }
+  else ordem.sort(function(a,b){ return a.localeCompare(b); });
+  var totPorGrupo={}; todos.filter(usrPassaChip).forEach(function(p){ usrChaveGrupo(p).forEach(function(g){ totPorGrupo[g]=(totPorGrupo[g]||0)+1; }); });
+  var fech=usrFechados(), busca=!!usrBusca.trim();
+  ordem.forEach(function(g){
+    var lista=grupos[g].sort(function(a,b){ return String(a.full_name||a.email||'').localeCompare(String(b.full_name||b.email||'')); });
+    var aberto=busca||fech.indexOf(g)<0, idx=0;
+    var funcoes=m==='area'?((USR_AREAS.find(function(a){return a[0]===g;})||[null,[]])[1].map(usrRoleLbl).join(' · ')):'';
+    h+='<div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;margin-bottom:12px;overflow:visible">'
+      +'<div onclick="usrToggleGrupo(\''+usrJs(g)+'\')" style="display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--bg2);'+(aberto?'border-bottom:1px solid var(--border);':'')+'border-radius:14px'+(aberto?' 14px 0 0':'')+';cursor:pointer;user-select:none">'
+        +'<span style="font-size:11px;color:var(--text3);width:10px">'+(aberto?'▾':'▸')+'</span><b style="font-size:13.5px">'+usrEsc(g)+'</b>'
+        +'<span style="font-size:12.5px;color:var(--text3);font-weight:600">'+(busca||usrChip!=='todos'?lista.length+' de '+(totPorGrupo[g]||lista.length):lista.length)+'</span>'
+        +(funcoes?'<span title="'+usrEsc(funcoes)+'" style="margin-left:auto;font-size:11.5px;color:var(--text3);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%">'+usrEsc(funcoes)+'</span>':'')+'</div>'
+      +(aberto?'<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed"><colgroup><col style="width:34%"><col style="width:18%"><col style="width:17%"><col style="width:19%"><col style="width:12%"></colgroup><tr style="font-size:10.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;text-align:left"><th style="padding:8px 14px;font-weight:600">Usuário</th><th style="padding:8px 14px;font-weight:600">Função</th><th style="padding:8px 14px;font-weight:600">Unidades</th><th style="padding:8px 14px;font-weight:600">Funcionário</th><th style="padding:8px 14px;font-weight:600;text-align:right">Ações</th></tr>'
+        +lista.map(function(p){ return usrLinhaHtml(p,idx++); }).join('')+'</table>':'')
+      +'</div>';
+  });
+  return h;
+}
+function usrListaRender(){ var b=ge('usr-lista-box'); if(b) b.innerHTML=usrListaHtml(); }
 function rUsuarios(){
   const lista=usrListaAtual();
   const alvo=usrEmpresaAlvo();
   const listaEmp=(typeof allCompanies!=='undefined'&&allCompanies&&allCompanies.length)?allCompanies:companies;
   const empOpts=listaEmp.map(function(x){return'<option value="'+x.id+'" '+(x.id===alvo?'selected':'')+'>'+x.name+'</option>';}).join('');
-  const filtroHtml='<div style="display:flex;align-items:center;gap:8px;margin:0 0 12px">'
-    +'<span style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Empresa</span>'
-    +'<select class="fi" style="max-width:340px;height:34px;padding:4px 10px;font-size:13px" onchange="setUsrFiltroEmp(this.value)">'+empOpts+'</select>'
+  const cab='<div class="sechdr"><span class="sectitle">Usuários <span style="color:var(--text3);font-weight:500">· '+((lista||[]).length)+'</span></span><span style="display:flex;gap:8px"><button class="btn btn-sm" style="border-color:var(--accent);color:var(--accent);font-weight:600" onclick="usrWizAbrir()" title="Cria o usuário já com o acesso igual a um perfil ou a outra pessoa">⚡ Criar usuário</button><button class="btn btn-p btn-sm" onclick="openModal(\'new_user\')">+ Novo usuário</button></span></div>';
+  const gm=usrGrupoModo(), seg=function(k,t){ var on=gm===k; return '<button onclick="usrSetGrupo(\''+k+'\')" style="border:none;cursor:pointer;padding:6px 12px;border-radius:8px;font-size:12.5px;background:'+(on?'var(--bg)':'transparent')+';font-weight:'+(on?'700':'500')+';color:'+(on?'var(--text)':'var(--text2)')+';box-shadow:'+(on?'0 1px 3px rgba(0,0,0,.08)':'none')+'">'+t+'</button>'; };
+  const barra='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px">'
+    +'<div style="flex:1;min-width:280px;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:0 12px">'
+      +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'
+      +'<input id="usr-busca" value="'+usrEsc(usrBusca)+'" oninput="usrSetBusca(this.value)" placeholder="Buscar por nome, e-mail, funcionário ou função" style="flex:1;border:none;outline:none;background:transparent;padding:10px 0;font-size:14px;color:var(--text)">'
+      +'<span id="usr-busca-info" style="font-size:12px;color:var(--text3);white-space:nowrap"></span></div>'
+    +'<select class="fi" style="max-width:300px;height:38px;padding:4px 10px;font-size:13px" onchange="setUsrFiltroEmp(this.value)">'+empOpts+'</select>'
     +(alvo&&alvo!==company?.id?'<span style="font-size:11px;padding:3px 9px;border-radius:99px;background:var(--amber-bg);color:var(--amber-text)">outra empresa</span>':'')
+    +'<div style="display:flex;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:3px"><span style="font-size:12px;color:var(--text3);padding:0 8px">Agrupar</span>'+seg('area','Área')+seg('funcao','Função')+seg('unidade','Unidade')+seg('nenhum','Sem grupo')+'</div>'
     +'</div>';
   if(usrLoading){
-    return'<div class="sechdr"><span class="sectitle">Usuários</span></div>'+filtroHtml
-      +'<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px"><span class="spin"></span> Carregando usuários...</div>';
+    return cab+barra+'<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px"><span class="spin"></span> Carregando usuários...</div>';
   }
-  const rows=lista.map((p,i)=>{
-    const comp=companies.find(c=>c.id===p.company_id);
-    return`<div class="li">
-      <div class="av ${AVC[i%5]}">${ini(p.full_name||p.email||'?')}</div>
-      <div class="linfo">
-        <div class="lname">${p.full_name||'—'}</div>
-        <div class="lsub">${p.email||''} ${comp?'· '+comp.name:''}</div>
-        <div class="lsub" style="margin-top:2px">${(function(){
-          const pe=pessoas.find(function(x){return x.id===p.pessoa_id;});
-          if(pe)return '<span style="color:var(--green-text)">🔗 '+pe.nome+'</span>';
-          const critico=['gestor','rh'].includes(p.role);
-          return '<span style="color:var(--'+(critico?'red':'text3')+'-text||var(--text3))">⚠ sem funcionário vinculado</span>';
-        })()}</div>
-      </div>
-      <div class="lright">
-        <span class="role-badge ${ROLE_CLASS[p.role]||''}">${ROLES[p.role]||p.role}</span>
-        <div style="display:flex;gap:4px;margin-top:3px">
-          <button class="bicon btn-sm" title="Editar" onclick="openModal('user','${p.id}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="bicon btn-sm" title="Permissões" onclick="openModal('permissoes','${p.id}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          </button>
-          <button class="bicon btn-sm" title="Empresas com acesso" onclick="openEmpresasUsuario('${p.id}','${p.full_name||p.email}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </button>
-          <button class="bicon btn-sm" title="Unidades com acesso" onclick="openUnidadesUsuario('${p.id}','${(p.full_name||p.email||'').replace(/'/g,'')}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/></svg>
-          </button>
-          <button class="bicon btn-sm" title="Copiar permissões de outro usuário" onclick="copiarPermissoes('${p.id}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          ${(profile&&profile.role==='admin')?`<button class="bicon btn-sm" title="Duplicar usuário (cria outro a partir deste)" style="color:var(--accent)" onclick="duplicarUsuario('${p.id}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/></svg>
-          </button>`:''}
-          <button class="bicon btn-sm" title="Reenviar e-mail de acesso (gera nova senha)" onclick="reenviarEmailAcesso('${p.id}','${p.email||''}','${(p.full_name||p.email||'').replace(/'/g,'')}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
-          </button>
-          <button class="bicon btn-sm" title="Resetar senha" onclick="resetarSenha('${p.id}','${p.email||''}','${(p.full_name||p.email||'').replace(/'/g,'')}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/><path d="M12 16v.01"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  return`<div class="sechdr"><span class="sectitle">Usuários (${lista.length})</span><span style="display:flex;gap:8px"><button class="btn btn-sm" style="border-color:var(--accent);color:var(--accent);font-weight:600" onclick="usrWizAbrir()" title="Cria o usuário já com o acesso igual a um perfil ou a outra pessoa">⚡ Criar usuário</button><button class="btn btn-p btn-sm" onclick="openModal('new_user')">+ Novo usuário</button></span></div>
-  ${filtroHtml}
-  ${rows||'<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><p>Nenhum usuário</p></div>'}`;
+  if(alvo&&usrExtras.cid!==alvo) setTimeout(function(){ usrExtrasCarregar(alvo); },0);
+  return cab+barra+'<div id="usr-lista-box">'+usrListaHtml()+'</div>';
 }
 
 // ── MODALS ──
