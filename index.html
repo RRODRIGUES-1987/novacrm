@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1446 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1447 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1854,7 +1854,7 @@ async function usrEquipeCarregar(){
       :'<div class="empty"><p>Ninguém com telas do seu módulo ainda.</p></div>';
   }catch(e){ box.innerHTML='<div style="color:var(--red-text);padding:12px">Erro ao carregar: '+usrEsc(e.message||e)+'</div>'; }
 }
-const APP_VERSION='v1.0.1446';
+const APP_VERSION='v1.0.1447';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -33315,6 +33315,8 @@ function rPortariaPainel(){
     ${card('Veículos em uso',frotaUso.length,'var(--amber-text)',"pg('portaria-entradas')")}
     ${card('Visitas liberadas',libPend.length,'var(--purple-text)',"pg('portaria-liberacoes')")}
     ${card('Autorizações hoje',autHoje.length,'var(--text)',"pg('portaria-autorizacoes')")}</div>`;
+  html+='<div id="port-patio-box" style="margin-bottom:20px"></div>';   // v1.0.1447: caminhões no pátio com "Dar saída"
+  setTimeout(portPatioCarregar,0);
   html+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">`;
   html+=`<div><div class="sectitle" style="margin-bottom:8px">Colaboradores no local (${colabDentro.length})</div>`;
   html+=colabDentro.length?colabDentro.map(a=>liDentro(portPessoaNome(a.pessoa_id),'Colaborador',portFmtHora(a.entrada_em))).join(''):`<div class="lsub" style="color:var(--text3)">Ninguém registrado.</div>`;
@@ -33322,6 +33324,61 @@ function rPortariaPainel(){
   html+=visitDentro.length?visitDentro.map(a=>liDentro(a.visitante_nome,(PORT_VIS_TIPO[a.visitante_tipo]||'Visitante')+(a.visitante_empresa?' · '+a.visitante_empresa:''),portFmtHora(a.entrada_em))).join(''):`<div class="lsub" style="color:var(--text3)">Ninguém registrado.</div>`;
   html+=`</div></div>`;
   return html;
+}
+
+// ═══ v1.0.1447 · CAMINHÕES NO PÁTIO — saída em um clique (o horário vai para o portal do cliente, coluna "Saiu") ═══
+var _portPatio=null;
+var PORT_ROM_ST={aberto:'aguardando carregamento',em_carregamento:'carregando',carregado:'carregado',liberado:'liberado',conferido:'conferido',em_conferencia:'em conferência'};
+async function portPatioCarregar(){
+  var box=ge('port-patio-box'); if(!box||!company) return;
+  try{
+    var desde=new Date(Date.now()-3*86400000).toISOString();
+    var L=await dbSelect('wms_patio','company_id=eq.'+company.id+'&status=neq.finalizado&chegada_em=gte.'+desde+'&order=chegada_em.asc&limit=200')||[];
+    var _u=(typeof currentUnitId==='function')?currentUnitId():null; if(_u) L=L.filter(function(x){ return !x.unit_id||x.unit_id===_u; });
+    var rids=[...new Set(L.map(function(x){return x.romaneio_id;}).filter(Boolean))], roms={};
+    if(rids.length) ((await dbSelect('wms_romaneios','id=in.('+rids.join(',')+')&select=id,numero,status,movimento'))||[]).forEach(function(r){ roms[r.id]=r; });
+    _portPatio=L.map(function(x){ return Object.assign({},x,{_rom:roms[x.romaneio_id]||null}); });
+  }catch(e){ box.innerHTML='<div class="lsub" style="color:var(--red-text)">Não consegui ler o pátio: '+ecomEsc(e.message||e)+'</div>'; return; }
+  portPatioRender();
+}
+function portPatioRender(){
+  var box=ge('port-patio-box'); if(!box) return; var L=_portPatio||[];
+  var cli=function(id){ var c=(clientes||[]).find(function(x){return x.id===id;}); return c?(c.nome_fantasia||c.nome||''):''; };
+  var h='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div class="sectitle" style="margin:0">Caminhões no pátio ('+L.length+')</div><span style="font-size:12px;color:var(--text3)">chegaram e ainda não saíram · últimos 3 dias</span></div>';
+  if(!L.length){ box.innerHTML=h+'<div class="lsub" style="color:var(--text3)">Nenhum caminhão no pátio.</div>'; return; }
+  h+='<div style="border:1px solid var(--border);border-radius:var(--radius);overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px"><thead><tr style="background:#1e3a8a;color:#fff;text-align:left;font-size:11px">'
+    +'<th style="padding:7px 8px">Placa</th><th style="padding:7px 8px">Cliente · romaneio</th><th style="padding:7px 8px">Tipo</th><th style="padding:7px 8px">Chegou</th><th style="padding:7px 8px">Situação</th><th></th></tr></thead><tbody>';
+  L.forEach(function(x){
+    var r=x._rom, ent=(x.movimento==='descarga'||(r&&r.movimento==='entrada')), st=r?(PORT_ROM_ST[r.status]||r.status):(x.status==='na_doca'?'na doca':'aguardando doca');
+    var dia=x.chegada_em&&new Date(x.chegada_em).toDateString()!==new Date().toDateString()?new Date(x.chegada_em).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' ':'';
+    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:8px">'+ecomEsc(x.placa||'—')+'</td><td style="padding:8px">'+ecomEsc(cli(x.cliente_id)||'—')+(r?' · '+ecomEsc(r.numero||''):'')+'</td>'
+      +'<td style="padding:8px">'+(ent?'Recebimento':'Coleta')+'</td><td style="padding:8px">'+dia+portFmtHora(x.chegada_em)+'</td><td style="padding:8px">'+ecomEsc(st)+'</td>'
+      +'<td style="padding:8px;text-align:right"><button class="btn btn-sm" onclick="portPatioSaidaModal(\''+x.id+'\')">🏁 Dar saída</button></td></tr>';
+  });
+  box.innerHTML=h+'</tbody></table></div>';
+}
+function portPatioSaidaModal(id){
+  var x=(_portPatio||[]).find(function(p){return p.id===id;}); if(!x) return;
+  var d=new Date(), hh=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  portModal('Dar saída · '+ecomEsc(x.placa||''),'<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">Chegou '+(x.chegada_em?new Date(x.chegada_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—')+(x._rom?' · '+ecomEsc(x._rom.numero||''):'')+'. O horário da saída aparece para o cliente no portal.</div>'
+    +'<div class="fg"><label class="fl">Horário da saída</label><input class="fi" type="time" id="pp-sai-hora" value="'+hh+'" style="max-width:140px"></div>',
+    'portPatioSaidaConfirmar(\''+id+'\')',{saveLabel:'Confirmar saída',width:'420px'});
+}
+async function portPatioSaidaConfirmar(id){
+  var x=(_portPatio||[]).find(function(p){return p.id===id;}); if(!x) return portErr('Caminhão não encontrado.');
+  var hm=((ge('pp-sai-hora')||{}).value||'').split(':'); var dt=new Date(); if(hm.length===2){ dt.setHours(+hm[0],+hm[1],0,0); }
+  if(x.chegada_em && dt<new Date(x.chegada_em)) return portErr('A saída não pode ser antes da chegada.');
+  if(dt>new Date(Date.now()+5*60000)) return portErr('A saída não pode ser no futuro.');
+  portSaving();
+  try{
+    var sai=dt.toISOString();
+    await dbUpdate('wms_patio',id,{status:'finalizado',saida_em:sai});
+    if(x.evento_id){ try{ await dbUpdate('wms_eventos',x.evento_id,{status:'fechado',saida_em:sai}); }catch(_e){} }
+    if(x.prisma_id){ try{ await dbUpdate('wms_prismas_caminhao',x.prisma_id,{status:'livre',romaneio_id:null,placa:null,motorista:null,motorista_cpf:null}); }catch(_e){} }
+    var p=(typeof wmsPatio!=='undefined'&&wmsPatio||[]).find(function(y){return y.id===id;}); if(p){ p.status='finalizado'; p.saida_em=sai; }
+    _portPatio=(_portPatio||[]).filter(function(y){return y.id!==id;});
+    portClose(); showToast('Saída registrada: '+(x.placa||'')+' às '+portFmtHora(sai),'green'); portPatioRender();
+  }catch(e){ portErr('Erro ao registrar a saída: '+(e.message||e)); }
 }
 
 // ── ENTRADA / SAÍDA (tela unificada) ──
@@ -51514,6 +51571,13 @@ function wmsCliTabSaida(c){
       </div>
     </div>
     <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" id="wms-saida-embarque" ${wmsCliParam(c.id,'saida_no_embarque')===true?'checked':''} style="margin-top:2px">
+        <div><div style="font-weight:600;font-size:12px">Baixa automática na portaria ao fechar o romaneio</div>
+        <div style="font-size:10px;color:var(--text3)">Quando o romaneio é encerrado (com o prisma), o caminhão sai do pátio sozinho, com o horário do último bipe de embarque. Não precisa dar saída na portaria. O horário aparece para o cliente no portal.</div></div>
+      </label>
+    </div>
+    <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
       <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:7px">Controle de embarque (4ª)</div>
       <div style="display:flex;gap:8px">
         ${[['bipe','Bipar','Embarque só bipando a etiqueta do pallet.'],['manual','Confirmação manual','Embarque confirmado manualmente, sem bipe.']].map(([v,lbl,desc])=>`
@@ -51668,6 +51732,11 @@ async function wmsSalvarParamCliente(clienteId){
     const et=document.querySelector('input[name="wms-exp-tipo"]:checked');
     if(et){ const cA=clientes.find(x=>x.id===clienteId)||{}; let pa=cA.parametros; if(typeof pa==='string'){ try{ pa=JSON.parse(pa); }catch(_e){ pa={}; } }
       dados.parametros=Object.assign({},pa||{},dados.parametros||{},{expedicao_fracionada:et.value==='fracionado'}); }
+  }
+  { // v1.0.1447: baixa automática na portaria ao fechar o romaneio (gatilho no banco)
+    const se=ge('wms-saida-embarque');
+    if(se){ const cA=clientes.find(x=>x.id===clienteId)||{}; let pa=cA.parametros; if(typeof pa==='string'){ try{ pa=JSON.parse(pa); }catch(_e){ pa={}; } }
+      dados.parametros=Object.assign({},pa||{},dados.parametros||{},{saida_no_embarque:se.checked}); }
   }
   const bloqE=ge('wms-conf-ent-bloqueia-div'); if(bloqE)dados.wms_conf_ent_bloqueia_div=bloqE.checked;
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
