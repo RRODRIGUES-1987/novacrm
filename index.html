@@ -1,4 +1,4 @@
-<!-- VERUS ERP v1.0.1448 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
+<!-- VERUS ERP v1.0.1449 | Gerado: 2026-11-28 UTC | Arquivo: index.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1854,7 +1854,7 @@ async function usrEquipeCarregar(){
       :'<div class="empty"><p>Ninguém com telas do seu módulo ainda.</p></div>';
   }catch(e){ box.innerHTML='<div style="color:var(--red-text);padding:12px">Erro ao carregar: '+usrEsc(e.message||e)+'</div>'; }
 }
-const APP_VERSION='v1.0.1448';
+const APP_VERSION='v1.0.1449';
 // ── Sidebar dinamica (rail) · v863 ──
 function sbToggleMini(){var a=document.getElementById('app');if(!a)return;a.classList.toggle('sbmini');a.classList.remove('sbhov');try{localStorage.setItem('verus_sbmini',a.classList.contains('sbmini')?'1':'0');}catch(e){}}
 (function(){
@@ -51587,6 +51587,9 @@ function wmsCliTabSaida(c){
         <div><div style="font-weight:600;font-size:12px">Romaneio automático por transportadora (e-commerce)</div>
         <div style="font-size:10px;color:var(--text3)">No checkout do e-commerce, o pedido conferido entra sozinho no romaneio aberto do dia da transportadora dele (um por transportadora). O "Gerar romaneio" manual continua disponível.</div></div>
       </label>
+      <div style="margin-top:10px;font-weight:600;font-size:12px">Retiradas autorizadas (coleta do e-commerce)</div>
+      <div style="font-size:10px;color:var(--text3);margin-bottom:5px">Uma linha por transportadora: <b>TRANSPORTADORA | Nome; RG | Nome; RG … || Modelo; Placa | Modelo; Placa</b>. Na baixa da coleta dessa transportadora, só dá para escolher quem está aqui.</div>
+      <textarea class="fi" id="wms-ret-aut" rows="3" style="font-family:monospace;font-size:11.5px" placeholder="CORREIOS | Alex Silva de Souza; 41.528.171-4 || VW Kombi; FKU5553">${(()=>{ const L=wmsCliParam(c.id,'retirada_autorizados'); return Array.isArray(L)?L.map(x=>(x.transportadora||'')+' | '+(x.pessoas||[]).map(p=>p.nome+(p.doc?'; '+p.doc:'')).join(' | ')+' || '+(x.veiculos||[]).map(v=>(v.modelo?v.modelo+'; ':'')+v.placa).join(' | ')).join('\n'):''; })()}</textarea>
     </div>
     <div style="margin-top:11px;padding:11px 13px;background:var(--bg2);border-radius:9px">
       <div style="font-weight:600;font-size:12px;color:var(--text);margin-bottom:7px">Controle de embarque (4ª)</div>
@@ -51751,6 +51754,11 @@ async function wmsSalvarParamCliente(clienteId){
     const er=ge('wms-ecom-rom-auto');   // v1.0.1448
     if(er){ const cB=clientes.find(x=>x.id===clienteId)||{}; let pb=cB.parametros; if(typeof pb==='string'){ try{ pb=JSON.parse(pb); }catch(_e){ pb={}; } }
       dados.parametros=Object.assign({},pb||{},dados.parametros||{},{ecom_romaneio_auto:er.checked}); }
+    const ra=ge('wms-ret-aut');   // v1.0.1449: retiradas autorizadas
+    if(ra){ const lst=String(ra.value||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).map(l=>{ const [esq,dir]=l.split('||'); const ps=String(esq||'').split('|').map(x=>x.trim()); const t=ps.shift();
+        return {transportadora:String(t||'').trim().toUpperCase(), pessoas:ps.filter(Boolean).map(x=>{ const [n,d]=x.split(';'); return {nome:String(n||'').trim(),doc:String(d||'').trim()}; }).filter(p=>p.nome),
+          veiculos:String(dir||'').split('|').map(x=>x.trim()).filter(Boolean).map(x=>{ const pr=x.split(';'); const pl=pr.pop(); return {modelo:pr.join(';').trim(),placa:String(pl||'').trim().toUpperCase().replace(/\s+/g,'')}; }).filter(v=>v.placa)}; }).filter(x=>x.transportadora);
+      dados.parametros=Object.assign({},dados.parametros||{},{retirada_autorizados:lst}); }
   }
   const bloqE=ge('wms-conf-ent-bloqueia-div'); if(bloqE)dados.wms_conf_ent_bloqueia_div=bloqE.checked;
   const camE=ge('wms-conf-ent-por-camada'); if(camE)dados.wms_conf_ent_por_camada=camE.checked;
@@ -66683,6 +66691,7 @@ async function ecomEmbSemConfExec(){
   var motivo=(ge('embsc-motivo')||{}).value||'', obs=((ge('embsc-obs')||{}).value||'').trim();
   var errEl=ge('embsc-err');
   if(/Outro/i.test(motivo)&&!obs){ if(errEl){errEl.style.display='block';errEl.textContent='Descreva o motivo na observacao';} return; }
+  var _rr=ecomRomaneios.find(function(x){return x.id===ctx.romId;}), _ret=await ecomRetiradaPedir(_rr,ctx.peds); if(_ret===false) return;   // v1.0.1449
   var btn=ge('embsc-ok'); if(btn){btn.disabled=true;btn.textContent='Gravando\u2026';}
   var iso=new Date().toISOString(), sup=_ecomCxAuthUser||'supervisor';
   var txt=motivo+(obs?(' - '+obs):'');
@@ -66698,7 +66707,8 @@ async function ecomEmbSemConfExec(){
            codigo_lido:'SEM CONFERENCIA: '+txt,
            operador:ecomOper()+' | autorizado por '+sup}); }catch(e){}
     }
-    await dbUpdate('ecom_romaneios',ctx.romId,{status:'coletado',data_coleta_efetiva:iso});
+    await dbUpdate('ecom_romaneios',ctx.romId,Object.assign({status:'coletado',data_coleta_efetiva:iso},_ret)); if(_rr) Object.assign(_rr,{status:'coletado',data_coleta_efetiva:iso},_ret);
+    if(_rr&&ecomRomFolhaNova(_rr,ctx.peds)) try{ ecomRomPDF(ctx.romId); }catch(_pf){}
     ecomEmbSemConfClose(); ecomCloseRomAbrir();
     _ecomLoaded=false; await ecomLoadAll();
     var el=ge('ecom-body'); if(el) el.innerHTML=ecomPanelRomaneio();
@@ -66757,6 +66767,7 @@ async function ecomEmbParcialExec(){
   var criarNovo=!!(ge('embdest-novo')&&ge('embdest-novo').checked);
   var r=ecomRomaneios.find(function(x){return x.id===ctx.romId;});
   var num='ROM-'+String((r&&r.numero)||0).padStart(4,'0');
+  var _ret=await ecomRetiradaPedir(r,ctx.vao||[]); if(_ret===false){ if(btn){btn.disabled=false;btn.textContent='Confirmar';} return; }   // v1.0.1449
   var iso=new Date().toISOString(), sup=_ecomCxAuthUser||'supervisor';
   try{
     // 1) o que saiu: carregado
@@ -66780,7 +66791,7 @@ async function ecomEmbParcialExec(){
            operador:ecomOper()+' | autorizado por '+sup}); }catch(e){}
     }
     // 3) fecha o romaneio pelo que efetivamente saiu
-    await dbUpdate('ecom_romaneios',ctx.romId,{status:'coletado',data_coleta_efetiva:iso});
+    await dbUpdate('ecom_romaneios',ctx.romId,Object.assign({status:'coletado',data_coleta_efetiva:iso},_ret)); if(r) Object.assign(r,{status:'coletado',data_coleta_efetiva:iso},_ret);
     // 4) opcional: já cria o próximo romaneio com os que ficaram
     var novoNum=null;
     if(criarNovo){
@@ -66818,18 +66829,82 @@ async function ecomRomConfirmar(romId){
       ecomEmbRender(); return;
     }
   }
+  var _ret=await ecomRetiradaPedir(r,peds); if(_ret===false) return;   // v1.0.1449: retirada autorizada
   try{
     var iso=new Date().toISOString();
     for(var i=0;i<peds.length;i++){ await dbUpdate('ecom_pedidos',peds[i].id,{status:'carregado',data_expedicao:iso}); }
-    await dbUpdate('ecom_romaneios',romId,{status:'coletado',data_coleta_efetiva:iso});
+    await dbUpdate('ecom_romaneios',romId,Object.assign({status:'coletado',data_coleta_efetiva:iso},_ret)); Object.assign(r,{status:'coletado',data_coleta_efetiva:iso},_ret);
+    if(ecomRomFolhaNova(r,peds)) try{ ecomRomPDF(romId); }catch(_pf){}
     ecomCloseRomAbrir();
     _ecomLoaded=false; await ecomLoadAll(); var el=ge('ecom-body'); if(el) el.innerHTML=ecomPanelRomaneio();
     _colScanHandler=function(code){ ecomRomScan(code); }; setTimeout(function(){ var i=ge('col-scan'); if(i)i.focus(); },40);
     showToast('Carregamento confirmado &middot; '+peds.length+' pedido(s) carregado(s)','green');
   }catch(e){ showToast('Erro ao confirmar: '+(e.message||e),'red'); }
 }
+// ═══ v1.0.1449 · FOLHA DE COLETA (uma folha, resumo por plataforma, uma assinatura) + RETIRADA AUTORIZADA ═══
+function ecomPlataforma(p){
+  var c=String(p&&p.canal||''), n=String(p&&p.numero_pedido||'').trim(), cl=c.toLowerCase();
+  if(cl.indexOf('amazon')>=0||/^\d{3}-\d{7}-\d{7}$/.test(n)||/^\d{3}-\d{7}-\d{7}$/.test(c.trim())) return 'Amazon';
+  if(cl.indexOf('magalu')>=0||cl.indexOf('magazine')>=0||/^LU-?\d/i.test(n)) return 'Magalu';
+  var mk=ecomMarketplace(p); if(mk) return mk.nome;
+  return 'Outros';
+}
+function ecomRomCliente(r,peds){
+  var lid=(r&&r.lojista_id)||((peds||[]).find(function(p){return p.lojista_id;})||{}).lojista_id;
+  var lj=(ecomLojistas||[]).find(function(l){return l.id===lid;}); return lj&&lj.cliente_id||null;
+}
+function ecomRomFolhaNova(r,peds){ var cid=ecomRomCliente(r,peds); return /^autom/i.test(String(r&&r.obs||'')) || (!!cid && typeof wmsCliParam==='function' && wmsCliParam(cid,'ecom_romaneio_auto')===true); }
+// autorizados: clientes.parametros.retirada_autorizados = [{transportadora:'CORREIOS', pessoas:[{nome,doc}], veiculos:[{modelo,placa}]}]
+function ecomRetiradaLista(r,peds){
+  var cid=ecomRomCliente(r,peds); if(!cid||typeof wmsCliParam!=='function') return null;
+  var L=wmsCliParam(cid,'retirada_autorizados'); if(!Array.isArray(L)||!L.length) return null;
+  var t=String(r&&r.transportadora||'').trim().toUpperCase();
+  return L.find(function(x){ var xt=String(x&&x.transportadora||'').trim().toUpperCase(); return xt&&(xt===t||(t&&t.indexOf(xt)===0)); })||null;
+}
+function ecomRetiradaPedir(r,peds){
+  var A=ecomRetiradaLista(r,peds); if(!A) return Promise.resolve({});
+  var ps=A.pessoas||[], vs=A.veiculos||[];
+  return new Promise(function(ok){
+    var old=ge('ecom-ret-modal'); if(old) old.remove();
+    var op=function(L,f){ return '<option value="">— escolha —</option>'+L.map(function(x,i){return '<option value="'+i+'">'+ecomEsc(f(x))+'</option>';}).join(''); };
+    document.body.insertAdjacentHTML('beforeend','<div class="modal-overlay" id="ecom-ret-modal" style="z-index:10060"><div class="modal" style="width:460px;max-width:95vw">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Quem está retirando? · '+ecomEsc(A.transportadora||'')+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:12px">Só pessoas e veículos autorizados pelo cliente podem retirar. Fora da lista, não entregue e chame a liderança.</div>'
+      +'<div class="fg"><label class="fl">Pessoa autorizada *</label><select class="fi" id="ret-pessoa">'+op(ps,function(x){return x.nome+(x.doc?' · RG '+x.doc:'');})+'</select></div>'
+      +'<div class="fg"><label class="fl">Veículo autorizado *</label><select class="fi" id="ret-veic">'+op(vs,function(x){return (x.modelo?x.modelo+' · ':'')+x.placa;})+'</select></div>'
+      +'<div id="ret-err" style="display:none;color:var(--red-text);font-size:12px;margin-top:4px"></div>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="ret-cancel">Cancelar</button><button class="btn btn-p btn-sm" id="ret-ok">Confirmar retirada</button></div></div></div>');
+    ge('ret-cancel').onclick=function(){ ge('ecom-ret-modal').remove(); ok(false); };
+    ge('ret-ok').onclick=function(){
+      var pi=ge('ret-pessoa').value, vi=ge('ret-veic').value, e=ge('ret-err');
+      if(pi===''||vi===''){ e.style.display='block'; e.textContent='Escolha a pessoa e o veículo da lista.'; return; }
+      var P=ps[+pi], V=vs[+vi]; ge('ecom-ret-modal').remove();
+      ok({retirado_nome:P.nome||null, retirado_doc:P.doc||null, retirado_veiculo:V.modelo||null, retirado_placa:V.placa||null});
+    };
+  });
+}
+function ecomRomFolhaColeta(r,peds){
+  var num='ROM-'+String(r.numero||0).padStart(4,'0'), dt=new Date(r.data_coleta_efetiva||Date.now());
+  var G={}, ordem=[]; peds.forEach(function(p){ var k=ecomPlataforma(p); if(!G[k]){ G[k]=[]; ordem.push(k); } G[k].push(p); });
+  ordem.sort(function(a,b){ return (a==='Outros')-(b==='Outros') || G[b].length-G[a].length; });
+  var lj=(ecomLojistas||[]).find(function(l){return l.id===((r.lojista_id)||((peds[0]||{}).lojista_id));});
+  var box=function(t,v,sub,forte){ return '<div style="border:'+(forte?'2px solid #111':'1px solid #999')+';border-radius:6px;padding:6px 10px;min-width:120px"><div style="font-size:10px;color:#555;text-transform:uppercase">'+t+'</div><div style="font-size:18px;font-weight:800">'+v+'</div><div style="font-size:10px;color:#555">'+sub+'</div></div>'; };
+  var resumo='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">'+ordem.map(function(k){ return box(k,G[k].length+' vol.',G[k].length+' pedido(s)'); }).join('')+box('Total da coleta',peds.length+' vol.',peds.length+' pedido(s)',true)+'</div>';
+  var blocos=ordem.map(function(k){ return '<div style="font-weight:700;font-size:12px;margin:8px 0 3px">'+ecomEsc(k)+' · '+G[k].length+' pedido(s)</div>'
+    +'<div style="columns:3;column-gap:14px;font-family:monospace;font-size:10px;line-height:1.45">'+G[k].map(function(p){ return ecomEsc(p.numero_pedido||('E-'+String(p.numero_interno||0).padStart(6,'0'))); }).join('<br>')+'</div>'; }).join('');
+  var lin=function(t,v){ return '<div style="margin:3px 0">'+t+': <b>'+(v?ecomEsc(v):'______________________________')+'</b></div>'; };
+  var ret='<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-top:14px;padding-top:10px;border-top:1px solid #999;font-size:12px">'
+    +'<div>'+lin('Retirado por',r.retirado_nome?(r.retirado_nome+(r.retirado_doc?' · RG '+r.retirado_doc:'')):'')+lin('Veículo',r.retirado_placa?((r.retirado_veiculo?r.retirado_veiculo+' · ':'')+r.retirado_placa):'')+lin('Data e hora',r.data_coleta_efetiva?dt.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'')+'</div>'
+    +'<div style="display:flex;flex-direction:column;justify-content:flex-end"><div style="border-top:1px solid #111;padding-top:4px;text-align:center;color:#444">Assinatura do responsável pela coleta</div></div></div>';
+  return '<div class="sheet"><div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111;padding-bottom:6px">'
+    +'<div><div style="font-size:20px;font-weight:800">FOLHA DE COLETA · '+ecomEsc(r.transportadora||'')+'</div><div style="font-size:12px;color:#444">'+ecomEsc((lj&&lj.nome)||'')+' · MK Logística · '+new Date((r.data_coleta||hojeLocalISO())+'T12:00:00').toLocaleDateString('pt-BR')+'</div></div>'
+    +'<div style="border:1px solid #111;border-radius:6px;padding:4px 10px;text-align:right"><div style="font-size:10px;color:#555">ROMANEIO</div><div style="font-family:monospace;font-size:16px;font-weight:700">'+num+'</div></div></div>'
+    +resumo+blocos+ret+'</div>';
+}
 function ecomRomPDF(id){
   var r=ecomRomaneios.find(function(x){return x.id===id;}); if(!r)return;
+  var _pf=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===id;});
+  if(ecomRomFolhaNova(r,_pf)){ ecomPrintDoc('Folha de coleta ROM-'+String(r.numero||0).padStart(4,'0'), [ecomRomFolhaColeta(r,_pf)], false); return; }   // v1.0.1449
   var peds=ecomPedidosDoLojista().filter(function(p){return p.romaneio_id===id;});
   var totVol=peds.length, totUn=0;
   var rows=peds.map(function(p){ var un=ecomItensDo(p.id).reduce(function(a,b){return a+ecomN(b.qtd);},0); totUn+=un;
